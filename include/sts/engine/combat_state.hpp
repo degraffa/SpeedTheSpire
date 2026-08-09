@@ -802,6 +802,44 @@ inline constexpr uint32_t kMonsterFlagAwakenedFirstTurn = 0x1000u;
 inline constexpr uint32_t kMonsterFlagTimeEaterUsedHaste = 0x2000u;
 inline constexpr uint32_t kMonsterFlagShapeAttacking = 0x4000u;
 
+// S2.27 (Act-3 Beyond ELITES). ONE type-scoped bit, spent THREE TIMES over --
+// 0x0800 again, the same reuse-not-append call S2.28 made one paragraph above
+// and for the same reason (six concurrent wave-3 batches cannot share an
+// append cursor without colliding, while two batches reusing one bit for
+// monsters that cannot co-occur are both correct).
+//
+// The three carriers are Nemesis.firstMove (Nemesis.java:65,148-156),
+// Reptomancer.firstMove (Reptomancer.java:61,169-172) and SnakeDagger.firstMove
+// (SnakeDagger.java:43,92-95). They get ONE constant each rather than one shared
+// name because their Java fields are three unrelated declarations; the VALUE is
+// shared, and that is the type-scoped region working as designed.
+//
+// THE REPTOMANCER AND THE DAGGER DO CO-OCCUR -- they are in the same group, and
+// a Reptomancer can summon three more daggers on top. That is fine and is the
+// Donu/Deca adjudication verbatim: the rule is that no single RECORD is ever two
+// types at once, and each record reads only its own type's bit. Sharing with the
+// Hexaghost's orb mask is safe for the S2.28 reason plus one more: these three
+// are ACT-3 ELITES and an elite room never contains a boss.
+//
+// SET == THE FIRST MOVE IS STILL PENDING, i.e. the bit mirrors the Java field's
+// `true` initializer rather than inverting it, and every init writes it
+// explicitly (kMonsterFlagAwakenedFirstTurn does the same). A zeroed record is
+// therefore NOT a valid un-inited monster of these types, which is exactly the
+// property that makes a missing init a visible bug rather than a plausible one.
+inline constexpr uint32_t kMonsterFlagNemesisFirstMove = 0x0800u;
+inline constexpr uint32_t kMonsterFlagReptomancerFirstMove = 0x0800u;
+inline constexpr uint32_t kMonsterFlagSnakeDaggerFirstMove = 0x0800u;
+//
+// NO BIT AND NO NEW FIELD FOR THE OTHER THREE PIECES OF S2.27 STATE, recorded
+// here so a reader looking for this batch's spend finds the answer:
+//   * GiantHead.count (GiantHead.java:53) and Nemesis.scytheCooldown (:56) are
+//     small per-instance INTEGERS, not latches, and each lives in that monster
+//     type's MonsterState::pad0 (the Book of Stabbing / Darkling precedent).
+//   * Reptomancer.daggers[4] (:60) needs no storage at all, for the Gremlin
+//     Leader's reason: which POSX slot is free is a pure function of which
+//     `draw_x` values currently carry a live record, and draw_x already stores
+//     that key. See monster_reptomancer.hpp note (3).
+
 // ESCAPED -- the FIRST global flag bit, bit 24, the bottom of the 24-31 global
 // region: the monster left the fight ALIVE. (HALF_DEAD, bit 25, is the second;
 // it is declared just below.)

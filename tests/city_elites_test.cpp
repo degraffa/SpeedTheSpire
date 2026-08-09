@@ -671,7 +671,12 @@ TEST(CityElites, SpawnFlagsRoundTripDrawXAndLeaveLandedCallersAtZero) {
     // both large-slime split sites write.
     for (int16_t x : {int16_t(-532), int16_t(-366), int16_t(-250), int16_t(-170),
                       int16_t(0), int16_t(35), int16_t(210), int16_t(254),
-                      int16_t(-8192), int16_t(8191)}) {
+                      // The field's extremes. S2.27 NARROWED it from 14 signed
+                      // bits to 13 (-4096..4095) to free bit 31 for
+                      // kSpawnMinionAtTop; every real position in Acts 1-3 is
+                      // an order of magnitude inside that, and the bounds are
+                      // pinned here so a future widening is a deliberate act.
+                      int16_t(-4096), int16_t(4095)}) {
         const uint32_t f = make_spawn_monster_flags(
             static_cast<uint16_t>(MonsterId::GREMLIN_FAT), x, true, true);
         EXPECT_EQ(spawn_draw_x_from_flags(f), x);

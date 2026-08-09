@@ -482,6 +482,23 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     if (id == PowerId::DRAW_REDUCTION) {
         fresh.counter = 1;
     }
+    // IntangiblePower's (the MONSTER class, id 107) IDENTICALLY-SHAPED latch
+    // (S2.27). `this.justApplied = true` is the LAST line of the ctor
+    // (IntangiblePower.java:33) -- unconditional, like Draw Reduction's field
+    // initializer and unlike the three duration debuffs' conditional latches --
+    // so it gets its own branch for the same reason id 111 does rather than a
+    // fifth case in duration_debuff_starts_just_applied.
+    //
+    // NEW SLOT ONLY, the same placement as every latch above. The stacking path
+    // returned long ago, which is ApplyPowerAction's behaviour; here it is
+    // additionally unreachable, because the only producer re-applies exclusively
+    // when the monster does NOT already hold the power (Nemesis.java:114).
+    //
+    // NOTE THE SIBLING ROW IS UNTOUCHED: PowerId::INTANGIBLE (id 29,
+    // "IntangiblePlayer") has NO justApplied field and must not get one.
+    if (id == PowerId::INTANGIBLE_MONSTER) {
+        fresh.counter = 1;
+    }
     slots[*count] = fresh;
     ++*count;
     // The new-power branch ends with the whole-list re-sort

@@ -11,6 +11,7 @@ add_library(sts_engine
     monster_slime_large.cpp
     monster_slime_boss.cpp
     monster_lagavulin.cpp
+    monster_giant_head.cpp
     monster_gremlin.cpp
     monster_guardian.cpp
     monster_hexaghost.cpp
@@ -33,7 +34,9 @@ add_library(sts_engine
     monster_taskmaster.cpp
     # S2.25 -- Act-3 beyond normals I
     monster_darkling.cpp
+    monster_nemesis.cpp
     monster_orb_walker.cpp
+    monster_reptomancer.cpp
     monster_repulsor.cpp
     monster_exploder.cpp
     monster_spiker.cpp
@@ -86,6 +89,7 @@ add_library(sts_engine
     powers/power_flame_barrier.cpp
     powers/power_frail.cpp
     powers/power_hex.cpp
+    powers/power_intangible_monster.cpp
     powers/power_lose_dexterity.cpp
     powers/power_lose_strength.cpp
     powers/power_magnetism.cpp
@@ -105,6 +109,7 @@ add_library(sts_engine
     powers/power_sadistic.cpp
     powers/power_sharp_hide.cpp
     powers/power_shifting.cpp
+    powers/power_slow.cpp
     powers/power_spore_cloud.cpp
     powers/power_the_bomb.cpp
     powers/power_thorns.cpp

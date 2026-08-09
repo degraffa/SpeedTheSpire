@@ -99,7 +99,12 @@ namespace {
     // updateDescription + duringTurn (ExplosivePower.java:41-57) and
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39) -- none touches block.
-    static_assert(sts::registry::manifest::kPowersCount == 69,
+    // Checked for S2.27's two powers, neither of which touches block: SLOW
+    // overrides onAfterUseCard, atEndOfRound and atDamageReceive
+    // (SlowPower.java, read in full) and INTANGIBLE_MONSTER overrides
+    // atDamageFinalReceive and atEndOfTurn (IntangiblePower.java, read in full).
+    // Both count moves here are caseless.
+    static_assert(sts::registry::manifest::kPowersCount == 71,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

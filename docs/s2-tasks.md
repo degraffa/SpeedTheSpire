@@ -1065,9 +1065,190 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   used, so the block leaves no gap. `check_stale_counts` +
   `check_doc_links` clean. All six presets green — debug / asan / release
   via `wsl_run.sh`, win-debug / win-asan / win-release via clang-cl.
-- **S2.27** `[ ]` ∥ Beyond elites — Giant Head, Nemesis (Intangible +
+- **S2.27** `[x]` ∥ Beyond elites — Giant Head, Nemesis (Intangible +
   Burn), Reptomancer (+ SnakeDagger spawns).
   **Deps:** S2.01, S2.2F, S2.23 (MINION row + spawn pattern) **Acceptance:** as S2.21.
+  **Log:** 2026-08-09. `MonsterId` **58–61** all spent (GIANT_HEAD,
+  NEMESIS, REPTOMANCER, SNAKE_DAGGER with `game_id "Dagger"` — the class
+  is SnakeDagger and the ID literal is not); 45–48 and 66 stay UNISSUED
+  and were not backfilled. `PowerId` **106 SLOW** and **107
+  INTANGIBLE_MONSTER** spent. `kMonstersCount` 50 → 54, `kPowersCount`
+  69 → 71, `kTotalCount` 566 → 572. Every count-guard site answers its
+  own question in-comment: the six in `monster_dispatch.cpp`, and on the
+  power side ONE of the four took a case (`at_damage_receive` gained
+  SLOW) while `at_damage_final_receive` gained INTANGIBLE_MONSTER beside
+  the existing INTANGIBLE, leaving `at_damage_give` and
+  `interp_block.cpp` caseless.
+
+  **Encounters needed ZERO edits, and so did `run_advance.cpp`.** Ids 55
+  "Giant Head", 56 "Nemesis" and 57 "Reptomancer" landed with S2.01 and
+  resolve their `EMIT` targets as game-id strings at spawn time, so
+  registering the four init fns un-parked all three rooms — the S2.23 /
+  B3.16 precedent, and it holds because the implemented-member gate asks
+  `monster_init_fn`, never a list. All three compositions are
+  fixed (zero `misc_rng` draws) and the Reptomancer's is spawn-order-exact
+  at Dagger / Reptomancer / Dagger.
+
+  **TWO FRAMEWORK DEFECTS, both found by reading SpawnMonsterAction
+  against the comment that cited it, and both fixed rather than worked
+  around.** (1) `smart_position_for`'s header claimed SummonGremlinAction
+  and SpawnMonsterAction run the *same* smart-positioning loop. They do
+  not: `SummonGremlinAction.java:92-99` **breaks** at the first record the
+  newcomer is not strictly right of, while `SpawnMonsterAction.java:50-56`
+  **continues** — a COUNT over the whole list. The two disagree on any
+  list that is not sorted by `drawX`, which `MonsterHelper` is free to
+  build. Split into `smart_position_for` (break, the Gremlin Leader) and
+  `smart_position_for_spawn_action` (count, every SpawnMonsterAction
+  summoner), with the citation corrected in place and a directed test
+  driving an unsorted list where the two answers differ (0 vs 2). The
+  Reptomancer's own list happens to be sorted ascending and insertion
+  preserves that, so the divergence is unobservable *in this encounter* —
+  which is exactly why it would have survived. The two large-slime split
+  sites hand-derive their slots and carry `draw_x == 0`, so they are
+  untouched and no fixture moves. (2) The Minion application's PLACEMENT
+  differs too: `SpawnMonsterAction.java:68` is `addToTop` where
+  `SummonGremlinAction.java:114` is `addToBot`. Landed as `flags` bit
+  **31 `kSpawnMinionAtTop`**, which required narrowing the `draw_x`
+  operand from 14 signed bits to **13** (−4096..4095, still an order of
+  magnitude wider than every `offsetX` in Acts 1–3; the extremes are the
+  Gremlin Leader's −532 and the Slime Boss layout's +254). Zero stays the
+  identity, so no landed caller moves, and `city_elites_test`'s
+  round-trip pin now names the new bounds.
+
+  **The Reptomancer is the roster's SECOND double-`monster_hp_rng`
+  drawer**, after the Taskmaster and for the identical reason: the
+  `super(...)` argument list contains `monsterHpRng.random(180, 190)`
+  (Reptomancer.java:64), Java evaluates it before the constructor body,
+  and `setHp` draws again. Landed as registry DATA (row `SUPER_ARG_HP`,
+  timing S2.2F's `CONSTRUCTOR_BEFORE_HP`, range the FLAT literal at every
+  ascension) so `burn_unspawned_ctor_rolls` orders a discarded candidate
+  the same way. It sits at group index 1, so the offset moves the SECOND
+  dagger's HP — pinned by a test that re-derives all three rolls by hand
+  off the seed and carries a negative control proving the difference is
+  real. **The SnakeDagger is the mirror image and the grant was wrong
+  about it:** the Wave-3 table lists it as a `CONSTRUCTOR_BEFORE_HP`
+  consumer, but its super-argument draw `monsterHpRng.random(20, 25)`
+  (SnakeDagger.java:46) is its ONLY draw — the class declares no `setHp`
+  at all — so the ordinary `hp` column expresses it exactly and the row
+  carries no `rolls` entry. Nothing is spent or gapped by that; the timing
+  value is S2.2F's and has another consumer.
+
+  **The Giant Head's A18 pre-battle decrement lands AFTER the opening
+  rollMove, not before it.** `count` is a field initializer 5 (:53), the
+  ctor+`init()` phase runs before `use_pre_battle_actions` (design §5.2),
+  and `getMove`'s ordinary arm decrements *before* reading `num` — so at
+  A20 the opening decision leaves 4 and the pre-battle takes it to 3. Both
+  orders produce a legal-looking telegraph and no test would have caught
+  the wrong one, so each step is asserted separately. The IT_IS_TIME ramp
+  is arithmetic (`damage.get(1 - count)`, index-clamped at 7, count
+  floored at −6) and the module READS the row's single tiered
+  `startingDeathDmg` column rather than re-authoring 30/40 in code, so the
+  A3 branch has one home; both clamps are driven far enough to reach them.
+
+  **Slow is native for its RESET, and amount ZERO is a real state.**
+  `atEndOfRound` is `this.amount = 0` — not a removal and not a
+  `ReducePowerAction`, which would delete the slot — and the Giant Head
+  applies the power at amount 0 in the first place
+  (`new SlowPower(this, 0)`, GiantHead.java:82). The stack-up half IS
+  data-expressible (one `APPLY_POWER` of SLOW at 1 onto SELF) and is
+  written natively anyway so the pair reads as the single class it is.
+  The hook is **ON_AFTER_USE_CARD (16)**, not ON_USE_CARD: only the
+  `update()` fan-out reaches monster powers at the right moment
+  (UseCardAction.java:79-88). `atDamageReceive` multiplies by
+  `1 + 0.1*amount` through the float pipeline before the single
+  `mathutils_floor`, so 13 at three stacks is 16, not 13 + 3.
+
+  **The Nemesis's Intangible is TWO ROWS' worth of difference and TWO cap
+  sites.** `IntangiblePower` ("Intangible") is not
+  `IntangiblePlayerPower` ("IntangiblePlayer", id 29): different POWER_ID
+  literal, hence a different oracle join key; it decays at
+  **atEndOfTURN** (the monster pass of `dispatch_at_end_of_round`) where
+  id 29 decays at atEndOfROUND; it carries a `justApplied` latch (in
+  `PowerSlot.counter`, the Draw Reduction shape, written on
+  op_apply_power's new-slot path); and it spells a REMOVE arm for
+  amount 0 that id 29's row collapses. The cap likewise lives twice:
+  `atDamageFinalReceive` caps NORMAL damage, and `Nemesis.damage`
+  (:120-131) caps `info.output` before `super.damage()` with NO
+  DamageType test, so THORNS and HP_LOSS are capped too. That second site
+  is keyed on `MonsterId::NEMESIS` rather than on "any monster with
+  Intangible", because it is a class method override and not a property of
+  the power — invisible today (nothing else grants a monster Intangible)
+  and the statement that survives Act 4. All three damage types are
+  pinned. Burn generation is **DISCARD on both ascension arms** (5 at
+  A18, else 3): `MakeTempCardInDiscardAction` is the only card-making
+  action in the class, so the "discard vs draw per move" the brief flagged
+  is not a real split.
+
+  **`getMove` draw counts are the Nemesis's other native reason.** Three
+  arms spend an extra `aiRng.randomBoolean()` on top of the rollMove draw,
+  and the `>= 65` arm's is `randomBoolean() && scytheCooldown <= 0` —
+  Java evaluates the LEFT operand first, so THE DRAW IS SPENT EVEN WHEN
+  THE COOLDOWN THEN REFUSES THE SCYTHE. Reordering that conjunction to
+  test the cheap integer first is the natural "optimisation" and it
+  silently desynchronises the shared stream; the body forces the
+  evaluation order through a local and a named test counts the draws on
+  both sides. `scytheCooldown` lives in `pad0` FLOORED AT ZERO, which is
+  exact because every reader is `<= 0` or `> 0`.
+
+  **`daggers[4]` needed NO storage**, the Gremlin Leader's `gremlins[3]`
+  derivation verbatim: "slot i is occupied" is exactly "some record with
+  `draw_x == POSX[i]` is not dead-or-escaped", and `draw_x` (S2.2F)
+  already stores that key. It stays exact under RECYCLING — the dead
+  record keeps its `draw_x` and the new live one joins it, and the live
+  one is what both the Java pointer and the predicate see — which is a
+  named test. The two ENCOUNTER daggers' positions are written by the
+  Reptomancer's `usePreBattleAction`, the one place that can know them
+  (they are an encounter property, not a type property), riding along with
+  the Minion walk exactly as the leader's does.
+
+  **The spawn turn's stream order is the batch's most fragile fact and is
+  test-pinned end to end:** both `SnakeDagger` constructors — and
+  therefore both `monster_hp_rng` draws — run at QUEUE time, both
+  children's `init()` rolls at RESOLVE, and the Reptomancer's own roll
+  lands THIRD on `ai_rng` behind them, with its trailing ROLL_MOVE naming
+  the POST-insertion index (pending queue items are not remapped across a
+  spawn). Two independent caps are reproduced and separately tested: the
+  POSITION cap (four POSX slots; with all four held the turn spawns
+  nothing, draws nothing and still rolls) and `canSpawn`'s GROUP cap
+  (`aliveCount <= 3` over every record that is neither `this` nor dying),
+  which gates the DECISION only — a telegraphed SPAWN_DAGGER still fires
+  if the group filled up in between. `getMove` recurses on two arms with
+  fresh seeded draws, the second (`aiRng.random(65)`) widening the range
+  back down, so it is a re-draw loop with a depth assert rather than an
+  unroll.
+
+  **`MonsterDieAfterFn` gained the entry its own header comment names.**
+  The Reptomancer's suicide sweep runs after `super.die()`, has no
+  `m == this` term, and skips the Reptomancer ONLY because `super.die()`
+  already set `isDying` — run it pre-super and it suicides itself in an
+  infinite regress. Both pushes are `addToTop`, so the suicides resolve in
+  REVERSE list order, and the 1-arg `SuicideAction` sets triggerRelics
+  TRUE (unlike the slime splits), so every surviving dagger pays a full
+  death edge. `HideHealthBarAction` is presentation and dropped, which
+  does not move that order. The other three declare presentation-only
+  die()s and take explicit `nullptr` cases with the reading recorded —
+  including the Nemesis's, whose `playDeathSfx` IS on the pre-super side
+  and still does not qualify, because its `MathUtils.random(1)` is
+  UNSEEDED (the Looter half of the Mugger/Looter split).
+
+  Released / not spent: **ZERO new opcodes** (the summon pattern is bits
+  on the existing `SPAWN_MONSTER`; the dagger's self-kill is the existing
+  `LOSE_HP`), **ZERO new hooks** (S2.2F's `ON_AFTER_USE_CARD` gains a
+  second binder), **ZERO new `MonsterIntent`s**, **ONE type-scoped
+  `MonsterState.flags` bit** — 0x0800, spent THREE times over for the
+  Nemesis / Reptomancer / SnakeDagger `firstMove` latches, deliberately
+  REUSING the Hexaghost bits exactly as S2.28 did and for the same
+  reason (six concurrent batches cannot share an append cursor); bits
+  17–23 stay free. The Reptomancer and the dagger DO co-occur, which is
+  fine and is the Donu/Deca adjudication: no single RECORD is ever two
+  types at once. `pad0` carries the Giant Head's `count` (biased by 6) and
+  the Nemesis's `scytheCooldown`. Dead content recorded rather than
+  registered: `SpawnDaggerAction` has NO caller anywhere in the tree
+  (grepped, not assumed) and `SnakeDagger.damage.get(2)` — a 25 of type
+  HP_LOSS — is never read, so no move row carries it. `check_stale_counts`
+  + `check_doc_links` clean. All six presets green at 2408 tests —
+  debug / asan / release via `wsl_run.sh`, win-debug / win-asan /
+  win-release via clang-cl.
 - **S2.28** `[x]` ∥ Beyond bosses — Awakened One (two phases, Curiosity/
   Unawakened, Void insertion, Cultist adds), Time Eater (TimeWarp/
   DrawReduction/Slimed), Donu and Deca.

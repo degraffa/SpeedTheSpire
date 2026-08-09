@@ -123,7 +123,14 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 69,
+    // S2.27 (kPowersCount 69 -> 71): neither of the two touches the ATTACKER
+    // side. SLOW's only damage override is atDamageReceive
+    // (SlowPower.java:56-62) -- the victim's pass, not this one -- and its other
+    // two members are onAfterUseCard and atEndOfRound.
+    // INTANGIBLE_MONSTER's only damage override is atDamageFinalReceive
+    // (IntangiblePower.java:42-47), likewise victim-side. So this count moves
+    // caseless, as does interp_block.cpp's.
+    static_assert(sts::registry::manifest::kPowersCount == 71,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -229,13 +236,21 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 69,
+    // S2.27 (kPowersCount 69 -> 71) is the FIRST batch in a while to add a case
+    // HERE rather than take the move caseless. SLOW (id 106) overrides
+    // atDamageReceive (SlowPower.java:56-62) and scales the number, so it has
+    // its case below. INTANGIBLE_MONSTER (id 107) does NOT belong here: its cap
+    // is atDamageFinalReceive (IntangiblePower.java:42-47), the pass below --
+    // the same split Flight already demonstrates, and it is not cosmetic,
+    // because the FINAL pass runs after Vulnerable's and Slow's multiplies.
+    static_assert(sts::registry::manifest::kPowersCount == 71,
                   "new power: does it override atDamageReceive (target-side "
-                  "damage scaling, as Vulnerable does)? Add a case here if so. "
-                  "Check atDamageFinalReceive below in the same pass -- it is "
-                  "NOT a pass-through: INTANGIBLE has a case there "
-                  "(IntangiblePlayerPower.java:43-49). Its twin "
-                  "atDamageFinalGive still is one.");
+                  "damage scaling, as Vulnerable and Slow do)? Add a case here "
+                  "if so. Check atDamageFinalReceive below in the same pass -- "
+                  "it is NOT a pass-through: both Intangible rows have a case "
+                  "there (IntangiblePlayerPower.java:43-49, "
+                  "IntangiblePower.java:42-47). Its twin atDamageFinalGive "
+                  "still is one.");
     // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
     // REACTIVE. Checked one at a time against BOTH count-guarded families,
     // and all four are pure count moves. ConstrictedPower overrides only
@@ -255,6 +270,24 @@ namespace {
                 return dmg * 1.75f;                     // VulnerablePower.java:68
             }
             return dmg * 1.5f;                          // VulnerablePower.java:70
+        case PowerId::SLOW:
+            // SlowPower.atDamageReceive (SlowPower.java:56-62):
+            //     if (type == DamageType.NORMAL)
+            //         return damage * (1.0f + this.amount * 0.1f);
+            //     return damage;
+            // +10% per stack. THE TYPE GUARD IS ALREADY SATISFIED AT THIS SITE
+            // and needs no parameter, exactly as Flight's is in the pass below:
+            // this whole pass is DamageInfo.applyPowers, which op_damage runs
+            // only for NORMAL non-pure damage, so THORNS and HP_LOSS never
+            // reach here.
+            //
+            // A float multiply, not integer arithmetic: the single
+            // mathutils_floor at the end of compute_damage is what truncates, so
+            // a 13 at three stacks is floor(13 * 1.3f) = 16. Amount 0 -- the
+            // value the Giant Head's pre-battle application lands, and the value
+            // atEndOfRound resets to -- multiplies by exactly 1.0f, which is why
+            // a live zero-amount slot is harmless and must not be removed.
+            return dmg * (1.0f + static_cast<float>(p.amount) * 0.1f);
         default:
             return dmg;
     }
@@ -330,10 +363,16 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 69,
+    // S2.27 (kPowersCount 69 -> 71): SLOW (id 106) does NOT override this pass
+    // -- its multiply is atDamageReceive, above -- and INTANGIBLE_MONSTER (id
+    // 107) DOES, with a body character-for-character identical to id 29's
+    // (IntangiblePower.java:42-47 vs IntangiblePlayerPower.java:43-49). Two
+    // classes, two rows, two cases; see powers.yaml 107 for why they cannot be
+    // one row.
+    static_assert(sts::registry::manifest::kPowersCount == 71,
                   "new power: does it override atDamageFinalReceive (the last "
-                  "target-side pass, as Intangible and Flight do)? Add a case "
-                  "here if so.");
+                  "target-side pass, as both Intangible rows and Flight do)? "
+                  "Add a case here if so.");
     // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
     // REACTIVE. Checked one at a time against BOTH count-guarded families,
     // and all four are pure count moves. ConstrictedPower overrides only
@@ -345,6 +384,8 @@ namespace {
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::INTANGIBLE:
             return dmg > 1.0f ? 1.0f : dmg;   // IntangiblePlayerPower.java:44-48
+        case PowerId::INTANGIBLE_MONSTER:
+            return dmg > 1.0f ? 1.0f : dmg;   // IntangiblePower.java:43-46
         case PowerId::FLIGHT:
             // FlightPower.atDamageFinalReceive -> calculateDamageTakenAmount
             // (FlightPower.java:53-63): `damage / 2.0f` unless the type is
@@ -408,10 +449,38 @@ void cards_took_player_damage(CombatState& s) noexcept;
 // types that never reach IntangiblePlayerPower.atDamageFinalReceive because they
 // skip DamageInfo.applyPowers. It is on AbstractPlayer only (monsters carry a
 // different IntangiblePower).
+//
+// S2.27 ADDS THE MONSTER-SIDE TWIN, and it is NOT a generalization of the line
+// above -- it is a different class's method override that happens to do the same
+// thing. Nemesis.damage (Nemesis.java:120-131) opens with
+//     if (info.output > 0 && this.hasPower("Intangible")) info.output = 1;
+// before `super.damage(info)`, i.e. at the same pre-decrementBlock position, and
+// with the same absence of a DamageType test -- so it caps THORNS and HP_LOSS
+// too, the types that skip IntangiblePower.atDamageFinalReceive.
+//
+// IT IS KEYED ON THE MONSTER TYPE. The guard belongs to the Nemesis's override,
+// not to the power: a hypothetical other monster holding Intangible would get
+// the atDamageFinalReceive cap on NORMAL damage and NOTHING on Thorns. Nothing
+// else in the game gives a monster Intangible, so today the distinction cannot
+// be observed -- and the faithful statement is the one that stays right when
+// Act 4 or a future batch adds a second holder. The alternative (dropping the id
+// test) would be a silent behaviour invention at exactly the shape conventions
+// §8 calls a bug signal.
+//
+// `> 0` versus the player line's `> 1` is the Java's, verbatim, and the two are
+// indistinguishable in effect: capping a 1 at 1 changes nothing.
 [[nodiscard]] int intangible_cap(const CombatState& s, uint8_t tgt,
                                  int dmg) noexcept {
-    if (tgt == kActorPlayer && dmg > 1 &&
-        actor_has_power(s, kActorPlayer, PowerId::INTANGIBLE)) {
+    if (tgt == kActorPlayer) {
+        if (dmg > 1 && actor_has_power(s, kActorPlayer, PowerId::INTANGIBLE)) {
+            return 1;
+        }
+        return dmg;
+    }
+    if (tgt < kMonsterCap && dmg > 0 &&
+        s.monsters[tgt].monster_id ==
+            static_cast<uint16_t>(MonsterId::NEMESIS) &&
+        actor_has_power(s, tgt, PowerId::INTANGIBLE_MONSTER)) {
         return 1;
     }
     return dmg;

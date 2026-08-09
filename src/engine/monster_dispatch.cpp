@@ -21,6 +21,9 @@
 #include "sts/engine/monster_exploder.hpp"  // the Exploder: a fuse, not a move
 #include "sts/engine/monster_donu_deca.hpp"  // the out-of-phase Act-3 pair
 #include "sts/engine/monster_fungi_beast.hpp"  // Fungi Beast + its Spore Cloud
+#include "sts/engine/monster_giant_head.hpp"  // the Giant Head: the countdown + Slow
+#include "sts/engine/monster_nemesis.hpp"  // the Nemesis: Intangible + Burn
+#include "sts/engine/monster_reptomancer.hpp"  // the Reptomancer + its SnakeDaggers
 #include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
 #include "sts/engine/monster_gremlin_leader.hpp"  // the summoning Act-2 elite
 #include "sts/engine/monster_gremlin_nob.hpp"  // gremlin_nob_init / _take_turn
@@ -238,6 +241,21 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &maw_init;
         case MonsterId::WRITHING_MASS:
             return &writhing_mass_init;
+        // S2.27 -- the three Act-3 Beyond ELITES and the dagger. Their HP draws
+        // are NOT uniform and the differences are the point: the Giant Head and
+        // the Nemesis each take ONE draw over a DEGENERATE range (literal super
+        // argument, then setHp); the REPTOMANCER takes TWO (a drawing super
+        // argument, then setHp -- the Taskmaster's shape, carried as a registry
+        // roll row); and the SNAKE_DAGGER takes ONE that IS its super argument,
+        // with no setHp under it at all.
+        case MonsterId::GIANT_HEAD:
+            return &giant_head_init;
+        case MonsterId::NEMESIS:
+            return &nemesis_init;
+        case MonsterId::REPTOMANCER:
+            return &reptomancer_init;
+        case MonsterId::SNAKE_DAGGER:
+            return &snake_dagger_init;
         // S2.28 -- the four Act-3 Beyond bosses. Every one of them draws exactly
         // ONE monster_hp_rng roll over a DEGENERATE range: single-arg setHp is
         // setHp(hp, hp) (AbstractMonster.java:777-779) and the two-arg body draws
@@ -351,6 +369,14 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &maw_take_turn;
         case MonsterId::WRITHING_MASS:
             return &writhing_mass_take_turn;
+        case MonsterId::GIANT_HEAD:
+            return &giant_head_take_turn;
+        case MonsterId::NEMESIS:
+            return &nemesis_take_turn;
+        case MonsterId::REPTOMANCER:
+            return &reptomancer_take_turn;
+        case MonsterId::SNAKE_DAGGER:
+            return &snake_dagger_take_turn;
         case MonsterId::AWAKENED_ONE:
             return &awakened_one_take_turn;
         case MonsterId::TIME_EATER:
@@ -366,7 +392,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 54,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
@@ -540,6 +566,28 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
         // Donu's and Deca's getMoves IGNORE the rolled num entirely (both key off
         // isAttacking) and they register anyway -- the Spheric Guardian's reason:
         // the draw itself moves the shared ai_rng stream.
+        // S2.27 -- all four register, because all four end takeTurn in a
+        // RollMoveAction that sits AFTER the switch, so every move body reaches
+        // it (GiantHead.java:113, Nemesis.java:117, Reptomancer.java:136,
+        // SnakeDagger.java:76). Two of them have a further reason to be queued
+        // rather than inline: the Reptomancer's roll must resolve BEHIND the
+        // dagger spawns (its own record index moves under it), and the dagger's
+        // must resolve after its own EXPLODE has killed it -- RollMoveAction has
+        // no liveness gate. The Giant Head's and the dagger's getMoves ignore
+        // `num` on at least one arm and register anyway, for the Spheric
+        // Guardian's reason: the draw itself moves the shared ai_rng stream.
+        case MonsterId::GIANT_HEAD:
+            return &giant_head_roll_move;
+        case MonsterId::NEMESIS:
+            // Can spend TWO draws: three of getMove's arms consult an extra
+            // aiRng.randomBoolean() (Nemesis.java:161,175,187).
+            return &nemesis_roll_move;
+        case MonsterId::REPTOMANCER:
+            // Can spend MORE than two: getMove recurses with a fresh
+            // random(33, 99) or random(65) (Reptomancer.java:178,193).
+            return &reptomancer_roll_move;
+        case MonsterId::SNAKE_DAGGER:
+            return &snake_dagger_roll_move;
         case MonsterId::AWAKENED_ONE:
             return &awakened_one_roll_move;
         case MonsterId::TIME_EATER:
@@ -570,7 +618,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 54,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -643,6 +691,17 @@ MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
             return &gremlin_tsundere_spawn_at_hp;
         case MonsterId::GREMLIN_WIZARD:
             return &gremlin_wizard_spawn_at_hp;
+        // S2.27: the SnakeDagger, the batch's ONLY spawnable. The Reptomancer's
+        // SPAWN_DAGGER queues one SpawnMonsterAction per free POSX slot
+        // (Reptomancer.java:120-127) and the dagger's HP arrives PRE-DRAWN,
+        // because the Java constructs the SnakeDagger -- monster_hp_rng draw and
+        // all -- inside takeTurn, before the action exists. The other three in
+        // this batch are never spawned: the Giant Head and the Nemesis are solo
+        // encounters (MonsterHelper.java:579-581, :573-575) and the Reptomancer
+        // is the SUMMONER, built by its own encounter (:536-539); none of the
+        // three declares a SpawnMonsterAction, a SplitPower or a summon list.
+        case MonsterId::SNAKE_DAGGER:
+            return &snake_dagger_spawn_at_hp;
         default:
             return nullptr;  // not mid-combat spawnable
     }
@@ -687,9 +746,25 @@ uint8_t smart_position_for(const CombatState& state, int16_t draw_x) noexcept {
     return position;
 }
 
+uint8_t smart_position_for_spawn_action(const CombatState& state,
+                                        int16_t draw_x) noexcept {
+    // SpawnMonsterAction.java:50-56 -- the SAME body as above with `continue`
+    // where SummonGremlinAction has `break`, i.e. a COUNT over the whole list
+    // with no early exit. Two actions, two loops; see the correction note in
+    // monster_dispatch.hpp.
+    uint8_t position = 0;
+    for (uint8_t i = 0; i < state.monster_count && i < kMonsterCap; ++i) {
+        if (!(draw_x > state.monsters[i].draw_x)) {
+            continue;
+        }
+        ++position;
+    }
+    return position;
+}
+
 void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
                            int16_t hp, bool run_pre_battle, bool apply_minion,
-                           int16_t draw_x) noexcept {
+                           int16_t draw_x, bool minion_at_top) noexcept {
     assert(state.monster_count < kMonsterCap &&
            "spawn_monster_at_slot: monster record overflow. kMonsterCap is 23 "
            "-- the largest the CombatState size ceiling admits, NOT a derived "
@@ -764,7 +839,19 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
         minion.tgt = slot;
         minion.amount = kMinionAppliedAmount;
         minion.flags = make_apply_power_flags(PowerId::MINION);
-        add_to_bottom(state, minion);
+        // ...and SpawnMonsterAction.java:68 is `addToTop` for the identical
+        // application (S2.27). The two Java actions disagree about the
+        // placement as well as the presence, so the caller says which -- see
+        // kSpawnMinionAtTop in interp.hpp. With one spawn in flight the two
+        // orders are indistinguishable (nothing between them draws or reads the
+        // power), but the Reptomancer queues TWO spawns plus a trailing
+        // RollMoveAction behind them, and there the interleaving is visible the
+        // moment anything reads the queue.
+        if (minion_at_top) {
+            add_to_top(state, minion);
+        } else {
+            add_to_bottom(state, minion);
+        }
     }
 
     // SummonGremlinAction.update runs the child's usePreBattleAction at isDone
@@ -782,7 +869,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 54,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -989,13 +1076,37 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
             // COMPLETE translation and hp_lost is deliberately unread. Spelled as
             // cases so the omission is checkable.
             return;
+
+        // S2.27. THREE of the four Act-3 elites override damage() and none of
+        // them registers here -- which is a reading, not an omission, and the
+        // Nemesis is the one worth the paragraph.
+        case MonsterId::NEMESIS:
+            // Nemesis.damage (:120-131) has real content, but it runs BEFORE
+            // super.damage(info) and it MODIFIES THE INCOMING NUMBER:
+            //     if (info.output > 0 && hasPower("Intangible")) info.output = 1;
+            // This seam is the POST-damage half of the override (it fires after
+            // the hit has fully landed), so it is the wrong side of the line.
+            // The cap lives at the pre-block site in interp_damage.cpp's
+            // intangible_cap, beside the player-side guard it mirrors
+            // (AbstractPlayer.java:1397-1399). The rest of the override is the
+            // Hit spine animation.
+            return;
+        case MonsterId::REPTOMANCER:
+        case MonsterId::SNAKE_DAGGER:
+            // Both are super.damage(info) followed ONLY by the Hurt animation,
+            // gated on a non-THORNS hit with output > 0 (Reptomancer.java:
+            // 148-155, SnakeDagger.java:79-88). Nothing touches combat state and
+            // nothing draws RNG, so an empty hook is the COMPLETE translation.
+            // The GIANT HEAD declares no damage() override at all and is
+            // deliberately absent from this list -- it falls to the `default:`.
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 54,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -1092,6 +1203,35 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             // Repulsor.java declares only takeTurn and getMove, so it inherits
             // AbstractMonster's empty body (AbstractMonster.java:953-954).
             // Explicit nullptr, the Chosen's precedent.
+            return nullptr;
+
+        // S2.27. TWO of the four Act-3 elites declare usePreBattleAction; all
+        // four are spelled out rather than left to the `default:`.
+        case MonsterId::GIANT_HEAD:
+            // ApplyPowerAction(this, this, new SlowPower(this, 0)) -- SELF, at
+            // AMOUNT ZERO -- and then, at A18 only, `--this.count`
+            // (GiantHead.java:80-86). That decrement is why this monster's
+            // pre-battle writes combat state at all, and it lands AFTER the
+            // opening rollMove; see monster_giant_head.hpp note (2). No RNG.
+            return &giant_head_use_pre_battle_action;
+        case MonsterId::REPTOMANCER:
+            // ONE walk over the group (Reptomancer.java:89-102): an
+            // ApplyPowerAction(m, m, MinionPower(this)) for every record whose
+            // id string differs from its own, and the daggers[0]/daggers[1]
+            // identification -- which is also where the two ENCOUNTER daggers'
+            // `draw_x` is written, the one place that can know it (the Gremlin
+            // Leader's reason). No RNG.
+            return &reptomancer_use_pre_battle_action;
+        case MonsterId::NEMESIS:
+        case MonsterId::SNAKE_DAGGER:
+            // Neither class declares the method. Nemesis.java declares takeTurn,
+            // damage, changeState, getMove, playSfx, playDeathSfx, die and
+            // update; SnakeDagger.java declares initializeAnimation, takeTurn,
+            // damage, getMove and changeState. Both inherit AbstractMonster's
+            // empty body (AbstractMonster.java:953-954). Explicit nullptr, the
+            // Chosen's precedent. Note a dagger still ends up with MinionPower --
+            // applied by the Reptomancer's walk above, or by the spawn path's
+            // kSpawnApplyMinion bit -- never by a pre-battle of its own.
             return nullptr;
 
         // S2.28. All four Act-3 bosses declare usePreBattleAction with real
@@ -1244,7 +1384,7 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
 }
 
 MonsterDieFn monster_die_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 54,
                   "new monster: does its Java class override die()? Read the "
                   "method. If everything before `super.die()` is presentation -- "
                   "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
@@ -1359,6 +1499,33 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
             // a Time Eater room ever sets that latch (the Awakened One's
             // usePreBattleAction is its only producer in Act 3).
             return nullptr;
+
+        // S2.27. THREE of the four declare die(); none has PRE-super content.
+        case MonsterId::GIANT_HEAD:
+            // `super.die(); this.playDeathSfx();` (GiantHead.java:147-151), and
+            // playDeathSfx' MathUtils.random(2) (:128) is UNSEEDED -- the
+            // Taskmaster's answer twice over: wrong generator AND wrong side.
+            return nullptr;
+        case MonsterId::NEMESIS:
+            // `this.playDeathSfx(); super.die();` (Nemesis.java:213-217) -- this
+            // one IS on the pre-super side, and it still does not belong here,
+            // because playDeathSfx' MathUtils.random(1) (:196) is UNSEEDED
+            // libGDX. That is the Looter half of the Mugger/Looter split: the
+            // Mugger's identically-shaped helper draws on the SEEDED aiRng and
+            // therefore moves the shared stream, and this one cannot.
+            return nullptr;
+        case MonsterId::REPTOMANCER:
+            // die() (Reptomancer.java:157-165) has REAL CONTENT -- the suicide
+            // sweep over every surviving record -- but `super.die()` is its
+            // FIRST statement, and the ordering is load-bearing exactly as the
+            // Gremlin Leader's is: the sweep's `if (m.isDead || m.isDying)
+            // continue;` has no `m == this` term and excludes the Reptomancer
+            // ONLY because super.die() already set isDying. Run it pre-super and
+            // it suicides itself in an infinite regress. So the body registers in
+            // monster_die_after_fn below and this nullptr is the pre-super half
+            // being genuinely empty. THE SNAKE_DAGGER declares no die() at all
+            // and is deliberately absent from this list.
+            return nullptr;
         default:
             return nullptr;  // die() is presentation only, or absent
     }
@@ -1372,7 +1539,7 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
 // three carry achievements and victory bookkeeping only. The slot exists because
 // the batches that need it run in parallel and must not each invent their own.
 MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 54,
                   "new monster: does its Java die() override do anything AFTER "
                   "`super.die()`? Read the method. Content before super.die() "
                   "belongs in monster_die_fn; content after it belongs here, "
@@ -1398,6 +1565,18 @@ MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
             // -- unlike Reptomancer's, where the ordering is the only thing
             // preventing an infinite regress).
             return &awakened_one_die_after;
+        case MonsterId::REPTOMANCER:
+            // THE CASE THIS SLOT'S HEADER COMMENT NAMES. `super.die()`, then
+            // `for (m : getCurrRoom().monsters.monsters) { if (m.isDead ||
+            //  m.isDying) continue; addToTop(HideHealthBarAction(m));
+            //  addToTop(SuicideAction(m)); }` (Reptomancer.java:157-165). The
+            // sweep has NO `m == this` term and skips the Reptomancer purely
+            // because super.die() has already zeroed it, which is the whole
+            // reason a post-super slot exists. The 1-arg SuicideAction defaults
+            // triggerRelics to TRUE, so every surviving dagger pays a full
+            // death; both pushes are addToTop, so the suicides resolve in
+            // REVERSE list order.
+            return &reptomancer_die_after;
         case MonsterId::TIME_EATER:
         case MonsterId::DONU:
         case MonsterId::DECA:

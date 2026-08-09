@@ -518,7 +518,12 @@ TEST(RegistryGen, ManifestCounts) {
                                       // joins any generated pool.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 69u);  // + S2.23's MINION (96) and PAINFUL_STABS
+    EXPECT_EQ(m::kPowersCount, 71u);  // + S2.27's SLOW (106) and
+                                      // INTANGIBLE_MONSTER (107, game_id
+                                      // "Intangible" -- the MONSTER class, NOT
+                                      // id 29 "IntangiblePlayer"), the 106-107
+                                      // block spent exactly.
+                                      // + S2.23's MINION (96) and PAINFUL_STABS
                                       // (97) -- the Gremlin Leader's minion
                                       // marker (which un-parks the Feed and
                                       // Hand of Greed gates) and the Book of
@@ -602,7 +607,12 @@ TEST(RegistryGen, ManifestCounts) {
                                       // The block 93-94 is spent exactly; 95
                                       // (Malleable) is the NEXT city batch's row,
                                       // not this one's
-    EXPECT_EQ(m::kMonstersCount, 50u); // + S2.23's three Act-2 city ELITES:
+    EXPECT_EQ(m::kMonstersCount, 54u); // + S2.27's three Act-3 beyond ELITES
+                                       // and the dagger: Giant Head (58),
+                                       // Nemesis (59), Reptomancer (60) and
+                                       // SnakeDagger (61, game_id "Dagger"),
+                                       // the 58-61 block spent exactly.
+                                       // + S2.23's three Act-2 city ELITES:
                                        // Gremlin Leader (37), Taskmaster (38,
                                        // game_id "SlaverBoss") and Book of
                                        // Stabbing (39), the 37-39 block spent
@@ -684,7 +694,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 566u);  // 132 + 69 + 50 + 150 + 33 + 51 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 572u);  // 132 + 71 + 54 + 150 + 33 + 51 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1606,7 +1616,8 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
     // (IntangiblePlayerPower.java:31), Confusion 0 (ConfusionPower.java:30),
     // PenNib 6 (PenNibPower.java:36), Flight 50 (FlightPower.java:34),
     // Constricted 105 (ConstrictedPower.java:35), Reactive 50
-    // (ReactivePower.java:31).
+    // (ReactivePower.java:31), Intangible 75 (IntangiblePower.java:32 -- the
+    // MONSTER class, a second row carrying the same number as id 29).
     namespace r = sts::registry;
     EXPECT_EQ(r::power_def(r::PowerId::WEAK)->priority, 99);
     EXPECT_EQ(r::power_def(r::PowerId::FRAIL)->priority, 10);
@@ -1618,6 +1629,15 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
     // and slot order IS the atDamage* walk order, so this number decides whether
     // a Weak attacker's damage is halved before or after the 0.75 multiply.
     EXPECT_EQ(r::power_def(r::PowerId::FLIGHT)->priority, 50);
+    // INTANGIBLE_MONSTER 75 (IntangiblePower.java:32) -- the SAME 75 its
+    // player-side namesake carries, from a DIFFERENT class's ctor. Both rows
+    // exist because the POWER_ID literals differ ("Intangible" vs
+    // "IntangiblePlayer"), and both must carry the number.
+    EXPECT_EQ(r::power_def(r::PowerId::INTANGIBLE_MONSTER)->priority, 75);
+    // SLOW's ctor (SlowPower.java:27-35) sets type = DEBUFF and NOTHING else --
+    // no priority -- so it belongs in the default sweep below.
+    EXPECT_EQ(r::power_def(r::PowerId::SLOW)->priority,
+              r::kDefaultPowerPriority);
     // Constricted 105 (ConstrictedPower.java:35) -- the HIGHEST in the registry,
     // above Weak's 99, so its slot always sorts LAST and therefore walks last in
     // every atDamage* pass and every hook fan-out.
@@ -1647,7 +1667,8 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
         if (id == r::PowerId::WEAK || id == r::PowerId::FRAIL ||
             id == r::PowerId::INTANGIBLE || id == r::PowerId::CONFUSION ||
             id == r::PowerId::PEN_NIB || id == r::PowerId::FLIGHT ||
-            id == r::PowerId::CONSTRICTED || id == r::PowerId::REACTIVE) {
+            id == r::PowerId::CONSTRICTED || id == r::PowerId::REACTIVE ||
+            id == r::PowerId::INTANGIBLE_MONSTER) {
             continue;
         }
         const r::PowerDef* d = r::power_def(id);

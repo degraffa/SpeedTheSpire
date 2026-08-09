@@ -507,6 +507,21 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "still NORMAL"},
         {MonsterId::WRITHING_MASS,      MonsterEnemyType::NORMAL,
          "WrithingMass.java -- no this.type assignment (ctor :53-78)"},
+        // S2.27's three Act-3 elites, and the dagger that is NOT one. The split
+        // is the point: an elite fight's minion keeps the NORMAL default even
+        // though every record in the room belongs to an elite encounter, so
+        // "which room am I in" and "what is this monster's type" are genuinely
+        // two questions.
+        {MonsterId::GIANT_HEAD,          MonsterEnemyType::ELITE,
+         "GiantHead.java:57 -- this.type = EnemyType.ELITE"},
+        {MonsterId::NEMESIS,             MonsterEnemyType::ELITE,
+         "Nemesis.java:69 -- this.type = EnemyType.ELITE"},
+        {MonsterId::REPTOMANCER,         MonsterEnemyType::ELITE,
+         "Reptomancer.java:65 -- this.type = EnemyType.ELITE"},
+        {MonsterId::SNAKE_DAGGER,        MonsterEnemyType::NORMAL,
+         "SnakeDagger.java -- NO this.type assignment (ctor :45-51), so the "
+         "AbstractMonster.java:99 NORMAL default stands even inside the "
+         "Reptomancer's elite group"},
         // S2.28's four Act-3 bosses. All four DO assign the field, and all four
         // matter beyond bookkeeping: Pantograph scans the group for a BOSS-typed
         // member (Pantograph.java:32-40) and Slaver's Collar's per-combat energy

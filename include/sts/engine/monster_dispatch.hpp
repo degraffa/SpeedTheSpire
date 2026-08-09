@@ -204,10 +204,16 @@ using MonsterSpawnAtHpFn = void (*)(CombatState& state, uint8_t monster_index,
 // items. That order is the Java's and it is observable: a summoned Gremlin
 // Warrior's power list is [Minion, Angry]. SpawnMonsterAction applies no Minion,
 // which is why this is the third bit and not a default.
+//
+// `minion_at_top` puts that application at the queue TOP instead
+// (SpawnMonsterAction.java:68 is `addToTop`, where SummonGremlinAction.java:114
+// is `addToBot` -- two actions, two placements; see kSpawnMinionAtTop in
+// interp.hpp). Ignored when `apply_minion` is false.
 void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
                            int16_t hp, bool run_pre_battle = false,
                            bool apply_minion = false,
-                           int16_t draw_x = 0) noexcept;
+                           int16_t draw_x = 0,
+                           bool minion_at_top = false) noexcept;
 
 // The `relics.onSpawnMonster` fan-out, in acquisition order (per SLOT, matching
 // the Java's `for (AbstractRelic r : player.relics)`). Philosopher's Stone is the
@@ -225,8 +231,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 void dispatch_on_spawn_monster_relics(CombatState& state,
                                       uint8_t monster_index) noexcept;
 
-// SpawnMonsterAction's SMART POSITIONING (SpawnMonsterAction.java:50-56), and
-// GremlinLeader's identical getSmartPosition (SummonGremlinAction.java):
+// GremlinLeader's getSmartPosition (SummonGremlinAction.java:92-99):
 //
 //     int position = 0;
 //     for (AbstractMonster mo : getCurrRoom().monsters.monsters) {
@@ -239,6 +244,22 @@ void dispatch_on_spawn_monster_relics(CombatState& state,
 // The two differ whenever the list is not sorted by drawX, which initial groups
 // need not be (MonsterHelper constructs in its own order).
 //
+// CORRECTED BY S2.27 -- THIS FUNCTION IS SummonGremlinAction's, NOT
+// SpawnMonsterAction's, and the previous version of this comment cited both.
+// They are not the same loop. SpawnMonsterAction.java:50-56 is
+//
+//     for (AbstractMonster mo : getCurrRoom().monsters.monsters) {
+//         if (!(this.m.drawX > mo.drawX)) continue;      // <-- continue
+//         ++position;
+//     }
+//
+// a `continue`, i.e. a COUNT over the whole list, where SummonGremlinAction's is
+// a `break`. Read side by side in the decompile, character for character. The
+// count variant is smart_position_for_spawn_action below; every
+// SpawnMonsterAction summoner (Reptomancer's daggers, and the Bronze Automaton
+// / Collector spawns that follow) must use THAT one, and the Gremlin Leader
+// keeps this one.
+//
 // The comparison is `>` and therefore STRICT: a newcomer with the SAME x as an
 // existing record stops there and is inserted BEFORE it. That happens whenever a
 // position is recycled, which every one of the Act-2/3 spawners does.
@@ -250,6 +271,24 @@ void dispatch_on_spawn_monster_relics(CombatState& state,
 // place precisely so that stays true.
 [[nodiscard]] uint8_t smart_position_for(const CombatState& state,
                                          int16_t draw_x) noexcept;
+
+// SpawnMonsterAction's smart positioning (SpawnMonsterAction.java:50-56): the
+// COUNT of records the newcomer is strictly right of, over the WHOLE list, with
+// no early exit. See the correction note above smart_position_for for why this
+// is a second function and not a shared one.
+//
+// The two agree exactly when the list is already sorted ascending by `draw_x`,
+// which the Reptomancer's is (-220 dagger, -20 Reptomancer, 210 dagger) and
+// which an insertion at this position preserves -- so today the divergence is
+// unobservable in the encounters that reach it. It is implemented separately
+// anyway, because "unobservable in the encounters that exist" is the kind of
+// claim that expires: the two large-slime split sites hand-derive their slots
+// (they carry draw_x == 0 and predate the key), and the day one of them stops
+// hand-deriving, the loop it needs is THIS one, not the one above.
+//
+// DEAD RECORDS COUNT, exactly as above: the Java walks the whole group list.
+[[nodiscard]] uint8_t smart_position_for_spawn_action(const CombatState& state,
+                                                      int16_t draw_x) noexcept;
 
 // Post-damage monster hook -- the AbstractMonster.damage() override seam, run
 // AFTER a hit fully lands (op_damage / op_lose_hp, ANY damage type: the Java

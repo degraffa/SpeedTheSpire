@@ -455,7 +455,8 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                 static_cast<int16_t>(item.amount),
                 (item.flags & kSpawnRunPreBattle) != 0u,
                 (item.flags & kSpawnApplyMinion) != 0u,
-                spawn_draw_x_from_flags(item.flags));
+                spawn_draw_x_from_flags(item.flags),
+                (item.flags & kSpawnMinionAtTop) != 0u);
             return;
         case Opcode::SET_MOVE: {
             // SetMoveAction.update (SetMoveAction.java:52-56) -> setMove:

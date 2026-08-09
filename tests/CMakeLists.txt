@@ -242,6 +242,17 @@ sts_add_test(guardian_test)
 # The A20 double-boss ROUTE is pinned in run_advance_test.cpp.
 sts_add_test(beyond_bosses_test)
 
+# S2.27: the Act-3 beyond ELITES -- the Giant Head (the `count` countdown, the
+# A18 pre-battle decrement that lands AFTER the opening roll, the IT_IS_TIME
+# ramp and its two clamps, and the zero-amount Slow the fight is built around),
+# the Nemesis (the MONSTER-side Intangible with its justApplied skip and its two
+# separate cap sites, the discard-pile Burns, and the getMove arms that spend a
+# second ai_rng draw), and the Reptomancer with its SnakeDaggers (the second
+# double-constructor-draw in the roster, queue-time spawn planning over a slot
+# map derived from draw_x, SpawnMonsterAction's COUNT-form smart positioning and
+# its addToTop Minion, and the post-`super.die()` suicide sweep).
+sts_add_test(beyond_elites_test)
+
 # B3.22: Hexaghost -- the A9 HP column and the A4/A19 stat columns, the forced
 # two-turn ACTIVATE/DIVIDER opener, Divider's player-HP-derived base pinned
 # against the formula at Hexaghost.java:151, the 7-long orb-count cycle

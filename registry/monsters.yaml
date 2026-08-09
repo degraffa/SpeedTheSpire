@@ -2475,6 +2475,229 @@
                # changes push the A17 Healer toward BUFF. See
                # monster_healer.cpp.
 
+# --- S2.27 (Act-3 Beyond ELITES): Giant Head, Nemesis, Reptomancer and the ---
+# --- SnakeDagger the Reptomancer summons. MonsterId 58-61 is this task's -----
+# --- whole grant (stage-b-tasks.md "S2 Wave-3 allocations"); all four are ----
+# --- spent, so the block leaves no gap. 45-48 and 66 stay UNISSUED and are ---
+# --- not this batch's to backfill. -------------------------------------------
+#
+# THE THREE ENCOUNTER ROWS ALREADY EXIST and are untouched: encounters.yaml 55
+# GIANT_HEAD_ENC, 56 NEMESIS_ENC and 57 REPTOMANCER_ENC landed with S2.01 and
+# resolve their `emit` targets as GAME-ID STRINGS against this file at spawn
+# time, so registering the four init fns un-parks all three rooms with NO
+# encounters.yaml and NO run_advance.cpp change (the S2.23 / B3.16 precedent --
+# run_advance's implemented-member gate asks monster_init_fn, never a list).
+#
+# THREE OF THE FOUR ARE ELITE and one is not. GiantHead.java:57, Nemesis.java:69
+# and Reptomancer.java:65 each assign `this.type = EnemyType.ELITE`; SnakeDagger
+# assigns nothing at all, so it keeps AbstractMonster.java:99's NORMAL default
+# even though it only ever appears inside an elite fight. That is not cosmetic:
+# Pantograph and the elite-only reward paths read the MONSTER's type.
+#
+# TWO monster_hp_rng DRAWS FOR THE REPTOMANCER, ONE FOR EACH OF THE OTHER
+# THREE. The Reptomancer is the roster's SECOND double-drawer after the
+# Taskmaster (id 38) and for the identical reason -- its `super(...)` argument
+# list contains `AbstractDungeon.monsterHpRng.random(180, 190)`
+# (Reptomancer.java:64), which Java evaluates before the constructor body, and
+# then setHp draws again (:68-72). The first value is invisible in the HP and
+# the stream offset is the whole observable; it sits at group index 1 of the
+# Reptomancer encounter, so BOTH daggers' HP rolls move with it. The SnakeDagger
+# is the mirror image and needs NO `rolls` row: its super argument
+# `monsterHpRng.random(20, 25)` (SnakeDagger.java:46) is its ONLY draw -- the
+# class declares no setHp at all -- so the ordinary `hp` column expresses it
+# exactly. The Wave-3 grant listed the SnakeDagger as a CONSTRUCTOR_BEFORE_HP
+# consumer; read against the Java it is not one, and the timing value is S2.2F's
+# and costs nothing left unused here.
+
+- id: 58
+  name: GIANT_HEAD
+  game_id: "GiantHead"
+  provenance: "GiantHead (GiantHead.java, 175 lines, read in full). ID \"GiantHead\" (:33) -- the oracle join key and the string encounters.yaml id 55 already emits. type = ELITE (:57). SOLO encounter (MonsterHelper.java:579-581). ctor (:55-78): the super(...) HP argument is the LITERAL 500 -- no draw -- then setHp(520,520) at ascension >= 8 else setHp(500,500) (:64-68), ONE monster_hp_rng draw over a DEGENERATE range (the Hexaghost reading: Random.random(int,int) still increments the counter for min == max, Random.java:58-61, so the DRAW is the observable, not the number). `startingDeathDmg` is 40 at ascension >= 3 else 30 (:69) -- the constant is named A_2_DEATH_DMG and the branch is `>= 3`. The damage list is EIGHT entries built in the ctor (:70-77): index 0 is COUNT_DMG 13, and indices 1..7 are startingDeathDmg + 0,5,10,15,20,25,30 -- an arithmetic ramp, which is why IT_IS_TIME's row authors index 1 and the module adds the step. `count` is a FIELD INITIALIZER 5 (:53), NOT a ctor argument. usePreBattleAction (:80-86): ApplyPowerAction(this, this, new SlowPower(this, 0)) -- SELF-applied at AMOUNT ZERO -- and then, at ascension >= 18 ONLY, `--this.count`. THE PRE-BATTLE DECREMENT LANDS AFTER THE FIRST rollMove, not before it: spawn_group runs every ctor+init() and use_pre_battle_actions runs afterwards (design section 5.2), and the Java's MonsterGroup does the same, so at A20 the opening getMove sees count == 5 (and leaves 4) and the pre-battle takes it to 3. takeTurn (:88-114): case GLARE(1) is playSfx + ShoutAction + ApplyPowerAction(player, this, WeakPower(player, 1, true), 1); case COUNT(3) is playSfx + ShoutAction + DamageAction(damage.get(0)); case IT_IS_TIME(2) is ShoutAction(getTimeQuote()) + DamageAction(damage.get(index)) where `index = 1 - count` CLAMPED AT 7 (:106-109). RollMoveAction (:113) sits OUTSIDE the switch. playSfx (:116-125) and getTimeQuote (:138-145) both roll UNSEEDED MathUtils and cost nothing. die (:147-151) is super.die() then playDeathSfx, also UNSEEDED -- so NO MonsterDieFn entry (explicit nullptr, monster_dispatch.cpp). getMove (:153-174) MUTATES `count` on every path and is the reason the row is ai: native."
+  enemy_type: ELITE    # GiantHead.java:57
+  hp:
+    base: {min: 500, max: 500}  # GiantHead.java:67 (ascension < 8)
+    a8:   {min: 520, max: 520}  # GiantHead.java:65 (ascension >= 8)
+  rolls: []
+  moves:
+    - name: GLARE
+      move_id: 1               # GiantHead.java:50
+      intent: DEBUFF           # setMove((byte)1, Intent.DEBUFF) (:165,172)
+      effects:
+        # GLARE_WEAK is the field constant 1 (:46) and is NEVER ascension-branched.
+        # ShoutAction (:93) and playSfx (:92) are presentation; playSfx's
+        # MathUtils.random(2) is UNSEEDED and moves no engine stream.
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: WEAK}
+    - name: IT_IS_TIME
+      move_id: 2               # GiantHead.java:51
+      intent: ATTACK           # setMove((byte)2, Intent.ATTACK, sdd - count*5) (:159)
+      effects:
+        # THE RAMP IS NATIVE AND THIS STEP IS ITS BASE. damage.get(index) with
+        # `index = 1 - count` (:106) and index 1 == startingDeathDmg, so the
+        # amount below is EXACTLY the first It Is Time (count == 0) and the module
+        # adds `-count * 5` for every later one -- the arithmetic the ctor's eight
+        # DamageInfos spell out longhand (:71-77). Written this way rather than as
+        # eight rows because the count is per-instance combat state (pad0) that no
+        # effect list carries, and monster_giant_head.cpp READS this column rather
+        # than re-authoring 30/40, so the tier branch has exactly one home. The
+        # index CLAMP at 7 (:107-109) is the same clamp as `count` bottoming out
+        # at -6 in getMove (:156-158) and the module spells both.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 30, a3: 40}}
+    - name: COUNT
+      move_id: 3               # GiantHead.java:52
+      intent: ATTACK           # setMove((byte)3, Intent.ATTACK, 13) (:167,170)
+      effects:
+        # COUNT_DMG is the field constant 13 (:44) and damage.get(0) is built from
+        # it directly (:70). FLAT at every ascension -- no tier column.
+        - {op: DAMAGE, target: PLAYER, amount: 13}
+  ai: native   # getMove (:153-174) WRITES `count` on every path -- the `count <= 1`
+               # arm decrements it (floored at -6) and the ordinary arm decrements
+               # it unconditionally BEFORE reading `num` -- and the amount it
+               # telegraphs is a function of that write. No ai table has a write
+               # side; the Book of Stabbing (id 39) is the same shape. See
+               # monster_giant_head.cpp.
+
+- id: 59
+  name: NEMESIS
+  game_id: "Nemesis"
+  provenance: "Nemesis (Nemesis.java, 232 lines, read in full). ID \"Nemesis\" (:42) -- the oracle join key and the string encounters.yaml id 56 already emits. type = ELITE (:69). SOLO encounter (MonsterHelper.java:573-575). ctor (:67-86): the super(...) HP argument is the LITERAL 185 -- no draw -- then setHp(200) at ascension >= 8 else setHp(185) (:78-82), ONE monster_hp_rng draw (the single-arg overload is literally setHp(hp, hp), AbstractMonster.java:777-779, and the two-arg body draws unconditionally). fireDmg is 7 at ascension >= 3 else 6 (:83; the constant is named A_2_FIRE_DMG and the branch is `>= 3`). damage.get(0) = SCYTHE_DMG 45, FLAT at every ascension; damage.get(1) = fireDmg. Move ids TRI_ATTACK = 2, SCYTHE = 3, TRI_BURN = 4 (:57-59) -- THERE IS NO MOVE 1. takeTurn (:88-118): case SCYTHE queues ChangeStateAction + playSfx + WaitAction + ONE DamageAction(damage.get(0)); case TRI_ATTACK queues THREE separate DamageActions on damage.get(1) (:99-101), so block and per-hit powers apply per hit; case TRI_BURN queues SFX + VFX and then ONE MakeTempCardInDiscardAction(new Burn(), 5) at ascension >= 18 else (new Burn(), 3) (:107-111). THE BURNS GO TO THE DISCARD PILE, not the draw pile, on BOTH arms -- MakeTempCardInDiscardAction is the only card-making action the class uses. AFTER the switch and OUTSIDE it (:114-116): `if (!hasPower(\"Intangible\")) addToBottom(ApplyPowerAction(this, this, new IntangiblePower(this, 1)))`, then RollMoveAction (:117). THE INTANGIBLE IS THE MONSTER-SIDE POWER: IntangiblePower (POWER_ID \"Intangible\"), NOT IntangiblePlayerPower (\"IntangiblePlayer\", powers.yaml id 29) -- two classes, two ID strings, two oracle join keys; this batch registers the monster one as powers.yaml id 107. damage(DamageInfo) (:120-131) is an override with REAL content: `if (info.output > 0 && hasPower(\"Intangible\")) info.output = 1;` runs BEFORE super.damage(info), i.e. before decrementBlock, and unlike IntangiblePower.atDamageFinalReceive it is TYPE-AGNOSTIC -- it caps THORNS and HP_LOSS too. The rest of the override is animation. die (:213-217) is playDeathSfx and THEN super.die(), and playDeathSfx (:204-211) rolls UNSEEDED MathUtils -- so NO MonsterDieFn entry (explicit nullptr, monster_dispatch.cpp). update() (:219-231) is fire particles. getMove (:145-193) is ai: native for two independent reasons -- it decrements `scytheCooldown` on EVERY call before branching, and three of its arms spend an EXTRA aiRng.randomBoolean() draw."
+  enemy_type: ELITE    # Nemesis.java:69
+  hp:
+    base: {min: 185, max: 185}  # Nemesis.java:81 (ascension < 8)
+    a8:   {min: 200, max: 200}  # Nemesis.java:79 (ascension >= 8)
+  rolls: []
+  moves:
+    - name: TRI_ATTACK
+      move_id: 2               # Nemesis.java:57
+      intent: ATTACK           # setMove(2, ATTACK, fireDmg, 3, true) -- the "3, true"
+                               # is the multi-hit TELEGRAPH (FIRE_TIMES, :52)
+      effects:
+        # THREE SEPARATE DamageActions in a `for (i < 3)` loop (:99-101). FIRE_TIMES
+        # is the flat constant 3; fireDmg is 6, 7 from A3 (:53,83). Three literal
+        # steps rather than a counted one -- the Centurion furyHits / Book of
+        # Stabbing precedent -- because each is its own DamageAction.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a3: 7}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a3: 7}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a3: 7}}
+    - name: SCYTHE
+      move_id: 3               # Nemesis.java:58
+      intent: ATTACK           # setMove(3, ATTACK, 45) (:159,179,188)
+      effects:
+        # SCYTHE_DMG 45 (:50), FLAT at every ascension -- no tier column.
+        # ChangeStateAction, playSfx (UNSEEDED MathUtils.random(1), :196) and
+        # WaitAction (:92-94) are presentation.
+        - {op: DAMAGE, target: PLAYER, amount: 45}
+    - name: TRI_BURN
+      move_id: 4               # Nemesis.java:59
+      intent: DEBUFF           # setMove(4, Intent.DEBUFF) -- five call sites
+      effects:
+        # ONE MakeTempCardInDiscardAction with a COUNT (:108,111), so ONE MAKE_CARD
+        # step whose amount is the count -- the Taskmaster's Wound row precedent.
+        # BURN_AMT 3 (:54), 5 at A18. THE PILE IS DISCARD on both arms. The SFX and
+        # the ShockWaveEffect VFX (:105-106) are presentation.
+        - {op: MAKE_CARD, target: PLAYER, amount: {base: 3, a18: 5}, card: BURN, pile: DISCARD}
+  ai: native   # getMove (:145-193) does TWO things no ai table expresses. (1) It
+               # decrements `scytheCooldown` at the top of EVERY call (:147),
+               # before any branch -- a write side. (2) THREE of its arms spend an
+               # extra `AbstractDungeon.aiRng.randomBoolean()` (:161,175,187) on
+               # top of the rollMove draw that produced `num`, so the per-turn
+               # ai_rng cost is 1 or 2 draws depending on the arm taken. It also
+               # carries a `firstMove` one-shot (:148-156). See monster_nemesis.cpp.
+
+- id: 60
+  name: REPTOMANCER
+  game_id: "Reptomancer"
+  provenance: "Reptomancer (Reptomancer.java, 212 lines, read in full). ID \"Reptomancer\" (:41) -- the oracle join key and the string encounters.yaml id 57 already emits. type = ELITE (:65). The encounter is Dagger / Reptomancer / Dagger in THAT list order (MonsterHelper.java:536-539), the daggers built at Reptomancer.POSX[1] = -220 and POSX[0] = 210 respectively. ctor (:63-87) DRAWS monster_hp_rng TWICE: the super(...) argument is `AbstractDungeon.monsterHpRng.random(180, 190)` (:64), which Java evaluates before the constructor body, and setHp(190,200) at ascension >= 8 else setHp(180,190) (:68-72) draws again. The first value is overwritten and invisible; its POSITION in the stream is the observable, which is what the `rolls` entry below with timing CONSTRUCTOR_BEFORE_HP encodes (the Taskmaster, id 38, is the only other double-drawer). NOTE the super argument's range is the LITERAL (180, 190) at EVERY ascension -- only the setHp under it is branched. `daggersPerSpawn` is 2 at ascension >= 18 else 1 (:67). damage is added A3-branched IN ONE BLOCK (:73-79): at >= 3 it is [16, 34], below it [13, 30] -- get(0) is SNAKE_STRIKE_DMG, get(1) is BITE_DMG. POSX = {210, -220, 180, -250} and POSY = {75, 115, 345, 335} (:57-58) are the FOUR dagger slots; the Reptomancer's own offsetX is -20 (:64). usePreBattleAction (:89-102) walks the group ONCE and does two things per member: `if (!m.id.equals(this.id)) ApplyPowerAction(m, m, new MinionPower(this))` -- so every non-Reptomancer record in the group, dagger or not, becomes a MINION -- and, for each SnakeDagger, `daggers[0] = m` when its list index is GREATER than the Reptomancer's and `daggers[1] = m` otherwise. Note the id COMPARISON is by string, so a second Reptomancer would not minionize the first; the roster has no such group. takeTurn (:104-137): case SNAKE_STRIKE(1) is ChangeState + Wait + (VFX, DamageAction(damage.get(0))) TWICE + ApplyPowerAction(player, this, WeakPower(player, 1, true), 1); case SPAWN_DAGGER(2) is ChangeState + Wait + the spawn loop; case BIG_BITE(3) is AnimateFastAttack + VFX + one DamageAction(damage.get(1)). RollMoveAction (:136) sits OUTSIDE the switch. The BiteEffect VFX arguments call MathUtils.random(-50f, 50f), UNSEEDED, twice per bite. THE SPAWN LOOP (:120-127) scans `daggers[0..3]` in INDEX ORDER, skips a slot whose occupant is non-null and NOT isDeadOrEscaped, and for each of the first `daggersPerSpawn` free slots constructs `new SnakeDagger(POSX[i], POSY[i])` -- a monster_hp_rng draw AT QUEUE TIME, because Java constructs the argument before `new SpawnMonsterAction(...)` -- assigns daggers[i] and queues SpawnMonsterAction(dagger, true). canSpawn (:139-146) counts every record that is neither `this` nor isDying and returns aliveCount <= 3; it is consulted by getMove, NOT by takeTurn, so a SPAWN_DAGGER already telegraphed still fires even if the group filled up in between. die (:157-165) is super.die() FIRST and then, for every record that is neither isDead nor isDying, addToTop(HideHealthBarAction) + addToTop(SuicideAction) -- the post-super ordering is what makes the sweep skip the Reptomancer itself, and the 1-arg SuicideAction defaults triggerRelics to TRUE. getMove (:167-195) RECURSES on two arms with fresh seeded draws."
+  enemy_type: ELITE    # Reptomancer.java:65
+  hp:
+    base: {min: 180, max: 190}  # Reptomancer.java:71 (ascension < 8)
+    a8:   {min: 190, max: 200}  # Reptomancer.java:69 (ascension >= 8)
+  rolls:
+    # The super(...) ARGUMENT draw (Reptomancer.java:64), the Taskmaster's shape
+    # exactly. Its VALUE is thrown away by the setHp below it; its POSITION in the
+    # monster_hp_rng sequence is the whole point, which is what timing
+    # CONSTRUCTOR_BEFORE_HP encodes (burn_unspawned_ctor_rolls' two-pass walk,
+    # monster_dispatch.cpp). NO tier columns: the argument is the flat literal
+    # random(180, 190) at every ascension -- only the setHp under it moves.
+    - name: SUPER_ARG_HP
+      stream: MONSTER_HP
+      timing: CONSTRUCTOR_BEFORE_HP
+      range:
+        base: {min: 180, max: 190}  # Reptomancer.java:64 -- literal, unbranched
+  moves:
+    - name: SNAKE_STRIKE
+      move_id: 1               # Reptomancer.java:54
+      intent: ATTACK_DEBUFF    # setMove(1, ATTACK_DEBUFF, dmg[0].base, 2, true)
+      effects:
+        # TWO SEPARATE DamageActions on damage.get(0) (:111,113) and THEN the Weak
+        # (:114) -- the order is the queue order and it is load-bearing. dmg[0] is
+        # 13, 16 from A3 (:74,77).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 13, a3: 16}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 13, a3: 16}}
+        # WeakPower(player, 1, true) -- amount 1, flat at every ascension (:114).
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: WEAK}
+    - name: SPAWN_DAGGER
+      move_id: 2               # Reptomancer.java:55
+      intent: UNKNOWN          # setMove((byte)2, Intent.UNKNOWN) (:171,183)
+      effects:
+        # A NOP PLACEHOLDER, the Darkling COUNT precedent. Everything this move
+        # does is the native spawn loop (:120-127): the free-slot scan over
+        # daggers[0..3], the QUEUE-TIME SnakeDagger construction (a monster_hp_rng
+        # draw each) and one SPAWN_MONSTER item per dagger carrying that dagger's
+        # POSX as draw_x. None of it is expressible as an effect step, and the
+        # count is `daggersPerSpawn` (1, or 2 from A18). See monster_reptomancer.cpp.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: BIG_BITE
+      move_id: 3               # Reptomancer.java:56
+      intent: ATTACK           # setMove(3, ATTACK, dmg[1].base) (:191)
+      effects:
+        # ONE DamageAction on damage.get(1) (:133). BITE_DMG 30, 34 from A3 (:75,78).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 30, a3: 34}}
+  ai: native   # getMove (:167-195) RECURSES on two arms with FRESH SEEDED DRAWS --
+               # `this.getMove(AbstractDungeon.aiRng.random(33, 99))` (:178) and
+               # `this.getMove(AbstractDungeon.aiRng.random(65))` (:193) -- so
+               # termination is probabilistic, not bounded, exactly as the Gremlin
+               # Leader's is; a transcription that reuses `num` diverges on the
+               # first recursion. It also reads canSpawn(), a GROUP-SHAPED
+               # predicate, and carries a `firstMove` one-shot that forces the
+               # opening SPAWN_DAGGER. See monster_reptomancer.cpp.
+
+- id: 61
+  name: SNAKE_DAGGER
+  game_id: "Dagger"
+  provenance: "SnakeDagger (SnakeDagger.java, 115 lines, read in full). ID IS \"Dagger\" (:32), NOT \"SnakeDagger\" -- that is the string encounters.yaml id 57 already emits twice, and it is the oracle join key. The class assigns NO type, so it keeps AbstractMonster.java:99's NORMAL default even inside an elite fight. THE CTOR HAS EXACTLY ONE monster_hp_rng DRAW AND IT IS THE SUPER ARGUMENT: `super(NAME, ID, AbstractDungeon.monsterHpRng.random(20, 25), ...)` (:46) with NO setHp anywhere in the class -- so unlike the Taskmaster and the Reptomancer, whose super-argument draws are OVERWRITTEN by a setHp and therefore need a `rolls` entry, this one IS the HP and the ordinary `hp` column below expresses it exactly. FLAT at every ascension: the class has no ascension branch of any kind. The ctor takes (x, y) and passes them as offsetX/offsetY, which is how the same type sits at four different positions -- the Reptomancer's POSX/POSY tables -- and is why draw_x is written by the SPAWNER (monster_dispatch.hpp \"WHO SETS draw_x\"). damage (:48-50) is three DamageInfos: get(0) STAB_DMG 9, get(1) SACRIFICE_DMG 25, and get(2) a 25 of type HP_LOSS that is DEAD -- takeTurn's EXPLODE uses get(1) for the DamageAction and a LoseHPAction built from currentHealth for the self-kill, so nothing ever reads get(2) and no move row carries it. takeTurn (:59-77): case WOUND(1) is ChangeState + Wait + DamageAction(damage.get(0)) + MakeTempCardInDiscardAction(new Wound(), 1); case EXPLODE(2) is ChangeState + Wait + DamageAction(damage.get(1)) + LoseHPAction(this, this, this.currentHealth). RollMoveAction (:76) sits OUTSIDE the switch, so a dagger that just exploded still rolls. `firstMove` is a PUBLIC field initializer true (:43) and getMove (:90-98) is the whole ai: the first decision is WOUND and every later one is EXPLODE, unconditionally, with `num` ignored -- but the rollMove that produced `num` still drew aiRng.random(99) and still moved the shared stream. damage(DamageInfo) (:79-88) is animation only. NO die() override, NO usePreBattleAction: the MinionPower a dagger carries is applied by the Reptomancer's pre-battle walk (encounter daggers) or by the spawn path's kSpawnApplyMinion bit (summoned ones)."
+  enemy_type: NORMAL   # SnakeDagger assigns no type (AbstractMonster.java:99)
+  hp:
+    # THE SUPER-ARGUMENT DRAW ITSELF (SnakeDagger.java:46), not a setHp -- see the
+    # provenance. One monster_hp_rng draw over 20..25, flat at every ascension.
+    base: {min: 20, max: 25}
+  rolls: []
+  moves:
+    - name: WOUND
+      move_id: 1               # SnakeDagger.java:41
+      intent: ATTACK_DEBUFF    # setMove((byte)1, Intent.ATTACK_DEBUFF, 9) (:94)
+      effects:
+        # STAB_DMG 9 (:39), flat. ChangeState + Wait (:63-64) are presentation.
+        - {op: DAMAGE, target: PLAYER, amount: 9}
+        # MakeTempCardInDiscardAction(new Wound(), 1) (:66) -- ONE Wound, DISCARD.
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: WOUND, pile: DISCARD}
+    - name: EXPLODE
+      move_id: 2               # SnakeDagger.java:42
+      intent: ATTACK           # setMove((byte)2, Intent.ATTACK, 25) (:97)
+      effects:
+        # SACRIFICE_DMG 25 (:40), flat -- damage.get(1) (:72).
+        - {op: DAMAGE, target: PLAYER, amount: 25}
+        # LoseHPAction(this, this, this.currentHealth) (:73). A PER-INSTANCE amount
+        # read at QUEUE time, so this is the `amount: 0` placeholder the Darkling's
+        # NIP row uses: monster_reptomancer.cpp substitutes the dagger's live HP.
+        # The self-kill is an HP_LOSS through the damage path, NOT a SuicideAction,
+        # so it goes through op_lose_hp and pays the ordinary death edge.
+        - {op: LOSE_HP, target: SELF, amount: 0}
+  ai: native   # getMove (:90-98) is a `firstMove` one-shot and then a constant, and
+               # it ignores `num` entirely -- but the rollMove that produced `num`
+               # still spends aiRng.random(99) every turn (the Taskmaster / Looter /
+               # Guardian precedent, which is why those rows are native too). The
+               # EXPLODE amount is also per-instance. See monster_reptomancer.cpp.
+
 # --- S2.28 (Act-3 Beyond bosses) ---------------------------------------------
 # MonsterId 62-65 is this task's whole grant (stage-b-tasks.md "S2 Wave-3
 # allocations"); all four are spent, so the block leaves no gap. 37-61 belong to

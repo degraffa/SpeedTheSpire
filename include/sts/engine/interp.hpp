@@ -724,10 +724,37 @@ inline constexpr uint32_t kSpawnRunPreBattle = 1u << 16;
 // Collector's torch heads and the Bronze Automaton's orbs in the batches that
 // follow. Setting both bits together IS the summon pattern.
 inline constexpr uint32_t kSpawnApplyMinion = 1u << 17;
-// Bits 18..31 carry the spawned record's `draw_x` position key
-// (MonsterState::draw_x) as a RAW SIGNED 14-BIT two's-complement field --
-// range -8192..8191, comfortably wider than every `offsetX` in Acts 1-3 (the
-// extremes are the Gremlin Leader's -532 and the Slime Boss layout's +254).
+// Bit 31 puts that Minion application at the queue TOP instead of the bottom.
+//
+// WHY IT IS A SECOND BIT AND NOT A POLICY (S2.27). The two Java spawn actions
+// disagree about the PLACEMENT as well as the presence:
+//     SummonGremlinAction.java:114   addToBot(new ApplyPowerAction(m, m, Minion))
+//     SpawnMonsterAction.java:68     addToTop(new ApplyPowerAction(m, m, Minion))
+// -- literally addToBot versus addToTop, in two actions that are otherwise the
+// same shape. The Gremlin Leader is the bottom form; every SpawnMonsterAction
+// summoner (Reptomancer's daggers, and the Bronze Automaton's orbs and the
+// Collector's torch heads that follow) is the top form. Deriving the placement
+// from bit 16 instead -- "run_pre_battle means SummonGremlinAction means bottom"
+// -- would be correct today by coincidence and would encode a class identity in
+// a bit that names a behaviour.
+//
+// It is bit 31 because the word was full: bits 0-15 are the MonsterId, 16 and 17
+// are the two behaviour bits, and `draw_x` held 18..31. Rather than widen the
+// item, `draw_x` NARROWS from 14 bits to 13 (see below) and gives up its top
+// bit. Zero stays the identity, so no landed caller moves.
+inline constexpr uint32_t kSpawnMinionAtTop = 1u << 31;
+// Bits 18..30 carry the spawned record's `draw_x` position key
+// (MonsterState::draw_x) as a RAW SIGNED 13-BIT two's-complement field --
+// range -4096..4095, still comfortably wider than every `offsetX` in Acts 1-3
+// (the extremes are the Gremlin Leader's -532 and the Slime Boss layout's +254,
+// with the Reptomancer's dagger slots spanning only -250..210).
+//
+// NARROWED FROM 14 BITS BY S2.27 to free bit 31 for kSpawnMinionAtTop above. The
+// change is invisible to every existing caller: the widest value any of them
+// encodes is -532, which round-trips identically through a 13-bit field, and the
+// sign-extension helper below is written against kSpawnDrawXBits so it followed
+// the constant. A future position outside -4096..4095 would have to widen the
+// item rather than the field, and nothing in Acts 1-4 comes close.
 //
 // WHY IT RIDES IN THE ITEM. `draw_x` is a per-SPAWNER, per-SLOT constant out of
 // the spawning class's POSX table (GremlinLeader.POSX {-366,-170,-532};
@@ -742,15 +769,16 @@ inline constexpr uint32_t kSpawnApplyMinion = 1u << 17;
 // draw_x == 0, exactly the value those records already carried, so no landed
 // spawn moves.
 inline constexpr uint32_t kSpawnDrawXShift = 18u;
-inline constexpr uint32_t kSpawnDrawXBits = 14u;
+inline constexpr uint32_t kSpawnDrawXBits = 13u;
 [[nodiscard]] constexpr uint32_t make_spawn_monster_flags(
     uint16_t monster_id, int16_t draw_x = 0, bool run_pre_battle = false,
-    bool apply_minion = false) noexcept {
+    bool apply_minion = false, bool minion_at_top = false) noexcept {
     const uint32_t x = static_cast<uint32_t>(static_cast<uint16_t>(draw_x)) &
                        ((1u << kSpawnDrawXBits) - 1u);
     return static_cast<uint32_t>(monster_id) |
            (run_pre_battle ? kSpawnRunPreBattle : 0u) |
-           (apply_minion ? kSpawnApplyMinion : 0u) | (x << kSpawnDrawXShift);
+           (apply_minion ? kSpawnApplyMinion : 0u) |
+           (minion_at_top ? kSpawnMinionAtTop : 0u) | (x << kSpawnDrawXShift);
 }
 [[nodiscard]] constexpr int16_t spawn_draw_x_from_flags(uint32_t flags) noexcept {
     // Sign-extend the 14-bit field: shift it to the top of a 32-bit word and
