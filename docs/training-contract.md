@@ -28,13 +28,15 @@ that §2.7 draws, restated once because everything here follows from it:
 
 ## 1. `PUBLIC_VIEW_VERSION` and the stamps you must record
 
-`PUBLIC_VIEW_VERSION` is **4**
+`PUBLIC_VIEW_VERSION` is **5**
 ([../include/sts/engine/public_view.hpp](../include/sts/engine/public_view.hpp)).
 (It read **2** here until S2.2F: S2.13's v3 bump did not update this line. The
 number lives in the header; this file quotes it, and a quoted number goes stale
 exactly the way conventions §8 describes. v4 is the first BREAKING bump — see
 the audit's version log — so shards and checkpoints stamped v1-v3 are
-reanalyze-or-quarantine, not forward-readable.)
+reanalyze-or-quarantine, not forward-readable. v5 — S2.28's
+`second_boss_reserved` populate — is ADDITIVE over v4: no offset moved, and a
+v4 record's zero there reads truthfully as "no second boss revealed".)
 It is a real field of every `PublicView` instance (`public_view_version`), not
 just a compile-time constant, so a stored record carries its own schema
 identity and a loader can refuse without out-of-band metadata.
@@ -76,7 +78,7 @@ The header groups the struct into these sections, in layout order:
 | combat: piles | hand / **draw (canonically sorted multiset)** / discard / exhaust / limbo, as card values |
 | combat: monsters | per-monster block, HP, intent, and full 24-slot power lists (the old `ObsBuffer` stub truncated at 4) |
 | belt | potions — public in every phase, combat or not |
-| reserved (v1) | `keys_reserved`, `act_reserved` (both **populated** since v2), `boss_relic_choice_reserved`, `second_boss_reserved` (zero until S2/S3) |
+| reserved (v1) | `keys_reserved`, `act_reserved` (both **populated** since v2), `second_boss_reserved` (**populated** since v5: the A20 second Act-3 boss, 0 elsewhere), `boss_relic_choice_reserved` (zero until S2/S3) |
 | *v2 tail append →* | everything below was appended; no v1 field moved |
 | always-block | hp/max-hp/gold/floor/ascension, screen-flow scalars, `current_encounter_id`, masked chest fields, pity/membership counters |
 | always-block: collections | master deck (**engine order** — see below), relics + displayed counters, the full current-act map incl. the emerald node, consumed encounter prefix |

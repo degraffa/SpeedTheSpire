@@ -518,7 +518,14 @@ TEST(RegistryGen, ManifestCounts) {
                                       // joins any generated pool.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 56u);  // + S2.22's MALLEABLE (95), the Snake
+    EXPECT_EQ(m::kPowersCount, 60u);  // + S2.28's four Act-3 boss powers:
+                                      // CURIOSITY (108), UNAWAKENED (109),
+                                      // TIME_WARP (110), DRAW_REDUCTION (111)
+                                      // -- that batch's whole grant, spent
+                                      // exactly, so 108-111 leaves no gap.
+                                      // 96-107 belong to the sibling wave-3
+                                      // batches and are not rows here yet.
+                                      // + S2.22's MALLEABLE (95), the Snake
                                       // Plant's escalating retaliation shield;
                                       // that batch's whole PowerId grant, spent
                                       // exactly, so 95 leaves no gap.
@@ -581,7 +588,15 @@ TEST(RegistryGen, ManifestCounts) {
                                       // The block 93-94 is spent exactly; 95
                                       // (Malleable) is the NEXT city batch's row,
                                       // not this one's
-    EXPECT_EQ(m::kMonstersCount, 34u); // + S2.22's five Act-2 city normals:
+    EXPECT_EQ(m::kMonstersCount, 38u); // + S2.28's four Act-3 Beyond bosses:
+                                       // AWAKENED_ONE (62), TIME_EATER (63),
+                                       // DONU (64), DECA (65) -- that batch's
+                                       // whole grant, spent exactly. Ids 37-61
+                                       // belong to the sibling wave-3 batches
+                                       // and are not rows here yet, so the
+                                       // COUNT (38) and the max id (65) are
+                                       // deliberately far apart.
+                                       // + S2.22's five Act-2 city normals:
                                        // Mugger (32), Snake Plant (33), Snecko
                                        // (34), Centurion (35), Healer (36) --
                                        // the 32-36 block spent exactly. Id 31
@@ -642,7 +657,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 537u);  // 132 + 56 + 34 + 150 + 33 + 51 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 545u);  // 132 + 60 + 38 + 150 + 33 + 51 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

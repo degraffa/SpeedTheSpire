@@ -370,11 +370,17 @@ void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
     }
 }
 
-void condition_boss_list(MonsterLists& lists, RngStream& rng) noexcept {
-    // Uniform permutation of [1, count): Fisher-Yates downward, each swap
+void condition_boss_list(MonsterLists& lists, RngStream& rng,
+                         uint8_t keep) noexcept {
+    // Uniform permutation of [keep, count): Fisher-Yates downward, each swap
     // partner drawn inclusively over the still-unfixed span.
-    for (int i = static_cast<int>(lists.boss_list_count) - 1; i > 1; --i) {
-        const int32_t j = random(rng, 1, static_cast<int32_t>(i));
+    //
+    // `keep` was a hard-coded 1 until S2.28. Entry 0 is public from act start,
+    // so the floor is 1 however small the argument; the A20 double boss is what
+    // can raise it to 2, by revealing bossList[1] on entry to the second room.
+    int lo = keep < 1 ? 1 : static_cast<int>(keep);
+    for (int i = static_cast<int>(lists.boss_list_count) - 1; i > lo; --i) {
+        const int32_t j = random(rng, lo, static_cast<int32_t>(i));
         std::swap(lists.boss_list[static_cast<std::size_t>(i)],
                   lists.boss_list[static_cast<std::size_t>(j)]);
     }

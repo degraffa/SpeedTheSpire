@@ -134,10 +134,27 @@ def parse_monster(entry: dict, powers: dict[str, int],
             raise fail(f"{owner}: duplicate move name '{mname}'")
         seen_move_names.add(mname)
         mid = mv.get("move_id")
-        if not isinstance(mid, int) or isinstance(mid, bool) or mid < 1:
+        # >= 0, NOT >= 1. The bound was 1 because the move-history ring uses 0 as
+        # its EMPTY-SLOT sentinel (monster_dispatch.hpp:29-33), and no Act-1
+        # monster had a move 0 to contradict it. Donu and Deca do: `BEAM = 0` is a
+        # real Java byte move id on both (Donu.java:42, Deca.java:47), so the
+        # loader rejecting it would make the row unwritable.
+        #
+        # WHAT THE RELAXATION COSTS, stated rather than waved past: for a monster
+        # with a move 0, `last_move_is(m, 0)` / `last_two_moves_are(m, 0)` /
+        # `last_move_before_is(m, 0)` can no longer distinguish "decided move 0"
+        # from "no decision yet", because the ring stores the same byte for both.
+        # Neither Donu nor Deca reads its history at all -- both getMoves key
+        # purely off `isAttacking` (Donu.java:125-131, Deca.java:135-143) -- so
+        # nothing is wrong today, and the two modules and the fixture say so out
+        # loud. A FUTURE monster with a move 0 AND a history read would need a
+        # separate "history length" counter; this is the note that says so.
+        if not isinstance(mid, int) or isinstance(mid, bool) or mid < 0 or \
+                mid > 255:
             raise fail(f"{owner}: move {mname} 'move_id' must be an integer "
-                       f">= 1 (0 is the move_history empty-slot sentinel), "
-                       f"got {mid!r}")
+                       f"0..255 (the game's byte move id; 0 is ALSO the "
+                       f"move_history empty-slot sentinel, so a move 0 monster "
+                       f"must not read its own history), got {mid!r}")
         if mid in seen_move_ids:
             raise fail(f"{owner}: duplicate move_id {mid} ('{mname}' collides "
                        f"with '{seen_move_ids[mid]}') -- move ids are the "
@@ -328,7 +345,12 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("    TieredStat amount;")
     out.append("};\n")
     out.append("struct MonsterMove {")
-    out.append("    uint8_t move_id;     // the game's byte move id; never 0")
+    out.append("    uint8_t move_id;     // the game's byte move id. MAY BE 0 "
+               "(Donu/Deca BEAM),")
+    out.append("                         // which also spells the move_history "
+               "empty slot --")
+    out.append("                         // such a monster must not read its "
+               "own history.")
     out.append("    MonsterIntent intent;")
     out.append("    uint8_t effect_count;")
     out.append("    std::array<MonsterMoveEffect, kMaxMoveEffects> effects;  "

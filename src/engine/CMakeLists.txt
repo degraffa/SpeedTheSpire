@@ -28,6 +28,10 @@ add_library(sts_engine
     monster_snecko.cpp
     monster_centurion.cpp
     monster_healer.cpp
+    # S2.28 -- Act-3 Beyond bosses.
+    monster_awakened_one.cpp
+    monster_time_eater.cpp
+    monster_donu_deca.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -50,9 +54,11 @@ add_library(sts_engine
     powers/power_combust.cpp
     powers/power_confusion.cpp
     powers/power_corruption.cpp
+    powers/power_curiosity.cpp
     powers/power_curl_up.cpp
     powers/power_dark_embrace.cpp
     powers/power_double_tap.cpp
+    powers/power_draw_reduction.cpp
     powers/power_duplication.cpp
     # Not a power: the atEndOfRound body Vulnerable / Weak / Frail share, plus
     # their application-time justApplied predicate (powers/power_duration_debuff.hpp).
@@ -82,6 +88,7 @@ add_library(sts_engine
     powers/power_spore_cloud.cpp
     powers/power_the_bomb.cpp
     powers/power_thorns.cpp
+    powers/power_time_warp.cpp
     powers/power_vigor.cpp
     powers/power_vulnerable.cpp
     powers/power_weak.cpp

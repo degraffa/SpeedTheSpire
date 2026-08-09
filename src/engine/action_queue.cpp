@@ -106,11 +106,18 @@ int16_t energy_master(const CombatState& s) noexcept {
 }
 
 int32_t game_hand_size(const CombatState& s) noexcept {
-    // The complete set of masterHandSize writers that are S1 registry rows:
-    // Snecko Eye alone (SneckoEye.java:29-32). The only other writers in the
-    // game are the in-combat DrawPower / DrawReductionPower (DrawPower.java:38,
-    // :43; DrawReductionPower.java:37, :51), which write gameHandSize -- the
-    // per-combat snapshot -- not the master, and neither has a registry row.
+    // The complete set of masterHandSize writers that are registry rows: Snecko
+    // Eye alone (SneckoEye.java:29-32). The other two writers in the game are the
+    // in-combat DrawPower / DrawReductionPower (DrawPower.java:38,:43;
+    // DrawReductionPower.java:31-34,:47-50), which write gameHandSize -- the
+    // per-combat SNAPSHOT -- rather than the master.
+    //
+    // DRAW REDUCTION IS NOW A REGISTRY ROW (id 111, S2.28) and IS derived below.
+    // The clause this comment used to end on ("and neither has a registry row")
+    // is DELETED rather than amended, per conventions section 8: the prerequisite
+    // arrived. DrawPower stays out and that is a positive finding, not an
+    // omission -- its only sources in the game are Watcher/Silent cards and the
+    // Snecko Skull, none of which is in Acts 1-3.
     static_assert(sts::registry::manifest::kRelicsCount == 150,
                   "new relic: does its onEquip touch "
                   "AbstractPlayer.masterHandSize? Only Snecko Eye does today.");
@@ -118,6 +125,24 @@ int32_t game_hand_size(const CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.relic_count; ++i) {
         if (s.relics[i].relic_id == static_cast<uint16_t>(RelicId::SNECKO_EYE)) {
             hand += 2;  // SneckoEye.HAND_MODIFICATION (SneckoEye.java:18)
+        }
+    }
+    // DrawReductionPower: onInitialApplication `--gameHandSize` (:31-34) and
+    // onRemove `++gameHandSize` (:47-50) are a BALANCED PAIR around the power's
+    // lifetime, so a PRESENCE test is exactly equivalent to replaying both
+    // writes -- with no stored field, and no way for the two to drift apart.
+    //
+    // PRESENCE, NOT THE STACK COUNT, and that is the Java's own arithmetic rather
+    // than a simplification: onInitialApplication fires ONLY on the first
+    // application, so a second Head Slam raises `amount` to 2 while the hand
+    // shrinks by exactly ONE card (AbstractCreature.addPower hands the amount to
+    // the live object and discards the freshly constructed one, :506-513). See
+    // powers/power_draw_reduction.hpp.
+    for (uint8_t i = 0; i < s.player_power_count && i < kPowerCap; ++i) {
+        if (s.player_powers[i].power_id ==
+            static_cast<uint16_t>(PowerId::DRAW_REDUCTION)) {
+            --hand;
+            break;
         }
     }
     return hand;

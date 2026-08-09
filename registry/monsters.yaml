@@ -1,4 +1,4 @@
-# monsters.yaml -- monster registry (rules-as-data, design doc B §4.2, §5.2).
+# monsters.yaml -- monster registry (rules-as-data, design doc B Â§4.2, Â§5.2).
 #
 # Entry shape (frozen):
 #   - id: <int>            numeric enum value -- append-only, NEVER renumbered
@@ -20,7 +20,7 @@
 #                          (Pantograph.java:32-40) scans the MONSTER group for a
 #                          BOSS-typed member -- it keys on monster type, not on
 #                          the room being MonsterRoomBoss.
-#     hp:                  per-ascension-tier HP range columns (design doc B §4.2/§6):
+#     hp:                  per-ascension-tier HP range columns (design doc B Â§4.2/Â§6):
 #       base: {min: , max: }     ascension 0+ column (mandatory)
 #       a<N>: {min: , max: }     ascension >= N column(s), ascending
 #     rolls: []            optional native per-instance RNG rolls; each carries
@@ -34,10 +34,18 @@
 #                          precedes the setHp draw (OrbWalker.java:53-58)
 #         range: {base: {min: , max: }, a<N>: {min: , max: }}
 #     moves:               move list; each move an intent + effect program in
-#                          takeTurn addToBottom order (effects as data, §4.2)
+#                          takeTurn addToBottom order (effects as data, Â§4.2)
 #       - name: <SYMBOL>
-#         move_id: <int>         the game's byte move id -- unique per monster, never 0
-#                                (0 is the move_history empty-slot sentinel)
+#         move_id: <int>         the game's byte move id -- unique per monster, 0..255.
+#                                0 IS PERMITTED, and 0 is ALSO the move_history
+#                                empty-slot sentinel (monster_dispatch.hpp:29-33),
+#                                so a monster that HAS a move 0 must never read its
+#                                own move history -- the ring cannot tell "decided
+#                                move 0" from "nothing decided yet". Donu (64) and
+#                                Deca (65) are the only such rows in the game;
+#                                both getMoves key purely off `isAttacking`.
+#                                (The loader bound was `>= 1` until S2.28; see
+#                                tools/registry_gen/stsgen/emit/monsters.py.)
 #         intent: <SYMBOL>       telegraphed intent (generated MonsterIntent)
 #         effects:
 #           - {op: <OPCODE>, target: SELF|PLAYER, amount: <tier columns>[, power: <SYMBOL>]}
@@ -45,7 +53,7 @@
 #                                amount is either a flat int (all ascensions) or
 #                                per-tier columns {base: , a<N>: , ...} like hp.
 #     ai: native | {table: ...}  move-selection rule; `native` keeps selection in
-#                          engine code (design doc B §4.2's honest budget: move
+#                          engine code (design doc B Â§4.2's honest budget: move
 #                          *effects* as data, *selection* native where the table
 #                          shape doesn't fit). ai tables are a later task.
 #
@@ -53,8 +61,8 @@
 # ascension via last-matching-threshold lookup (base <= a2 <= a7 <= a17 ...),
 # mirroring the Java's descending if/else-if ascension branches exactly.
 #
-# Skeleton content (stage-a design §9). Id pinned JAW_WORM=1 and re-asserted in the
-# generated header (design doc B §4.4). Stat columns from JawWorm.java's ascension
+# Skeleton content (stage-a design Â§9). Id pinned JAW_WORM=1 and re-asserted in the
+# generated header (design doc B Â§4.4). Stat columns from JawWorm.java's ascension
 # branches (all three read in full); move effects from JawWorm.takeTurn's
 # addToBottom order.
 
@@ -97,7 +105,7 @@
 # --- B3.13: Cultist + Louses (Act-1 weak pool) -------------------------------
 # Stat/move numbers per-column below cite the decompiled Java (read in full;
 # D:\STS_BG_Mod\SlayTheSpireDecompiled\...\monsters\exordium). Ascension-threshold
-# convention for normals (scoping §2): HP keys on A7, damage/ritual on A2, AI/
+# convention for normals (scoping Â§2): HP keys on A7, damage/ritual on A2, AI/
 # special on A17 (the A_2_* static field names are misleading -- trust the
 # `if (ascensionLevel >= N)` branches). Selection is native (monster_cultist.*,
 # monster_louse.*); the move *effects* are the data below.
@@ -1698,3 +1706,287 @@
                # preceding attack is now enough to block it (:172,176). Both
                # changes push the A17 Healer toward BUFF. See
                # monster_healer.cpp.
+
+# --- S2.28 (Act-3 Beyond bosses) ---------------------------------------------
+# MonsterId 62-65 is this task's whole grant (stage-b-tasks.md "S2 Wave-3
+# allocations"); all four are spent, so the block leaves no gap. 37-61 belong to
+# the sibling wave-3 batches and are NOT touched here. The three ENCOUNTER rows
+# (encounters.yaml 58 AWAKENED_ONE_ENC, 59 TIME_EATER_ENC, 60 DONU_AND_DECA)
+# landed with S2.01 and are unchanged -- this batch only supplies the monsters
+# their `emit` game_ids name.
+#
+# EVERY ONE OF THE FOUR DRAWS EXACTLY ONE monster_hp_rng ROLL, and that is worth
+# stating because the S2.28 scout dossier says the opposite ("no boss in this
+# task draws monsterHpRng -- all four use the single-arg setHp"). The single-arg
+# overload is literally `setHp(hp, hp)` (AbstractMonster.java:777-779), and the
+# two-arg body draws `monsterHpRng.random(min, max)` UNCONDITIONALLY (:765-767);
+# Random.random(int,int) increments the counter and calls nextInt(end-start+1)
+# even for a degenerate range (Random.java:58-61). So the HP is fixed and the
+# DRAW still happens -- exactly the reading the Hexaghost row (id 22) already
+# carries and the dossier cited while drawing the wrong conclusion from it. The
+# rows below spell the degenerate range as {min: N, max: N} for the same reason
+# the Hexaghost's does: the observable is the STREAM, not the number.
+
+- id: 62
+  name: AWAKENED_ONE
+  game_id: "AwakenedOne"
+  provenance: "AwakenedOne (AwakenedOne.java, 377 lines, read in full). ID (:70); type = BOSS (:128); ctor setHp branch (:110-114); five DamageInfos in order (:131-135) 20/6/40/18/10 with NO ascension branch on any of them; usePreBattleAction (:139-156); takeTurn (:159-208); changeState \"REBIRTH\" (:213-227); getMove (:243-278); the damage() phase transition (:281-320); die() (:356-375). Move ids SLASH=1, SOUL_STRIKE=2, REBIRTH=3, DARK_ECHO=5, SLUDGE=6, TACKLE=8 (:83-94) -- 4 and 7 are UNUSED byte values, spelled out here so a reader does not go looking for the rows."
+  enemy_type: BOSS     # AwakenedOne.java:128
+  hp:
+    # setHp(320) at A9+, else setHp(300) (:110-114). Degenerate ranges: the
+    # value is fixed, the monster_hp_rng draw still happens (see the block
+    # comment above). STAGE_1_HP == STAGE_2_HP == 300 and A_9_STAGE_1_HP ==
+    # A_9_STAGE_2_HP == 320 (:78-81), which is why the Rebirth heal below reuses
+    # these same two numbers: changeState re-asserts maxHealth (:214) to the
+    # value it already had, so the "phase 2 sheet" is not a second stat line.
+    base: {min: 300, max: 300}   # AwakenedOne.java:113
+    a9:   {min: 320, max: 320}   # AwakenedOne.java:111
+  moves:
+    - name: SLASH
+      move_id: 1               # AwakenedOne.java:83
+      intent: ATTACK           # setMove((byte)1, Intent.ATTACK, 20) (:246,254,257)
+      effects:
+        # damage.get(0) == 20, flat at every ascension (:131). The SFXAction /
+        # ChangeStateAction / WaitAction around it (:162-164) are presentation on
+        # unseeded clocks.
+        - {op: DAMAGE, target: PLAYER, amount: 20}
+    - name: SOUL_STRIKE
+      move_id: 2               # AwakenedOne.java:84
+      intent: ATTACK           # setMove(SS_NAME, (byte)2, Intent.ATTACK, 6, 4, true)
+      effects:
+        # FOUR SEPARATE DamageActions of damage.get(1) == 6 (:169-171), not one
+        # of 24: each is its own hit, so block, Thorns and the multi-hit
+        # cancellation on the attacker's death all apply per hit.
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+    - name: REBIRTH
+      move_id: 3               # AwakenedOne.java:85
+      intent: UNKNOWN          # setMove((byte)3, Intent.UNKNOWN) (:309, :312)
+      effects:
+        # takeTurn case 3 (:174-178) queues only a ChangeStateAction("REBIRTH");
+        # the two program steps below are what changeState (:213-227) itself
+        # addToBottom's when that action RESOLVES, which is why they land AFTER
+        # the trailing RollMoveAction (:207) rather than before it. The module
+        # queues them in exactly that order -- see monster_awakened_one.cpp,
+        # which also carries the one deviation (WHEN the halfDead flag clears).
+        #
+        # HealAction(this, this, this.maxHealth) (:225) -- a FULL heal from 0,
+        # through AbstractMonster.heal, i.e. op_heal's monster branch. The amount
+        # is maxHealth, which is the same two numbers as the hp column above.
+        - {op: HEAL, target: SELF, amount: {base: 300, a9: 320}}
+        # CanLoseAction (:226) -- re-arms the loss condition usePreBattleAction
+        # disarmed. It is LAST on purpose: between the phase-1 death and this
+        # step the boss sits at 0 HP with the room's cannotLose latch the only
+        # thing holding the combat open.
+        - {op: CAN_LOSE, target: SELF, amount: 0}   # no operands: the op clears a COMBAT flag
+    - name: DARK_ECHO
+      move_id: 5               # AwakenedOne.java:92 (4 is an unused byte)
+      intent: ATTACK           # setMove(DARK_ECHO_NAME, (byte)5, Intent.ATTACK, 40)
+      effects:
+        # damage.get(2) == 40, flat (:133). takeTurn case 5 ALSO clears the
+        # `firstTurn` latch at :183 -- state, not an effect, so it is native.
+        - {op: DAMAGE, target: PLAYER, amount: 40}
+    - name: SLUDGE
+      move_id: 6               # AwakenedOne.java:93
+      intent: ATTACK_DEBUFF    # setMove(SLUDGE_NAME, (byte)6, Intent.ATTACK_DEBUFF, 18)
+      effects:
+        # damage.get(3) == 18, flat (:134), THEN the card (:194).
+        - {op: DAMAGE, target: PLAYER, amount: 18}
+        # MakeTempCardInDrawPileAction(new VoidCard(), 1, true, true) (:194):
+        # randomSpot = true, toBottom = false -> ShowCardAndAddToDrawPileEffect ->
+        # drawPile.addToRandomSpot, i.e. CardGroup.java:463-469's
+        # `group.add(cardRandomRng.random(size - 1), c)`. That is exactly
+        # CardPile::DRAW_RANDOM, whose op_make_card branch already spends ONE
+        # card_random_rng draw per copy and NONE at all when the draw pile is
+        # empty (the empty-group branch appends without drawing).
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: VOID, pile: DRAW_RANDOM}
+    - name: TACKLE
+      move_id: 8               # AwakenedOne.java:94 (7 is an unused byte)
+      intent: ATTACK           # setMove((byte)8, Intent.ATTACK, 10, 3, true)
+      effects:
+        # THREE separate DamageActions of damage.get(4) == 10 (:199-203), flat.
+        - {op: DAMAGE, target: PLAYER, amount: 10}
+        - {op: DAMAGE, target: PLAYER, amount: 10}
+        - {op: DAMAGE, target: PLAYER, amount: 10}
+  ai: native   # getMove (:243-278) is TWO DISJOINT TREES on `form1`, and neither
+               # is expressible as a table: the phase-1 tree is gated on a
+               # `firstTurn` latch it CLEARS, the phase-2 tree is gated on the
+               # SAME latch and does NOT clear it (takeTurn case 5 does, :183),
+               # and the whole phase switch is driven from the damage() override
+               # rather than from a move. One aiRng.random(99) per decision, no
+               # recursion, no extra draws. See monster_awakened_one.cpp.
+
+- id: 63
+  name: TIME_EATER
+  game_id: "TimeEater"
+  provenance: "TimeEater (TimeEater.java, 223 lines, read in full). ID (:51); type = BOSS (:87); ctor setHp branch (:77-81) and the A4 damage branch (:90-98); usePreBattleAction (:102-108); takeTurn (:111-155); getMove (:177-206); die() (:211-221). Move ids REVERBERATE=2, RIPPLE=3, HEAD_SLAM=4, HASTE=5 (:58-61) -- 0 and 1 are unused. The HP field names (HP / A_2_HP, :56-57) are MISLEADING, exactly as the Hexaghost row's are: the branch tests `ascensionLevel >= 9` (:78), not 2."
+  enemy_type: BOSS     # TimeEater.java:87
+  hp:
+    base: {min: 456, max: 456}   # TimeEater.java:80
+    a9:   {min: 480, max: 480}   # TimeEater.java:79 (`>= 9`, NOT the A_2_ name)
+  moves:
+    - name: REVERBERATE
+      move_id: 2               # TimeEater.java:58
+      intent: ATTACK           # setMove((byte)2, Intent.ATTACK, damage[0].base, 3, true)
+      effects:
+        # THREE separate DamageActions of damage.get(0) == reverbDmg (:122-125):
+        # 7 base, 8 from A4 (:90-96). The A4 threshold is the boss-damage tier,
+        # not A2 and not A19.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a4: 8}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a4: 8}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a4: 8}}
+    - name: RIPPLE
+      move_id: 3               # TimeEater.java:59
+      intent: DEFEND_DEBUFF    # setMove((byte)3, Intent.DEFEND_DEBUFF) (:200,204)
+                               # -- MonsterIntent 15, this batch's whole grant.
+      effects:
+        # In addToBottom order (:129-133). RIPPLE_BLOCK 20 is flat.
+        - {op: BLOCK, target: SELF, amount: 20}
+        # Vulnerable/Weak(player, 1, true) -- the isJustApplied MONSTER-SOURCE
+        # form the duration-debuff model already carries.
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: VULNERABLE}
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: WEAK}
+        # A19 ONLY (:132-133). PRESENCE, not an amount, so the effect list cannot
+        # express the gate: the step is authored here and monster_time_eater.cpp
+        # queues steps 0..2 always and step 3 only at A19, through the per-step
+        # queue_monster_move_effect the Snecko's identical A17 arm introduced.
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: FRAIL}
+    - name: HEAD_SLAM
+      move_id: 4               # TimeEater.java:60
+      intent: ATTACK_DEBUFF    # setMove((byte)4, Intent.ATTACK_DEBUFF, damage[1].base)
+      effects:
+        # damage.get(1) == headSlamDmg: 26 base, 32 from A4 (:90-96).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 26, a4: 32}}
+        # DrawReductionPower(player, 1) -- HEAD_SLAM_STICKY 1 (:70), flat.
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: DRAW_REDUCTION}
+        # A19 ONLY (:141-142): MakeTempCardInDiscardAction(new Slimed(), 2).
+        # PRESENCE again -- same native per-step gate as RIPPLE's Frail.
+        - {op: MAKE_CARD, target: PLAYER, amount: 2, card: SLIMED, pile: DISCARD}
+    - name: HASTE
+      move_id: 5               # TimeEater.java:61
+      intent: BUFF             # setMove((byte)5, Intent.BUFF) (:180)
+      effects:
+        # RemoveDebuffsAction(this) (:147) -- enumerates the boss's DEBUFFs at
+        # RESOLVE time and removes each.
+        - {op: REMOVE_DEBUFFS, target: SELF, amount: 0}   # no operand; the op enumerates at resolve
+        # RemoveSpecificPowerAction(this, this, "Shackled") (:148). REDUNDANT:
+        # Shackled is a DEBUFF and the action above already removed it, so this
+        # is a no-op at every reachable state. Authored anyway, because the pair
+        # is what the Java queues and a free no-op is cheaper than a comment
+        # claiming a step does not exist.
+        - {op: REMOVE_POWER, target: SELF, amount: 0, power: SHACKLED}
+        # THE HEAL IS NOT HERE, and its absence is deliberate. HealAction(this,
+        # this, this.maxHealth / 2 - this.currentHealth) (:149) is a RUNTIME
+        # amount -- INTEGER division of the live max HP, minus the live current
+        # HP -- which no tier column can express, so monster_time_eater.cpp
+        # queues it between this step and the next (the Louse's rolled bite
+        # damage precedent: per-instance amounts are not in the table). It can be
+        # NEGATIVE if the boss is at or above half when Haste resolves, which
+        # op_heal's `amount <= 0` guard drops; getMove's gate makes that
+        # unreachable, and the module says so.
+        # A19 ONLY (:150-151): GainBlockAction(this, headSlamDmg) -- the SAME
+        # field the HEAD_SLAM damage reads, so the tier columns must match it.
+        - {op: BLOCK, target: SELF, amount: {base: 26, a4: 32}}
+  ai: native   # getMove (:177-206) is the one tree in this batch that spends
+               # EXTRA aiRng draws: two of its arms RE-ENTER getMove with a fresh
+               # random(50, 99) / random(74) and the third spends a
+               # randomBoolean(0.66f), each inside its own history guard, so the
+               # number of draws a turn costs depends on the move history. It is
+               # also gated by a one-shot `usedHaste` latch on a STRICT
+               # `currentHealth < maxHealth / 2` integer-division threshold. See
+               # monster_time_eater.cpp.
+
+- id: 64
+  name: DONU
+  game_id: "Donu"
+  provenance: "Donu (Donu.java, 146 lines, read in full). ID (:35); type = BOSS (:60); ctor setHp branch (:63-67) and beamDmg (:68); usePreBattleAction (:93-99); takeTurn (:102-122); getMove (:125-131); die() (:134-144). Move ids BEAM=0 and CIRCLE_OF_PROTECTION=2 (:42-43) -- 1 is unused. Group order is Deca (slot 0) then Donu (slot 1), MonsterHelper.java:591-593, which encounters.yaml row 60 already has."
+  enemy_type: BOSS     # Donu.java:61
+  hp:
+    base: {min: 250, max: 250}   # Donu.java:66
+    a9:   {min: 265, max: 265}   # Donu.java:64
+  moves:
+    - name: BEAM
+      move_id: 0               # Donu.java:42 -- A REAL MOVE ID 0, and the FIRST
+                               # in the roster. 0 is also the move_history
+                               # empty-slot sentinel, so Donu must never read its
+                               # own history; its getMove (:125-131) reads only
+                               # `isAttacking` and does not. See the move_id note
+                               # in this file's header and monster_donu_deca.cpp.
+      intent: ATTACK           # setMove((byte)0, Intent.ATTACK, damage[0].base, 2, true)
+      effects:
+        # TWO separate DamageActions of damage.get(0) == beamDmg (:106-110):
+        # 10 base, 12 from A4 (:68).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a4: 12}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a4: 12}}
+    - name: CIRCLE_OF_PROTECTION
+      move_id: 2               # Donu.java:43
+      intent: BUFF             # setMove(CIRCLE_NAME, (byte)2, Intent.BUFF) (:129).
+                               # BUFF, not DEFEND_DEBUFF: the dispatching brief
+                               # said otherwise and the tree was re-read before
+                               # MonsterIntent 15 was spent (see vocab.py).
+      effects:
+        # ONE AUTHORED STEP, FANNED OUT NATIVELY. The Java queues one
+        # ApplyPowerAction(m, this, StrengthPower(m, 3), 3) per member of
+        # getMonsters().monsters (:114-117) -- INCLUDING ITSELF and with NO
+        # liveness filter at all, unlike every S2.22 walk. A per-combat action
+        # COUNT is not expressible in an effect list, so this is the template and
+        # monster_donu_deca.cpp repeats it per record. CIRCLE_STR_AMT 3 is flat (:50).
+        - {op: APPLY_POWER, target: SELF, amount: 3, power: STRENGTH}
+  ai: native   # getMove (:125-131) IGNORES `num` entirely and switches on the
+               # `isAttacking` latch takeTurn flips at QUEUE time -- but the
+               # RollMoveAction still runs, so the aiRng.random(99) draw is spent
+               # every turn and changes nothing. Modelling the draw is the point.
+
+- id: 65
+  name: DECA
+  game_id: "Deca"
+  provenance: "Deca (Deca.java, 158 lines, read in full). ID (:38); ENC_NAME \"Donu and Deca\" (:43); type = BOSS (:64); ctor setHp branch (:67-71) and beamDmg (:72); usePreBattleAction (:97-108); takeTurn (:110-132); getMove (:135-143); die() (:146-156). Move ids BEAM=0 and SQUARE_OF_PROTECTION=2 (:46-47) -- 1 is unused. Deca is spawned FIRST (slot 0) despite the encounter key naming Donu first (MonsterHelper.java:591-593)."
+  enemy_type: BOSS     # Deca.java:61
+  hp:
+    base: {min: 250, max: 250}   # Deca.java:70
+    a9:   {min: 265, max: 265}   # Deca.java:68
+  moves:
+    - name: BEAM
+      move_id: 0               # Deca.java:46 -- the same real move id 0 as Donu's;
+                               # Deca's getMove reads no history either.
+      intent: ATTACK_DEBUFF    # setMove((byte)0, Intent.ATTACK_DEBUFF, ...) (:137)
+      effects:
+        # TWO DamageActions of damage.get(0) == beamDmg (:115-117), then the
+        # cards (:118). BEAM_DAZE_AMT 2 is flat (:53).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a4: 12}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a4: 12}}
+        - {op: MAKE_CARD, target: PLAYER, amount: 2, card: DAZED, pile: DISCARD}
+    - name: SQUARE_OF_PROTECTION
+      move_id: 2               # Deca.java:47
+      intent: DEFEND_BUFF      # ASCENSION-SWITCHED, and this column carries only
+                               # the LIVE one. getMove telegraphs Intent.DEFEND_BUFF
+                               # at A19+ and Intent.DEFEND below (:139-141) -- the
+                               # first per-tier INTENT in the roster, which the row
+                               # schema (one intent per move) cannot express. The
+                               # engine runs at kMonsterAscension == 20, so
+                               # DEFEND_BUFF is the live value; monster_donu_deca.cpp
+                               # owns BOTH arms and its decide function takes the
+                               # ascension so the tier-2 tests can drive the other.
+      effects:
+        # TWO AUTHORED TEMPLATE STEPS, FANNED OUT NATIVELY over the WHOLE group
+        # -- again with NO liveness filter (:122-128) -- and the second is A19-ONLY
+        # PRESENCE. The Java's loop body is
+        #     GainBlockAction(m, this, 16);
+        #     if (ascensionLevel >= 19) ApplyPowerAction(m, this, PlatedArmor(m,3), 3);
+        # i.e. the two steps INTERLEAVE PER MEMBER (block, armor, block, armor...),
+        # not block-for-all then armor-for-all. monster_donu_deca.cpp reproduces that
+        # interleaving; it is observable the moment anything reads the queue.
+        - {op: BLOCK, target: SELF, amount: 16}
+        # PLATED_ARMOR is already registered (id 17) with an on_power_removed
+        # binding from S2.21. Deca is the FIRST producer in the game that puts it
+        # on ANOTHER MONSTER -- it can plate Donu -- which makes Plated Armor's
+        # run-out path reachable on a boss.
+        - {op: APPLY_POWER, target: SELF, amount: 3, power: PLATED_ARMOR}
+  ai: native   # getMove (:135-143) ignores `num` exactly as Donu's does and keys
+               # off the same queue-time `isAttacking` flip -- but Deca's field is
+               # initialised TRUE (:74) where Donu's is FALSE (:70), which is what
+               # puts the pair permanently OUT OF PHASE: Deca opens on BEAM, Donu
+               # opens on CIRCLE, and they swap every turn thereafter. The per-turn
+               # aiRng.random(99) is still spent by both.

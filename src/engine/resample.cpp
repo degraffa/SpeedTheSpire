@@ -378,8 +378,15 @@ void resample_hidden(RunController& rc, SamplerRng& rng) noexcept {
         rc.elite_cursor + (room == RoomType::Elite ? 1 : 0));
     continue_monster_lists(static_cast<int32_t>(rs.act), rng.stream,
                            monster_keep, elite_keep, rc.lists);
-    // The boss list conditions on the public boss_list[0] (named on the map).
-    condition_boss_list(rc.lists, rng.stream);
+    // The boss list conditions on the public prefix. That is boss_list[0]
+    // (named on the map from act start) in every ordinary run -- and ONE MORE at
+    // the A20 double boss, where entering the second Act-3 boss room reveals
+    // boss_list[1] to the player as surely as entering any other room reveals its
+    // encounter. Same shape as the two prefixes above: the cursor, plus one while
+    // standing in a room of that kind.
+    const uint8_t boss_keep = static_cast<uint8_t>(
+        rc.boss_cursor + (room == RoomType::Boss ? 1 : 0));
+    condition_boss_list(rc.lists, rng.stream, boss_keep);
 
     // Row "Mid-event hidden state": pin the flips, permute the rest. Guarded on
     // the phase so a stale board left in the transient struct after the event

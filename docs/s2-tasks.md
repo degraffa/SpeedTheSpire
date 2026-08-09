@@ -735,11 +735,95 @@ are the "first registry authoring wave" the TE.2 acceptance names.
 - **S2.27** `[ ]` ∥ Beyond elites — Giant Head, Nemesis (Intangible +
   Burn), Reptomancer (+ SnakeDagger spawns).
   **Deps:** S2.01, S2.2F, S2.23 (MINION row + spawn pattern) **Acceptance:** as S2.21.
-- **S2.28** `[ ]` ∥ Beyond bosses — Awakened One (two phases, Curiosity/
+- **S2.28** `[x]` ∥ Beyond bosses — Awakened One (two phases, Curiosity/
   Unawakened, Void insertion, Cultist adds), Time Eater (TimeWarp/
   DrawReduction/Slimed), Donu and Deca.
   **Deps:** S2.01, S2.2F **Acceptance:** as S2.21, plus phase-transition and
   TimeWarp turn-economy tests.
+  **Log:** 2026-08-09. `MonsterId` **62–65** and `PowerId` **108 CURIOSITY /
+  109 UNAWAKENED / 110 TIME_WARP / 111 DRAW_REDUCTION** all spent — both
+  blocks exact, no gaps. `MonsterIntent` **15 DEFEND_DEBUFF** spent on the
+  **Time Eater's Ripple** (TimeEater.java:194,203) — NOT on Donu, whom the
+  dispatching brief assigned it to: Circle of Protection telegraphs plain
+  `Intent.BUFF` (Donu.java:129) and Deca's Square telegraphs DEFEND /
+  DEFEND_BUFF on an A19 switch (Deca.java:139-141, the roster's first
+  per-tier INTENT — the module owns both arms, the row carries the live A20
+  one). S2.2F's opcodes **69 CLEAR_CARD_QUEUE / 70 END_PLAYER_TURN** consumed
+  as allocated; no new opcode (steps.py only admits the existing
+  REMOVE_DEBUFFS / CAN_LOSE into `MONSTER_MOVE_OPS`). Fuzz **`MoveCat` 32
+  RELEASED unspent**: the double-boss crossing offers NO player decision — no
+  reward screen exists at either Act-3 boss (AbstractRoom.java:327), so there
+  is nothing to claim and no map to pick, and the transition fires straight
+  out of `finish_combat_after_action`. **Zero new `MonsterState.flags` bits**:
+  the four type-scoped bits (form1 / firstTurn / usedHaste / isAttacking —
+  ONE shared bit for the Donu+Deca pair, per-record) deliberately REUSE the
+  Hexaghost's 0x0800–0x4000, reversing S2.21's append-not-reuse call because
+  six concurrent batches sharing "next 17" is a collision engine while an
+  Act-1 boss and an Act-3 boss can never share a combat.
+
+  **`PUBLIC_VIEW_VERSION` 4 → 5** — additive, case 1: `second_boss_reserved`
+  populated with the revealed A20 second boss (`boss_list[1]`), carried from
+  the double-boss transition onward and surviving into RUN_OVER, where it is
+  the only record of which second boss decided the run. No offset moved;
+  `twins_v1.bin` regenerated for the stamp alone. No `SCHEMA_VERSION` bump.
+  The run layer grew the pieces the route needed: `boss_cursor` now
+  increments on boss-room EXIT (meaning "boss rooms completed"; the Java pops
+  `bossList` on ENTRY, so the gate reads
+  `boss_list_count - (boss_cursor + 1) == 2` — the entry-pop offset spelled
+  out rather than reduced away), `condition_boss_list` gained the observed
+  prefix length `keep` (cursor plus one while standing in a Boss room, the
+  same rule as the monster/elite prefixes) and `resample_hidden` passes it,
+  so the hidden twin agrees with the truth the moment the second boss is on
+  screen. Kill #2 is the run's only terminal and pays the +1 exactly once;
+  the Act-2 A20 negative and the below-A20 single-boss terminal are named
+  tests (`run_advance_test.cpp` BossVictory). a20.yaml row **20** flipped to
+  IMPLEMENTED (ownership history S2.12 → S2.28 recorded in-row) and row 13's
+  S2.28 share (both Act-3 boss rooms draw-and-discard their own boss gold) is
+  recorded landed; the four a20_modifiers_test pins moved with their rows.
+
+  **Framework edges the bosses forced, all engine-wide rather than
+  special-cased:** `op_apply_power` gained ApplyPowerAction's resolve-time
+  `isDeadOrEscaped` early-out (the safety net under the game's three
+  UNGUARDED queue-time walks — Donu's Circle, Deca's Square, Time Warp's
+  Strength fan-out); `op_block` gained GainBlockAction's `isDying/isDead`
+  recipient read, which is NOT the same predicate — a half-dead monster gains
+  block but takes no power, and a named test tells the two guards apart;
+  `op_heal`'s guard is now `hp <= 0 && !halfDead` (isDying, not "at zero"),
+  which is what lets Rebirth's full heal land on a 0-HP boss, and the heal
+  clears the half-dead bit as the invariant maintainer — the ONE recorded
+  deviation: the Java clears it one action earlier in `changeState`, and
+  nothing can observe the difference (argued at both sites).
+  `game_hand_size()` derives Draw Reduction by PRESENCE (the balanced
+  onInitialApplication/onRemove pair), so a second Head Slam stacks to 2
+  while the hand shrinks by one card, exactly the Java's arithmetic. The
+  registry loader's `move_id >= 1` bound relaxed to `0..255`: Donu and Deca's
+  BEAM is a REAL move id 0 colliding with the move-history empty-slot
+  sentinel — harmless because neither getMove reads history, and the loader
+  note says what a future move-0 monster with a history read would need.
+
+  **Verification of the inherited tree (a prior agent stopped mid-task with
+  the implementation uncommitted and untested):** all four Java classes plus
+  the four power classes re-read in full against every line of the dirty
+  tree. Defects found and fixed: a task id in a `run_advance.cpp` comment
+  (NoTaskIds violation), fabricated getMove line citations in
+  `emit/monsters.py` (Donu.java:337-343 / Deca.java:505-512 — the files are
+  146/158 lines long; corrected to :125-131 / :135-143), the missing audit
+  version-log v5 entry and the training-contract still quoting version 4,
+  and four test files still pinning the pre-S2.28 world (public-view version
+  stamp, twin fixture, the Act-3 terminal at A20, the a20 row statuses).
+  Time Warp binds **ON_AFTER_USE_CARD (16), not ON_USE_CARD (1)** — the two
+  fan-outs differ in moment and participant list — and its 12th-play turn
+  end executes the END_PLAYER_TURN opcode body SYNCHRONOUSLY so queued plays
+  die before the Strength fan-out queues, matching
+  `callEndTurnEarlySequence`. The Awakened One's death fan-outs pay ONCE at
+  the half-death (MonsterDieFn veto) and TWICE at the real death (super.die
+  plus the damage() override's re-fire) — Gremlin Horn is the named witness
+  for both counts. Every ctor draws exactly one DEGENERATE `monster_hp_rng`
+  roll (single-arg `setHp` is `setHp(hp, hp)`; the scout dossier's "no draw"
+  claim is corrected in the yaml block header). `kPowersCount` 56 → 60 and
+  `kMonstersCount` 34 → 38, every count-guard site moved together. All six
+  presets green (`ctest -N` for the current suite size);
+  `check_stale_counts` + `check_doc_links` clean.
 
 ## Phase S2.3 — Events closure (B4.11–B4.13 pattern; ∥ across disjoint batches once S2.02 + S2.13 land)
 

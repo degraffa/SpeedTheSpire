@@ -10,10 +10,12 @@
 
 #include "interp/interp_powers.hpp"        // op_apply_power (Philosopher's Stone)
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
+#include "sts/engine/monster_awakened_one.hpp"  // the Awakened One: the halfDead phase transition
 #include "sts/engine/monster_byrd.hpp"     // the Byrd: Flight + the airborne latch
 #include "sts/engine/monster_centurion.hpp"  // the Centurion: aliveCount-driven tree
 #include "sts/engine/monster_chosen.hpp"   // the Chosen: Hex opener + roll tree
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
+#include "sts/engine/monster_donu_deca.hpp"  // the out-of-phase Act-3 pair
 #include "sts/engine/monster_fungi_beast.hpp"  // Fungi Beast + its Spore Cloud
 #include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
 #include "sts/engine/monster_gremlin_nob.hpp"  // gremlin_nob_init / _take_turn
@@ -28,6 +30,7 @@
 #include "sts/engine/monster_sentry.hpp"   // sentry_* init / take_turn / pre_battle
 #include "sts/engine/monster_shelled_parasite.hpp"  // Plated Armor + the recursive roll
 #include "sts/engine/monster_slaver.hpp"   // the Blue and Red slavers
+#include "sts/engine/monster_time_eater.hpp"  // the Time Eater: recursive getMove + Time Warp
 #include "sts/engine/monster_snake_plant.hpp"  // the Snake Plant: Malleable + lastMoveBefore
 #include "sts/engine/monster_snecko.hpp"   // the Snecko: Confusion opener + gated Weak
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
@@ -176,6 +179,18 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &centurion_init;
         case MonsterId::HEALER:
             return &healer_init;
+        // S2.28 -- the four Act-3 Beyond bosses. Every one of them draws exactly
+        // ONE monster_hp_rng roll over a DEGENERATE range: single-arg setHp is
+        // setHp(hp, hp) (AbstractMonster.java:777-779) and the two-arg body draws
+        // unconditionally. Fixed HP, real stream movement.
+        case MonsterId::AWAKENED_ONE:
+            return &awakened_one_init;
+        case MonsterId::TIME_EATER:
+            return &time_eater_init;
+        case MonsterId::DONU:
+            return &donu_init;
+        case MonsterId::DECA:
+            return &deca_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -253,6 +268,14 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &centurion_take_turn;
         case MonsterId::HEALER:
             return &healer_take_turn;
+        case MonsterId::AWAKENED_ONE:
+            return &awakened_one_take_turn;
+        case MonsterId::TIME_EATER:
+            return &time_eater_take_turn;
+        case MonsterId::DONU:
+            return &donu_take_turn;
+        case MonsterId::DECA:
+            return &deca_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -260,7 +283,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
@@ -348,6 +371,33 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             // Likewise: needToHeal sums the group's missing HP
             // (Healer.java:157-160).
             return &healer_roll_move;
+        // S2.28: ALL FOUR Act-3 bosses end takeTurn in a RollMoveAction that sits
+        // AFTER the switch, so every move body reaches it (AwakenedOne.java:207,
+        // TimeEater.java:154, Donu.java:121, Deca.java:131) -- including the
+        // Awakened One's REBIRTH turn, which still rolls while the boss is at 0 HP.
+        //
+        // FOR THE AWAKENED ONE THE QUEUED FORM IS LOAD-BEARING, not a style
+        // choice. Its phase transition sets move 3 SYNCHRONOUSLY and ALSO queues a
+        // SetMoveAction(3) at the bottom (AwakenedOne.java:309,312); the queued one
+        // exists precisely to land BEHIND a RollMoveAction that takeTurn had
+        // already queued, which is the state a boss downed during its own turn is
+        // in. Roll inline and there is no roll for it to land behind.
+        //
+        // Donu's and Deca's getMoves IGNORE the rolled num entirely (both key off
+        // isAttacking) and they register anyway -- the Spheric Guardian's reason:
+        // the draw itself moves the shared ai_rng stream.
+        case MonsterId::AWAKENED_ONE:
+            return &awakened_one_roll_move;
+        case MonsterId::TIME_EATER:
+            // The one roll fn in this batch that can spend more than one draw:
+            // getMove re-enters with a fresh random(50,99) or random(74), and the
+            // middle band can spend a randomBoolean instead (TimeEater.java:188,
+            // :196, :206).
+            return &time_eater_roll_move;
+        case MonsterId::DONU:
+            return &donu_roll_move;
+        case MonsterId::DECA:
+            return &deca_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -366,7 +416,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -525,7 +575,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -638,13 +688,35 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         case MonsterId::CENTURION:
         case MonsterId::HEALER:
             return;
+
+        // S2.28. All four Act-3 bosses override damage(); exactly ONE of them has
+        // content, and that split is the whole shape of the batch.
+        case MonsterId::AWAKENED_ONE:
+            // AwakenedOne.damage (:281-320) is super.damage(info), the hit
+            // animation, and then THE PHASE TRANSITION -- the half-death, the two
+            // hand-fired death fan-outs, the card-queue clear, the selective power
+            // purge and the double setMove. It fires on the phase-1 half-death AND
+            // AGAIN on the real phase-2 death; both are the Java's own behaviour
+            // and the second is documented at the body.
+            awakened_one_on_damaged(state, monster_index, hp_lost);
+            return;
+        case MonsterId::TIME_EATER:
+        case MonsterId::DONU:
+        case MonsterId::DECA:
+            // The other three are super.damage(info) followed ONLY by the Hit
+            // spine animation, gated on a non-THORNS hit with output > 0
+            // (TimeEater.java:158-166, Donu.java:83-90, Deca.java:86-94). Nothing
+            // there touches combat state or draws RNG, so an empty hook is the
+            // COMPLETE translation and hp_lost is deliberately unread. Spelled as
+            // cases so the omission is checkable.
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -689,6 +761,28 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             return &spheric_guardian_use_pre_battle_action;
         case MonsterId::CHOSEN:
             return nullptr;  // no usePreBattleAction in the class at all
+
+        // S2.28. All four Act-3 bosses declare usePreBattleAction with real
+        // combat content, and none of the four draws any RNG.
+        case MonsterId::AWAKENED_ONE:
+            // The room's cannotLose latch (a DIRECT field write, :143), then four
+            // addToBottom grants: Regenerate 10/15, Curiosity 1/2, Unawakened
+            // (amount -1, a marker) and, from A4, Strength 2 (:144-153).
+            return &awakened_one_use_pre_battle_action;
+        case MonsterId::TIME_EATER:
+            // ApplyPowerAction(this, this, new TimeWarpPower(this)) -- the 1-arg
+            // ctor, so the counter starts at 0 (TimeEater.java:107;
+            // TimeWarpPower.java:26). No ascension branch.
+            return &time_eater_use_pre_battle_action;
+        case MonsterId::DONU:
+            // ArtifactPower(this, asc >= 19 ? 3 : 2) on ITSELF only -- no group
+            // fan-out (Donu.java:93-99).
+            return &donu_use_pre_battle_action;
+        case MonsterId::DECA:
+            // The same Artifact grant (Deca.java:97-108). Deca's method
+            // additionally carries the BGM lines Donu's does not; presentation,
+            // and the pair's only pre-battle asymmetry.
+            return &deca_use_pre_battle_action;
         case MonsterId::LOUSE_NORMAL:
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_use_pre_battle_action;  // curl-up roll (monster_hp_rng)
@@ -790,7 +884,7 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
 }
 
 MonsterDieFn monster_die_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does its Java class override die()? Read the "
                   "method. If everything before `super.die()` is presentation -- "
                   "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
@@ -822,19 +916,43 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
             // playDeathSfx' aiRng.random(2) (Mugger.java:147-154, called at
             // :158). SEEDED, unconditional, once per death.
             return &mugger_die;
+        case MonsterId::AWAKENED_ONE:
+            // NO pre-super content -- super.die() is the first statement inside
+            // the guard (:357-358) -- but the GUARD is the point: the whole body
+            // sits inside `if (!getCurrRoom().cannotLose)`, so while that latch is
+            // set NOTHING of super.die() may run. This entry exists solely to
+            // answer the VETO, which is what stops the phase-1 half-death firing
+            // the two death fan-outs twice (the damage() override re-fires them by
+            // hand, exactly once).
+            return &awakened_one_die;
+        case MonsterId::TIME_EATER:
+        case MonsterId::DONU:
+        case MonsterId::DECA:
+            // All three DO override die(), and all three are presentation on the
+            // pre-super side: TimeEater (:211-221) a shake and a rumble, Donu
+            // (:134-144) and Deca (:146-156) nothing at all -- both call
+            // super.die() as their FIRST statement. Their content is on the
+            // POST-super side and is likewise not sim-visible; see
+            // monster_die_after_fn. Explicit nullptr cases rather than the
+            // `default:`, because all three classes do declare the method.
+            //
+            // The Time Eater's own `!cannotLose` guard can never fire: nothing in
+            // a Time Eater room ever sets that latch (the Awakened One's
+            // usePreBattleAction is its only producer in Act 3).
+            return nullptr;
         default:
             return nullptr;  // die() is presentation only, or absent
     }
 }
 
-// The POST-`super.die()` half. EMPTY TODAY, and that is a recorded reading, not
-// an oversight: no Act-1 monster has content on that side of the line. Every
-// consumer named in the header's survey -- Reptomancer, Bronze Automaton, The
-// Collector, Awakened One -- is Act-2/3 content that has not landed yet. The
-// slot exists now because the four batches that need it run in parallel and
-// must not each invent their own.
+// The POST-`super.die()` half. S2.2F landed it EMPTY, ahead of the four Act-2/3
+// batches that were about to need it; S2.28 is the first to fill it. Of the four
+// consumers its header names -- Reptomancer, Bronze Automaton, The Collector,
+// Awakened One -- the last is this batch's, and it is the only one of THIS
+// batch's four bosses whose post-super half survives the reading: the other three
+// carry achievements and victory bookkeeping only.
 MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does its Java die() override do anything AFTER "
                   "`super.die()`? Read the method. Content before super.die() "
                   "belongs in monster_die_fn; content after it belongs here, "
@@ -842,6 +960,30 @@ MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
                   "suicide sweep skips itself only because super.die() has "
                   "already set isDying.");
     switch (id) {
+        case MonsterId::AWAKENED_ONE:
+            // `for (m : getCurrRoom().monsters.monsters) { if (m.isDying ||
+            //  !(m instanceof Cultist)) continue; addToBottom(EscapeAction(m)); }`
+            // (AwakenedOne.java:366-369) -- every surviving Cultist FLEES when the
+            // boss finally dies. Strictly post-super: super.die() runs at :358 and
+            // sets isDying, which is what keeps the boss out of its own walk
+            // (it is not a Cultist either, so here the filter is belt-and-braces
+            // -- unlike Reptomancer's, where the ordering is the only thing
+            // preventing an infinite regress).
+            return &awakened_one_die_after;
+        case MonsterId::TIME_EATER:
+        case MonsterId::DONU:
+        case MonsterId::DECA:
+            // All three have post-super content and NONE of it is sim-visible.
+            // TimeEater (:216-220): onBossVictoryLogic, two UnlockTracker calls,
+            // onFinalBossVictoryLogic. Donu (:135-143) / Deca (:147-155): the same
+            // tail, gated on getMonsters().areMonstersBasicallyDead() so it fires
+            // ONCE, on the SECOND of the pair to die -- a gate recorded precisely
+            // because it looks like it should matter and does not.
+            // onBossVictoryLogic is achievements + StatsScreen;
+            // onFinalBossVictoryLogic (AbstractMonster.java:1058-1085) is
+            // achievements + stopClock, and it skips its whole body outright at
+            // A20 with two bosses left. Explicit nullptr cases.
+            return nullptr;
         default:
             return nullptr;  // no post-super content (or no die() at all)
     }

@@ -232,6 +232,16 @@ sts_add_test(lagavulin_test)
 # Weakness ATTACK_BUFF classification this task's Twin Slam telegraph uncovered.
 sts_add_test(guardian_test)
 
+# S2.28: the Act-3 Beyond bosses -- the Awakened One (both getMove trees, the
+# damage()-driven phase transition with its once-then-twice death fan-outs, the
+# selective Rebirth purge, the Void insertion), the Time Eater (the recursive
+# getMove and its history-dependent draw counts, the strict-half one-shot Haste,
+# Time Warp's 12-card turn economy, Draw Reduction's derived hand size), and
+# Donu and Deca (the out-of-phase alternation, real move id 0, the unguarded
+# protect walks and the two resolve-time liveness guards that make them safe).
+# The A20 double-boss ROUTE is pinned in run_advance_test.cpp.
+sts_add_test(beyond_bosses_test)
+
 # B3.22: Hexaghost -- the A9 HP column and the A4/A19 stat columns, the forced
 # two-turn ACTIVATE/DIVIDER opener, Divider's player-HP-derived base pinned
 # against the formula at Hexaghost.java:151, the 7-long orb-count cycle

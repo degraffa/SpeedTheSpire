@@ -216,13 +216,26 @@ void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
 // The boss list's own row: `boss_list[0]` is PUBLIC (the act boss is named on
 // the map from floor 1), and the run-start order is a uniform shuffle, so the
 // exact conditional law of the remainder given the observed head is a uniform
-// permutation of `boss_list[1..count)`. Preserves entry 0 and the multiset.
+// permutation of the entries past the observed prefix. Preserves that prefix and
+// the multiset.
 //
-// Load-bearing for S2's A20 double boss, where a second entry is consumed; in
-// S1 only entry 0 is ever fought, so this row is about not LEAKING the rest.
+// `keep` IS THE OBSERVED PREFIX LENGTH, and it is the reason this takes an
+// argument at all (S2.28). It was `1` implicitly, because in S1 -- and in every
+// non-A20 act -- only entry 0 is ever named. THE A20 DOUBLE BOSS CONSUMES A
+// SECOND ENTRY: once the player has walked into the second Act-3 boss room, that
+// boss's identity has been REVEALED by the monsters standing in front of them,
+// so `boss_list[1]` is public and permuting it would make a hidden twin disagree
+// with the truth on a value the player can see -- which is exactly what the leak
+// gate exists to catch, in the direction that FAILS the gate rather than leaking.
+// The caller computes it the same way it computes the monster/elite prefixes:
+// the cursor, plus one while standing in a room of that kind. A `keep` below 1 is
+// raised to 1 (entry 0 is public from act start whether or not the cursor passed
+// it) and a `keep` past the count leaves the list alone.
+//
 // The permutation is a plain Fisher-Yates over `rng` -- this is sampler-side
 // belief machinery, never a game-parity path, so it deliberately does not
 // reproduce Collections.shuffle.
-void condition_boss_list(MonsterLists& lists, RngStream& rng) noexcept;
+void condition_boss_list(MonsterLists& lists, RngStream& rng,
+                         uint8_t keep = 1) noexcept;
 
 }  // namespace sts::engine

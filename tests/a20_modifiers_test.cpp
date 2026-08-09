@@ -467,16 +467,20 @@ TEST(A20Negative, A12UpgradedCardChanceStaysANoOpInActOne) {
 }
 
 // §6: "A20's double boss is Act-3-only (ProceedButton.java:102,
-// AbstractMonster.java:1059) -- out of S1". The level exists; its only effect is
-// gated behind an Act-3 dungeon id, so an Act-1 run at ascension 20 gets nothing
-// from level 20 beyond the union of 1..19. The sweep above proves the run-setup
-// half of that; this pins the written reason.
+// AbstractMonster.java:1059)". The level's only effect is gated behind an
+// Act-3 dungeon id, so an Act-1 run at ascension 20 gets nothing from level 20
+// beyond the union of 1..19 -- a fact S2.28's IMPLEMENTED route did not move
+// (the row's status changed; the Act-1 negative it records must not). The
+// sweep above proves the run-setup half of that; this pins the written reason.
 TEST(A20Negative, LevelTwentyAddsNothingToAnActOneRun) {
     const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
     const auto it = std::find_if(rows.begin(), rows.end(),
                                  [](const A20Row& r) { return r.level == 20; });
     ASSERT_NE(it, rows.end());
-    EXPECT_EQ(it->notes.rfind("N/A-FOR-S1", 0), std::size_t{0}) << it->notes;
+    EXPECT_EQ(it->notes.rfind("IMPLEMENTED", 0), std::size_t{0}) << it->notes;
+    EXPECT_NE(it->notes.find("A20 still adds NOTHING to an Act-1 run"),
+              std::string::npos)
+        << "the S1 frozen negative must survive the status flip";
     EXPECT_NE(it->provenance.find("ProceedButton.java:100-104"), std::string::npos);
     EXPECT_NE(it->provenance.find("AbstractMonster.java:1058-1060"),
               std::string::npos);
@@ -495,12 +499,12 @@ TEST(A20Negative, LevelTwentyAddsNothingToAnActOneRun) {
 // =============================================================================
 //
 // s2-tasks.md S2.04: rows A5, A6, A12, A13, A20 gain S2-scoped facts and
-// explicit engine-work ownership, but their S1 STATUS (IMPLEMENTED /
-// N/A-FOR-S1) must NOT move until the owning task lands -- that is the whole
-// point of the task ("rows keep S1 status until their owner lands"). These
-// tests pin the new citations by substring, the same discipline the frozen
-// no-such-modifier block already uses, and re-assert the five rows' STATUS
-// prefixes stayed put.
+// explicit engine-work ownership; a row's STATUS moves only when the owning
+// task lands ("rows keep S1 status until their owner lands"). Row 20's owner
+// LANDED (S2.28's double-boss route), so its prefix is IMPLEMENTED now; row
+// 13's remains open (its S2.24 reward-assembly share has not landed), so its
+// prefix must not move. These tests pin the citations by substring, the same
+// discipline the frozen no-such-modifier block already uses.
 TEST(A20S204, AffectedRowsKeepTheirS1StatusPrefix) {
     const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
     auto row = [&](int level) -> const A20Row& {
@@ -512,7 +516,8 @@ TEST(A20S204, AffectedRowsKeepTheirS1StatusPrefix) {
     EXPECT_EQ(row(6).notes.rfind("IMPLEMENTED", 0), std::size_t{0});
     EXPECT_EQ(row(12).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
     EXPECT_EQ(row(13).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
-    EXPECT_EQ(row(20).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
+    EXPECT_EQ(row(20).notes.rfind("IMPLEMENTED", 0), std::size_t{0})
+        << "S2.28 landed the double-boss route";
 }
 
 // A5: the between-act heal (AbstractDungeon.java:2582-2586, the same line
@@ -571,16 +576,19 @@ TEST(A20S204, A13RecordsDoubleBossAndMindBloomCitations) {
     EXPECT_NE(it->notes.find("owned by S2.28"), std::string::npos);
 }
 
-// A20: the double-boss route's engine ownership (S2.12) is now explicit, so a
-// later reader cannot casually flip this row to IMPLEMENTED without landing
-// that task.
+// A20: the row flipped to IMPLEMENTED when S2.28 landed the route, and the
+// note must keep the ownership HISTORY -- the route was originally S2.12's and
+// was reassigned in the Wave-3 allocation note, a drift the ledger records
+// explicitly so a later reader does not go looking for it in S2.12's Log.
 TEST(A20S204, A20RecordsDoubleBossEngineOwnership) {
     const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
     const auto it = std::find_if(rows.begin(), rows.end(),
                                  [](const A20Row& r) { return r.level == 20; });
     ASSERT_NE(it, rows.end());
-    EXPECT_NE(it->notes.find("owned by S2.12"), std::string::npos);
-    EXPECT_NE(it->notes.find("S2 note (S2.04)"), std::string::npos);
+    EXPECT_NE(it->notes.find("originally assigned S2.12"), std::string::npos);
+    EXPECT_NE(it->notes.find("REASSIGNED to S2.28"), std::string::npos);
+    EXPECT_NE(it->notes.find("finish_combat_after_action"), std::string::npos)
+        << "an IMPLEMENTED prefix names its site";
 }
 
 }  // namespace

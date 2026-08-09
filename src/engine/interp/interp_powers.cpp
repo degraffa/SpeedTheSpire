@@ -210,6 +210,34 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     if (id == PowerId::NONE) {
         return;
     }
+    // ApplyPowerAction.update:97-100 -- THE VERY FIRST THING THE ACTION DOES:
+    //
+    //     if (this.target == null || this.target.isDeadOrEscaped()) {
+    //         this.isDone = true; return;
+    //     }
+    //
+    // A RESOLVE-TIME liveness read, ahead of the No Draw short-circuit, ahead of
+    // the source onApplyPower hooks and ahead of the Artifact nullify -- so a
+    // power aimed at a corpse costs nothing at all, not even an Artifact stack.
+    //
+    // WHY IT LANDS NOW (S2.28), and why its absence was invisible before: it is
+    // the safety net the game relies on INSTEAD of guarding its queue-time walks,
+    // and Acts 1-2 have no unguarded walk to protect. Act 3 has three -- Donu's
+    // Circle of Protection (Donu.java:114-117), Deca's Square (Deca.java:122-128)
+    // and Time Warp's Strength fan-out (TimeWarpPower.java:66-67) -- each of
+    // which queues one item per monster RECORD with no liveness filter of any
+    // kind. Their correctness is this early-out. The dossier's instruction not to
+    // "fix" those loops into live-only walks is only sound with this guard in
+    // place: queue-time and resolve-time liveness genuinely differ, and the game
+    // reads the second.
+    //
+    // isDeadOrEscaped, NOT basically-dead: a HALF-DEAD monster is untargetable,
+    // so a Deca that plated a half-dead ally would apply nothing.
+    // monster_dead_or_escaped is exactly that predicate (combat_state.hpp).
+    if (tgt != kActorPlayer && tgt < kMonsterCap &&
+        monster_dead_or_escaped(s.monsters[tgt])) {
+        return;
+    }
     // ApplyPowerAction.update:102-105: applying No Draw to a target that
     // ALREADY has No Draw is a whole-action no-op -- it short-circuits BEFORE the
     // source onApplyPower hooks and the Artifact nullify, and never stacks.
@@ -436,6 +464,22 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     // the freshly constructed one, latch and all (AbstractCreature.java:506-513).
     if (duration_debuff_starts_just_applied(
             s, tgt, id, is_source_monster)) {
+        fresh.counter = 1;
+    }
+    // DrawReductionPower's IDENTICALLY-SHAPED latch (S2.28), and the reason it is
+    // a separate branch rather than a fourth case in that predicate: the three
+    // duration debuffs latch CONDITIONALLY (their ctors read turnHasEnded /
+    // isSourceMonster), while this one is set by the FIELD INITIALIZER --
+    // `private boolean justApplied = true;` (DrawReductionPower.java:17) -- so it
+    // latches on EVERY new instance, unconditionally. Folding it into that
+    // predicate would import three conditions the Java does not have here.
+    //
+    // NEW SLOT ONLY, the same placement as Flight / Panache / Malleable and the
+    // duration debuffs, and for the same reason: the stacking branch returned
+    // long before this line, which IS ApplyPowerAction's behaviour. So a second
+    // Head Slam does not re-arm the skip -- the stack it just raised ticks down
+    // at the end of that same round.
+    if (id == PowerId::DRAW_REDUCTION) {
         fresh.counter = 1;
     }
     slots[*count] = fresh;

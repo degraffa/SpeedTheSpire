@@ -90,7 +90,7 @@ namespace {
     // modifier; that block arrives here as an ordinary direct-add BLOCK item and
     // is deliberately NOT scaled by the owner's own Dexterity/Frail, exactly as
     // GainBlockAction never is.
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    static_assert(sts::registry::manifest::kPowersCount == 60,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "
@@ -153,6 +153,32 @@ void op_block(CombatState& s, uint8_t tgt, int amount, uint32_t flags) noexcept 
     int16_t* blk = actor_block(s, tgt);
     if (blk == nullptr) {
         return;
+    }
+    // GainBlockAction.update:52-54 -- `if (!target.isDying && !target.isDead
+    // && ...) target.addBlock(amount);`. A RESOLVE-TIME liveness read on the
+    // RECIPIENT, and the sibling of the isDeadOrEscaped early-out
+    // ApplyPowerAction carries (interp_powers.cpp op_apply_power).
+    //
+    // isDying/isDead, NOT isDeadOrEscaped, and the difference is real: a
+    // HALF-DEAD monster is neither dying nor dead (its die() was suppressed), so
+    // it DOES gain block -- unlike a power aimed at it, which the apply-side
+    // guard rejects. Both Java conditions collapse to `hp <= 0 && !halfDead` here
+    // (this engine models isDying that way and has no separate post-animation
+    // isDead), and an ESCAPED monster is deliberately not excluded, because
+    // GainBlockAction does not test isEscaping.
+    //
+    // WHY IT LANDS NOW (S2.28): Deca's Square of Protection queues one
+    // GainBlockAction per monster RECORD with no liveness filter at all
+    // (Deca.java:122-128), so a dead Donu is queued a block it must not receive.
+    // Before Act 3 every BLOCK recipient was the player or a self-buffing live
+    // monster, so the guard had nothing to reject -- except in one pre-existing
+    // corner it also closes: a monster killed mid-turn by Thorns whose own move
+    // had already queued a self-BLOCK behind the damage.
+    if (tgt != kActorPlayer && tgt < kMonsterCap) {
+        const MonsterState& m = s.monsters[tgt];
+        if (m.hp <= 0 && !monster_half_dead(m)) {
+            return;
+        }
     }
     int gain = amount;
     if ((flags & kBlockNoPowers) == 0u) {
