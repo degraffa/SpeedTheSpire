@@ -71,7 +71,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
 | Gremlin move-99 escape (`EscapeAction` body + `deathReact`/`escapeNext` trigger) | B3.16 (stage-b table: "UNASSIGNED — Act-2 owner") | S2.23 | **DISCHARGED by S2.23 (2026-08-07) — as a FINDING on one half and a third PRODUCER on the other; re-derived, not inherited.** (a) The `EscapeAction` BODY was in fact already landed in Act 1, by S1's Looter, as `Opcode::ESCAPE` (40) + `kMonsterFlagEscaped` (bit 24); S2.23 adds a THIRD producer of it, `GremlinLeader.die()` (GremlinLeader.java:224-241), through the new `MonsterDieAfterFn` slot — one queued ESCAPE per non-dying record, the leader excluding ITSELF only because `super.die()` ran first. That is the escape the Gremlin Leader's minions actually experience. (b) The `deathReact`/`escapeNext` TRIGGER — and therefore gremlin move 99 — remains **UNREACHABLE IN EVERY ACT** and stays unmodelled. Evidence, from `grep -rn "deathReact()\|escapeNext()\|new EscapeAction" com/` with each hit read: `escapeNext()` has NO caller anywhere in the tree; the only `deathReact()` call is `BanditBear.java:131`, whose group is Bandits (BanditPointy/BanditLeader/BanditBear, MonsterHelper.java:513-515) and contains no gremlin; the leader's fan-out queues `new EscapeAction(m)` DIRECTLY and never enters `case 99` or telegraphs `Intent.ESCAPE`. **The `deathReact` obligation is RE-POINTED, not closed:** it is live for `BanditLeader` (:82) and `BanditPointy` (:70) in the Act-2 "Masked Bandits" event combat (encounters.yaml id 41), and its owner is the **S2.31/S2.32 event-combat owner**, not this batch. Consequence recorded at the code: `BLOCK_RANDOM_MONSTER`'s valid-list filter reads the TELEGRAPHED intent and `isDying`, never the escaped flag (GainBlockRandomMonsterAction.java:26-38), so a leader-fan-out escapee is still a legal block recipient — in the engine AND in the game. Checked and deliberately left exact rather than "improved" into `monster_dead_or_escaped`; pinned by `CityElites.AnEscapedGremlinNeverTelegraphsEscapeIntent`. Wording amended in place at `monster_gremlin.hpp` note (1) and `combat_state.hpp`'s `kMonsterFlagEscaped` comment, both of which said "unreachable in Act 1". The stage-b row (docs/stage-b-tasks.md) is marked DISCHARGED in the same commit and points here |
-| `JawWorm(..., true)` constructor variant semantics | TE.2 scope pass | S2.26 | Jaw Worm Horde constructs the variant (MonsterHelper.java:549-551); UNVERIFIED — needs decompile check what the boolean changes (stats? starting Strength?) before the row's tier columns are trusted |
+| `JawWorm(..., true)` constructor variant semantics | TE.2 scope pass | S2.26 | **DISCHARGED — the boolean changes EXACTLY TWO things and NEITHER is a stat** (2026-08-09, S2.26). `JawWorm.java:71-110` read in full: the 2-arg ctor delegates with `hard = false` and the 3-arg one has exactly one caller in the game, MonsterHelper's Jaw Worm Horde, which builds three worms with `true` (MonsterHelper.java:549-550). It sets (a) `firstMove = false` (:77-79), which suppresses the forced opening CHOMP so the opening telegraph runs the full getMove num-tree against an EMPTY move history — and the DRAW COUNT is unchanged, because every arm's history predicate is false on an empty history, so no tiebreak `randomBoolean` is reached and the opening still costs exactly one `random(99)`; and (b) a non-empty `usePreBattleAction` (:112-118), `ApplyPowerAction` Strength(bellowStr) THEN `GainBlockAction`(bellowBlock) in that addToBottom order — +5 / 9 at A20, the same two numbers in the same order as the BELLOW move's own program. **Every `setHp` range and every tier column sits OUTSIDE the hardMode guard (:81-104)**, so the id-1 row's columns are trusted unchanged for both variants, which is exactly what this row asked. Modelled with NO new `MonsterId` and NO schema change (the Lagavulin awake-init precedent): `jaw_worm_init_hard` + a `pad0` latch + an encounter-key branch in `run_advance.cpp`; the registered pre-battle fn is a no-op without the latch, so the Exordium worm and its Stage-A fixtures are byte-identical. Pinned by `BeyondNormalsII.OrdinaryJawWormIsUnchangedByTheHardModeAddition`, `HardJawWormSpendsTheSameDrawsAndReadsTheRoll`, `HardJawWormOpensWithAnyOfTheThreeMoves`, `HardJawWormPreBattleGivesStrengthThenBlock` and `JawWormHordeSpawnsThreeHardWorms` |
 | Rest-site Recall option surface at Acts 2–3 (`isFinalActAvailable`, ruby key) | TE.2 scope pass (s2-design §4.5) | S2.13 | **DISCHARGED — YES, present; already modelled; zero engine work** (2026-08-07, S2.13). `CampfireUI.initializeButtons` (CampfireUI.java:94-96, read in full) appends the `RecallOption` under `Settings.isFinalActAvailable && !Settings.hasRubyKey` and **no act test whatsoever** — the only `id.equals` in that file is a flavour-text branch at :258 — so the row's real scope is *every* rest site in *every* act, Act 1 included, and this row's "Act-2/3" framing was wrong about the scope while right about the consequence. `Settings.isFinalActAvailable` (Settings.java:642) is profile state, constant for a run. The append lands **after** the relic veto sweep and **before** the `cannotProceed` auto-complete, so it can never be vetoed and a boss-relic-locked campfire stays open while the key is on offer. All of it has been live since S1 — `RestOptionKind::RECALL` (`rest_sites.hpp`), `kFinalActAvailable`, the post-sweep append (`rest_sites.cpp:193-205`) — and the grant is **not** "stubbed to S3": the RECALL arm sets `keys \|= kKeyRuby` (`CampfireRecallEffect.java:39-53` → `ObtainKeyEffect`). What is still S3 is only what the key is *for*. Pinned by `RestMenu.RecallIsOfferedInEveryActAndIsNeverVetoed`; s2-design §4.5 carries the withdrawal |
 | Translator's `event_flags` FIRED derivation is act-local | S2.13 | S2.43 | The translator reconstructs "fired" as "initially in the list and now absent" (`translate.cpp`, the `eventList`/`shrineList` blocks), which is complete only while a list is never refilled. From Act 2 on it is not: `dungeonTransitionSetup` clears both (AbstractDungeon.java:2576-2577) and the constructor rebuilds them (:291, :293), so an Act-2 dump **cannot witness an Act-1 event or shrine fire** while the simulator's `event_flags` rightly still carries it — a differ false-RED on the first Act-2/3 differential capture that draws a shrine. The one-time specials are unaffected (carried by identity, never rebuilt), and so is all of Act 1, which is why nothing is red today. Closing it needs cross-record accumulation over a capture that starts at floor 1 — the capture campaign's call; the alternative is a narrow differ recognizer in the `b14` RACE mould. Decide before the first Act-2 shrine capture is scored |
 | SecretPortal's `false` pin rests solely on unmodelled wall-clock playtime | S2.13 | S2.33 | `build_shrine_pool` pins SecretPortal `eligible = false` in every act. Through S1 that was over-determined — the act gate excluded it anyway — but in Act 3 the act half (`id.equals("TheBeyond")`) is satisfied, so the `false` now rests **only** on `CardCrawlGame.playtime >= 800.0f` (AbstractDungeon.java:1929-1933) having no engine representation. That is a real behavioural deviation on a reachable state, not an act exclusion. It is deliberate: a wall clock would make the sim nondeterministic in (seed, actions), which everything else rests on. If any task ever models playtime, this pin and its comment go with it. Pinned by `SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond`; s2-design §5 trap 5 carries the sharpened wording |
@@ -949,11 +949,122 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   shapes to join S2.21's Spheric Guardian. Dead content deliberately
   unregistered: `OrbWalker.DOUBLE_ENCOUNTER`, and the three shapes'
   `ENCOUNTER_NAME` / `ENCOUNTER_NAME_W`. All six presets green.
-- **S2.26** `[ ]` ∥ Beyond normals II — Spire Growth, Transient, Maw, Jaw
+- **S2.26** `[x]` ∥ Beyond normals II — Spire Growth, Transient, Maw, Jaw
   Worm Horde (variant-ctor deferred row), Writhing Mass (Reactive +
   master-deck Parasite).
   **Deps:** S2.01, S2.2F **Acceptance:** as S2.21, plus the master-deck Parasite
   fold-back test.
+  **Log:** `MonsterId` **54–57** all spent (Spire Growth, Transient, Maw,
+  Writhing Mass); the batch's FIFTH monster, the Jaw Worm Horde, adds **no
+  row** — it is three `JawWorm(x, y, true)` actors reusing id 1. `PowerId`
+  **102–105** all spent (CONSTRICTED, FADING, SHIFTING, REACTIVE — the last
+  with `game_id "Compulsive"`, because the class is `ReactivePower` and the
+  join key is the ID literal, the NoBlock shape of mismatch). **No new
+  opcode, no new `Hook`, no new `MonsterIntent`, no new `SCHEMA_VERSION`**:
+  the batch is the first CONSUMER of two S2.2F framework grants — opcode
+  **68 `OBTAIN_CARD`** (the Writhing Mass's Parasite) and **`Hook::DURING_TURN`
+  (15)** (Fading, its first binder anywhere). `MALLEABLE` (95, S2.22) and
+  `SHACKLED` (78) are reused byte-for-byte; only Malleable's "applied only
+  by" sentence was amended in place.
+
+  **The sharpest fact in the batch is the TWO-TWO fixed-HP split.** All four
+  monsters have a flat HP sheet, and exactly two of them cost a
+  `monster_hp_rng` draw — because exactly two call `setHp` at all. Spire
+  Growth (:53-57) and Writhing Mass (:60-64) use the ONE-ARG `setHp`, which
+  is `setHp(hp, hp)` (AbstractMonster.java:777-779) and calls
+  `monsterHpRng.random(min, max)` unconditionally, advancing the stream over
+  a degenerate range — the Hexaghost precedent. Transient and Maw never call
+  it: the ctor hands `maxHealth` to super and `AbstractMonster`'s ctor
+  assigns `currentHealth = maxHealth` with no RNG — the Spheric Guardian
+  precedent, and the modules SKIP the call rather than rolling a degenerate
+  range. The YAML spelling is identical in both cases (`{min: N, max: N}`),
+  so the distinction lives in the rows' comments and is pinned by
+  `FixedHpMonstersSplitTwoTwoOnTheHpDraw` and `SpawnGroupHpDrawsFollowTheSetHpSplit`.
+
+  **`move_id: 0` is now admissible, argued rather than renumbered.**
+  `WrithingMass.BIG_HIT` is `(byte) 0` (:48), which is also
+  `move_history`'s empty-slot sentinel, and `emit/monsters.py` rejected
+  `< 1` for exactly that reason. `move_id` **is** the game's byte id and the
+  file says so, so the rule was re-derived instead of worked around: the
+  loader now rejects only what is unconditionally wrong (non-integer, bool,
+  negative, `> 255`) and the 0-vs-empty-history question is answered **in
+  the row**, where the evidence is — the Writhing Mass's `lastMove(0)` sits
+  behind a `firstMove` branch that returns unconditionally, and the class
+  never calls `lastTwoMoves` or `lastMoveBefore`, so the collision is
+  unreachable for it. A negative id stays a hard error with its own
+  generator test.
+
+  **A second onAttacked walk, not a widened one.** `ShiftingPower` is the
+  first `ON_ATTACKED` binder whose body declares NO damage-type guard and NO
+  `info.owner != null` guard (ShiftingPower.java:33) — the Java's loop is
+  unconditional and every previous binder carried its own guards, which is
+  what made hoisting them to `dispatch_on_attacked` correct until now. So a
+  THORNS reflect or an HP_LOSS onto a Transient really does swing its
+  Strength, and the hoisted gate alone would miss it. Widening the shared
+  gate would push six landed powers onto call paths they are excluded from
+  for free; instead `dispatch_on_attacked_type_tolerant` walks the
+  COMPLEMENT (non-NORMAL, and self-sourced damage) over a closed, enumerated
+  admitted set — today exactly `SHIFTING`, with the reason each other binder
+  is OUT written out line by line. The union of the two walks is the Java's
+  single loop, and it is a no-op unless the victim holds an admitted power,
+  so every fixture and corpus replay is byte-identical.
+
+  **One divergence found in the inherited tree and FIXED: FadingPower's
+  `else` covers TWO cases, not one.** The death arm's condition is a
+  CONJUNCTION (`amount == 1 && !isDying`), so an owner at amount 1 that is
+  already dying falls to the `else` and queues the reduce — and that is the
+  only path on which a Fading slot can reach zero by decrement and touch
+  `ReducePowerAction`'s removal arm. The body had returned instead, behind a
+  header and a provenance paragraph both asserting the removal path
+  unreachable "because the arm is only reached at amount >= 2" — a claim
+  that was wrong about the Java in exactly the way that made the missing arm
+  look deliberate. Both claims are corrected in place (conventions §8) and
+  the behaviour is pinned by
+  `FadingDoesNotSuicideAnAlreadyDyingOwnerButStillReduces`. A second, smaller
+  one: the Spire Growth's defensive CONSTRICT guard `return`ed past the
+  trailing `ROLL_MOVE`, which sits outside the Java's switch — it now skips
+  only the apply, because a stuck-move state is strictly worse than the
+  missing step it guards.
+
+  **`MonsterState.flags`: ONE bit, and it is a REUSE.** `kMonsterFlagMawRoared`
+  takes **0x0004**, the value the large slimes' `splitTriggered` holds — the
+  first deliberate reuse under the type-scoped policy and the point of it.
+  Chosen over the two lower bits because those are consumed by a *power's*
+  native body and are therefore scoped to every type that can own Ritual or
+  Curl Up; `splitTriggered` is read only by `monster_slime_large.cpp`, so
+  the question is the narrow "can one record be both a large slime and a
+  Maw?", and nothing splits into, spawns or transforms a Maw. Everything
+  else needs no bit: the Maw's `turnCount`, the Writhing Mass's `firstMove`
+  and `usedMegaDebuff`, and the Jaw Worm's hardMode marker all live in
+  `pad0`, which each type owns and subdivides.
+
+  **The Jaw Worm Horde's deferred row is DISCHARGED in the same commit** —
+  see the Deferred obligations table for the full argument. No new
+  `MonsterId`, no schema change: `jaw_worm_init_hard` plus an encounter-key
+  branch at the combat-start site, the Lagavulin precedent, with the one
+  difference (encounter key vs. event-variant enum) flagged in-header
+  against a future rule of two. Checked, and it will not fire from the
+  Act-2/3 roster: `Cultist(x, y, boolean talk)` is purely presentational.
+
+  **The master-deck Parasite folds back through the real door.** MEGA_DEBUFF
+  accrues into `CombatState.pending_obtain` via OBTAIN_CARD and
+  `run_advance` drains it through `add_card_to_master_deck` — the single
+  acquisition door, which is what makes Omamori's curse gate and the
+  `onObtainCard` / `onMasterDeckChange` relic fan-outs apply without a
+  second implementation. Pinned end-to-end through `enter_event_combat` by
+  `WrithingMassParasiteReachesTheRunMasterDeck`, with
+  `OmamoriBlocksTheParasiteAndSpendsACharge` as the other half. A Reactive
+  re-roll can select MEGA_DEBUFF, so a Writhing Mass can be made to grant
+  its Parasite during the PLAYER's turn.
+
+  **Citation hygiene:** every Java line reference in this batch's rows,
+  headers and modules was re-derived against the decompile file by file
+  after the first pass drifted 1–3 lines in ~90 places; the numbers now
+  match the files under `SlayTheSpireDecompiled` exactly. Released / not
+  spent: **zero** — every granted `MonsterId` and `PowerId` in the block was
+  used, so the block leaves no gap. `check_stale_counts` +
+  `check_doc_links` clean. All six presets green — debug / asan / release
+  via `wsl_run.sh`, win-debug / win-asan / win-release via clang-cl.
 - **S2.27** `[ ]` ∥ Beyond elites — Giant Head, Nemesis (Intangible +
   Burn), Reptomancer (+ SnakeDagger spawns).
   **Deps:** S2.01, S2.2F, S2.23 (MINION row + spawn pattern) **Acceptance:** as S2.21.

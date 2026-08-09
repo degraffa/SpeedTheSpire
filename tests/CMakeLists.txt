@@ -325,6 +325,16 @@ sts_add_test(city_elites_test)
 # that only lands because isDying is not a bare hp <= 0, and the synchronous
 # group kill. "Sphere and 2 Shapes" un-parks here.
 sts_add_test(beyond_normals_i_test)
+# S2.26: Act-3 "Beyond" normals II -- the Spire Growth, Transient, Maw, Jaw Worm
+# Horde and Writhing Mass, plus Constricted/Fading/Shifting/Reactive, the
+# DURING_TURN hook's first binder, the OBTAIN_CARD opcode's first producer and
+# the type-tolerant onAttacked walk. The batch's sharpest pin is the TWO-TWO
+# fixed-HP split: all four monsters have a flat HP sheet and only two of them
+# cost a monster_hp_rng draw, because only two call setHp at all. Also carries
+# the master-deck Parasite fold-back test (run layer, through the real encounter
+# door) and the proof that registering a Jaw Worm pre-battle fn leaves the
+# ordinary Exordium worm byte-identical.
+sts_add_test(beyond_normals_ii_test)
 
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the

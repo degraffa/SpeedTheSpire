@@ -123,11 +123,19 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 61,
+    static_assert(sts::registry::manifest::kPowersCount == 65,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
                   "still a pass-through because no power overrides it yet.");
+    // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
+    // REACTIVE. Checked one at a time against BOTH count-guarded families,
+    // and all four are pure count moves. ConstrictedPower overrides only
+    // atEndOfTurn; FadingPower only duringTurn; ReactivePower only
+    // onAttacked. ShiftingPower overrides only onAttacked too -- and it is
+    // the one worth naming, because it LOOKS like a mitigation power: it
+    // returns damageAmount UNCHANGED (ShiftingPower.java:41) and swaps the
+    // OWNER's Strength instead, so no pass here sees it.
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::STRENGTH:                        // StrengthPower.java:96
             return dmg + static_cast<float>(p.amount) *
@@ -221,13 +229,21 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 61,
+    static_assert(sts::registry::manifest::kPowersCount == 65,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
                   "NOT a pass-through: INTANGIBLE has a case there "
                   "(IntangiblePlayerPower.java:43-49). Its twin "
                   "atDamageFinalGive still is one.");
+    // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
+    // REACTIVE. Checked one at a time against BOTH count-guarded families,
+    // and all four are pure count moves. ConstrictedPower overrides only
+    // atEndOfTurn; FadingPower only duringTurn; ReactivePower only
+    // onAttacked. ShiftingPower overrides only onAttacked too -- and it is
+    // the one worth naming, because it LOOKS like a mitigation power: it
+    // returns damageAmount UNCHANGED (ShiftingPower.java:41) and swaps the
+    // OWNER's Strength instead, so no pass here sees it.
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::VULNERABLE:
             if (owner_actor == kActorPlayer &&
@@ -314,10 +330,18 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 61,
+    static_assert(sts::registry::manifest::kPowersCount == 65,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible and Flight do)? Add a case "
                   "here if so.");
+    // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
+    // REACTIVE. Checked one at a time against BOTH count-guarded families,
+    // and all four are pure count moves. ConstrictedPower overrides only
+    // atEndOfTurn; FadingPower only duringTurn; ReactivePower only
+    // onAttacked. ShiftingPower overrides only onAttacked too -- and it is
+    // the one worth naming, because it LOOKS like a mitigation power: it
+    // returns damageAmount UNCHANGED (ShiftingPower.java:41) and swaps the
+    // OWNER's Strength instead, so no pass here sees it.
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::INTANGIBLE:
             return dmg > 1.0f ? 1.0f : dmg;   // IntangiblePlayerPower.java:44-48
@@ -713,18 +737,30 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // whose Java body has NO owner test (BufferPower.java:41-47), so a
     // null-source hit still spends it.
     dmg = apply_buffer(s, tgt, dmg);
-    // onAttacked (AbstractPlayer.damage:1425-1426): the VICTIM's powers fire on a
-    // NORMAL attack from a DISTINCT attacker -- AFTER decrementBlock and REGARDLESS
-    // of whether damage penetrated (Thorns reflects even a fully-blocked hit). A
-    // THORNS/HP_LOSS incoming does NOT trigger onAttacked (ThornsPower's own type
-    // guard), so it is dispatched only for NORMAL damage with src != tgt. A
-    // NULL-SOURCE NORMAL hit still dispatches -- the game's loop runs
-    // unconditionally and the `info.owner != null` gates live in the power
-    // BODIES, which read HookContext::source_null -- so a future
-    // owner-INsensitive body fires exactly as in the game. No-op unless a
-    // power binds ON_ATTACKED, so skeleton/relic-free DAMAGE is unchanged.
+    // onAttacked (AbstractPlayer.damage:1425-1426): the VICTIM's powers fire
+    // AFTER decrementBlock and REGARDLESS of whether damage penetrated (Thorns
+    // reflects even a fully-blocked hit). A NULL-SOURCE NORMAL hit dispatches
+    // too -- the game's loop runs unconditionally and the `info.owner != null`
+    // gates live in the power BODIES, which read HookContext::source_null.
+    //
+    // THE GAME'S LOOP IS ALSO UNGATED ON THE DAMAGE TYPE AND ON src == tgt. The
+    // NORMAL / src != tgt condition below is a CALL-SITE HOIST of guards that
+    // every binder used to spell for itself, not a property of the event -- an
+    // earlier version of this comment claimed the former, citing ThornsPower's
+    // own type guard, which proved exactly one power's behaviour and not the
+    // rule. Shifting (powers.yaml 104) is the first binder with no such guard,
+    // so the complement is dispatched too, restricted to the powers that declare
+    // no guard of their own. The union of the two calls IS the Java's single
+    // loop; see power_hooks.hpp for the enumeration that keeps them equivalent.
+    //
+    // Both are no-ops unless a power binds ON_ATTACKED, so skeleton/relic-free
+    // DAMAGE is unchanged and every landed fixture stays byte-identical.
     if (type == DamageType::NORMAL && src != tgt) {
         dispatch_on_attacked(s, tgt, src, dmg, source_null);
+    } else {
+        dispatch_on_attacked_type_tolerant(s, tgt, src, dmg,
+                                           static_cast<uint8_t>(type),
+                                           source_null);
     }
     // The player's relics' onAttacked, then onLoseHpLast -- the last two
     // modifiers before the HP write (AbstractPlayer.java:1430-1435). Torii's
@@ -835,6 +871,17 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     int dmg = intangible_cap(s, tgt, amount);   // AbstractPlayer.java:1397-1399
     dmg = apply_buffer(s, tgt, dmg);            // AbstractPlayer.java:1412-1415
     dmg = apply_tungsten_rod(s, tgt, dmg);      // AbstractPlayer.java:1433-1435
+    // The victim's powers' onAttacked, HP_LOSS arm. LoseHPAction routes through
+    // creature.damage() (LoseHPAction.java:41), and that method's onAttacked
+    // walk is unconditional over the damage type -- so a power whose body
+    // declares no type guard fires on an HP_LOSS too. dispatch_on_attacked's
+    // NORMAL-only gate never reaches this path at all, which is why the
+    // type-tolerant walk is called directly here rather than as an else-branch.
+    // Placed BEFORE the HP write, where AbstractCreature.damage puts the walk
+    // (AbstractMonster.java:665-670). Today's only member is Shifting, so this
+    // is a no-op for every landed self-damage card and fixture.
+    dispatch_on_attacked_type_tolerant(s, tgt, tgt, dmg,
+                                       static_cast<uint8_t>(DamageType::HP_LOSS));
     const int old_hp = *hp;
     int new_hp = old_hp - dmg;
     if (new_hp < 0) {

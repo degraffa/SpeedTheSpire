@@ -99,12 +99,20 @@ namespace {
     // updateDescription + duringTurn (ExplosivePower.java:41-57) and
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39) -- none touches block.
-    static_assert(sts::registry::manifest::kPowersCount == 61,
+    static_assert(sts::registry::manifest::kPowersCount == 65,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "
                   "modify_block_last just below in the same pass; No Block is "
                   "the game's only overrider of it.");
+    // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
+    // REACTIVE. Checked one at a time against BOTH count-guarded families,
+    // and all four are pure count moves. ConstrictedPower overrides only
+    // atEndOfTurn; FadingPower only duringTurn; ReactivePower only
+    // onAttacked. ShiftingPower overrides only onAttacked too -- and it is
+    // the one worth naming, because it LOOKS like a mitigation power: it
+    // returns damageAmount UNCHANGED (ShiftingPower.java:41) and swaps the
+    // OWNER's Strength instead, so no pass here sees it.
     // Checked for the Guardian's two powers, neither needs a case: ModeShiftPower
     // overrides only updateDescription (ModeShiftPower.java:27-30) and
     // SharpHidePower only updateDescription + onUseCard (SharpHidePower.java:

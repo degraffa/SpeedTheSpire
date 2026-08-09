@@ -174,4 +174,73 @@ void jaw_worm_take_turn(CombatState& state, uint8_t monster_index) noexcept {
     get_move(state, m, num);
 }
 
+// --- The hardMode variant (S2.26) -------------------------------------------
+// See monster_jaw_worm.hpp for what the constructor boolean is and why it is
+// modelled as two extra exported functions rather than a second MonsterId or a
+// schema column. NOTHING ABOVE THIS LINE CHANGED for it, which is the point:
+// the Stage-A fixtures pin the ordinary worm byte for byte.
+
+void jaw_worm_init_hard(CombatState& state, uint8_t monster_index) noexcept {
+    MonsterState& m = state.monsters[monster_index];
+    m.monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+
+    // IDENTICAL setHp: `if (ascensionLevel >= 7) setHp(42, 46) else setHp(40, 44)`
+    // sits OUTSIDE the hardMode guard (JawWorm.java:81-84), so the range, the
+    // stream and the draw count are exactly the ordinary worm's. One inclusive
+    // monsterHpRng draw; currentHealth == maxHealth.
+    const int32_t rolled =
+        random(state.monster_hp_rng, kJawWormHpMin, kJawWormHpMax);
+    m.hp = static_cast<int16_t>(rolled);
+    m.max_hp = static_cast<int16_t>(rolled);
+
+    m.block = 0;
+    m.flags = 0;
+    m.power_count = 0;
+    // The ONE state difference: `if (this.hardMode) this.firstMove = false;`
+    // (:77-79), plus the latch usePreBattleAction reads.
+    m.pad0 = kJawWormPadHardMode;
+    m.move_history[0] = 0;
+    m.move_history[1] = 0;
+    m.move_history[2] = 0;
+
+    // init() -> rollMove() -> getMove(aiRng.random(99)), the SAME single draw the
+    // ordinary worm makes -- but here the value is USED, because the
+    // forced-first-move short circuit (:150-154) is gated on `firstMove` and that
+    // is already false. Running the full tree against an EMPTY history costs no
+    // extra draw: last_move / last_two_moves are false on every arm, so no
+    // randomBoolean tiebreak is reached. The distribution of the OPENING move
+    // changes (25% Chomp / 30% Thrash / 45% Bellow); the group's ai_rng sequence
+    // LENGTH at init does not, so spawn accounting is untouched.
+    const int32_t num = random(state.ai_rng, 99);
+    get_move(state, m, num);
+}
+
+void jaw_worm_use_pre_battle_action(CombatState& state,
+                                    uint8_t monster_index) noexcept {
+    // JawWorm.usePreBattleAction (JawWorm.java:112-118):
+    //
+    //   if (this.hardMode) {
+    //       addToBottom(new ApplyPowerAction(this, this,
+    //                                        new StrengthPower(this, bellowStr),
+    //                                        bellowStr));
+    //       addToBottom(new GainBlockAction(this, this, this.bellowBlock));
+    //   }
+    //
+    // The `if` is the whole body, and the latch below IS that `if`. An ordinary
+    // Exordium worm falls straight out, queuing nothing and drawing nothing --
+    // which is what makes registering this fn for MonsterId::JAW_WORM
+    // indistinguishable from the nullptr it replaces, and keeps the Stage-A
+    // fixtures byte-identical.
+    if ((state.monsters[monster_index].pad0 & kJawWormPadHardMode) == 0u) {
+        return;
+    }
+    // bellowStr THEN bellowBlock, addToBottom -- which is exactly the BELLOW
+    // move's registry program (monsters.yaml id 1: APPLY_POWER SELF STRENGTH,
+    // then BLOCK SELF): the same two numbers, in the same order, resolved at the
+    // same ascension. Queuing that program is not a coincidence being exploited;
+    // it is literally the same two lines of Java, and reusing it keeps ONE home
+    // for bellowStr 5 / bellowBlock 9 rather than a second copy that can drift.
+    queue_move_effects(state, monster_index, kMoveBellow);
+}
+
 }  // namespace sts::engine

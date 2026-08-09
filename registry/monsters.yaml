@@ -61,7 +61,7 @@
 - id: 1
   name: JAW_WORM
   game_id: "JawWorm"
-  provenance: "JawWorm ctor setHp/stat branches (JawWorm.java:79-104), takeTurn (JawWorm.java:120-146), getMove (JawWorm.java:148-184); ID (JawWorm.java:38)"
+  provenance: "JawWorm ctor setHp/stat branches (JawWorm.java:79-104), takeTurn (JawWorm.java:120-146), getMove (JawWorm.java:148-184); ID (JawWorm.java:38). THE hardMode CONSTRUCTOR VARIANT, DISCHARGED BY S2.26 (the docs/s2-tasks.md deferred row): the 3-arg ctor JawWorm(x, y, boolean hard) (:75-108) is used ONLY by the Act-3 \"Jaw Worm Horde\" group, which builds three of them with hard = true (MonsterHelper.java:549-550); the 2-arg ctor delegates with false (:71-73). THE BOOLEAN CHANGES EXACTLY TWO THINGS AND NEITHER IS A STAT: (a) `firstMove = false` (:77-79), which suppresses the forced opening CHOMP so the OPENING decision runs the full getMove num-tree against an EMPTY move history -- and because every arm's history predicate is false on an empty history, that opening still costs exactly ONE aiRng.random(99) and no tiebreak, so the group's init draw count is unchanged (25% Chomp / 30% Thrash / 45% Bellow instead of 100% Chomp); (b) usePreBattleAction (:110-118) becomes non-empty -- ApplyPowerAction(this, this, StrengthPower(this, bellowStr), bellowStr) THEN GainBlockAction(this, this, bellowBlock), in that addToBottom order, so +5 Strength and 9 block per worm at A20. EVERY setHp RANGE AND EVERY TIER COLUMN BELOW SITS OUTSIDE THE hardMode GUARD (:81-104) and is therefore TRUSTED UNCHANGED for both variants -- which is precisely what the deferred row asked. The variant is modelled with no new MonsterId and no schema change (the Lagavulin awake-init precedent): monster_jaw_worm.cpp exports jaw_worm_init_hard alongside jaw_worm_init, run_advance's combat-start path branches on the encounter key, and the registered pre-battle fn is a no-op unless the hard-mode pad0 latch is set, so the ordinary Exordium worm and its Stage-A fixtures stay byte-identical."
   enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 40, max: 44}   # JawWorm.java:83-84 (ascension < 7)
@@ -2145,3 +2145,318 @@
                # rest is num < 50 && !lastMove(ATTACK). See monster_spiker.cpp for
                # where the counter lives (MonsterState.pad0, saturating -- the
                # Mugger/Looter precedent; NO new flag bit).
+
+# --- S2.26 (Act-3 "Beyond" normals II): Spire Growth, Transient, Maw, --------
+# --- Writhing Mass. MonsterId 54-57 are this task's grant (stage-b-tasks.md --
+# --- "S2 Wave-3 allocations"); all four are spent, so the block leaves no ----
+# --- gap. The batch's FIFTH monster, the Jaw Worm Horde, adds NO row: it is --
+# --- three JawWorm(x, y, TRUE) actors and reuses id 1 unchanged (see the -----
+# --- hardMode paragraph in that row's provenance). --------------------------
+#
+# ALL FOUR ARE FIXED-HP MONSTERS AND THEY SPLIT TWO-TWO ON WHETHER THAT COSTS A
+# monster_hp_rng DRAW. The distinction is spelled out per row below and is never
+# inferred from "the HP is flat":
+#
+#   * setHp(int)      -> Spire Growth (:53-57), Writhing Mass (:62-66).
+#                        setHp(int) is `setHp(hp, hp)` (AbstractMonster.java:
+#                        777-779) and the two-arg overload calls
+#                        monsterHpRng.random(min, max) unconditionally (:765-767),
+#                        which advances the stream even over a degenerate range.
+#                        ONE DRAW EACH. The Hexaghost precedent (id 22).
+#   * no setHp at all -> Transient (:45-61), Maw (:62-82). The ctor hands
+#                        maxHealth straight to super and AbstractMonster's ctor
+#                        (:135-155) assigns currentHealth = maxHealth with no RNG
+#                        anywhere in it. ZERO DRAWS. The Spheric Guardian
+#                        precedent (id 30), and the module SKIPS the call rather
+#                        than rolling a degenerate range.
+#
+# The YAML spelling is identical in both cases ({min: N, max: N}) -- the schema
+# has no column for "does this cost a draw" -- so the fact lives in these
+# comments and in each module's init, and each is pinned by a named test.
+
+- id: 54
+  name: SPIRE_GROWTH
+  game_id: "Serpent"           # SpireGrowth.ID == "Serpent" (SpireGrowth.java:32),
+                               # NOT "SpireGrowth". encounters.yaml id 47 already
+                               # emits "Serpent" and its preamble (:620-622) names
+                               # this as one of the three ID/class-name mismatches;
+                               # get it wrong here and monster_from_game_id fails
+                               # to join, parking the encounter.
+  provenance: "SpireGrowth (SpireGrowth.java, read in full). ID \"Serpent\" (:32). ctor (:50-72): super(..., 170, ...) then setHp(190) at ascension >= 7 else setHp(170) (:53-57) -- the ONE-ARG setHp, so a FIXED sheet that still costs ONE monsterHpRng draw (AbstractMonster.java:777-779 -> :765-767); tackleDmgActual/smashDmgActual take the A2 pair 18/25 else 16/22 (:58-64), added to damage in that order (:70-71). constrictDmg 10 (:41), +2 at A17 (:85 -- the ONLY A17 amount, and it lives in takeTurn, not the ctor). Move ids QUICK_TACKLE=1, CONSTRICT=2, SMASH=3 (:46-48). NO usePreBattleAction. takeTurn (:74-98): case 1 one DamageAction on damage.get(0) (:79); case 2 ApplyPowerAction(player, this, ConstrictedPower(player, THIS, constrictDmg [+2 at A17])) (:82-89) -- the THREE-arg ConstrictedPower carries a SOURCE creature, which is the Spire Growth itself and is what powers.yaml id 102 stores in PowerSlot.counter; case 3 one DamageAction on damage.get(1) (:91-95); the trailing RollMoveAction (:97) sits OUTSIDE the switch so all three cases reach it. getMove (:100-119) reads the PLAYER's power list twice (hasPower(\"Constricted\")) plus lastMove/lastTwoMoves and `num`, and spends NO extra ai_rng draw. damage() (:121-129) runs super.damage FIRST then an animation, and changeState (:131-141) is two spine calls: both presentation. NO die() override."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    # setHp(int) -- FIXED at each tier but STILL ONE monsterHpRng draw. See the
+    # block header above and the Hexaghost precedent (id 22).
+    base: {min: 170, max: 170}  # START_HP (:37), ascension < 7 (:56)
+    a7:   {min: 190, max: 190}  # A_2_START_HP (:38) -- the field NAME says A_2,
+                                # the BRANCH says `>= 7` (:53). The name is
+                                # misleading; the branch is authoritative, exactly
+                                # as for Hexaghost's A_2_HP at a9.
+  rolls: []
+  moves:
+    - name: QUICK_TACKLE
+      move_id: 1               # SpireGrowth.java:46
+      intent: ATTACK           # setMove(1, ATTACK, dmg[0]) (:107,118)
+      effects:
+        # damage.get(0) == tackleDmgActual: 16, or 18 from A2 (:40,43,58-63).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 16, a2: 18}}
+    - name: CONSTRICT
+      move_id: 2               # SpireGrowth.java:47
+      intent: STRONG_DEBUFF    # setMove((byte)2, STRONG_DEBUFF) (:103,111)
+      effects:
+        # ConstrictedPower(player, THIS, constrictDmg) -- constrictDmg 10 (:41),
+        # `constrictDmg + 2` == 12 at A17 (:85). The A17 arm is a whole duplicated
+        # ApplyPowerAction line rather than an amount tweak, but the ONLY thing
+        # that differs is the number, so a tier column expresses it exactly.
+        #
+        # THE STEP IS AUTHORED HERE FOR ITS AMOUNT, AND THE MODULE QUEUES IT
+        # ITSELF (monster_spire_growth.cpp). ConstrictedPower's ctor takes a
+        # SOURCE creature the effect grammar cannot name -- it is the acting
+        # monster's runtime slot index -- and that source is OBSERVABLE: the
+        # power's atEndOfTurn DamageAction is built with the SOURCE as its owner,
+        # and dispatch_was_hp_lost's Rupture guard fires only when source ==
+        # victim. Author the source as the player and Rupture would fire on every
+        # Constricted tick. So the module packs the index into the APPLY_POWER
+        # item's counter operand (make_apply_power_flags) and this row stays the
+        # pinned amount source -- the Snecko/Healer precedent for "the row
+        # authors the numbers, the module owns the shape".
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 10, a17: 12}, power: CONSTRICTED}
+    - name: SMASH
+      move_id: 3               # SpireGrowth.java:48
+      intent: ATTACK           # setMove(3, ATTACK, dmg[1]) (:115)
+      effects:
+        # damage.get(1) == smashDmgActual: 22, or 25 from A2 (:40,44,58-63).
+        # The ChangeStateAction("ATTACK") / WaitAction around it (:93-94) are
+        # presentation and draw no seeded RNG.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 22, a2: 25}}
+  ai: native   # getMove (:100-119) queries a PLAYER POWER -- `!player.hasPower(
+               # "Constricted")` -- twice, which no ai table expresses, alongside
+               # lastMove/lastTwoMoves and `num`. The A17 arm is the only one that
+               # changes BEHAVIOUR rather than a number: it hoists the Constrict
+               # gate ABOVE the `num < 50` tackle branch, so at A20 a player
+               # without Constricted eats it at the first non-repeat opportunity.
+               # ZERO extra ai_rng draws on every path. See monster_spire_growth.cpp.
+
+- id: 55
+  name: TRANSIENT
+  game_id: "Transient"
+  provenance: "Transient (Transient.java, read in full). ID \"Transient\" (:32). ctor (:45-61): super(..., 999, ...) and NO setHp call anywhere -- ZERO monsterHpRng draws, the SphericGuardian shape (AbstractMonster.java:135-155). HP 999 FLAT: no ascension branch on it at all. `this.gold = 1` (:50) -- see the gold paragraph below. startingDeathDmg = 40 at ascension >= 2 else 30 (:53), then SEVEN DamageInfo entries at start + 0,10,20,30,40,50,60 (:54-60). usePreBattleAction (:63-71) applies TWO powers in this order: FadingPower(this, ascension >= 17 ? 6 : 5) THEN ShiftingPower(this) (powers.yaml 103 and 104). takeTurn (:73-84) has ONE case: ChangeState/Wait presentation, one DamageAction on damage.get(count), then ++count and a SELF setMove(1, ATTACK, startingDeathDmg + count*10) -- and there is NO trailing RollMoveAction, so the monster re-telegraphs itself and the aiRng is never touched again after init. getMove (:112-115) IGNORES num entirely and always sets move 1 -- the Looter/Guardian precedent: rollMove still DRAWS at init and the value is discarded. damage() (:86-93) and changeState (:95-104) are presentation. die() (:106-110) is super.die() plus UnlockTracker.unlockAchievement(\"TRANSIENT\") -- meta-progression, nothing combat-visible, so no MonsterDieFn. GOLD, CHECKED AND FOUND DEAD: `this.gold = 1` writes AbstractCreature.gold (AbstractCreature.java:69), and SuicideAction.update zeroes it before die() (SuicideAction.java:31) -- but NOTHING in rooms/ or dungeons/ ever READS a monster's gold. Combat gold rewards come from an already-rolled int (AbstractRoom.java:616,625), and the only readers of a creature's `gold` field in the whole decompiled tree are DamageAction's steal (DamageAction.java:99) and MaskedBandits (:114-119), whose target is the PLAYER in both cases. So a faded-out Transient and a killed one pay the SAME gold; this row deliberately carries no gold column and the negative is pinned by a named test rather than left unstated."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    # NO setHp CALL -> ZERO monster_hp_rng DRAWS. The ctor hands maxHealth 999 to
+    # super (:46) and AbstractMonster's ctor (AbstractMonster.java:135-155)
+    # assigns currentHealth = maxHealth with no RNG in it. The Spheric Guardian
+    # precedent (id 30): one tier, no branch, and the module SKIPS the draw
+    # rather than calling random() over 999..999, which WOULD move the stream.
+    base: {min: 999, max: 999}  # HP (:37) -- flat at every ascension
+  rolls: []
+  moves:
+    - name: ATTACK
+      move_id: 1               # Transient.java:43
+      intent: ATTACK           # setMove(1, ATTACK, startingDeathDmg + count*10)
+      effects:
+        # THE AMOUNT IS PER-INSTANCE AND ESCALATING, AND AN EFFECT LIST CANNOT
+        # SAY SO. takeTurn reads damage.get(this.count) (:79) -- the count-th of
+        # seven pre-built DamageInfos at startingDeathDmg + 10*i -- and then
+        # increments the count. `base + count * 10` is not a tier column, so
+        # monster_transient.cpp queues this ONE step with a per-instance amount
+        # (the Louse's rolled bite damage precedent, monster_dispatch.hpp:79-80),
+        # reading rung zero from here.
+        #
+        # THE COLUMN BELOW IS RUNG ZERO: startingDeathDmg, 30, or 40 from A2
+        # (:53). The module adds 10 per resolved attack. At A20 the live ladder is
+        # 40, 50, 60, 70, 80, 90 -- SIX rungs, because Fading is 6 at A17 and the
+        # monster dies at the end of its sixth turn; the seventh DamageInfo (100)
+        # is UNREACHABLE at every ascension (Fading 5 below A17 reaches five).
+        # Both facts are pinned by named tests.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 30, a2: 40}}
+  ai: native   # getMove (:112-115) ignores `num` completely and always re-arms
+               # move 1, and takeTurn re-telegraphs the SAME move itself with no
+               # trailing RollMoveAction (:73-84). So the WHOLE COMBAT costs
+               # exactly ONE ai_rng draw -- init's rollMove -- and its value is
+               # discarded. Native, not an empty table, precisely because that
+               # discarded draw still moves the stream every other monster in the
+               # group shares. See monster_transient.cpp.
+
+- id: 56
+  name: MAW
+  game_id: "Maw"
+  provenance: "Maw (Maw.java, read in full). ID \"Maw\" (:36). ctor (:60-82): super(..., 300, ...) with NO setHp call -- ZERO monsterHpRng draws, the SphericGuardian shape. HP 300 FLAT and there is NO A7 BRANCH -- unusual for a normal, and a genuine absence, not an oversight; do not invent one. strUp 3 and terrifyDur 3 (:67-68), BOTH +2 at ascension >= 17 (:69-72). The ascension >= 2 branch (:73-79) assigns slamDmg 30 / nomDmg 5 against 25 / 5 below -- nomDmg is assigned 5 in BOTH arms, a dead half-branch (the SlimeBoss tackleDmg and Centurion furyHits precedent), so it carries no tier column. damage gets slamDmg then nomDmg (:80-81). Move ids ROAR=2, SLAM=3, DROOL=4, NOMNOMNOM=5 (:51-54) -- THERE IS NO MOVE 1, a harmless gap (move ids are the game's byte ids and only uniqueness is enforced). `roared` false (:55) and `turnCount` ONE (:56) are the two AI latches. NO usePreBattleAction. takeTurn (:85-114): ROAR queues Weak(player, terrifyDur, true) THEN Frail(player, terrifyDur, true) and sets roared = true SYNCHRONOUSLY (:87-93); SLAM is one DamageAction on damage.get(0) (:95-99); DROOL is ApplyPowerAction(this, this, StrengthPower(this, strUp), strUp) (:100-103); NOMNOMNOM loops `turnCount / 2` times queueing a BiteEffect VFX (UNSEEDED MathUtils jitter) and a DamageAction on damage.get(1) (:104-111); the trailing RollMoveAction (:113) sits outside the switch. getMove (:117-136) increments turnCount on EVERY call INCLUDING the init roll. die() (:138-142) is super.die() plus one UNSEEDED sound -- no MonsterDieFn."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    # NO setHp CALL -> ZERO monster_hp_rng DRAWS (the Spheric Guardian shape),
+    # AND NO A7 TIER. Both are real absences read off the ctor, not omissions.
+    base: {min: 300, max: 300}  # HP (:41) -- the super() argument, flat everywhere
+  rolls: []
+  moves:
+    - name: ROAR
+      move_id: 2               # Maw.java:51 -- the LOWEST id; there is no move 1
+      intent: STRONG_DEBUFF    # setMove((byte)2, STRONG_DEBUFF) (:120)
+      effects:
+        # ORDER IS LOAD-BEARING (:91-92): WEAK first, THEN FRAIL -- the reverse of
+        # the Snake Plant's SPORES. Both are (player, terrifyDur, true); the
+        # `true` is isSourceMonster, which op_apply_power derives from the monster
+        # source, so the steps carry no extra column. terrifyDur 3, 5 from A17
+        # (:68,71). NO A2 column: the A2 branch (:73-79) touches only damage.
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 3, a17: 5}, power: WEAK}
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 3, a17: 5}, power: FRAIL}
+    - name: SLAM
+      move_id: 3               # Maw.java:52
+      intent: ATTACK           # setMove(3, ATTACK, dmg[0]) (:135)
+      effects:
+        # damage.get(0) == slamDmg: 25, or 30 from A2 (:74,77).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 25, a2: 30}}
+    - name: DROOL
+      move_id: 4               # Maw.java:53
+      intent: BUFF             # setMove((byte)4, BUFF) (:130)
+      effects:
+        # ApplyPowerAction(this, this, StrengthPower(this, strUp), strUp) -- a
+        # SELF buff. strUp 3, 5 from A17 (:67,70). This is what makes NOMNOMNOM
+        # dangerous: Strength applies PER HIT, so stacked Drools multiply across
+        # the whole bite fan-out.
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a17: 5}, power: STRENGTH}
+    - name: NOMNOMNOM
+      move_id: 5               # Maw.java:54
+      intent: ATTACK           # setMove(5, ATTACK, dmg[1][, turnCount/2, true])
+      effects:
+        # ONE AUTHORED STEP, FANNED OUT NATIVELY -- the Healer's precedent, and
+        # the same schema limitation. The Java queues `turnCount / 2` separate
+        # DamageActions on damage.get(1) (:107-111), a count that depends on how
+        # long the combat has run and is therefore unbounded and per-instance;
+        # an effect list expresses per-tier AMOUNTS and not COUNTS. So this row
+        # authors the ONE template and monster_maw.cpp emits it turnCount/2 times
+        # through the per-step helper queue_monster_move_effect. Separate hits,
+        # not one multiplied hit, so block / a halving power / a lethal clamp all
+        # apply per hit -- and so does the monster's Strength.
+        #
+        # nomDmg is 5 in BOTH arms of the A2 branch (:76,80): assigned twice with
+        # the same value, a dead half-branch. Flat, and that non-difference is a
+        # deliberate NEGATIVE in the tier-2 table.
+        - {op: DAMAGE, target: PLAYER, amount: 5}
+  ai: native   # getMove (:117-136) is driven by TWO pieces of per-instance state
+               # no table carries: `roared` (a one-shot that forces the opening
+               # ROAR until the roar has actually RESOLVED -- it is set in
+               # takeTurn at :94, NOT in getMove) and `turnCount`, which is
+               # PRE-incremented on every getMove call INCLUDING the init roll and
+               # whose halved value is the NOMNOMNOM hit count. No ascension
+               # branch anywhere in the tree, and ZERO extra ai_rng draws. See
+               # monster_maw.cpp.
+
+- id: 57
+  name: WRITHING_MASS
+  game_id: "WrithingMass"
+  provenance: "WrithingMass (WrithingMass.java, read in full). ID \"WrithingMass\" (:39). ctor (:54-78): super(..., 160, ...) then setHp(175) at ascension >= 7 else setHp(160) (:60-64) -- the ONE-ARG setHp, so ONE monsterHpRng draw. The ascension >= 2 branch (:65-77) builds FOUR DamageInfos in order 38/9/16/12 against 32/7/15/10, and assigns normalDebuffAmt = 2 in BOTH arms -- another dead half-branch. THERE IS NO A17 BRANCH ANYWHERE IN THIS CLASS: the only monster in the batch without one, and a real absence. Move ids BIG_HIT=0 (!), MULTI_HIT=1, ATTACK_BLOCK=2, ATTACK_DEBUFF=3, MEGA_DEBUFF=4 (:48-52) -- move id ZERO is why emit/monsters.py's `move_id >= 1` rejection was relaxed to `>= 0`; see the reachability argument at the BIG_HIT move below. usePreBattleAction (:80-84) applies TWO powers in this order: ReactivePower(this) THEN MalleablePower(this) (powers.yaml 105 and the ALREADY-REGISTERED 95, reused byte-for-byte). takeTurn (:86-123): case 0 one DamageAction on damage.get(0); case 1 THREE separate DamageActions on damage.get(1) in a `for (i < 3)` loop (:96-99); case 2 a DamageAction on damage.get(2) then GainBlockAction(this, this, damage.get(2).BASE) -- the BASE field, so the block is the unmodified number and the monster's Strength does not scale it; case 3 damage.get(3) then Weak(player, 2, true) then Vulnerable(player, 2, true); case 4 sets usedMegaDebuff = true SYNCHRONOUSLY (:116) then AddCardToDeckAction(CardLibrary.getCard(\"Parasite\").makeCopy()) (:118); the trailing RollMoveAction (:122) sits outside the switch. getMove (:145-194) is RECURSIVE. damage() (:125-132) runs its animation BEFORE super.damage(info) -- presentation either way. changeState (:134-142) is two spine calls. NO die() override."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    # setHp(int) -- FIXED at each tier but STILL ONE monsterHpRng draw (the
+    # Hexaghost precedent, id 22). Contrast Transient and Maw above, which never
+    # call setHp at all and draw nothing.
+    base: {min: 160, max: 160}  # HP (:42), ascension < 7 (:62-63)
+    a7:   {min: 175, max: 175}  # A_2_HP (:43) -- the field NAME says A_2, the
+                                # BRANCH says `>= 7` (:60). Same misleading name
+                                # as Hexaghost's and Spire Growth's.
+  rolls: []
+  moves:
+    - name: BIG_HIT
+      move_id: 0               # WrithingMass.java:48 -- THE GAME'S BYTE ID IS 0.
+                               #
+                               # 0 IS ALSO MonsterState.move_history's EMPTY-SLOT
+                               # SENTINEL, and emit/monsters.py rejected `< 1` for
+                               # exactly that reason until this task. It is
+                               # relaxed to `< 0` here rather than renumbered,
+                               # because move_id IS the game's byte id and this
+                               # file says so. The collision is UNREACHABLE FOR
+                               # THIS MONSTER, checked rather than hoped:
+                               #   * lastMove(0) is consulted from ONE place, the
+                               #     `num < 10` arm (:159), which is reached only
+                               #     on a NON-first getMove -- the firstMove branch
+                               #     (:146-157) returns unconditionally. By then
+                               #     move_history[0] holds a real move, so Java's
+                               #     moveHistory.isEmpty() answer and the engine's
+                               #     0-sentinel answer AGREE.
+                               #   * this class never calls lastTwoMoves or
+                               #     lastMoveBefore, so slots [1]/[2] are never
+                               #     read and their ambiguity never surfaces.
+                               #   * the Reactive re-roll does not break either
+                               #     point: it fires from onAttacked, which needs
+                               #     a live combat past the pre-battle phase, and
+                               #     the init roll already spent firstMove.
+                               # The GENERAL case stays rejected (a negative
+                               # generator test pins move_id: -1), because a
+                               # future monster with a 0 id that DOES read an
+                               # empty history would be a silent wrong answer.
+      intent: ATTACK           # setMove((byte)0, ATTACK, dmg[0].base) (:160,168)
+      effects:
+        # damage.get(0): 32 (the else arm, :72), or 38 from A2 (:66).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 32, a2: 38}}
+    - name: MULTI_HIT
+      move_id: 1               # WrithingMass.java:49
+      intent: ATTACK           # setMove(1, ATTACK, dmg[1].base, 3, true) -- the
+                               # 5-arg multi-damage telegraph (:150,182)
+      effects:
+        # THREE SEPARATE DamageActions from the `for (i < 3)` loop (:96-99),
+        # HIT_COUNT 3 (:46) with no ascension column -- the Snake Plant's Chompy
+        # and the Centurion's Fury precedent. Separate hits, so block, a halving
+        # power and a lethal clamp apply per hit. damage.get(1): 7, or 9 from A2.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 9}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 9}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 9}}
+    - name: ATTACK_BLOCK
+      move_id: 2               # WrithingMass.java:50
+      intent: ATTACK_DEFEND    # setMove(2, ATTACK_DEFEND, dmg[2].base)
+      effects:
+        # ORDER IS LOAD-BEARING (:104-105): damage FIRST, then block -- the
+        # reverse of the Spheric Guardian's BLOCK_ATTACK.
+        #
+        # THE BLOCK READS damage.get(2).BASE (:105), not the DamageInfo's output,
+        # so it is the flat authored number and the monster's own Strength does
+        # NOT scale it. It is a direct GainBlockAction, so kBlockNoPowers. The two
+        # steps carrying the same column is a consequence of the Java writing
+        # `damage.get(2).base` twice, not of a shared value.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 15, a2: 16}}
+        - {op: BLOCK, target: SELF, amount: {base: 15, a2: 16}}
+    - name: ATTACK_DEBUFF
+      move_id: 3               # WrithingMass.java:51
+      intent: ATTACK_DEBUFF    # setMove(3, ATTACK_DEBUFF, dmg[3].base)
+      effects:
+        # ORDER (:109-111): damage, THEN Weak, THEN Vulnerable. Both debuffs are
+        # (player, normalDebuffAmt, true). normalDebuffAmt is 2 in BOTH arms of
+        # the A2 branch (:70,76) -- a dead half-branch, so flat and no column.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 12}}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: VULNERABLE}
+    - name: MEGA_DEBUFF
+      move_id: 4               # WrithingMass.java:52
+      intent: STRONG_DEBUFF    # setMove((byte)4, STRONG_DEBUFF) (:166)
+      effects:
+        # THE ONLY IN-COMBAT MASTER-DECK WRITE IN ACTS 1-3.
+        # AddCardToDeckAction(CardLibrary.getCard("Parasite").makeCopy()) (:118)
+        # -- a BASE (unupgraded) Parasite, cards.yaml id 35, which already carries
+        # its run-layer `on_remove_max_hp_loss: 3`. OBTAIN_CARD (opcode 68, the
+        # S2.2F framework grant) accrues it into CombatState.pending_obtain and
+        # run_advance drains that each pump step through add_card_to_master_deck
+        # -- the single acquisition door, which is what makes Omamori's curse gate
+        # (ShowCardAndObtainEffect.java:30-45) and the onObtainCard /
+        # onMasterDeckChange relic fan-outs apply without a second implementation.
+        #
+        # ONCE PER COMBAT, EVER: usedMegaDebuff is set SYNCHRONOUSLY in takeTurn
+        # (:116) and the `num < 20` arm's guard is `!usedMegaDebuff &&
+        # !lastMove(4)` (:165), so after the first the arm falls to a 0.1 coin for
+        # BIG_HIT or recurses. The FastShakeAction beside it (:117) is
+        # presentation.
+        # `amount` is unused by OBTAIN_CARD (the CardId rides in `extra`), but
+        # the monster-move grammar requires the column, so it is an explicit 0.
+        - {op: OBTAIN_CARD, target: PLAYER, amount: 0, card: PARASITE}
+  ai: native   # getMove (:145-194) is the RNG-heaviest AI in Acts 1-3 and the
+               # only RECURSIVE one. `firstMove` (:146-157) is a one-shot that
+               # picks among MULTI_HIT / ATTACK_BLOCK / ATTACK_DEBUFF on thirds of
+               # `num` and returns WITHOUT createIntent. Every other arm may spend
+               # MORE ai_rng: a randomBoolean tiebreak (0.1 / 0.4 / 0.3) is one
+               # draw, and a re-entry is `getMove(aiRng.random(a, b))` -- another
+               # draw, then the whole tree again. The recursion is real and is
+               # written as real recursion, not a capped loop, because a cap is a
+               # behaviour change. Note `getMove(aiRng.random(19))` from the
+               # `num < 40` arm WIDENS the range back, so termination is not
+               # structural; it is probabilistic, and the module asserts a
+               # generous depth bound rather than imposing one. No ascension
+               # branch. See monster_writhing_mass.cpp.

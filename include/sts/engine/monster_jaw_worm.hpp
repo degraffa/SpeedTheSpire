@@ -13,7 +13,7 @@
 // are cited per-column in registry/monsters.yaml):
 //   * com.megacrit.cardcrawl.monsters.exordium.JawWorm -- getMove decision tree
 //     (JawWorm.java:148-184), takeTurn's unconditional RollMoveAction
-//     (:120-146), ascension stat branches (:79-104), move ids
+//     (:120-146), ascension stat branches (:81-104), move ids
 //     CHOMP=1/BELLOW=2/THRASH=3 (:65-67).
 //   * com.megacrit.cardcrawl.monsters.AbstractMonster -- rollMove() ==
 //     getMove(aiRng.random(99)) (:465-467), init() calls rollMove() once before
@@ -88,5 +88,71 @@ void jaw_worm_init(CombatState& state, uint8_t monster_index) noexcept;
 // generated table, see SCOPE) then rolls the next move via the getMove decision
 // tree on ai_rng, updating move_history and intent.
 void jaw_worm_take_turn(CombatState& state, uint8_t monster_index) noexcept;
+
+// --- The hardMode variant (S2.26; the Act-3 "Jaw Worm Horde") ----------------
+//
+// PURELY ADDITIVE, AND DELIBERATELY SO. Everything above is skeleton content
+// whose Stage-A fixtures pin the ordinary Exordium Jaw Worm byte for byte, so
+// the variant is expressed as NEW exported functions plus a pad0 latch that
+// jaw_worm_init already writes as 0 -- not one line of jaw_worm_init /
+// jaw_worm_take_turn / the getMove tree changes.
+//
+// WHAT THE BOOLEAN IS. JawWorm has two constructors (JawWorm.java:71-110): the
+// 2-arg one delegates with `hard = false`, and the 3-arg one has exactly one
+// caller in the game -- MonsterHelper's "Jaw Worm Horde", which builds three
+// worms with `true` (MonsterHelper.java:549-550). It changes EXACTLY TWO things
+// and neither is a stat:
+//
+//   (a) `firstMove = false` (:77-79). The ordinary worm's getMove short-circuits
+//       its first decision to a forced CHOMP (:150-154); a hard worm does not,
+//       so its OPENING telegraph is decided by the full num tree against an
+//       EMPTY move history. Crucially the DRAW COUNT is unchanged: every arm's
+//       history predicate is false on an empty history, so no tiebreak
+//       randomBoolean is reached and the opening still costs exactly one
+//       random(99). What changes is the outcome distribution -- 25% Chomp / 30%
+//       Thrash / 45% Bellow instead of 100% Chomp.
+//
+//   (b) usePreBattleAction (:112-118) stops being empty: ApplyPowerAction
+//       Strength(bellowStr) THEN GainBlockAction(bellowBlock), in that
+//       addToBottom order. Those are the SAME two numbers in the SAME order as
+//       the BELLOW move's registry program, so the pre-battle body queues that
+//       program rather than restating 5 and 9 in code.
+//
+// EVERY setHp RANGE AND EVERY TIER COLUMN SITS OUTSIDE THE hardMode GUARD
+// (:81-104), which is what lets the id-1 registry row serve both variants
+// unchanged. That is the answer to the deferred ledger row.
+//
+// WHY NOT A SECOND MonsterId: `monster_from_game_id` is a by-game-id lookup and
+// two rows sharing "JawWorm" would make it ambiguous. WHY NOT A per-emit variant
+// column on the encounter composition: that is the general answer, and it would
+// touch ResolvedGroup, both spawn signatures and MonsterInitFn for one caller.
+// The chosen shape is the LAGAVULIN PRECEDENT -- a bespoke second init selected
+// by a named branch at the combat-start site (src/engine/run_advance.cpp) --
+// which costs no schema change and no registry vocabulary. Lagavulin's branch
+// keys off an event-variant enum and this one keys off the ENCOUNTER KEY, which
+// is the one difference worth flagging: if a second behavioural monster-ctor
+// boolean ever lands, the rule of two fires and the per-emit column becomes
+// correct. Checked, and it will not from the Act-2/3 roster:
+// `Cultist(x, y, boolean talk)` (Cultist.java:57-75), which the Awakened One
+// group passes `false`, is PURELY PRESENTATION (a dialog latch).
+
+// hardMode's marker, in the monster-type-scoped scratch byte. The ORDINARY init
+// writes pad0 = 0, so an Exordium worm reads this clear and every hard-mode
+// branch is dead for it -- which is exactly what keeps the Stage-A fixtures
+// byte-identical.
+inline constexpr uint8_t kJawWormPadHardMode = 0x01u;
+
+// `new JawWorm(x, y, true)` + init(). Identical to jaw_worm_init except that it
+// sets the hardMode latch and does NOT force the opening Chomp: the same single
+// ai_rng.random(99) is drawn, and this time its value is READ.
+void jaw_worm_init_hard(CombatState& state, uint8_t monster_index) noexcept;
+
+// JawWorm.usePreBattleAction (JawWorm.java:112-118). A NO-OP unless the record
+// carries kJawWormPadHardMode -- which IS the `if (this.hardMode)` guard, and is
+// why registering this for MonsterId::JAW_WORM is safe for the ordinary worm: a
+// registered no-op queues nothing and draws nothing, exactly as the nullptr it
+// replaces did.
+void jaw_worm_use_pre_battle_action(CombatState& state,
+                                    uint8_t monster_index) noexcept;
 
 }  // namespace sts::engine

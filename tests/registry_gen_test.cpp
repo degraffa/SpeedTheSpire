@@ -518,7 +518,7 @@ TEST(RegistryGen, ManifestCounts) {
                                       // joins any generated pool.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 61u);  // + S2.23's MINION (96) and PAINFUL_STABS
+    EXPECT_EQ(m::kPowersCount, 65u);  // + S2.23's MINION (96) and PAINFUL_STABS
                                       // (97) -- the Gremlin Leader's minion
                                       // marker (which un-parks the Feed and
                                       // Hand of Greed gates) and the Book of
@@ -527,7 +527,11 @@ TEST(RegistryGen, ManifestCounts) {
                                       // and S2.25's REGROW (99, game_id "Life
                                       // Link" -- NOT "Regrow"), EXPLOSIVE (100)
                                       // and GENERIC_STRENGTH_UP (101). Both
-                                      // blocks spent exactly; 98 is S2.24's
+                                      // blocks spent exactly -- and S2.26's
+                                      // CONSTRICTED (102), FADING (103),
+                                      // SHIFTING (104) and REACTIVE (105,
+                                      // game_id "Compulsive"), the 102-105
+                                      // block spent exactly. 98 is S2.24's
                                       // row, not a gap.
                                       // + S2.22's MALLEABLE (95), the Snake
                                       // Plant's escalating retaliation shield;
@@ -592,7 +596,7 @@ TEST(RegistryGen, ManifestCounts) {
                                       // The block 93-94 is spent exactly; 95
                                       // (Malleable) is the NEXT city batch's row,
                                       // not this one's
-    EXPECT_EQ(m::kMonstersCount, 42u); // + S2.23's three Act-2 city ELITES:
+    EXPECT_EQ(m::kMonstersCount, 46u); // + S2.23's three Act-2 city ELITES:
                                        // Gremlin Leader (37), Taskmaster (38,
                                        // game_id "SlaverBoss") and Book of
                                        // Stabbing (39), the 37-39 block spent
@@ -601,7 +605,14 @@ TEST(RegistryGen, ManifestCounts) {
                                        // Walker (50), Repulsor (51), Exploder
                                        // (52), Spiker (53), the 49-53 block
                                        // spent exactly. 40-44 are S2.24's and
-                                       // 45-48 stay UNISSUED.
+                                       // 45-48 stay UNISSUED --
+                                       // and S2.26's four Act-3 "Beyond"
+                                       // normals: Spire Growth (54, game_id
+                                       // "Serpent"), Transient (55), Maw (56),
+                                       // Writhing Mass (57), the 54-57 block
+                                       // spent exactly (the Jaw Worm Horde
+                                       // added NO row: it reuses id 1 through
+                                       // a constructor variant).
                                        // + S2.22's five Act-2 city normals:
                                        // Mugger (32), Snake Plant (33), Snecko
                                        // (34), Centurion (35), Healer (36) --
@@ -663,7 +674,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 550u);  // 132 + 61 + 42 + 150 + 33 + 51 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 558u);  // 132 + 65 + 46 + 150 + 33 + 51 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1100,6 +1111,71 @@ TEST(RegistryGen, DuplicateMoveIdFailsWithClearError) {
     EXPECT_NE(msg.find("BAD_MOVES"), std::string::npos) << msg;
 }
 
+// --- 6e. move_id 0 is ACCEPTED, and a NEGATIVE move_id is still rejected -----
+//
+// The loader demanded `move_id >= 1` until S2.26, on the grounds that 0 is
+// MonsterState.move_history's empty-slot sentinel. WrithingMass.BIG_HIT is
+// (byte) 0 (WrithingMass.java:48) and move_id IS the game's byte id, so the rule
+// was re-derived rather than dodged: the 0-vs-empty-history question is a
+// PER-MONSTER property (does its getMove read history while that history can
+// still be empty?), which a loader cannot answer and the row's provenance can.
+//
+// What the gate still owns is what is unconditionally wrong. This pins both
+// halves -- the acceptance of 0 through the REAL registry (the Writhing Mass
+// row is the witness, and the positive-side test above already reads it), and
+// the rejection of a negative id, which would silently wrap in the uint8_t the
+// engine stores move ids in.
+TEST(RegistryGen, NegativeMoveIdStillFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_registry_neg_move");
+    {
+        std::ofstream monsters(bad_reg / "monsters.yaml", std::ios::app);
+        // id 99: unused, so the parser reaches the move_id check rather than
+        // tripping the id-collision gate first.
+        monsters << R"YAML(
+- id: 99
+  name: BAD_NEG_MOVE
+  game_id: "BadNegMove"
+  provenance: "synthetic negative-move_id test"
+  hp:
+    base: {min: 10, max: 12}
+  moves:
+    - name: FIRST
+      move_id: -1
+      intent: ATTACK
+      effects:
+        - {op: DAMAGE, target: PLAYER, amount: 3}
+  ai: native
+)YAML";
+    }
+    const fs::path out = scratch / "bad_neg_move_out";
+    const fs::path err = scratch / "bad_neg_move_err.txt";
+    const int status =
+        run_generator(bad_reg.string(), out.string(), err.string());
+    EXPECT_NE(status, 0) << "generator should fail on a negative move_id";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("non-negative"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("BAD_NEG_MOVE"), std::string::npos) << msg;
+}
+
+// And the positive half, against the REAL registry rather than a synthetic row:
+// a 0 move id round-trips through codegen and resolves as a real move.
+TEST(RegistryGen, ZeroMoveIdRoundTripsForTheWrithingMass) {
+    namespace r = sts::registry;
+    EXPECT_EQ(r::kWrithingMassMoveBigHit, 0);
+    const r::MonsterMove* big =
+        r::kWrithingMass.move(r::kWrithingMassMoveBigHit);
+    ASSERT_NE(big, nullptr)
+        << "move(0) must resolve; a lookup that treated 0 as 'no move' would "
+           "silently give the Writhing Mass four moves instead of five";
+    EXPECT_EQ(big->move_id, 0);
+    EXPECT_EQ(big->effect_count, 1);
+    // Nobody else has one, which is what keeps the sentinel safe elsewhere.
+    EXPECT_EQ(r::kJawWorm.move(0), nullptr);
+}
+
 // --- 7. B3.1 card-flag + two-row (upgrade) codegen --------------------------
 // The skeleton cards carry no flags (generated flags 0), and each carries a
 // DISTINCT upgraded program whose numbers are hand-derived from the decompiled
@@ -1518,7 +1594,9 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
     // `this.priority` across the decompiled powers directory: Weak 99
     // (WeakPower.java:40), Frail 10 (FrailPower.java:29), IntangiblePlayer 75
     // (IntangiblePlayerPower.java:31), Confusion 0 (ConfusionPower.java:30),
-    // PenNib 6 (PenNibPower.java:36).
+    // PenNib 6 (PenNibPower.java:36), Flight 50 (FlightPower.java:34),
+    // Constricted 105 (ConstrictedPower.java:35), Reactive 50
+    // (ReactivePower.java:31).
     namespace r = sts::registry;
     EXPECT_EQ(r::power_def(r::PowerId::WEAK)->priority, 99);
     EXPECT_EQ(r::power_def(r::PowerId::FRAIL)->priority, 10);
@@ -1530,6 +1608,20 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
     // and slot order IS the atDamage* walk order, so this number decides whether
     // a Weak attacker's damage is halved before or after the 0.75 multiply.
     EXPECT_EQ(r::power_def(r::PowerId::FLIGHT)->priority, 50);
+    // Constricted 105 (ConstrictedPower.java:35) -- the HIGHEST in the registry,
+    // above Weak's 99, so its slot always sorts LAST and therefore walks last in
+    // every atDamage* pass and every hook fan-out.
+    EXPECT_EQ(r::power_def(r::PowerId::CONSTRICTED)->priority, 105);
+    // Reactive 50 (ReactivePower.java:31) -- the same slot band as Flight.
+    EXPECT_EQ(r::power_def(r::PowerId::REACTIVE)->priority, 50);
+    // Its two batch siblings set NO priority: FadingPower's ctor
+    // (FadingPower.java:24-31) and ShiftingPower's (ShiftingPower.java:22-29)
+    // assign neither type nor priority, so both take the default and belong in
+    // the sweep below.
+    EXPECT_EQ(r::power_def(r::PowerId::FADING)->priority,
+              r::kDefaultPowerPriority);
+    EXPECT_EQ(r::power_def(r::PowerId::SHIFTING)->priority,
+              r::kDefaultPowerPriority);
     // Hex's ctor sets NO priority (HexPower.java:26-34), so -- unlike its batch
     // sibling above -- it takes the default and belongs in the sweep below.
     EXPECT_EQ(r::power_def(r::PowerId::HEX)->priority,
@@ -1544,7 +1636,8 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
         const auto id = static_cast<r::PowerId>(i);
         if (id == r::PowerId::WEAK || id == r::PowerId::FRAIL ||
             id == r::PowerId::INTANGIBLE || id == r::PowerId::CONFUSION ||
-            id == r::PowerId::PEN_NIB || id == r::PowerId::FLIGHT) {
+            id == r::PowerId::PEN_NIB || id == r::PowerId::FLIGHT ||
+            id == r::PowerId::CONSTRICTED || id == r::PowerId::REACTIVE) {
             continue;
         }
         const r::PowerDef* d = r::power_def(id);
