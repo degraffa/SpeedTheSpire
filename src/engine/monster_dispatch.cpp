@@ -10,12 +10,15 @@
 
 #include "interp/interp_powers.hpp"        // op_apply_power (Philosopher's Stone)
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
+#include "sts/engine/interp.hpp"            // Opcode, make_apply_power_flags (the spawn Minion)
+#include "sts/engine/monster_book_of_stabbing.hpp"  // the growing stab counter
 #include "sts/engine/monster_byrd.hpp"     // the Byrd: Flight + the airborne latch
 #include "sts/engine/monster_centurion.hpp"  // the Centurion: aliveCount-driven tree
 #include "sts/engine/monster_chosen.hpp"   // the Chosen: Hex opener + roll tree
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
 #include "sts/engine/monster_fungi_beast.hpp"  // Fungi Beast + its Spore Cloud
 #include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
+#include "sts/engine/monster_gremlin_leader.hpp"  // the summoning Act-2 elite
 #include "sts/engine/monster_gremlin_nob.hpp"  // gremlin_nob_init / _take_turn
 #include "sts/engine/monster_guardian.hpp" // The Guardian's mode state machine
 #include "sts/engine/monster_healer.hpp"   // the Healer: needToHeal + group fan-out
@@ -34,6 +37,7 @@
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
 #include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split
 #include "sts/engine/monster_spheric_guardian.hpp"  // the zero-HP-draw Barricade sphere
+#include "sts/engine/monster_taskmaster.hpp"  // the double-ctor-draw Slavers elite
 #include "sts/registry/manifest.hpp"           // generated kMonstersCount
 
 namespace sts::engine {
@@ -176,6 +180,15 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &centurion_init;
         case MonsterId::HEALER:
             return &healer_init;
+        case MonsterId::GREMLIN_LEADER:
+            return &gremlin_leader_init;
+        case MonsterId::TASKMASTER:
+            // TWO monster_hp_rng draws, in this order: the `super(...)` argument
+            // (registry roll SUPER_ARG_HP, timing CONSTRUCTOR_BEFORE_HP) and then
+            // setHp (Taskmaster.java:50-56). See monster_taskmaster.hpp note (1).
+            return &taskmaster_init;
+        case MonsterId::BOOK_OF_STABBING:
+            return &book_of_stabbing_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -253,6 +266,12 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &centurion_take_turn;
         case MonsterId::HEALER:
             return &healer_take_turn;
+        case MonsterId::GREMLIN_LEADER:
+            return &gremlin_leader_take_turn;
+        case MonsterId::TASKMASTER:
+            return &taskmaster_take_turn;
+        case MonsterId::BOOK_OF_STABBING:
+            return &book_of_stabbing_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -260,7 +279,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 37,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
@@ -348,6 +367,28 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             // Likewise: needToHeal sums the group's missing HP
             // (Healer.java:157-160).
             return &healer_roll_move;
+        // S2.23: ALL THREE city elites register. Each ends takeTurn in a
+        // RollMoveAction that sits AFTER the switch, so every move body reaches
+        // it (GremlinLeader.java:133, Taskmaster.java:78,
+        // BookOfStabbing.java:102).
+        case MonsterId::GREMLIN_LEADER:
+            // The one roll fn that can spend an UNBOUNDED number of draws:
+            // getMove recurses with a fresh random(50, 99) / random(0, 80) on two
+            // arms (:163,:174), and a re-drawn 80 re-enters the same arm. It also
+            // reads OTHER monsters' liveness (numAliveGremlins), and on a RALLY
+            // turn its ITEM is aimed at a pre-computed post-insertion index --
+            // see monster_gremlin_leader.hpp notes (1) and (3).
+            return &gremlin_leader_roll_move;
+        case MonsterId::TASKMASTER:
+            // getMove discards the num (Taskmaster.java:81-84) and still
+            // registers, for the Spheric Guardian's reason: the draw moves the
+            // shared stream even when its value decides nothing.
+            return &taskmaster_roll_move;
+        case MonsterId::BOOK_OF_STABBING:
+            // The one roll fn that WRITES per-instance state: getMove
+            // ++stabCount's on three of four paths, and on all four at A18+
+            // (BookOfStabbing.java:129-150).
+            return &book_of_stabbing_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -366,7 +407,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 37,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -395,6 +436,25 @@ MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
     // them mid-combat. Every group that contains one builds it at spawn time
     // (MonsterHelper.java:391-393,406-408,427-429 and the Exordium Thugs /
     // Exordium Wildlife bottom-* helpers, :780-829); none splits or summons.
+    // ...AND THAT PARAGRAPH IS STILL TRUE OF THE SLAVERS after S2.23 -- the
+    // Taskmaster joins their group but summons nothing (Taskmaster.java declares
+    // takeTurn, getMove, playSfx, playDeathSfx and die, and nothing else).
+    //
+    // S2.23: THE FIVE GREMLINS BECOME MID-COMBAT SPAWNABLE, and they are the
+    // first monsters in the roster to get here by SUMMON rather than by split.
+    // GremlinLeader's RALLY queues two SummonGremlinActions
+    // (GremlinLeader.java:108-109), each of which draws a key from an 8-entry
+    // pool containing every one of the five (SummonGremlinAction.java:59-67) --
+    // so all five need an entry, not just the ones a given fight happens to
+    // produce. Their HP arrives PRE-DRAWN because the gremlin's constructor runs
+    // inside the summon action's constructor, at addToBottom time; see
+    // monster_gremlin.hpp.
+    // Checked for the three S2.23 elites themselves: none of them is mid-combat
+    // spawnable. The Gremlin Leader is built by the encounter
+    // (MonsterHelper.java:507-509) and is the SUMMONER, never the summoned; the
+    // Taskmaster is built by "Slavers" (:510-512) and "Colosseum Nobs" (:516-518);
+    // the Book of Stabbing is a solo encounter (:504-506) and declares no spawn
+    // machinery at all.
     // Checked for The Guardian: nothing spawns it mid-combat. It is a solo boss
     // encounter (encounters.yaml "The Guardian") and neither splits nor summons.
     // Same for Hexaghost: a solo boss encounter (encounters.yaml "Hexaghost")
@@ -409,6 +469,17 @@ MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
             return &spike_slime_large_spawn_at_hp;
         case MonsterId::ACID_SLIME_LARGE:
             return &acid_slime_large_spawn_at_hp;
+        // S2.23: the Gremlin Leader's summon pool, all five members.
+        case MonsterId::GREMLIN_WARRIOR:
+            return &gremlin_warrior_spawn_at_hp;
+        case MonsterId::GREMLIN_THIEF:
+            return &gremlin_thief_spawn_at_hp;
+        case MonsterId::GREMLIN_FAT:
+            return &gremlin_fat_spawn_at_hp;
+        case MonsterId::GREMLIN_TSUNDERE:
+            return &gremlin_tsundere_spawn_at_hp;
+        case MonsterId::GREMLIN_WIZARD:
+            return &gremlin_wizard_spawn_at_hp;
         default:
             return nullptr;  // not mid-combat spawnable
     }
@@ -458,7 +529,8 @@ uint8_t smart_position_for(const CombatState& state, int16_t draw_x) noexcept {
 }
 
 void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
-                           int16_t hp, bool run_pre_battle) noexcept {
+                           int16_t hp, bool run_pre_battle, bool apply_minion,
+                           int16_t draw_x) noexcept {
     assert(state.monster_count < kMonsterCap &&
            "spawn_monster_at_slot: monster record overflow. kMonsterCap is 23 "
            "-- the largest the CombatState size ceiling admits, NOT a derived "
@@ -487,6 +559,11 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
     assert(fn != nullptr && "spawn_monster_at_slot: monster is not mid-combat "
                             "spawnable (monster_spawn_at_hp_fn)");
     fn(state, slot, hp);  // m.init(): the child's aiRng roll, at resolve time
+    // The position key the SPAWNER supplied, written after the init because the
+    // init assigns every field of a fresh record (see the header's amended "WHO
+    // SETS draw_x" paragraph). Zero for every caller that names only a
+    // MonsterId, which is exactly what those records carried before.
+    state.monsters[slot].draw_x = draw_x;
 
     // relics.onSpawnMonster (SpawnMonsterAction.update, SpawnMonsterAction.java:
     // 44-50). A hand-written fan-out rather than a registry RelicHook: the
@@ -510,6 +587,27 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
     //     (queue_monster_move_effects above), which is strictly after this.
     dispatch_on_spawn_monster_relics(state, slot);
 
+    // SummonGremlinAction.update's own addToBot(ApplyPowerAction(m, m, new
+    // MinionPower(m))) (SummonGremlinAction.java:114). QUEUED, not applied: the
+    // Java queues it and it resolves after everything already in the queue --
+    // notably after the summoner's own trailing RollMoveAction. Its amount is
+    // -1, MinionPower's un-assigned AbstractPower field initialiser
+    // (MinionPower.java:21-28; AbstractPower.java:65), NOT 1 (the Confusion
+    // adjudication, monster_snecko.hpp kConfusionAppliedAmount).
+    //
+    // BEFORE the pre-battle block below, because the Java's isDone arm (:117-121)
+    // runs usePreBattleAction after this addToBot -- so a summoned Gremlin
+    // Warrior's items land [Minion, Angry], in that order.
+    if (apply_minion) {
+        ActionQueueItem minion{};
+        minion.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        minion.src = slot;
+        minion.tgt = slot;
+        minion.amount = kMinionAppliedAmount;
+        minion.flags = make_apply_power_flags(PowerId::MINION);
+        add_to_bottom(state, minion);
+    }
+
     // SummonGremlinAction.update runs the child's usePreBattleAction at isDone
     // (a summoned Gremlin Warrior's Angry power); SpawnMonsterAction does not.
     // Opt-in for that reason -- see the header. It runs AFTER the relic fan-out
@@ -525,7 +623,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 37,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -638,17 +736,58 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         case MonsterId::CENTURION:
         case MonsterId::HEALER:
             return;
+
+        // S2.23. TWO of the three city elites override damage() and both are
+        // empty here, for the Sentry's reason: GremlinLeader.damage
+        // (GremlinLeader.java:215-222) and BookOfStabbing.damage
+        // (BookOfStabbing.java:120-127) are each `super.damage(info)` followed
+        // ONLY by the "Hit" spine animation, gated on a non-THORNS hit with
+        // output > 0. Nothing there touches combat state or draws RNG, so an
+        // empty hook is the COMPLETE translation and hp_lost is deliberately
+        // unread. The TASKMASTER does not override damage() at all
+        // (Taskmaster.java declares takeTurn, getMove, playSfx, playDeathSfx and
+        // die, and nothing else), so it stays with the `default:`.
+        //
+        // The Gremlin Leader's real reaction to being killed is not here either:
+        // it is die(), on the POST-super side, and it registers in
+        // monster_die_after_fn below.
+        case MonsterId::GREMLIN_LEADER:
+        case MonsterId::BOOK_OF_STABBING:
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 37,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
     switch (id) {
+        // S2.23. TWO of the three city elites declare usePreBattleAction; all
+        // three are spelled out rather than left to the `default:`.
+        case MonsterId::GREMLIN_LEADER:
+            // gremlins[0]/[1] = monsters.get(0)/get(1), gremlins[2] = null, then
+            // ApplyPowerAction(m, m, MinionPower(this)) over all three -- the
+            // third target is null and no-ops (GremlinLeader.java:93-101;
+            // ApplyPowerAction.java:96-99), so TWO items are queued. It is also
+            // where the two minions' `draw_x` is written, which is the one place
+            // that can know it -- see monster_gremlin_leader.hpp note (5). No RNG.
+            return &gremlin_leader_use_pre_battle_action;
+        case MonsterId::BOOK_OF_STABBING:
+            // ApplyPowerAction(this, this, new PainfulStabsPower(this)) --
+            // self-applied at amount -1 (BookOfStabbing.java:78-81;
+            // PainfulStabsPower.java:29). No RNG.
+            return &book_of_stabbing_use_pre_battle_action;
+        case MonsterId::TASKMASTER:
+            // Taskmaster.java does not declare the method at all -- it declares
+            // takeTurn, getMove, playSfx, playDeathSfx and die, and nothing else
+            // -- so it inherits AbstractMonster's empty body
+            // (AbstractMonster.java:953-954). Explicit nullptr, the Chosen's
+            // precedent.
+            return nullptr;
+
         // S2.22. TWO of the five declare usePreBattleAction and three do not;
         // all five are spelled out rather than left to the `default:`.
         case MonsterId::MUGGER:
@@ -790,7 +929,7 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
 }
 
 MonsterDieFn monster_die_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 37,
                   "new monster: does its Java class override die()? Read the "
                   "method. If everything before `super.die()` is presentation -- "
                   "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
@@ -822,19 +961,42 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
             // playDeathSfx' aiRng.random(2) (Mugger.java:147-154, called at
             // :158). SEEDED, unconditional, once per death.
             return &mugger_die;
+
+        // S2.23. All three city elites override die() and NONE of them belongs
+        // here; the three explicit nullptrs are readings, not omissions.
+        case MonsterId::TASKMASTER:
+            // `super.die(); this.playDeathSfx();` (Taskmaster.java:104-108).
+            // Two things put it here rather than in the table: playDeathSfx'
+            // MathUtils.random(1) (:96) is UNSEEDED libGDX -- the Looter's
+            // answer, not the Mugger's -- and it runs AFTER super.die() anyway,
+            // so even a seeded draw would belong in monster_die_after_fn.
+            return nullptr;
+        case MonsterId::BOOK_OF_STABBING:
+            // `super.die(); CardCrawlGame.sound.play("STAB_BOOK_DEATH");`
+            // (BookOfStabbing.java:152-156) -- a bare sound, no generator at
+            // all, and again on the post-super side.
+            return nullptr;
+        case MonsterId::GREMLIN_LEADER:
+            // die() (GremlinLeader.java:224-241) has REAL CONTENT -- the
+            // EscapeAction fan-out -- but every line of it runs AFTER
+            // `super.die()` (:226), and the ordering is load-bearing: the
+            // fan-out's `if (m.isDying) continue;` is what excludes the leader
+            // ITSELF, and it only does so because super.die() has already set
+            // isDying. So the body registers in monster_die_after_fn below, and
+            // this nullptr is the pre-super half being genuinely empty.
+            return nullptr;
         default:
             return nullptr;  // die() is presentation only, or absent
     }
 }
 
-// The POST-`super.die()` half. EMPTY TODAY, and that is a recorded reading, not
-// an oversight: no Act-1 monster has content on that side of the line. Every
-// consumer named in the header's survey -- Reptomancer, Bronze Automaton, The
-// Collector, Awakened One -- is Act-2/3 content that has not landed yet. The
-// slot exists now because the four batches that need it run in parallel and
-// must not each invent their own.
+// The POST-`super.die()` half. No Act-1 monster has content on that side of the
+// line; the Gremlin Leader (S2.23) is the FIRST entry, and the rest of the
+// header's survey -- Reptomancer, Bronze Automaton, The Collector, Awakened One
+// -- is still ahead. The slot exists because the batches that need it run in
+// parallel and must not each invent their own.
 MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 37,
                   "new monster: does its Java die() override do anything AFTER "
                   "`super.die()`? Read the method. Content before super.die() "
                   "belongs in monster_die_fn; content after it belongs here, "
@@ -842,6 +1004,14 @@ MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
                   "suicide sweep skips itself only because super.die() has "
                   "already set isDying.");
     switch (id) {
+        case MonsterId::GREMLIN_LEADER:
+            // `super.die()`, two presentation ShoutAction loops, then
+            // `for (m : monsters) if (!m.isDying) addToBottom(new
+            // EscapeAction(m))` (GremlinLeader.java:224-241). The leader's own
+            // record is skipped by the isDying test alone -- there is no
+            // `m == this` term -- which is exactly Reptomancer's shape and
+            // exactly why this is the post-super slot.
+            return &gremlin_leader_die_after;
         default:
             return nullptr;  // no post-super content (or no die() at all)
     }

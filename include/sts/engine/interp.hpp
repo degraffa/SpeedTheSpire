@@ -476,9 +476,11 @@ enum class Opcode : uint16_t {
                               // The Java gate is
                               //   !(!isDying && currentHealth > 0 || halfDead ||
                               //     hasPower("Minion"))
-                              // (:37). halfDead is LIVE (kMonsterFlagHalfDead);
-                              // the Minion term is still inert -- there is no
-                              // Minion power row yet. See op_damage_greed.
+                              // (:37). BOTH extra terms are LIVE: halfDead is
+                              // kMonsterFlagHalfDead, and the Minion term is
+                              // PowerId::MINION (powers.yaml id 96, S2.23) --
+                              // killing a Gremlin Leader's minion pays no gold.
+                              // See op_damage_greed.
     // Wave-C track 1, relic-tail stage. 63-64 out of the 63-66 block that stage
     // owns; 65-66 are RELEASED unspent, and 60-62 stay the potions stage's.
     REMOVE_DEBUFFS = 63,      // Orange Pellets / RemoveDebuffsAction.update
@@ -709,6 +711,57 @@ enum class Opcode : uint16_t {
 // spawned monster's usePreBattleAction after its init (SummonGremlinAction's
 // behaviour; SpawnMonsterAction's is to leave it alone).
 inline constexpr uint32_t kSpawnRunPreBattle = 1u << 16;
+// Bit 17 asks the spawn to queue an ApplyPowerAction(m, m, MinionPower) on the
+// newly inserted record, at the queue BOTTOM, BEFORE the pre-battle action above
+// runs. That is SummonGremlinAction.update's exact pair and its exact order
+// (SummonGremlinAction.java:114 addToBot(Minion), then :120
+// m.usePreBattleAction() at isDone), which is why a summoned Gremlin Warrior's
+// power list ends up [Minion, Angry] and not the other way round.
+//
+// A BIT rather than a policy, for the same reason bit 16 is: the two Java spawn
+// actions differ. SpawnMonsterAction (the slime split) applies NO Minion; every
+// SUMMONER does -- SummonGremlinAction here, and Reptomancer's daggers, the
+// Collector's torch heads and the Bronze Automaton's orbs in the batches that
+// follow. Setting both bits together IS the summon pattern.
+inline constexpr uint32_t kSpawnApplyMinion = 1u << 17;
+// Bits 18..31 carry the spawned record's `draw_x` position key
+// (MonsterState::draw_x) as a RAW SIGNED 14-BIT two's-complement field --
+// range -8192..8191, comfortably wider than every `offsetX` in Acts 1-3 (the
+// extremes are the Gremlin Leader's -532 and the Slime Boss layout's +254).
+//
+// WHY IT RIDES IN THE ITEM. `draw_x` is a per-SPAWNER, per-SLOT constant out of
+// the spawning class's POSX table (GremlinLeader.POSX {-366,-170,-532};
+// Reptomancer's {210,-220,180,-250}), NOT a property of the spawned type -- the
+// same Gremlin Warrior sits at three different x's depending on which summon
+// slot it filled, and at a fourth in the Gremlin Gang encounter. So the spawned
+// monster's own spawn-at-hp init cannot know it, and the SPAWNER has to say.
+// (monster_dispatch.hpp's "WHO SETS draw_x" paragraph is amended to match.)
+//
+// ZERO IS THE IDENTITY. A caller that writes only the MonsterId -- which is
+// every pre-S2.23 caller, i.e. both large-slime split sites -- decodes to
+// draw_x == 0, exactly the value those records already carried, so no landed
+// spawn moves.
+inline constexpr uint32_t kSpawnDrawXShift = 18u;
+inline constexpr uint32_t kSpawnDrawXBits = 14u;
+[[nodiscard]] constexpr uint32_t make_spawn_monster_flags(
+    uint16_t monster_id, int16_t draw_x = 0, bool run_pre_battle = false,
+    bool apply_minion = false) noexcept {
+    const uint32_t x = static_cast<uint32_t>(static_cast<uint16_t>(draw_x)) &
+                       ((1u << kSpawnDrawXBits) - 1u);
+    return static_cast<uint32_t>(monster_id) |
+           (run_pre_battle ? kSpawnRunPreBattle : 0u) |
+           (apply_minion ? kSpawnApplyMinion : 0u) | (x << kSpawnDrawXShift);
+}
+[[nodiscard]] constexpr int16_t spawn_draw_x_from_flags(uint32_t flags) noexcept {
+    // Sign-extend the 14-bit field: shift it to the top of a 32-bit word and
+    // arithmetic-shift back. Written as an explicit subtract rather than a
+    // signed right shift so it does not lean on implementation-defined
+    // behaviour.
+    const uint32_t raw = (flags >> kSpawnDrawXShift) & ((1u << kSpawnDrawXBits) - 1u);
+    const uint32_t sign = 1u << (kSpawnDrawXBits - 1u);
+    return static_cast<int16_t>(
+        static_cast<int32_t>(raw ^ sign) - static_cast<int32_t>(sign));
+}
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
 // `amount` is the number of cards to draw; `flags` low byte carries the

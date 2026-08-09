@@ -221,9 +221,9 @@ OPCODES = {
     # unlike the pure-damage matrices Panache and The Bomb queue -- followed by
     # `extra` gold IF AND ONLY IF the hit left the target dead. The gold gate is
     #   !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
-    # (:37); halfDead is LIVE (kMonsterFlagHalfDead, schema v7) and is tested at
-    # the opcode body, while the Minion term stays documented-inert until a
-    # Minion power row lands. The gold
+    # (:37); BOTH extra terms are LIVE and both are tested at the opcode body --
+    # halfDead is kMonsterFlagHalfDead (schema v7) and the Minion term is
+    # PowerId::MINION (powers.yaml id 96, S2.23). The gold
     # accrues in CombatState.combat_gold and reaches RunState only at the run
     # layer's combat fold-back, through the single gain_gold door -- so a
     # combat-only replay never touches a run purse. `extra` carries the gold, the

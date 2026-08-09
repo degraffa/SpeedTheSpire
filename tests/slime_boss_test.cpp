@@ -474,6 +474,14 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "Centurion.java -- no this.type assignment (ctor :55-79)"},
         {MonsterId::HEALER,             MonsterEnemyType::NORMAL,
          "Healer.java -- no this.type assignment (ctor :57-84)"},
+        {MonsterId::GREMLIN_LEADER,     MonsterEnemyType::ELITE,
+         "GremlinLeader.java:67 -- this.type = EnemyType.ELITE"},
+        {MonsterId::TASKMASTER,         MonsterEnemyType::ELITE,
+         "Taskmaster.java:51 -- this.type = EnemyType.ELITE, and it stays ELITE "
+         "inside the Colosseum's 'Colosseum Nobs' group too "
+         "(MonsterHelper.java:516-518) -- same class, same ctor"},
+        {MonsterId::BOOK_OF_STABBING,   MonsterEnemyType::ELITE,
+         "BookOfStabbing.java:59 -- this.type = EnemyType.ELITE"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

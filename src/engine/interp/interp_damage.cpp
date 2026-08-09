@@ -108,7 +108,15 @@ namespace {
     // decide whether the hit was survivable) but MODIFIES no damage number in any
     // pass, giving or receiving -- so all three of this file's counts move again,
     // caseless, and interp_block.cpp's with them.
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    // Checked for S2.23's two powers, MINION (id 96, MinionPower.java:14-34) and
+    // PAINFUL_STABS (id 97, PainfulStabsPower.java:18-46), both read in full.
+    // MINION is a pure marker whose only member past the ctor is
+    // updateDescription; PAINFUL_STABS overrides updateDescription and
+    // onInflictDamage, an ATTACKER-side hook that fires from the victim's damage
+    // path AFTER every pass here and RETURNS NOTHING -- it queues a Wound and
+    // cannot move a damage number. So all three of this file's counts move again,
+    // caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 58,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -191,7 +199,15 @@ namespace {
     // floor(base/2*1.5).
     // MALLEABLE: same answer as the pass above -- it reads the incoming damage in
     // onAttacked and modifies none (MalleablePower.java:62-75).
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    // Checked for S2.23's two powers, MINION (id 96, MinionPower.java:14-34) and
+    // PAINFUL_STABS (id 97, PainfulStabsPower.java:18-46), both read in full.
+    // MINION is a pure marker whose only member past the ctor is
+    // updateDescription; PAINFUL_STABS overrides updateDescription and
+    // onInflictDamage, an ATTACKER-side hook that fires from the victim's damage
+    // path AFTER every pass here and RETURNS NOTHING -- it queues a Wound and
+    // cannot move a damage number. So all three of this file's counts move again,
+    // caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 58,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -269,7 +285,15 @@ namespace {
     // MALLEABLE needs no case in ANY of the three: it hooks onAttacked, which
     // fires AFTER all three passes with the already-modified number, and it
     // returns `damageAmount` unchanged (MalleablePower.java:74).
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    // Checked for S2.23's two powers, MINION (id 96, MinionPower.java:14-34) and
+    // PAINFUL_STABS (id 97, PainfulStabsPower.java:18-46), both read in full.
+    // MINION is a pure marker whose only member past the ctor is
+    // updateDescription; PAINFUL_STABS overrides updateDescription and
+    // onInflictDamage, an ATTACKER-side hook that fires from the victim's damage
+    // path AFTER every pass here and RETURNS NOTHING -- it queues a Wound and
+    // cannot move a damage number. So all three of this file's counts move again,
+    // caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 58,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible and Flight do)? Add a case "
                   "here if so.");
@@ -842,6 +866,25 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     }
 }
 
+// `hasPower("Minion")` -- the shared term of FeedAction.java:38 and
+// GreedAction.java:37. A plain slot scan rather than a flag bit: MinionPower is
+// an ordinary registered power (registry/powers.yaml id 96, applied at amount
+// -1), it is what the oracle join sees on the monster's power list, and both
+// readers already have the record in hand.
+//
+// The other two Java readers of the same predicate are RitualDaggerAction.java:44
+// and LessonLearnedAction.java:34 -- a colourless SPECIAL whose effect program is
+// deferred to S2.31 and a Watcher card that is out of scope. Named so the two
+// call sites below are a complete list of what exists, not of what was noticed.
+[[nodiscard]] bool monster_has_minion_power(const MonsterState& m) noexcept {
+    for (uint8_t i = 0; i < m.power_count && i < kPowerCap; ++i) {
+        if (m.powers[i].power_id == static_cast<uint16_t>(PowerId::MINION)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // DAMAGE_FEED (FeedAction.update, FeedAction.java:34-47): the ordinary damage
 // pipeline, then -- ONLY if the hit LEFT the target dead -- the player's
 // increaseMaxHp(amount, false). The Java condition is
@@ -849,11 +892,17 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
 // i.e. gain when the target is dying-or-at-zero and is neither halfDead nor a
 // Minion.
 //
-// The halfDead term is now LIVE (kMonsterFlagHalfDead, combat_state.hpp): a hit
-// that leaves a Darkling or an Awakened One half-dead grants NO max HP, because
-// it did not actually kill anything. The Minion term is still inert -- there is
-// no Minion power row yet -- and this remains the site that must gain that test
-// when one lands.
+// BOTH of the two extra terms are now LIVE, and neither is a hypothetical:
+//   * halfDead == kMonsterFlagHalfDead (combat_state.hpp) -- a hit that leaves a
+//     Darkling or an Awakened One half-dead grants NO max HP, because it did not
+//     actually kill anything;
+//   * hasPower("Minion") == PowerId::MINION (registry/powers.yaml id 96, S2.23) --
+//     killing a Gremlin Leader's minion, whether one of the two the encounter
+//     built or one it summoned mid-fight, grants NO max HP either. Every gremlin
+//     in that fight carries the marker (GremlinLeader.java:93-101 /
+//     SummonGremlinAction.java:114), so at Act 2 this term fires often.
+// The two are ORed, exactly as the Java ORs them, and both are tested BEFORE the
+// gain.
 // increaseMaxHp (AbstractCreature.java:199-208) is maxHealth += amount FOLLOWED BY
 // heal(amount, true), so the heal runs the onPlayerHeal relic pass -- it goes
 // through heal_player_with_relics, never a raw HP write. The heal is SYNCHRONOUS
@@ -864,10 +913,11 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
         return;
     }
     op_damage(s, src, tgt, base);
-    // `|| halfDead` -- a hit that leaves the target HALF-dead killed nothing,
-    // so Feed pays no max HP (FeedAction.java:38).
+    // `|| halfDead` -- a hit that leaves the target HALF-dead killed nothing --
+    // and `|| hasPower("Minion")` -- a minion's death is never a kill worth
+    // paying for (FeedAction.java:38).
     if (s.monsters[tgt].hp > 0 || monster_half_dead(s.monsters[tgt]) ||
-        max_hp_gain <= 0) {
+        monster_has_minion_power(s.monsters[tgt]) || max_hp_gain <= 0) {
         return;
     }
     s.player_max_hp = static_cast<int16_t>(s.player_max_hp + max_hp_gain);
@@ -885,15 +935,17 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 //     !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
 // i.e. pay out when the target is dying-or-at-zero AND is neither halfDead nor a
 // Minion.
-//   * halfDead is now LIVE -- kMonsterFlagHalfDead (combat_state.hpp) has two
+//   * halfDead is LIVE -- kMonsterFlagHalfDead (combat_state.hpp) has two
 //     producers, the Darkling and the Awakened One. Hand of Greed pays NOTHING
 //     for a hit that merely leaves one half-dead, because nothing died.
-//   * hasPower("Minion") -- registry/powers.yaml has NO Minion row (searched
-//     before writing this, not assumed), so no creature in the registry can carry
-//     it. When a Minion power lands, this is the site that must gain the test.
-// So the live test is "did this hit take the target to zero", which is the same
-// shape DAMAGE_FEED (op_damage_feed above) already uses for the identical Java
-// condition, with the same two terms inert for the same reasons.
+//   * hasPower("Minion") is LIVE too, as of S2.23 -- PowerId::MINION
+//     (registry/powers.yaml id 96). Killing a Gremlin Leader's minion pays no
+//     gold. Both of the leader's sources carry the marker: the two the encounter
+//     builds (GremlinLeader.java:93-101) and every one it summons
+//     (SummonGremlinAction.java:114).
+// So the live test is "did this hit take the target to zero, and was it something
+// that counts", which is the same shape DAMAGE_FEED (op_damage_feed above) uses
+// for the identical Java condition -- the two share monster_has_minion_power.
 //
 // gainGold itself is NOT called here: the combat layer has no purse. The gold
 // accrues in CombatState.combat_gold and the run layer settles the total through
@@ -906,10 +958,10 @@ void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
         return;
     }
     op_damage(s, src, tgt, base);
-    // `|| halfDead` -- nothing died, so Hand of Greed pays nothing
-    // (GreedAction.java:37).
+    // `|| halfDead` -- nothing died -- and `|| hasPower("Minion")` -- a minion's
+    // death pays nothing, so Hand of Greed comes up empty (GreedAction.java:37).
     if (s.monsters[tgt].hp > 0 || monster_half_dead(s.monsters[tgt]) ||
-        gold <= 0) {
+        monster_has_minion_power(s.monsters[tgt]) || gold <= 0) {
         return;
     }
     int32_t total = static_cast<int32_t>(s.combat_gold) + gold;

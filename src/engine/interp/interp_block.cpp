@@ -90,7 +90,11 @@ namespace {
     // modifier; that block arrives here as an ordinary direct-add BLOCK item and
     // is deliberately NOT scaled by the owner's own Dexterity/Frail, exactly as
     // GainBlockAction never is.
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    // Checked for S2.23's two powers, neither of which needs a case in either
+    // block pass: MINION overrides only updateDescription (MinionPower.java:
+    // 30-33) and PAINFUL_STABS only updateDescription and onInflictDamage
+    // (PainfulStabsPower.java:34-44) -- neither touches block at all.
+    static_assert(sts::registry::manifest::kPowersCount == 58,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

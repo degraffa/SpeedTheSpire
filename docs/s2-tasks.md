@@ -70,7 +70,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| Gremlin move-99 escape (`EscapeAction` body + `deathReact`/`escapeNext` trigger) | B3.16 (stage-b table: "UNASSIGNED — Act-2 owner") | S2.23 | Reachable in Act 2 via Gremlin Leader minions; land both halves together and mark the stage-b row DISCHARGED in the same commit |
+| Gremlin move-99 escape (`EscapeAction` body + `deathReact`/`escapeNext` trigger) | B3.16 (stage-b table: "UNASSIGNED — Act-2 owner") | S2.23 | **DISCHARGED by S2.23 (2026-08-07) — as a FINDING on one half and a third PRODUCER on the other; re-derived, not inherited.** (a) The `EscapeAction` BODY was in fact already landed in Act 1, by S1's Looter, as `Opcode::ESCAPE` (40) + `kMonsterFlagEscaped` (bit 24); S2.23 adds a THIRD producer of it, `GremlinLeader.die()` (GremlinLeader.java:224-241), through the new `MonsterDieAfterFn` slot — one queued ESCAPE per non-dying record, the leader excluding ITSELF only because `super.die()` ran first. That is the escape the Gremlin Leader's minions actually experience. (b) The `deathReact`/`escapeNext` TRIGGER — and therefore gremlin move 99 — remains **UNREACHABLE IN EVERY ACT** and stays unmodelled. Evidence, from `grep -rn "deathReact()\|escapeNext()\|new EscapeAction" com/` with each hit read: `escapeNext()` has NO caller anywhere in the tree; the only `deathReact()` call is `BanditBear.java:131`, whose group is Bandits (BanditPointy/BanditLeader/BanditBear, MonsterHelper.java:513-515) and contains no gremlin; the leader's fan-out queues `new EscapeAction(m)` DIRECTLY and never enters `case 99` or telegraphs `Intent.ESCAPE`. **The `deathReact` obligation is RE-POINTED, not closed:** it is live for `BanditLeader` (:82) and `BanditPointy` (:70) in the Act-2 "Masked Bandits" event combat (encounters.yaml id 41), and its owner is the **S2.31/S2.32 event-combat owner**, not this batch. Consequence recorded at the code: `BLOCK_RANDOM_MONSTER`'s valid-list filter reads the TELEGRAPHED intent and `isDying`, never the escaped flag (GainBlockRandomMonsterAction.java:26-38), so a leader-fan-out escapee is still a legal block recipient — in the engine AND in the game. Checked and deliberately left exact rather than "improved" into `monster_dead_or_escaped`; pinned by `CityElites.AnEscapedGremlinNeverTelegraphsEscapeIntent`. Wording amended in place at `monster_gremlin.hpp` note (1) and `combat_state.hpp`'s `kMonsterFlagEscaped` comment, both of which said "unreachable in Act 1". The stage-b row (docs/stage-b-tasks.md) is marked DISCHARGED in the same commit and points here |
 | `JawWorm(..., true)` constructor variant semantics | TE.2 scope pass | S2.26 | Jaw Worm Horde constructs the variant (MonsterHelper.java:549-551); UNVERIFIED — needs decompile check what the boolean changes (stats? starting Strength?) before the row's tier columns are trusted |
 | Rest-site Recall option surface at Acts 2–3 (`isFinalActAvailable`, ruby key) | TE.2 scope pass (s2-design §4.5) | S2.13 | **DISCHARGED — YES, present; already modelled; zero engine work** (2026-08-07, S2.13). `CampfireUI.initializeButtons` (CampfireUI.java:94-96, read in full) appends the `RecallOption` under `Settings.isFinalActAvailable && !Settings.hasRubyKey` and **no act test whatsoever** — the only `id.equals` in that file is a flavour-text branch at :258 — so the row's real scope is *every* rest site in *every* act, Act 1 included, and this row's "Act-2/3" framing was wrong about the scope while right about the consequence. `Settings.isFinalActAvailable` (Settings.java:642) is profile state, constant for a run. The append lands **after** the relic veto sweep and **before** the `cannotProceed` auto-complete, so it can never be vetoed and a boss-relic-locked campfire stays open while the key is on offer. All of it has been live since S1 — `RestOptionKind::RECALL` (`rest_sites.hpp`), `kFinalActAvailable`, the post-sweep append (`rest_sites.cpp:193-205`) — and the grant is **not** "stubbed to S3": the RECALL arm sets `keys \|= kKeyRuby` (`CampfireRecallEffect.java:39-53` → `ObtainKeyEffect`). What is still S3 is only what the key is *for*. Pinned by `RestMenu.RecallIsOfferedInEveryActAndIsNeverVetoed`; s2-design §4.5 carries the withdrawal |
 | Translator's `event_flags` FIRED derivation is act-local | S2.13 | S2.43 | The translator reconstructs "fired" as "initially in the list and now absent" (`translate.cpp`, the `eventList`/`shrineList` blocks), which is complete only while a list is never refilled. From Act 2 on it is not: `dungeonTransitionSetup` clears both (AbstractDungeon.java:2576-2577) and the constructor rebuilds them (:291, :293), so an Act-2 dump **cannot witness an Act-1 event or shrine fire** while the simulator's `event_flags` rightly still carries it — a differ false-RED on the first Act-2/3 differential capture that draws a shrine. The one-time specials are unaffected (carried by identity, never rebuilt), and so is all of Act 1, which is why nothing is red today. Closing it needs cross-record accumulation over a capture that starts at floor 1 — the capture campaign's call; the alternative is a narrow differ recognizer in the `b14` RACE mould. Decide before the first Act-2 shrine capture is scored |
@@ -713,12 +713,138 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   `ENC_NAME "HealerTank"` is dead content and is deliberately unregistered;
   the Centurion's third `playSfx` branch is unreachable and unseeded.
   All six presets green.
-- **S2.23** `[ ]` ∥ City elites — Gremlin Leader (minion mechanics +
-  spawnGremlin), Slavers (Taskmaster + S1 slavers), Book of Stabbing.
+- **S2.23** `[x]` ∥ City elites — Gremlin Leader (minion mechanics +
+  spawnGremlin), Slavers (Taskmaster + S1 slavers), Book of Stabbing;
+  `powers.yaml` **Minion (96)** and **Painful Stabs (97)** — the batch's
+  whole `PowerId` grant, spent.
   **Inherited:** the stage-b Gremlin move-99 escape row (see Deferred
   obligations).
   **Deps:** S2.01, S2.2F **Acceptance:** as S2.21, plus escape-trigger tests and
   the stage-b row discharged in the same commit.
+  **Log:** `MonsterId` **37–39** all spent (GREMLIN_LEADER, TASKMASTER
+  with `game_id "SlaverBoss"`, BOOK_OF_STABBING); id **31 stays S2.21's
+  permanent gap** and 40–48 are untouched. `PowerId` **96 MINION** and
+  **97 PAINFUL_STABS** spent. `kMonstersCount` 34 → 37, `kPowersCount`
+  56 → 58; every count-guard site (six in `monster_dispatch.cpp`, one in
+  `interp_block.cpp`, three in `interp_damage.cpp`) answers its own
+  question in-comment, and all four power guards took the move
+  **caseless** — Minion has no override past `updateDescription`, and
+  Painful Stabs' `onInflictDamage` returns nothing and cannot move a
+  damage number.
+
+  **Encounters needed ZERO edits.** Ids 35 "Gremlin Leader", 36
+  "Slavers", 37 "Book of Stabbing" and the EVENT-pool 42 "Colosseum Nobs"
+  were already landed by S2.01 and resolve their `EMIT` targets as game-id
+  strings against `monsters.yaml` at spawn time, so registering the three
+  init fns un-parked all four with **no `encounters.yaml` and no
+  `run_advance.cpp` change** (the B3.16 precedent). **S2.32's Colosseum is
+  unblocked by this batch** — "Colosseum Nobs" is Taskmaster + Gremlin Nob
+  and both rows now exist.
+
+  **The Taskmaster draws `monster_hp_rng` TWICE, and nothing else in the
+  roster does.** The `super(...)` argument list literally contains
+  `monsterHpRng.random(54, 60)` (Taskmaster.java:50), which Java evaluates
+  before the constructor body, and then `setHp(57,64)` draws again
+  (:52-56). The first value is overwritten and invisible in the HP; the
+  only thing it does is move the stream — and the Taskmaster sits at group
+  index 1 of "Slavers", so the Red Slaver's roll shifts. Landed as
+  registry DATA (row `SUPER_ARG_HP`, timing S2.2F's
+  `CONSTRUCTOR_BEFORE_HP`, range the FLAT literal `(54,60)` at every
+  ascension — only the `setHp` under it is branched), so
+  `burn_unspawned_ctor_rolls` orders it correctly too. Pinned by
+  `CityElites.TaskmasterExtraDrawShiftsTheRestOfTheSlaversGroup`, which
+  re-derives the Red Slaver's HP by hand off the same seed.
+
+  **`GremlinLeader.getMove` RECURSES with fresh seeded draws** (:163,
+  :174), and termination is probabilistic, not bounded: a re-drawn 80 on
+  the `num >= 80 && lastMove(STAB)` arm re-enters the SAME arm. Modelled
+  as a re-draw loop, not an unroll. Both recursive arms have directed
+  tests, the second driven by a seed searched to force a second recursion.
+
+  **A RALLY turn's stream order is the batch's most fragile fact, and it
+  is fixture-pinned.** `SummonGremlinAction`'s CONSTRUCTOR runs at
+  `addToBottom`, so BOTH summons' `aiRng` pool picks and BOTH gremlins'
+  `monster_hp_rng` `setHp` draws happen at QUEUE time; the children's
+  `init()` rolls happen at resolve; and the leader's own trailing
+  `RollMoveAction` lands **third** on `ai_rng`, because both spawns were
+  queued ahead of it while the Minion/Angry items each spawn appends land
+  behind it. The **summon pool is `ai_rng`** while S2.01's
+  identically-membered **encounter pool is `misc_rng`** — same eight
+  entries, two different streams, deliberately not unified.
+
+  **`gremlins[3]` needed NO storage — zero flag bits, zero `pad0`.**
+  `identifySlot`'s answer is a pure function of which of
+  `GremlinLeader.POSX = {-366,-170,-532}` currently has a LIVE record, and
+  `MonsterState.draw_x` (S2.2F) already stores exactly that key. The
+  alternative — three record indices in the leader — was rejected because
+  record indices SHIFT on every insertion, so a stored map would need
+  remapping mid-summon; the derivation cannot go stale, and it is EXACT
+  because a slot is only reassigned when its occupant is null-or-dying and
+  a dying record never revives. **Book of Stabbing's `stabCount` is the
+  batch's only `pad0` user**, and it SATURATES at 255 rather than wrapping
+  (the Guardian shift-count precedent).
+
+  **The spawn path gained the summon pattern S2.24/S2.27 consume**, as two
+  `SPAWN_MONSTER` `flags` bits plus a field, all on the existing opcode:
+  bit 17 `kSpawnApplyMinion` (queue `ApplyPowerAction(m, m, MinionPower)`
+  at amount −1, BEFORE the pre-battle bit's items — the Java's order, and
+  observable as `[Minion, Angry]` on a summoned Warrior) and bits 18–31 a
+  signed 14-bit `draw_x`. The `draw_x` operand corrects a
+  `monster_dispatch.hpp` claim rather than working around it: the position
+  key is per-SPAWNER-per-SLOT, not per-TYPE, so a shared spawn-at-hp init
+  (the five gremlins share theirs) cannot know it — the header's "WHO SETS
+  `draw_x`" paragraph is amended in place. **Zero is the identity**, so
+  both large-slime split sites are byte-unchanged.
+
+  **All five S1 gremlins became mid-combat spawnable** (five new
+  `MonsterSpawnAtHpFn` entries; the `default: nullptr` and the "nothing
+  spawns them mid-combat" paragraph for the slavers both stay true and are
+  extended rather than contradicted). Their HP arrives PRE-DRAWN even
+  though the Java runs the full gremlin constructor, because that
+  constructor runs inside the summon action's constructor.
+
+  **Minion un-parked two sites that named this landing verbatim.**
+  `op_damage_feed` and `op_damage_greed` both carried
+  `!(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))`
+  with the Minion term documented inert; both now test it through a shared
+  `monster_has_minion_power`, and the comments were REPLACED, not amended
+  (conventions §8), in `interp_damage.cpp`, `interp.hpp`, `cards.yaml`
+  (Feed + Hand of Greed provenance) and `stsgen/vocab.py`. Killing a
+  Gremlin Leader minion now grants no max HP and pays no gold. The
+  `cards.yaml` provenance edits forced the documented
+  `cards_sidetable.json` regeneration — a hash-line-only diff, as that
+  file's own `_provenance.regenerate` predicts.
+
+  **Painful Stabs is the FIRST binder of `Hook::ON_INFLICT_DAMAGE` (17)**,
+  which S2.2F landed with its dispatch site and no producer. Native for
+  the `!= THORNS` guard only (the Rage/Hex precedent); the effect is an
+  ordinary `MAKE_CARD` Wound into DISCARD. Per HIT, so a `stabCount` of 5
+  makes five Wounds. The `damageAmount > 0` half of the Java guard is the
+  dispatcher's and the body re-tests it anyway, so the split is checkable.
+
+  **`MonsterDieAfterFn` gained its first entry** (Gremlin Leader), and all
+  three elites' `die()` overrides are spelled as explicit cases: the
+  Taskmaster's and the Book's are UNSEEDED `MathUtils` sounds on the
+  post-super side, so both are `nullptr` in `monster_die_fn` with the
+  reading recorded.
+
+  Released / not spent: **ZERO new `MonsterState.flags` bits** (the
+  leader's slot map derives from `draw_x`; the Book's counter reuses
+  `pad0`), **ZERO new opcodes** (the summon pattern is two bits and a
+  field on the existing `SPAWN_MONSTER`), **ZERO new hooks** (S2.2F's 17
+  was the grant and this batch is its binder), **ZERO new intents**
+  (`UNKNOWN`/`ATTACK`/`DEFEND_BUFF`/`ATTACK_DEBUFF`/`ESCAPE` all exist).
+  Two schema limitations are recorded rather than worked around, both the
+  S2.22 shape: the Taskmaster's A18 self-Strength and the Book's
+  `stabCount` repetition are ascension-PRESENCE and per-instance-COUNT
+  facts an effect list cannot express, so the rows author the exact
+  amounts and the modules own the shape. `GremlinLeader.ENC_NAME`
+  ("Gremlin Leader Combat") is dead content and is deliberately
+  unregistered (the Healer `HealerTank` precedent); the Taskmaster's
+  `damage.get(0) == 4` (WHIP) is dead and no move row carries it. Every
+  `A_2_*` constant in this batch names a branch that is not `>= 2` — the
+  columns follow the branch, and `a3`/`a8` parse with no schema change.
+  All six presets green.
 - **S2.24** `[ ]` ∥ City bosses — Bronze Automaton (+ BronzeOrb, Stasis
   model), The Champ, The Collector (+ TorchHead). A2/3/4-A19 columns per
   boss.

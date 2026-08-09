@@ -28,6 +28,9 @@ add_library(sts_engine
     monster_snecko.cpp
     monster_centurion.cpp
     monster_healer.cpp
+    monster_book_of_stabbing.cpp
+    monster_gremlin_leader.cpp
+    monster_taskmaster.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -67,6 +70,7 @@ add_library(sts_engine
     powers/power_lose_strength.cpp
     powers/power_magnetism.cpp
     powers/power_malleable.cpp
+    powers/power_painful_stabs.cpp
     powers/power_mayhem.cpp
     powers/power_next_turn_block.cpp
     powers/power_panache.cpp

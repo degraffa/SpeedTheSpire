@@ -125,6 +125,20 @@ using MonsterPreBattleFn = void (*)(CombatState& state, uint8_t monster_index);
 // The pre-battle function for a monster id, or nullptr if it has none.
 [[nodiscard]] MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept;
 
+// MinionPower's applied stack amount. MinionPower's ctor (MinionPower.java:
+// 21-28) sets name/ID/owner/type and NEVER assigns `amount`, so the 3-arg
+// ApplyPowerAction forwards AbstractPower's field initialiser -1
+// (AbstractPower.java:65; ApplyPowerAction.java:80-82) -- NOT 1. Same
+// adjudication as Confusion (kConfusionAppliedAmount, monster_snecko.hpp) and
+// Split (monster_slime_large.cpp), and op_apply_power's `amount == -1`
+// non-stacking early return is what keeps a re-application a no-op.
+//
+// Declared HERE rather than in one monster's header because two unrelated sites
+// apply it: the Gremlin Leader's usePreBattleAction (over its two initial
+// minions) and the generic spawn path's kSpawnApplyMinion bit (over every
+// summoned one, and over the Act-2/3 summoners that follow).
+inline constexpr int32_t kMinionAppliedAmount = -1;
+
 // --- Monster split framework seams -------------------------------------------
 
 // A monster's queued-roll body (RollMoveAction.update -> rollMove; no liveness
@@ -159,17 +173,23 @@ using MonsterSpawnAtHpFn = void (*)(CombatState& state, uint8_t monster_index,
 // ROLL_MOVE). The insertion slot itself is pre-computed at QUEUE time from the
 // smart-positioning drawX rule (monster_slime_large.hpp).
 //
-// WHO SETS `draw_x`: the spawned monster's OWN spawn-at-hp init fn, not this
-// function. The position key is a per-type, per-slot constant out of the Java
-// class's POSX table (Reptomancer's {210,-220,180,-250}, the Gremlin Leader's
-// {-366,-170,-532}, and so on), so the module that owns the class owns the
-// table. This function deliberately takes no draw_x argument: the SPAWN_MONSTER
-// item has no field wide enough for a signed position, and threading one would
-// duplicate a constant the module already has.
+// WHO SETS `draw_x`: THE SPAWNER, through this function's `draw_x` argument
+// (SPAWN_MONSTER carries it in `flags` bits 18..31, interp.hpp
+// make_spawn_monster_flags). AMENDED BY S2.23 -- this paragraph previously said
+// the spawned monster's own spawn-at-hp init fn owned it, on the reading that
+// the position key is a per-TYPE constant. It is not: it is a per-SPAWNER,
+// per-SLOT constant out of the SPAWNING class's POSX table (GremlinLeader.POSX
+// {-366,-170,-532}; Reptomancer's {210,-220,180,-250}), so the very same Gremlin
+// Warrior sits at three different x's depending on which summon slot it filled
+// -- and at a fourth in the Gremlin Gang encounter, where nothing summons it at
+// all. A shared spawn-at-hp init (the five gremlins share theirs) therefore
+// cannot know the answer, and the claim that the SPAWN_MONSTER item had no field
+// wide enough was wrong too: `flags` had 14 free bits above the id and the two
+// behaviour bits, which is more than every `offsetX` in Acts 1-3 needs.
 //
-// Until a batch populates it, `draw_x` is uniformly 0 across every landed
-// monster, so smart_position_for is unused by landed content and the slime split
-// keeps its hand-derived slots -- no existing spawn changes.
+// `draw_x` defaults to 0, and a flags word that carries only a MonsterId decodes
+// to 0 -- so both large-slime split sites are byte-unchanged and keep their
+// hand-derived slots.
 //
 // `run_pre_battle` runs the spawned monster's usePreBattleAction after its init,
 // which is SummonGremlinAction's behaviour and NOT SpawnMonsterAction's -- the
@@ -177,8 +197,17 @@ using MonsterSpawnAtHpFn = void (*)(CombatState& state, uint8_t monster_index,
 // what gives a summoned Gremlin Warrior its Angry power. The Java runs it at
 // `isDone`, i.e. after the MinionPower the spawn itself queues, so a caller that
 // needs both orders them that way.
+//
+// `apply_minion` queues the ApplyPowerAction(m, m, MinionPower) that
+// SummonGremlinAction.update itself queues (SummonGremlinAction.java:114) at the
+// queue bottom, BEFORE `run_pre_battle` appends the pre-battle action's own
+// items. That order is the Java's and it is observable: a summoned Gremlin
+// Warrior's power list is [Minion, Angry]. SpawnMonsterAction applies no Minion,
+// which is why this is the third bit and not a default.
 void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
-                           int16_t hp, bool run_pre_battle = false) noexcept;
+                           int16_t hp, bool run_pre_battle = false,
+                           bool apply_minion = false,
+                           int16_t draw_x = 0) noexcept;
 
 // SpawnMonsterAction's SMART POSITIONING (SpawnMonsterAction.java:50-56), and
 // GremlinLeader's identical getSmartPosition (SummonGremlinAction.java):

@@ -453,7 +453,9 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             spawn_monster_at_slot(
                 s, item.tgt, static_cast<MonsterId>(item.flags & 0xFFFFu),
                 static_cast<int16_t>(item.amount),
-                (item.flags & kSpawnRunPreBattle) != 0u);
+                (item.flags & kSpawnRunPreBattle) != 0u,
+                (item.flags & kSpawnApplyMinion) != 0u,
+                spawn_draw_x_from_flags(item.flags));
             return;
         case Opcode::SET_MOVE: {
             // SetMoveAction.update (SetMoveAction.java:52-56) -> setMove:

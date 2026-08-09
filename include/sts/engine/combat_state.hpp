@@ -727,9 +727,19 @@ inline constexpr uint32_t kMonsterFlagSphericSecondMove = 0x10000u;
 // escape animation then latches `escaped` (updateEscapeAnimation, :894-906).
 // This engine has no animation clock, so the two Java booleans collapse into
 // this one bit, set by the ESCAPE opcode (EscapeAction.java:21-28 -> escape())
-// at resolve time. The Looter is the only Act-1 producer (Looter.java:126-133);
-// the gremlins' move 99 is unreachable in Act 1 (no escapeNext()/deathReact()
-// caller) and stays unmodelled.
+// at resolve time. Producers, in landing order: the Looter (Looter.java:126-133)
+// and the Mugger (Mugger.java:124-133) in Act 1, and GremlinLeader.die()
+// (GremlinLeader.java:237-240) in Act 2, which queues one EscapeAction per
+// surviving record when the leader falls.
+//
+// THE GREMLINS' OWN MOVE 99 IS STILL UNREACHABLE, IN EVERY ACT -- amended by
+// S2.23 from "unreachable in Act 1", which left the Act-2 answer open. Re-derived
+// rather than assumed: `escapeNext()` has no caller anywhere in the tree, and the
+// only `deathReact()` call is BanditBear.java:131, whose group (Bandits) contains
+// no gremlin. So the leader's fan-out reaches escape() DIRECTLY, without ever
+// setting move 99 and without telegraphing Intent.ESCAPE -- which is the
+// difference that matters to BLOCK_RANDOM_MONSTER's intent-based filter (see
+// monster_gremlin.hpp note (1)).
 //
 // An escaped monster keeps its positive hp -- it is NOT dying -- so every
 // liveness read that means "in the fight" must test one of the two liveness

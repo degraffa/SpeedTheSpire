@@ -273,4 +273,68 @@ void gremlin_wizard_take_turn(CombatState& s, uint8_t mi) noexcept {
     }
 }
 
+// --- Mid-combat spawn (S2.23: the Gremlin Leader's SummonGremlinAction) -------
+//
+// Each body is its encounter-time init with the monster_hp_rng draw REMOVED --
+// not because the game skips the draw (it does not: MonsterHelper.getGremlin
+// runs the gremlin's full ctor, setHp and all) but because the draw has ALREADY
+// HAPPENED, one action-queue step earlier, inside SummonGremlinAction's own
+// constructor at addToBottom time (SummonGremlinAction.java:33-46,:89). The
+// summoner passes the value through; see monster_gremlin.hpp.
+//
+// Everything else is identical to the encounter-time path, and deliberately so:
+// a summoned gremlin's opening move, its discarded init() ai_rng draw and its
+// A17 branches are the same code the Gremlin Gang runs. The Warrior's Angry is
+// NOT here -- that is usePreBattleAction, which the spawn path runs separately
+// through the SPAWN_MONSTER item's kSpawnRunPreBattle bit, after the Minion the
+// kSpawnApplyMinion bit queues.
+
+namespace {
+
+// The spawn-time twin of init_common, with `hp` supplied rather than drawn.
+// Value-initialises the whole record first so `draw_x` and every other field
+// start clean; the spawn path then writes draw_x from the SUMMONER's POSX table
+// (monster_dispatch.hpp).
+void spawn_common(CombatState& s, uint8_t mi, MonsterId id,
+                  int16_t hp) noexcept {
+    MonsterState& m = s.monsters[mi];
+    m = MonsterState{};
+    m.monster_id = static_cast<uint16_t>(id);
+    m.hp = hp;
+    m.max_hp = hp;
+}
+
+}  // namespace
+
+void gremlin_warrior_spawn_at_hp(CombatState& s, uint8_t mi,
+                                 int16_t hp) noexcept {
+    spawn_common(s, mi, MonsterId::GREMLIN_WARRIOR, hp);
+    init_roll_discarded(s, s.monsters[mi], kScratch, MonsterIntent::ATTACK);
+}
+
+void gremlin_thief_spawn_at_hp(CombatState& s, uint8_t mi, int16_t hp) noexcept {
+    spawn_common(s, mi, MonsterId::GREMLIN_THIEF, hp);
+    init_roll_discarded(s, s.monsters[mi], kPuncture, MonsterIntent::ATTACK);
+}
+
+void gremlin_fat_spawn_at_hp(CombatState& s, uint8_t mi, int16_t hp) noexcept {
+    spawn_common(s, mi, MonsterId::GREMLIN_FAT, hp);
+    init_roll_discarded(s, s.monsters[mi], kBlunt,
+                        MonsterIntent::ATTACK_DEBUFF);
+}
+
+void gremlin_tsundere_spawn_at_hp(CombatState& s, uint8_t mi,
+                                  int16_t hp) noexcept {
+    spawn_common(s, mi, MonsterId::GREMLIN_TSUNDERE, hp);
+    init_roll_discarded(s, s.monsters[mi], kProtect, MonsterIntent::DEFEND);
+}
+
+void gremlin_wizard_spawn_at_hp(CombatState& s, uint8_t mi,
+                                int16_t hp) noexcept {
+    spawn_common(s, mi, MonsterId::GREMLIN_WIZARD, hp);
+    MonsterState& m = s.monsters[mi];
+    m.pad0 = kChargeStart;  // currentCharge = 1 (GremlinWizard.java:43)
+    init_roll_discarded(s, m, kCharge, MonsterIntent::UNKNOWN);
+}
+
 }  // namespace sts::engine

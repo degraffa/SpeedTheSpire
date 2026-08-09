@@ -16,15 +16,41 @@
 //
 // FOUR THINGS WORTH KNOWING BEFORE READING THE BODIES
 //
-// (1) NOBODY IN THIS GANG ESCAPES. Every gremlin has a move 99 whose takeTurn
-//     case queues EscapeAction, reachable only once `escapeNext` is latched or
-//     `deathReact` re-telegraphs. `escapeNext()` (AbstractMonster.java:908-910)
-//     has NO caller anywhere in the decompiled tree, and the only `deathReact()`
-//     call is BanditBear.java:131 -- the Act-2 "Bandits" group. Act 1's gremlin
-//     encounter therefore never sets either, so the `if (this.escapeNext)` guard
-//     in every takeTurn below always takes the else branch and move 99 is
-//     unreachable. It is not modelled here at all (registry/monsters.yaml records
-//     the same, with the two halves an Act-2 task must add together).
+// (1) MOVE 99 IS UNREACHABLE IN EVERY ACT -- but these gremlins DO escape, by a
+//     route that never touches it. AMENDED BY S2.23, which discharged the
+//     stage-b "Gremlin move-99 escape" row; the previous wording said
+//     "unreachable in Act 1" and left the Act-2 answer open, and the Act-2
+//     answer turns out to be that nothing changes.
+//
+//     Every gremlin has a move 99 whose takeTurn case queues EscapeAction,
+//     reachable only once `escapeNext` is latched or `deathReact` re-telegraphs.
+//     Re-derived over the whole tree (`grep -rn "deathReact()\|escapeNext()\|new
+//     EscapeAction" com/`):
+//       * `escapeNext()` (AbstractMonster.java:908-910) has NO CALLER ANYWHERE;
+//       * the only `deathReact()` call is BanditBear.java:131, and its group is
+//         "Bandits" (BanditPointy/BanditLeader/BanditBear, MonsterHelper.java:
+//         513-515) -- NO GREMLIN IS EVER IN IT, so deathReact is reachable in
+//         Act 2 for the two bandits and for nobody else. That obligation is
+//         re-pointed at the Bandits owner, not closed (docs/s2-tasks.md).
+//     So `if (this.escapeNext)` always takes the else branch and move 99 stays
+//     unmodelled, in Acts 1, 2 and 3 alike.
+//
+//     THE ESCAPE THESE GREMLINS ACTUALLY EXPERIENCE is GremlinLeader.die()
+//     (GremlinLeader.java:237-240), which queues `new EscapeAction(m)` DIRECTLY
+//     for every non-dying record. It bypasses getMove and setMove entirely, so
+//     an escapee NEVER re-telegraphs Intent.ESCAPE -- unlike the Looter and the
+//     Mugger, which do (Looter.java:131 / Mugger.java:132). That difference is
+//     load-bearing for BLOCK_RANDOM_MONSTER (opcode 67), whose valid-list filter
+//     reads the TELEGRAPHED intent and not the escaped flag
+//     (GainBlockRandomMonsterAction.java:26-38, interp_block.cpp): a
+//     leader-fan-out escapee is therefore still a legal block target in the
+//     engine -- and in the game, for the same reason. Checked, and left exactly
+//     as it is, rather than "fixed" into monster_dead_or_escaped.
+//
+//     `record_alive` below likewise tests `hp > 0` only and does NOT test
+//     kMonsterFlagEscaped, which is exact for the same reason plus one more: an
+//     escape here means the leader is already dead, and the leader's death is
+//     what ends the fight.
 //
 // (2) DRAW ACCOUNTING at A20 (one monster_hp_rng draw per ctor, one ai_rng draw
 //     per rollMove -- AbstractMonster.java:765-775 and :705-715):
@@ -96,5 +122,37 @@ void gremlin_warrior_use_pre_battle_action(CombatState& state,
 // damage ahead of it, and RollMoveAction has no liveness check
 // (RollMoveAction.java:17-21).
 void gremlin_fat_roll_move(CombatState& state, uint8_t monster_index) noexcept;
+
+// --- Mid-combat spawn (S2.23) -------------------------------------------------
+// MonsterSpawnAtHpFn for all five gremlins: the Gremlin Leader summons them
+// (SummonGremlinAction, GremlinLeader.java:108-109), so from S2.23 on every one
+// of them can arrive mid-combat.
+//
+// WHY THEY TAKE A PRE-DRAWN HP even though the Java runs the gremlin's FULL
+// constructor -- setHp draw and all -- rather than a 4-arg newHealth ctor like
+// the slimes'. The draw happens, but it happens at QUEUE time, inside
+// SummonGremlinAction's own constructor (`MonsterHelper.getGremlin(...)` at
+// SummonGremlinAction.java:42, called from the action's ctor, which the Java
+// evaluates at addToBottom). The record itself is not inserted until update().
+// So the summoner draws the HP and hands it over, exactly as the split does
+// (monster_slime_large.cpp) -- the two arrive at the same signature from
+// opposite directions, and getting it wrong would put a monster_hp_rng draw one
+// action-queue drain too late.
+//
+// Each is spawn-time field init + the same discarded init() rollMove the
+// encounter-time init does: all five getMove overrides force a fixed opening
+// move and ignore the num, but the ai_rng draw still happens (note (2) above).
+// `draw_x` is written by the spawn path from the SUMMONER's POSX table, not
+// here (monster_dispatch.hpp).
+void gremlin_warrior_spawn_at_hp(CombatState& state, uint8_t monster_index,
+                                 int16_t hp) noexcept;
+void gremlin_thief_spawn_at_hp(CombatState& state, uint8_t monster_index,
+                               int16_t hp) noexcept;
+void gremlin_fat_spawn_at_hp(CombatState& state, uint8_t monster_index,
+                             int16_t hp) noexcept;
+void gremlin_tsundere_spawn_at_hp(CombatState& state, uint8_t monster_index,
+                                  int16_t hp) noexcept;
+void gremlin_wizard_spawn_at_hp(CombatState& state, uint8_t monster_index,
+                                int16_t hp) noexcept;
 
 }  // namespace sts::engine

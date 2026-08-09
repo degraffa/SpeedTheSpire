@@ -1698,3 +1698,183 @@
                # preceding attack is now enough to block it (:172,176). Both
                # changes push the A17 Healer toward BUFF. See
                # monster_healer.cpp.
+
+# --- S2.23 (Act-2 city ELITES): Gremlin Leader, Taskmaster, Book of Stabbing ---
+# MonsterId 37-39 are this task's whole grant (stage-b-tasks.md "S2 Wave-3
+# allocations"), and all three are spent, so the block leaves no gap. 40-44 are
+# S2.24's and are NOT touched here. Ids 31 and 45-48 stay permanent gaps.
+#
+# ALL THREE ARE `enemy_type: ELITE`, and all three gate their HP on
+# `ascensionLevel >= 8` while naming the constants `A_2_HP_*`. EVERY "A_2_" NAME
+# IN THIS BATCH LIES: the Gremlin Leader's strAmt/blockAmt chain is named
+# `A_2_STR_AMT` on a `>= 3` branch, and the Taskmaster's `A_2_WOUNDS` likewise.
+# The columns below follow the BRANCH, not the constant name -- the Chosen
+# precedent (S2.21) -- which is why `a3` and `a8` appear here for the first time.
+# Both parse with no schema change: the generator's tier key is the free regex
+# `^(base|a[1-9][0-9]?)$` (stsgen/vocab.py TIER_RE).
+#
+# The three encounters that field them (ids 35 "Gremlin Leader", 36 "Slavers",
+# 37 "Book of Stabbing", plus the EVENT-pool 42 "Colosseum Nobs") were landed by
+# S2.01 and are UNCHANGED here: encounter EMIT targets resolve as game-id strings
+# against this file at spawn time, so registering these three rows is what
+# un-parks all four groups, with no encounters.yaml and no run_advance.cpp edit
+# (the B3.16 precedent).
+
+- id: 37
+  name: GREMLIN_LEADER
+  game_id: "GremlinLeader"
+  provenance: "GremlinLeader (GremlinLeader.java, 242 lines, read in full). ID \"GremlinLeader\" (:38); type = ELITE (:67). ENC_NAME \"Gremlin Leader Combat\" (:47) is DEAD CONTENT -- the live MonsterHelper key is \"Gremlin Leader\" (MonsterHelper.java:507-509) and no case matches the ENC_NAME string, so it is deliberately not registered (the Healer's \"HealerTank\" precedent, id 36). ctor (:65-91): the super(...) HP argument is a LITERAL 148 -- no monsterHpRng draw in the argument list, unlike the Taskmaster below -- then setHp(145,155) at ascensionLevel >= 8 else setHp(140,148) (:73-77), ONE monster_hp_rng draw. strAmt/blockAmt (:78-87): >= 18 -> 5/10, >= 3 -> 4/6, else 3/6 -- note blockAmt is UNCHANGED across the >= 3 arm, which the a3 column below spells out to pin. STAB_DMG 6 and STAB_AMT 3 are FIELD INITIALIZERS (:62-63), never ascension-branched. Move ids RALLY=2, ENCOURAGE=3, STAB=4 (:51,53,61). usePreBattleAction (:93-101): gremlins[0]/[1] = monsters.get(0)/get(1), gremlins[2] = null, then ApplyPowerAction(m, m, new MinionPower(this)) for EACH of the three -- the third target is NULL, which ApplyPowerAction.update treats as a documented no-op (if (target == null || target.isDeadOrEscaped()) { isDone = true; return; }, ApplyPowerAction.java:96-99), so exactly TWO applications land. MinionPower never assigns amount -> AbstractPower's field initialiser -1 (the Confusion adjudication, S2.22). takeTurn (:103-134): RALLY queues ChangeState(CALL) + TWO SummonGremlinActions (:107-109); ENCOURAGE queues ShoutAction(getEncourageQuote()) -- and getEncourageQuote (:136-142) draws ONE SEEDED aiRng.random(0,2) at QUEUE time, the Mugger playDeathSfx precedent -- then walks the group (:114-122); STAB queues THREE DamageActions on damage.get(0) (:128-130). RollMoveAction (:133) sits OUTSIDE the switch, so every case reaches it. getMove (:144-189) branches on numAliveGremlins() and RECURSES with FRESH aiRng draws on two arms (:163, :174). numAliveGremlins (:191-198) counts every record that is not null, not this and not isDying -- it does NOT exclude escaped monsters and is NOT restricted to the gremlins[] array. die (:224-241): super.die() FIRST, then a ShoutAction pass and an EscapeAction over every non-dying record -- the post-super slot. damage()/changeState() are presentation."
+  enemy_type: ELITE    # GremlinLeader.java:67
+  hp:
+    base: {min: 140, max: 148}  # GremlinLeader.java:76 (ascension < 8)
+    a8:   {min: 145, max: 155}  # GremlinLeader.java:74 (ascension >= 8)
+  rolls: []
+  moves:
+    - name: RALLY
+      move_id: 2               # GremlinLeader.java:51
+      intent: UNKNOWN          # setMove(RALLY_NAME, 2, Intent.UNKNOWN) (:149,156,161)
+      effects:
+        # THE WHOLE BODY IS NATIVE (monster_gremlin_leader.cpp): two
+        # SummonGremlinActions (:108-109), each of which draws its gremlin key
+        # from an 8-slot aiRng pool and its HP from monster_hp_rng AT QUEUE TIME
+        # (the action's CONSTRUCTOR, SummonGremlinAction.java:33-46), then
+        # inserts the record and rolls the child's move at RESOLVE time. None of
+        # that is expressible as an effect program. ChangeStateAction("CALL")
+        # (:107) is presentation and rolls nothing. NOP placeholder (the Looter
+        # / Mugger ESCAPE precedent).
+        - {op: NOP, target: SELF, amount: 0}
+    - name: ENCOURAGE
+      move_id: 3               # GremlinLeader.java:53
+      intent: DEFEND_BUFF      # setMove((byte)3, Intent.DEFEND_BUFF) (:167,179,186)
+      effects:
+        # TWO AUTHORED TEMPLATE STEPS, FANNED OUT NATIVELY -- the Healer's shape
+        # (id 36), for the Healer's reason: the Java walks the whole group and
+        # queues a per-member pair (:114-122), a count no effect list can carry.
+        # The walk is NOT symmetric and the asymmetry is the thing to pin:
+        #
+        #     if (m == this) { ApplyPower(Strength); continue; }   // NO block,
+        #                                                          // NO isDying guard
+        #     if (m.isDying) continue;
+        #     ApplyPower(Strength); GainBlock(blockAmt);
+        #
+        # so the leader buffs ITSELF with Strength and gives itself NO block,
+        # and does so even while dying. Step 0 is the Strength template, step 1
+        # the block template; monster_gremlin_leader.cpp emits step 0 alone for
+        # the leader's own record and both, in this order, for every other live
+        # member, in slot order. `target: SELF` names the template's own
+        # recipient; the module retargets per member.
+        #
+        # strAmt 3, 4 from A3, 5 from A18 (:78-87). The Java constant for the
+        # middle arm is named A_2_STR_AMT and the branch is `>= 3`.
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a3: 4, a18: 5}, power: STRENGTH}
+        # blockAmt 6, STILL 6 at A3, 10 from A18 -- the a3 column is spelled out
+        # to pin the NON-change (the Healer healAmt precedent).
+        - {op: BLOCK, target: SELF, amount: {base: 6, a3: 6, a18: 10}}
+    - name: STAB
+      move_id: 4               # GremlinLeader.java:61
+      intent: ATTACK           # setMove(4, ATTACK, STAB_DMG, STAB_AMT, true)
+      effects:
+        # THREE SEPARATE DamageActions on damage.get(0) (:128-130), not one
+        # tripled hit -- so block, a halving power and a lethal clamp all apply
+        # per hit. STAB_DMG is the field initializer 6 (:62) and is NEVER
+        # ascension-branched, so there is no tier column at all; STAB_AMT 3 (:63)
+        # is the hit count and is likewise flat, which is why this is three
+        # literal steps rather than a counted one (the Centurion furyHits
+        # precedent). ChangeStateAction("ATTACK") and WaitAction (:126-127) are
+        # presentation.
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+  ai: native   # getMove (:144-189) is three arms on numAliveGremlins() -- a
+               # GROUP-SHAPED predicate no ai table expresses -- and TWO of its
+               # arms RECURSE (`this.getMove(aiRng.random(50, 99))` at :163 and
+               # `this.getMove(aiRng.random(0, 80))` at :174). Each recursion
+               # takes a FRESH SEEDED DRAW and re-enters the whole function, so
+               # termination is probabilistic, not bounded: a transcription that
+               # reuses `num` diverges on the first recursion. See
+               # monster_gremlin_leader.cpp.
+
+- id: 38
+  name: TASKMASTER
+  game_id: "SlaverBoss"
+  provenance: "Taskmaster (Taskmaster.java, 110 lines, read in full). ID is \"SlaverBoss\" (:33), NOT \"Taskmaster\" -- that is the string encounters.yaml id 36 (Slavers) and id 42 (Colosseum Nobs) already emit, and it is the oracle join key. type = ELITE (:51), including inside the Colosseum group. THE CTOR DRAWS monster_hp_rng TWICE and no other landed monster does: the super(...) argument list literally contains AbstractDungeon.monsterHpRng.random(54, 60) (:50), which Java evaluates BEFORE the constructor body, and then setHp(57,64) at ascension >= 8 else setHp(54,60) (:52-56) draws again (AbstractMonster.java:765-775). The first value is discarded by the second, but it MOVED THE STREAM -- and the Taskmaster sits at group index 1 of Slavers, so the Red Slaver's HP roll shifts. That is the rolls: entry below, with timing CONSTRUCTOR_BEFORE_HP. NOTE its range is the LITERAL (54,60) at EVERY ascension: the super-argument is not branched, only the setHp below it is. woundCount = 3 at >= 18, 2 at >= 3, else 1 (:57) -- the constant for the middle arm is named A_2_WOUNDS and the branch is >= 3. damage.get(0) = 4 (WHIP) is DEAD: getMove (:81-84) sets move 2 unconditionally and takeTurn has no other case, so the 4 is never queued and no move row carries it. damage.get(1) = 7 is SCOURING_WHIP. takeTurn case 2 (:66-79): playSfx -- MathUtils.random(1), UNSEEDED (:87) -- then AnimateSlowAttackAction, DamageAction(damage.get(1)), MakeTempCardInDiscardAction(new Wound(), woundCount), and ONLY at ascension >= 18 an ApplyPowerAction(this, this, StrengthPower(this, 1), 1) (:73-74). RollMoveAction (:78) sits outside the switch. getMove ignores num but the rollMove aiRng.random(99) still happens and is discarded (the Looter/Guardian/Chosen precedent). die (:104-108) is super.die() then playDeathSfx, whose MathUtils.random(1) (:96) is UNSEEDED -- so NO MonsterDieFn entry (explicit nullptr, monster_dispatch.cpp). No usePreBattleAction and no starting power."
+  enemy_type: ELITE    # Taskmaster.java:51
+  hp:
+    base: {min: 54, max: 60}    # Taskmaster.java:55 (ascension < 8)
+    a8:   {min: 57, max: 64}    # Taskmaster.java:53 (ascension >= 8)
+  rolls:
+    # The super(...) ARGUMENT draw (Taskmaster.java:50). Its VALUE is thrown
+    # away by the setHp below it; its POSITION in the monster_hp_rng sequence is
+    # the whole point, which is what timing CONSTRUCTOR_BEFORE_HP encodes
+    # (burn_unspawned_ctor_rolls' two-pass walk, monster_dispatch.cpp). NO tier
+    # columns: the argument is the flat literal random(54, 60) at every
+    # ascension -- only the setHp under it moves.
+    - name: SUPER_ARG_HP
+      stream: MONSTER_HP
+      timing: CONSTRUCTOR_BEFORE_HP
+      range:
+        base: {min: 54, max: 60}  # Taskmaster.java:50 -- literal, unbranched
+  moves:
+    - name: SCOURING_WHIP
+      move_id: 2               # Taskmaster.java:47
+      intent: ATTACK_DEBUFF    # setMove((byte)2, Intent.ATTACK_DEBUFF, 7) (:83)
+      effects:
+        # ORDER IS LOAD-BEARING (:71-74): damage, THEN the Wounds, THEN -- at
+        # A18 only -- the self Strength. damage.get(1) == SCOURING_WHIP_DMG 7,
+        # flat at every ascension (:59), so no tier column.
+        - {op: DAMAGE, target: PLAYER, amount: 7}
+        # MakeTempCardInDiscardAction(new Wound(), woundCount) -- ONE action with
+        # a COUNT, so one MAKE_CARD step whose amount is the count (:72).
+        # woundCount 1, 2 from A3, 3 from A18 (:57).
+        - {op: MAKE_CARD, target: PLAYER, amount: {base: 1, a3: 2, a18: 3}, card: WOUND, pile: DISCARD}
+        # THE A18 STRENGTH IS NOT A STEP. `if (ascensionLevel < 18) break;`
+        # (:73) makes it an ascension PRESENCE branch, and an effect list
+        # expresses per-tier AMOUNTS but not per-tier PRESENCE -- the Snecko TAIL
+        # limitation (id 34), handled the same way: recorded, not worked around.
+        # monster_taskmaster.cpp queues the ApplyPowerAction(self, Strength, 1)
+        # natively after this program, spelling both sides of the branch (the
+        # GremlinFat/Frail precedent). At the engine's fixed A20 it is always
+        # present.
+  ai: native   # getMove (:81-84) ignores `num` entirely and forces move 2 --
+               # but the rollMove that produced `num` still drew aiRng.random(99)
+               # and still moved the shared stream, and takeTurn's trailing
+               # RollMoveAction (:78) means that draw recurs EVERY turn. A `fixed`
+               # ai row would have to carry both the forced move and the discarded
+               # per-turn draw; native is how the Looter, the Guardian and the
+               # Chosen already say that. The A18 Strength presence branch above
+               # is the second reason. See monster_taskmaster.cpp.
+
+- id: 39
+  name: BOOK_OF_STABBING
+  game_id: "BookOfStabbing"
+  provenance: "BookOfStabbing (BookOfStabbing.java, 158 lines, read in full). ID \"BookOfStabbing\" (:33); type = ELITE (:59). Solo encounter (MonsterHelper.java:504-506). ctor (:52-76): the super(...) HP argument is a LITERAL 164 -- no draw -- then setHp(168,172) at ascension >= 8 else setHp(160,164) (:62-66), ONE monster_hp_rng draw. stabDmg/bigStabDmg 7/24 at >= 3 else 6/21 (:67-73), added to damage in that order (:74-75). Move ids STAB=1, BIG_STAB=2 (:48-49). stabCount is a FIELD INITIALIZER 1 (:50) and is UNBOUNDED -- it lives in MonsterState.pad0 (the Wizard-charge / Louse-bite precedent) and saturates rather than wraps. usePreBattleAction (:78-81): ApplyPowerAction(this, this, new PainfulStabsPower(this)) -- SELF-applied; PainfulStabsPower assigns amount = -1 explicitly (PainfulStabsPower.java:29). takeTurn (:83-103): case STAB loops for (i < stabCount) queuing an SFXAction (whose MathUtils.random(0,3) is UNSEEDED) and a DamageAction(damage.get(0)) EACH (:89-92) -- THE LOOP COUNT IS READ AT takeTurn TIME, i.e. the value getMove already committed to the telegraph, so it is per-move state and not recomputed; case BIG_STAB is one DamageAction(damage.get(1)) (:98). RollMoveAction (:102) sits outside the switch. getMove (:129-150) MUTATES stabCount on three of its four paths, and at ascension >= 18 on ALL FOUR -- including the init rollMove, so the first STAB is already 2 hits. changeState/damage() are presentation. die (:152-156) is super.die() then an UNSEEDED CardCrawlGame.sound.play -- so NO MonsterDieFn entry (explicit nullptr, monster_dispatch.cpp)."
+  enemy_type: ELITE    # BookOfStabbing.java:59
+  hp:
+    base: {min: 160, max: 164}  # BookOfStabbing.java:65 (ascension < 8)
+    a8:   {min: 168, max: 172}  # BookOfStabbing.java:63 (ascension >= 8)
+  rolls: []
+  moves:
+    - name: STAB
+      move_id: 1               # BookOfStabbing.java:48
+      intent: ATTACK           # setMove(1, ATTACK, dmg[0].base, stabCount, true)
+      effects:
+        # ONE AUTHORED TEMPLATE STEP, REPEATED stabCount TIMES NATIVELY. The
+        # count is per-instance combat state (pad0), grows without bound and is
+        # read at takeTurn time (:89) -- none of which an effect list can carry,
+        # so this is the Healer's one-template/native-fan-out shape with a
+        # counter instead of a group walk. Each repetition is a SEPARATE
+        # DamageAction (:91), so block and per-hit powers apply per stab.
+        # stabDmg 6, 7 from A3 (:67-73).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a3: 7}}
+    - name: BIG_STAB
+      move_id: 2               # BookOfStabbing.java:49
+      intent: ATTACK           # setMove(2, ATTACK, dmg[1].base) (:136,142)
+      effects:
+        # damage.get(1) == bigStabDmg: 21, 24 from A3 (:67-73). ONE hit.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 21, a3: 24}}
+  ai: native   # getMove (:129-150) is the ONLY getMove in the roster that
+               # MUTATES per-instance state as a side effect of deciding: three
+               # of its four paths ++stabCount, and at ascension >= 18 the
+               # fourth does too, so at the engine's fixed A20 EVERY decision --
+               # including the init rollMove -- grows the next STAB by one hit.
+               # No ai table has a write side. See monster_book_of_stabbing.cpp.

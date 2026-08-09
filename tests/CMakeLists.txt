@@ -299,6 +299,19 @@ sts_add_test(city_normals_i_test)
 # and Protect's recipient draw happens ONLY when a valid ally exists.
 sts_add_test(city_normals_ii_test)
 
+# S2.23: the three Act-2 city ELITES -- Gremlin Leader, Taskmaster, Book of
+# Stabbing -- plus the two powers they bring (Minion, Painful Stabs), the spawn
+# path's Minion/draw_x operands and the post-`super.die()` escape fan-out. The
+# stat tables cover every ascension branch each class has, which matters more
+# here than usual: all three gate HP on `>= 8` while naming the constants
+# `A_2_HP_*`, and two carry a second `>= 3` branch named the same way. The
+# ordering assertions are the bit-exactness surface: a RALLY turn draws BOTH
+# summons' pool picks and HP rolls at QUEUE time and resolves the leader's own
+# rollMove THIRD, behind both children's, and the Taskmaster draws
+# monster_hp_rng TWICE in its constructor -- a shift nothing else in the roster
+# produces and that moves the whole Slavers group.
+sts_add_test(city_elites_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE
