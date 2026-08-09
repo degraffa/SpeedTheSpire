@@ -108,7 +108,7 @@ namespace {
     // decide whether the hit was survivable) but MODIFIES no damage number in any
     // pass, giving or receiving -- so all three of this file's counts move again,
     // caseless, and interp_block.cpp's with them.
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    static_assert(sts::registry::manifest::kPowersCount == 59,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -191,7 +191,7 @@ namespace {
     // floor(base/2*1.5).
     // MALLEABLE: same answer as the pass above -- it reads the incoming damage in
     // onAttacked and modifies none (MalleablePower.java:62-75).
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    static_assert(sts::registry::manifest::kPowersCount == 59,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -269,7 +269,7 @@ namespace {
     // MALLEABLE needs no case in ANY of the three: it hooks onAttacked, which
     // fires AFTER all three passes with the already-modified number, and it
     // returns `damageAmount` unchanged (MalleablePower.java:74).
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    static_assert(sts::registry::manifest::kPowersCount == 59,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible and Flight do)? Add a case "
                   "here if so.");
@@ -1025,10 +1025,24 @@ void op_vampire_damage(CombatState& s, uint8_t src, uint8_t tgt,
 //     There is NO relic pass at all here -- and that is not merely because the
 //     base class's loop is `isPlayer`-gated (AbstractCreature.java:392-395); the
 //     override never reaches that code. There is also NO isEscaping test: only
-//     `isDying`, modelled here as hp <= 0. An escaped-but-alive monster WOULD be
-//     healed by a HealAction that reached it; nothing queues one, because the only
-//     producer (the Healer) filters escapees at QUEUE time (Healer.java:104-106).
-//     Reproduced as written rather than "corrected" with a liveness predicate.
+//     `isDying`. An escaped-but-alive monster WOULD be healed by a HealAction
+//     that reached it; nothing queues one, because the only producer (the
+//     Healer) filters escapees at QUEUE time (Healer.java:104-106). Reproduced
+//     as written rather than "corrected" with a liveness predicate.
+//
+//     AND `isDying` IS NOT `hp <= 0`. It was, while no monster could sit at zero
+//     HP and still be in the fight; the guard here read a bare `m.hp <= 0` and
+//     said so. S2.25's Darkling is the counter-example that makes the difference
+//     observable, and it is the WHOLE of its revival: a half-dead Darkling has
+//     currentHealth 0 and isDying FALSE -- its die() was vetoed, so isDying was
+//     never set -- and REINCARNATE's HealAction(this, this, maxHealth / 2)
+//     (Darkling.java:131) therefore lands. combat_state.hpp already spells the
+//     correct model out: isDying == `hp <= 0 && !halfDead`. That is the guard
+//     below. With the bare hp test the heal would silently no-op and the
+//     Darkling would sit at 0 HP forever, which is a divergence no Act-1 fixture
+//     could have caught. (This is the isDying half only -- there is no
+//     isEscaping term here, per the paragraph above, so this is deliberately NOT
+//     monster_basically_dead.)
 //
 // THE ONHEAL POWER PASS IS A DOCUMENTED, CHECKED NO-OP. `grep -rn onHeal com/`
 // over the decompiled tree finds AbstractPower's identity base and exactly ONE
@@ -1062,7 +1076,7 @@ void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept {
         return;
     }
     MonsterState& m = s.monsters[tgt];
-    if (m.hp <= 0) {
+    if (m.hp <= 0 && !monster_half_dead(m)) {
         return;  // `if (this.isDying) return;` (AbstractMonster.java:385-387)
     }
     // No relic pass and no onHeal implementor (see above), so the amount lands

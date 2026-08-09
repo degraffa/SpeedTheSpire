@@ -299,6 +299,21 @@ sts_add_test(city_normals_i_test)
 # and Protect's recipient draw happens ONLY when a valid ally exists.
 sts_add_test(city_normals_ii_test)
 
+# S2.25: Act-3 beyond normals I -- the Darkling, the Orb Walker and the three
+# ancient shapes (Repulsor, Exploder, Spiker), plus Regrow ("Life Link"),
+# Explosive and Generic Strength Up. Stat/move tables are pinned at every
+# ascension branch, including two boundaries that read like typos and are not
+# (the Darkling gates HP on >= 7 and its damage block on >= 2; the Spiker's A17
+# Thorns arm COMPOSES with the A2 value, giving 7 rather than 6). The draw-count
+# assertions are the bit-exactness surface: the Orb Walker's super-argument HP
+# roll is drawn BEFORE setHp and discarded, so it costs two draws, and the
+# Exploder's degenerate sub-A7 setHp(30,30) still costs one. The Darkling half of
+# the file is the first exercise of the framework's die() VETO and its halfDead
+# bit -- the by-hand death fan-outs, the DOUBLE move-4 push, the revival heal
+# that only lands because isDying is not a bare hp <= 0, and the synchronous
+# group kill. "Sphere and 2 Shapes" un-parks here.
+sts_add_test(beyond_normals_i_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

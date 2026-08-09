@@ -28,6 +28,12 @@ add_library(sts_engine
     monster_snecko.cpp
     monster_centurion.cpp
     monster_healer.cpp
+    # S2.25 -- Act-3 beyond normals I
+    monster_darkling.cpp
+    monster_orb_walker.cpp
+    monster_repulsor.cpp
+    monster_exploder.cpp
+    monster_spiker.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -58,6 +64,7 @@ add_library(sts_engine
     # their application-time justApplied predicate (powers/power_duration_debuff.hpp).
     powers/power_duration_debuff.cpp
     powers/power_evolve.cpp
+    powers/power_explosive.cpp
     powers/power_fire_breathing.cpp
     powers/power_flight.cpp
     powers/power_flame_barrier.cpp

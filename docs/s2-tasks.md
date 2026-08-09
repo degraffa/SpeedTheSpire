@@ -724,9 +724,105 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   boss.
   **Deps:** S2.01, S2.2F, S2.23 (MINION row + spawn pattern) **Acceptance:** as S2.21, plus boss-flag typing
   (Pantograph-style consumers) and A13 gold tests.
-- **S2.25** `[ ]` ∥ Beyond normals I — Darkling (Regrow/revival), Orb
+- **S2.25** `[x]` ∥ Beyond normals I — Darkling (Regrow/revival), Orb
   Walker, Repulsor/Exploder/Spiker (3/4 Shapes, Sphere and 2 Shapes).
   **Deps:** S2.01, S2.2F **Acceptance:** as S2.21.
+  **Log:** `MonsterId` **49–53** all spent (Darkling, Orb Walker,
+  Repulsor, Exploder, Spiker); **45–48 stay unissued** and were not
+  backfilled. `PowerId` **99 REGROW / 100 EXPLOSIVE /
+  101 GENERIC_STRENGTH_UP** spent exactly. **Zero new opcodes, zero new
+  `MonsterState.flags` bits, zero new `MonsterIntent`s** — the Darkling's
+  rolled `nipDmg` and the Spiker's `thornsCount` both reuse `pad0` (the
+  Louse / Mugger precedent, the Spiker's saturating because its only
+  reader tests `> 5`), the Exploder's `turnCount` needs no storage at all
+  (it is `lastMove(BLOCK) || lastTwoMoves(ATTACK)`, exact because move 2
+  is absorbing), and the half-death bit is S2.2F's granted global 25
+  `kMonsterFlagHalfDead`, whose first producer this is.
+
+  **Registered, not invented: `REGROW`'s `game_id` is `"Life Link"`**
+  (`RegrowPower.java:16`) — the class name is the misleading part, and the
+  oracle joins on the id. `powers/ResurrectPower.java` declares the SAME
+  `POWER_ID` and has zero construction sites anywhere in the tree; it is
+  dead content and is recorded in-row so a later batch does not add a
+  second row for it. Regrow itself has **no hooks at all** — the whole
+  revival machine is in `Darkling.damage` / `getMove` / `takeTurn`, not in
+  the power.
+
+  **Two boundaries that read like typos and are not.** The Darkling gates
+  HP on `>= 7` and its damage block on `>= 2` in the same constructor,
+  even though the HP constants are named `A_2_HP_MIN/MAX`
+  (`Darkling.java:50-53,77-88`) — the branch is transcribed, not the
+  constant name. The Spiker's A17 Thorns arm is `startingThorns + 3`
+  reading the already-tiered A2 field (`Spiker.java:64,76`), so it
+  **composes**: seven at A20, not six and not four.
+
+  **The draw-count surface is the bit-exactness surface.** The Orb
+  Walker's `super(...)` argument is itself a `monsterHpRng.random(90, 96)`
+  evaluated before the constructor body and immediately overwritten by the
+  tiered `setHp` — **two draws, the first discarded**, and it is
+  tier-INDEPENDENT while the second is not, so `"2 Orb Walkers"` costs
+  four. The Exploder's sub-A7 `setHp(30, 30)` is degenerate and **still
+  draws** (`Random.random` is `start + nextInt(end - start + 1)` with an
+  unconditional `++counter`), which is the exact opposite of the Spheric
+  Guardian's zero-draw init (setHp is never *called* there) — both columns
+  are authored so the two are never conflated. The Exploder's `getMove`
+  reads `num` on no branch and still spends one `ai_rng` draw per decision
+  (the Guardian precedent); the Darkling's spends **one, two or more**,
+  because `getMove` re-enters on a fresh draw at two sites with
+  *different* bounds (`random(40, 99)` at `:166`, `random(0, 99)` at
+  `:181`). `burn_unspawned_ctor_rolls` and the live init read the same
+  registry roll rows, so range and order cannot drift.
+
+  **First exercise of the S2.2F die() VETO, and it found two live
+  defects.** `Darkling.die()` suppresses `super.die()` while the room's
+  `cannotLose` latch its own `usePreBattleAction` set is up, and
+  `Darkling.damage()` re-fires the power/relic fan-outs by hand — so a
+  Darkling at 0 HP is *half dead*, not dying, and `isDying` stops being
+  `hp <= 0`. (1) `op_heal`'s early-out was a bare `hp <= 0`, so
+  REINCARNATE's `HealAction(this, this, maxHealth / 2)` would have
+  silently no-opped and the Darkling would have sat at 0 HP forever; the
+  guard is now `hp <= 0 && !halfDead`, which is what `combat_state.hpp`
+  already spelled out. (2) Gremlin Horn's "some other monster is still
+  alive" test was a bare `hp > 0` where the Java reads
+  `areMonstersBasicallyDead` (`isDying || isEscaping`) — wrong in both
+  directions, and only *unreachable* until now (no Act-1 group pairs an
+  escapee with a sibling whose death matters); a three-Darkling fight is
+  three half-deaths and then a three-member `die()` sweep, so it is very
+  much reachable. Both fixed in place, both pinned.
+
+  **The revival's fine print, all reproduced rather than corrected:** the
+  half-death telegraph pushes move 4 **twice** (the synchronous `setMove`
+  *and* the queued `SetMoveAction`), so a revived Darkling's first
+  decision reads `[4, 4, <pre-death move>]`; `powers.clear()` is something
+  the base `die()` never does, which is why the power walk does not fire
+  again in the group sweep while the relic walk **does** (Gremlin Horn and
+  friends fire twice per Darkling); `firstMove` is consumed on the init
+  roll and is *not* reset by revival; the all-dead test ignores
+  non-Darkling members entirely; and `this.halfDead = false` at
+  `Darkling.java:227` is deliberately **not** transcribed at that point —
+  in this engine's `isDying` model, clearing the bit a line early would
+  make the record look already-dying to the sweep and swallow its second
+  fan-out, so the sweep clears it per member exactly where the Java sets
+  `isDying`. `getMove` also reads the monster's own **slot parity**
+  (`monsters.lastIndexOf(this) % 2 == 0`): the middle Darkling of a group
+  of three structurally can never CHOMP.
+
+  `dispatch_on_spawn_monster_relics` was **promoted** out of
+  `monster_dispatch.cpp`'s anonymous namespace to the header (rule of two,
+  conventions §7): REINCARNATE runs the same `onSpawnMonster` loop inline
+  in `takeTurn`, synchronously and uncapped, so a revival re-grants
+  Philosopher's Stone's +1 Strength every time — a revival is not a spawn,
+  but the game fires the spawn hook for it. `ExplosivePower` binds
+  S2.2F's `Hook::DURING_TURN` (the second binder will be S2.26's Fading):
+  `applyTurnPowers` runs synchronously right after `takeTurn`, so the
+  Exploder attacks on the very turn it self-destructs, the `SuicideAction`
+  resolves *before* the 30 THORNS-typed unscaled blast, and its 1-arg
+  constructor defaults `triggerRelics` to **true** (unlike the large-slime
+  split). No new encounter rows: all six beyond groups this un-parks were
+  landed by S2.01, and `"Sphere and 2 Shapes"` needed only these three
+  shapes to join S2.21's Spheric Guardian. Dead content deliberately
+  unregistered: `OrbWalker.DOUBLE_ENCOUNTER`, and the three shapes'
+  `ENCOUNTER_NAME` / `ENCOUNTER_NAME_W`. All six presets green.
 - **S2.26** `[ ]` ∥ Beyond normals II — Spire Growth, Transient, Maw, Jaw
   Worm Horde (variant-ctor deferred row), Writhing Mass (Reactive +
   master-deck Parasite).

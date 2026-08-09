@@ -474,6 +474,19 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "Centurion.java -- no this.type assignment (ctor :55-79)"},
         {MonsterId::HEALER,             MonsterEnemyType::NORMAL,
          "Healer.java -- no this.type assignment (ctor :57-84)"},
+        {MonsterId::DARKLING,           MonsterEnemyType::NORMAL,
+         "Darkling.java -- no this.type assignment (ctor :71-92). NORMAL "
+         "despite the cannotLose latch its usePreBattleAction sets (:96), which "
+         "is a ROOM flag and has nothing to do with EnemyType: Pantograph must "
+         "not read a 3-Darkling fight as a boss fight"},
+        {MonsterId::ORB_WALKER,         MonsterEnemyType::NORMAL,
+         "OrbWalker.java -- no this.type assignment (ctor :52-70)"},
+        {MonsterId::REPULSOR,           MonsterEnemyType::NORMAL,
+         "Repulsor.java -- no this.type assignment (ctor :44-57)"},
+        {MonsterId::EXPLODER,           MonsterEnemyType::NORMAL,
+         "Exploder.java -- no this.type assignment (ctor :50-62)"},
+        {MonsterId::SPIKER,             MonsterEnemyType::NORMAL,
+         "Spiker.java -- no this.type assignment (ctor :52-70)"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

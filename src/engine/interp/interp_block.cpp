@@ -90,7 +90,7 @@ namespace {
     // modifier; that block arrives here as an ordinary direct-add BLOCK item and
     // is deliberately NOT scaled by the owner's own Dexterity/Frail, exactly as
     // GainBlockAction never is.
-    static_assert(sts::registry::manifest::kPowersCount == 56,
+    static_assert(sts::registry::manifest::kPowersCount == 59,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "
