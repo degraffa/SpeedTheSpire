@@ -377,6 +377,27 @@ before reconfiguring; a fresh configure restores the defaults. Verify with
 `grep CMAKE_CXX_FLAGS: build/<preset>/CMakeCache.txt` — it must contain
 `/EHsc`.
 
+Where the fixed shell comes from (three more agents re-derived this on
+2026-08-09, so it is now written down): `clang-cl` resolves only after **both**
+`"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"`
+has run **and** `C:\Program Files\LLVM\bin` is prepended to `PATH`. A plain
+PowerShell/cmd session has neither. The working pattern is a two-line wrapper
+
+```bat
+@echo off
+call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
+set "PATH=C:\Program Files\LLVM\bin;%PATH%"
+cd /d <your worktree>
+%*
+```
+
+invoked as `wrapper.cmd cmd /c "cmake --preset win-debug && ..."`. Note
+`cmake --build` on an already-configured tree does *not* need the wrapper
+(the cache pins the compiler path) — it is **configure** that does, and a
+`cmake --build` that triggers an implicit reconfigure (a `CMakeLists.txt`
+edit, a preset change) needs it for the same reason. That implicit-reconfigure
+case is exactly how the trap fires after a merge.
+
 #### Two build commands in one build tree corrupt each other's objects
 
 **Symptom:** a link fails with `file format not recognized` for an object that
