@@ -507,6 +507,22 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "still NORMAL"},
         {MonsterId::WRITHING_MASS,      MonsterEnemyType::NORMAL,
          "WrithingMass.java -- no this.type assignment (ctor :53-78)"},
+        // S2.28's four Act-3 bosses. All four DO assign the field, and all four
+        // matter beyond bookkeeping: Pantograph scans the group for a BOSS-typed
+        // member (Pantograph.java:32-40) and Slaver's Collar's per-combat energy
+        // reads the same column (SlaversCollar.java:47-51), so a silent NORMAL
+        // here would quietly cost the player a relic's worth of effect in three
+        // of the game's hardest fights. Smoke Bomb's BOSS veto reads it too.
+        {MonsterId::AWAKENED_ONE,        MonsterEnemyType::BOSS,
+         "AwakenedOne.java:128 -- this.type = EnemyType.BOSS"},
+        {MonsterId::TIME_EATER,          MonsterEnemyType::BOSS,
+         "TimeEater.java:87 -- this.type = EnemyType.BOSS"},
+        {MonsterId::DONU,                MonsterEnemyType::BOSS,
+         "Donu.java:60 -- this.type = EnemyType.BOSS"},
+        {MonsterId::DECA,                MonsterEnemyType::BOSS,
+         "Deca.java:64 -- this.type = EnemyType.BOSS; note BOTH halves of the "
+         "pair are BOSS-typed, so the group reads as a boss fight on either "
+         "member -- Pantograph's scan stops at the first hit"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

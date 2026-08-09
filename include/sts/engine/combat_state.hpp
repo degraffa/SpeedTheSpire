@@ -746,6 +746,61 @@ inline constexpr uint32_t kMonsterFlagMawRoared = 0x0004u;
 // monster type and subdivides it (the Slaver / Looter precedent). The same is
 // true of the Jaw Worm's hardMode marker. Recorded here so a reader looking for
 // this batch's flag spend finds the answer rather than an absence.
+// S2.28 (Act-3 Beyond bosses). FOUR type-scoped bits, and they are a DELIBERATE
+// REUSE of the Hexaghost's four (0x0800/0x1000/0x2000 = its orbActiveCount mask,
+// 0x4000 = its burnUpgraded latch) rather than an append at bit 17. That reverses
+// the call S2.21 made, and the reason it reverses is that the resource stopped
+// being cheap:
+//
+//   * The policy above says a new type "should DELIBERATELY REUSE bits held by
+//     types it can never co-occur with, rather than extend upward". S2.21 argued
+//     the other way -- reuse conserves something that is not scarce, and a reused
+//     bit makes a raw `flags` read ambiguous until the reader also checks
+//     monster_id -- and with one batch in flight that argument held.
+//   * S2 wave 3 is SIX CONCURRENT BATCHES, all granted "type-scoped flag bits
+//     next 17" (docs/stage-b-tasks.md). Six batches appending from one shared
+//     cursor is either a coordination problem or six collisions in bits 17-23,
+//     of which there are seven. Reuse has no such failure mode: two batches that
+//     independently reuse the same bit for monsters that cannot co-occur are
+//     BOTH correct, and no integration merge can break them.
+//   * The non-co-occurrence here is as strong as it gets, and it is structural
+//     rather than a coincidence of pools: the Hexaghost is an ACT-1 BOSS and
+//     these four are ACT-3 BOSSES, and a combat contains exactly one boss
+//     encounter. (Mind Bloom's Act-1-boss re-fight, S2.33, is a separate combat
+//     with its own monster records; it does not put a Hexaghost and an Awakened
+//     One in one group.) Neither side can own the other's powers either, so the
+//     power-owned-bit caveat above does not bite: every one of these four is read
+//     ONLY by its own monster's module.
+//
+// So bits 17-23 are left free for the five sibling batches, and this block spends
+// nothing new.
+//
+//   * AWAKENED_FORM1     -- AwakenedOne.form1 (:75,315). SET == phase 1, the
+//                           form the boss starts in; cleared by the damage()
+//                           override at the phase transition, never restored.
+//                           getMove switches on it into two DISJOINT trees.
+//   * AWAKENED_FIRST_TURN-- AwakenedOne.firstTurn (:76,183,248,314). Both trees
+//                           read it and they treat it DIFFERENTLY: the phase-1
+//                           arm clears it inside getMove (:248), the phase-2 arm
+//                           does NOT (:262-265) and it is takeTurn case 5 that
+//                           clears it (:183). The transition SETS it again (:314),
+//                           which is what makes Dark Echo the opener of phase 2.
+//   * TIME_EATER_USED_HASTE -- TimeEater.usedHaste (:73,179). A one-shot latch:
+//                           Haste fires at most once per fight however far the
+//                           boss is healed back down.
+//   * SHAPE_ATTACKING    -- Donu.isAttacking (Donu.java:52,70,110,118) AND
+//                           Deca.isAttacking (Deca.java:56,74,119,128) -- ONE bit
+//                           for two types, which is the type-scoped region
+//                           working as designed. The pair co-occurs in the SAME
+//                           GROUP, and that is fine: the rule is that no single
+//                           RECORD is ever two types at once, and each record
+//                           reads only its own bit. Their INITIAL values differ
+//                           (Deca true, Donu false), which is what puts them
+//                           permanently out of phase.
+inline constexpr uint32_t kMonsterFlagAwakenedForm1 = 0x0800u;
+inline constexpr uint32_t kMonsterFlagAwakenedFirstTurn = 0x1000u;
+inline constexpr uint32_t kMonsterFlagTimeEaterUsedHaste = 0x2000u;
+inline constexpr uint32_t kMonsterFlagShapeAttacking = 0x4000u;
 
 // ESCAPED -- the FIRST global flag bit, bit 24, the bottom of the 24-31 global
 // region: the monster left the fight ALIVE. (HALF_DEAD, bit 25, is the second;

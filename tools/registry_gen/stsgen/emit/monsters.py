@@ -156,6 +156,14 @@ def parse_monster(entry: dict, powers: dict[str, int],
         # returns unconditionally, and it never calls lastTwoMoves or
         # lastMoveBefore at all).
         #
+        # S2.28 added the game's other two move-0 carriers: Donu and Deca
+        # (`BEAM = 0`, Donu.java:42 / Deca.java:47). Their answer to the
+        # empty-history question is simpler than the Writhing Mass's: neither
+        # getMove reads move history at all -- both key purely off
+        # `isAttacking` (Donu.java:125-131, Deca.java:135-143). A FUTURE
+        # monster with a move 0 AND a real history read would need a separate
+        # history-length counter; this is the note that says so.
+        #
         # So this gate cannot decide the question and no longer pretends to. It
         # rejects what is unconditionally wrong -- a non-integer, a bool, a
         # NEGATIVE id (move ids are Java bytes used as array/switch keys and the
@@ -364,10 +372,12 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("};\n")
     out.append("struct MonsterMove {")
     out.append("    uint8_t move_id;     // the game's byte move id. MAY BE 0 "
-               "(WrithingMass.BIG_HIT is),")
-    out.append("                         // which is ALSO move_history's "
-               "empty-slot sentinel -- see")
-    out.append("                         // the loader note in "
+               "(WrithingMass.BIG_HIT,")
+    out.append("                         // Donu/Deca BEAM), which is ALSO "
+               "move_history's empty-slot")
+    out.append("                         // sentinel -- such a monster must not "
+               "read its own history;")
+    out.append("                         // see the loader note in "
                "emit/monsters.py.")
     out.append("    MonsterIntent intent;")
     out.append("    uint8_t effect_count;")

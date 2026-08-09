@@ -123,7 +123,7 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 65,
+    static_assert(sts::registry::manifest::kPowersCount == 69,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -229,7 +229,7 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 65,
+    static_assert(sts::registry::manifest::kPowersCount == 69,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -330,7 +330,7 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 65,
+    static_assert(sts::registry::manifest::kPowersCount == 69,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible and Flight do)? Add a case "
                   "here if so.");
@@ -1196,8 +1196,21 @@ void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept {
         return;
     }
     MonsterState& m = s.monsters[tgt];
+    // `if (this.isDying) return;` (AbstractMonster.java:385-387).
+    //
+    // THE GUARD IS isDying, NOT `hp <= 0`, AND THE TWO NOW DIFFER. This engine
+    // models isDying as hp <= 0 because die() and SuicideAction both zero the HP
+    // -- but a HALF-DEAD monster sits at 0 HP with isDying explicitly FALSE: its
+    // die() was SUPPRESSED by the room's cannotLose (AwakenedOne.java:356-357,
+    // Darkling.java:239-243), which is exactly what MonsterDieFn's veto models.
+    // So isDying is `hp <= 0 && !halfDead` here, and reading it as `hp <= 0`
+    // would reject the two heals in the game that MUST land on a 0-HP monster:
+    // the Darkling's REINCARNATE (HealAction(this, this, maxHealth / 2),
+    // Darkling.java:131) and the Awakened One's Rebirth (HealAction(this, this,
+    // this.maxHealth), AwakenedOne.java:225). Corpses stay rejected -- halfDead
+    // is set only on the branch that keeps a monster in the fight.
     if (m.hp <= 0 && !monster_half_dead(m)) {
-        return;  // `if (this.isDying) return;` (AbstractMonster.java:385-387)
+        return;
     }
     // No relic pass and no onHeal implementor (see above), so the amount lands
     // as authored; clamp to maxHealth (:391-394).
@@ -1206,6 +1219,30 @@ void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept {
         nhp = m.max_hp;
     }
     m.hp = static_cast<int16_t>(nhp);
+    // THE INVARIANT MAINTAINER, and it is a FRAMEWORK rule rather than a boss
+    // special case: combat_state.hpp declares that halfDead IMPLIES hp == 0, and
+    // that implication is precisely what makes monster_dead_or_escaped exact for
+    // isDeadOrEscaped with no edit. A heal that lifts a half-dead monster off
+    // zero must clear the bit, or every targeting predicate in the engine would
+    // go on treating a living monster as untargetable.
+    //
+    // The Java clears halfDead ONE ACTION EARLIER, inside changeState("REBIRTH")
+    // (:223), before it queues the HealAction. It can afford to, because it
+    // carries isDying as a separate field; here the bit IS the only carrier of
+    // "at 0 HP and not dying", so an early clear would make the boss read as
+    // basically-dead for the one intervening action. Nothing observes the
+    // difference: that intervening action is the trailing RollMoveAction, whose
+    // getMove reads neither HP nor the flag, and the combat-over gate is held
+    // open by the room's cannotLose latch on either reading. The deviation is
+    // recorded here and in monster_awakened_one.hpp.
+    //
+    // op_heal is the ONLY route that can reach this state. RegenerateMonsterPower
+    // keeps its own `hp <= 0` early-out (powers/power_regenerate_monster.cpp) and
+    // so cannot heal a half-dead monster at all -- which is exactly what its Java
+    // halfDead guard (RegenerateMonsterPower.java:38-42) says.
+    if (m.hp > 0) {
+        m.flags &= ~kMonsterFlagHalfDead;
+    }
 }
 
 // DropkickAction.update: test Vulnerable when the action resolves. Damage is

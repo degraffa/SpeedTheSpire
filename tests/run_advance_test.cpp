@@ -43,6 +43,8 @@
 #include "sts/registry/monster_table.hpp"  // monster_def / MonsterRollTiming
 #include "sts/engine/potions.hpp"
 #include "sts/engine/power_hooks.hpp"  // dispatch_was_hp_lost (Centennial Puzzle)
+#include "sts/engine/public_view.hpp"  // second_boss_reserved (A20 double boss)
+#include "sts/registry/encounter_table.hpp"  // encounter_by_game_id (same test)
 #include "sts/engine/relic_hooks.hpp"  // RelicHook (the pre-draw emptiness pin)
 #include "sts/engine/relics.hpp"       // RelicDef / kRelicDefs
 #include "sts/engine/rng_stream.hpp"
@@ -3327,10 +3329,23 @@ TEST(BossVictory, TheActThreeBossIsTheTerminalAndItsMaskIsEmpty) {
     RunController act3 = enter_boss_combat(kSeed);
     act3.run.act = 3;
     act3.run.floor = static_cast<uint16_t>(act_floor_base(3) + kActFloorSpan - 1);
+    // BELOW A20 the first Act-3 boss IS the terminal: ProceedButton's
+    // double-boss arm needs `ascensionLevel >= 20` (ProceedButton.java:101-104),
+    // so at A19 the kill falls straight through to goToVictoryRoomOrTheDoor.
+    // The A20 route -- a SECOND boss room before the terminal -- is the sibling
+    // test below.
+    act3.run.ascension = 19;
     weaken_all_monsters(act3);
-    // The Act-2 twin, identical but for the act -- the differential that pins
-    // "the gold DRAW still happens, the gold ITSELF never lands".
+    // The Act-2 twin, identical but for the act (and it deliberately KEEPS
+    // ascension 20: an A20 Act-2 boss kill must still open a reward screen,
+    // because the double-boss gate is TheBeyond-only however the remaining
+    // bossList count reads -- the named Act-2 negative the run_advance.cpp
+    // double-boss comment points at). The differential still pins "the gold
+    // DRAW still happens, the gold ITSELF never lands": roll_boss_gold spends
+    // exactly one miscRng draw at 19 and at 20 alike (the A13 branch changes
+    // the discarded value, never the stream).
     RunController act2 = act3;
+    act2.run.ascension = 20;
     act2.run.act = 2;
     act2.run.floor = static_cast<uint16_t>(act_floor_base(2) + kActFloorSpan - 1);
     const int32_t gold_before = act3.run.gold;
@@ -3368,6 +3383,110 @@ TEST(BossVictory, TheActThreeBossIsTheTerminalAndItsMaskIsEmpty) {
     EXPECT_TRUE(res.terminal);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
     EXPECT_TRUE(run_is_victory(rc));
+}
+
+// The A20 route to that terminal has ONE MORE ROOM in it (a20.yaml row 20,
+// S2.28). ProceedButton.update:99-104 -- `ascensionLevel >= 20 &&
+// bossList.size() == 2`, read AFTER MonsterRoomBoss.onPlayerEntry popped this
+// room's boss -- sends the first Act-3 boss kill through goToDoubleBoss
+// (:210-220): a synthetic MonsterRoomBoss and a FULL nextRoomTransitionStart.
+// Only the SECOND kill is the terminal, and only it pays the +1.
+TEST(BossVictory, TheA20DoubleBossInterposesASecondBossRoomBeforeTheTerminal) {
+    RunController rc = enter_boss_combat(kSeed);  // run_begin(seed, kA20)
+    rc.run.act = 3;
+    rc.run.floor = static_cast<uint16_t>(act_floor_base(3) + kActFloorSpan - 1);
+    ASSERT_EQ(rc.run.ascension, 20);
+    ASSERT_EQ(rc.lists.boss_list_count, 3)
+        << "TheBeyond.initializeBoss keeps three keys; the gate's remaining "
+           "count is data, not a constant";
+    ASSERT_EQ(rc.boss_cursor, 0);
+    const uint16_t first_floor = rc.run.floor;
+    const int32_t gold_before = rc.run.gold;
+
+    weaken_all_monsters(rc);
+    // play_out_combat loops while phase == COMBAT, and the double-boss crossing
+    // lands in ANOTHER combat -- so drive the first fight with an explicit
+    // floor-change stop instead, or the helper would play the second boss
+    // un-weakened.
+    {
+        StepResult res{};
+        for (int step = 0; step < 800; ++step) {
+            if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT) ||
+                rc.run.floor != first_floor) {
+                break;
+            }
+            RunActionMask m{};
+            legal_actions(rc, m);
+            Action a = make_action(ActionVerb::END_TURN);
+            bool played = false;
+            for (int i = 0; i < kHandCap && !played; ++i) {
+                for (int t = 0; t < kMonsterCap; ++t) {
+                    if (m.combat.can_play_target[i][t]) {
+                        a = make_action(ActionVerb::PLAY_CARD,
+                                        static_cast<uint8_t>(i),
+                                        static_cast<uint8_t>(t));
+                        played = true;
+                        break;
+                    }
+                }
+            }
+            advance(std::span<RunController>(&rc, 1),
+                    std::span<const Action>(&a, 1),
+                    std::span<StepResult>(&res, 1));
+        }
+    }
+
+    // Kill #1: NOT a terminal. The crossing is a full room transition --
+    // ++floor, the five-stream reseed, boss_cursor advances on the way out --
+    // into a COMBAT in a fresh Boss room whose encounter is boss_list[1].
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+        << "goToDoubleBoss is a room transition, not a screen";
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
+    EXPECT_FALSE(run_is_victory(rc));
+    EXPECT_EQ(rc.run.floor, first_floor + 1)
+        << "nextRoomTransitionStart runs in full, so the synthetic room is its "
+           "own floor (the S2.11 rule: never hand-roll a second transition)";
+    EXPECT_EQ(rc.boss_cursor, 1)
+        << "the cursor means 'boss rooms COMPLETED' and bumps on room exit";
+    EXPECT_EQ(rc.run.gold, gold_before)
+        << "the first room's boss-gold draw is discarded, not banked "
+           "(AbstractRoom.java:286-297 pays to an unclaimable reward list)";
+
+    // The second boss's identity is now PUBLIC -- the player is looking at it --
+    // so the reserved v5 slot carries it, and it is boss_list[1] exactly.
+    {
+        PublicView pv{};
+        encode_public_view(rc, pv);
+        const sts::registry::EncounterDef* second =
+            sts::registry::encounter_by_game_id(rc.lists.boss_list[1]);
+        ASSERT_NE(second, nullptr);
+        EXPECT_EQ(pv.second_boss_reserved, second->id)
+            << "second_boss_reserved (v5) carries the revealed second boss";
+        EXPECT_EQ(pv.second_boss_reserved, pv.current_encounter_id)
+            << "while standing in the second room the two fields agree; only "
+               "second_boss_reserved survives into RUN_OVER";
+    }
+
+    // Kill #2: the terminal, exactly once, with the +1 paid here and not before.
+    weaken_all_monsters(rc);
+    play_out_combat(rc);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER))
+        << "after the second room's entry pop the remaining count is 1, the "
+           "gate fails, and the kill falls through to the terminal";
+    EXPECT_TRUE(run_is_victory(rc));
+    EXPECT_EQ(rc.rewards.count, 0) << "no reward screen at either Act-3 boss";
+
+    // The v5 slot SURVIVES the terminal -- at RUN_OVER it is the only record of
+    // which second boss decided the run (current_encounter_id is combat-scoped).
+    PublicView pv{};
+    encode_public_view(rc, pv);
+    const sts::registry::EncounterDef* second =
+        sts::registry::encounter_by_game_id(rc.lists.boss_list[1]);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(pv.second_boss_reserved, second->id);
+    EXPECT_EQ(pv.current_encounter_id, 0)
+        << "combat-scoped, absent at RUN_OVER -- the non-redundancy the v5 "
+           "field note claims";
 }
 
 // =============================================================================

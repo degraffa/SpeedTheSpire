@@ -375,6 +375,21 @@ void encode_always_block(const RunController& rc, PublicView& out) noexcept {
         rc.boss_cursor > 0 ? static_cast<int>(rc.boss_cursor) : 1;
     encode_prefix(rc.lists.boss_list.data(), rc.lists.boss_list_count,
                   boss_public, out.boss_prefix, kMaxBossList);
+    // THE A20 SECOND BOSS (S2.28; the reserved slot public_view.hpp declares).
+    // boss_cursor advances when a boss room is LEFT, and in the FINAL act the
+    // only way to leave one with the run still going is the double-boss
+    // transition -- a non-A20 Act-3 boss kill terminates the run instead. So
+    // `act == kFinalAct && boss_cursor >= 1` IS "the player is in (or has
+    // finished) the second boss room", which is exactly when boss_list[1] stops
+    // being a hidden realization and starts being the monsters on screen.
+    //
+    // The belief sampler preserves the same prefix (condition_boss_list's `keep`,
+    // resample.cpp), so a hidden twin agrees with the truth here -- which is what
+    // makes populating this safe rather than a leak.
+    if (rc.run.act == kFinalAct && rc.boss_cursor >= 1 &&
+        rc.lists.boss_list_count > 1) {
+        out.second_boss_reserved = encounter_id_of(rc.lists.boss_list[1]);
+    }
 
     // The encounter the player is INSIDE. Entering the room revealed it; the
     // cursor still points at it (it advances on room exit). Event combats are

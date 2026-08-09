@@ -227,11 +227,27 @@ POTION_DOMAIN = StepDomain(
 # now author a heal, which the Healer's HEAL row does (fanned out natively over
 # the live group -- see monster_healer.cpp). Neither carries an extra operand, so
 # neither needs a pack_extra branch.
+#
+# S2.28 adds two more, both operand-free and both authored so that a move's STEP
+# ORDER stays in the row rather than migrating into engine code:
+#   * REMOVE_DEBUFFS -- the Time Eater's Haste opens with RemoveDebuffsAction(this)
+#     and then a REDUNDANT RemoveSpecificPowerAction("Shackled") on the same turn
+#     (TimeEater.java:210-211). Shackled is a DEBUFF, so the first action already
+#     removed it and the second is a no-op; both are authored because the pair is
+#     what the Java queues and the second costs nothing.
+#   * CAN_LOSE -- the Awakened One's Rebirth ends by re-arming the loss condition
+#     (changeState "REBIRTH" -> addToBottom(new CanLoseAction()),
+#     AwakenedOne.java:226). Its SIBLING, CANNOT_LOSE, is deliberately NOT added:
+#     its only monster producer sets the room flag from usePreBattleAction
+#     (AwakenedOne.java:143), which is not a move program at all.
+# Neither carries an extra operand, so neither needs a pack_extra branch, and
+# both ignore the step's target (the room flag is combat-wide).
 MONSTER_MOVE_OPS = frozenset({
     "NOP", "DAMAGE", "BLOCK", "LOSE_HP",
     "APPLY_POWER", "REMOVE_POWER", "REDUCE_POWER", "MAKE_CARD",
     "VAMPIRE_DAMAGE",
     "BLOCK_RANDOM_MONSTER", "HEAL", "OBTAIN_CARD",
+    "REMOVE_DEBUFFS", "CAN_LOSE",
 })
 MONSTER_DOMAIN = StepDomain("monsters", "monsters.yaml", MONSTER_MOVE_OPS)
 

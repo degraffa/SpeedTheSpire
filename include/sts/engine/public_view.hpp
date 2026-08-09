@@ -120,7 +120,7 @@ namespace sts::engine {
 //             must re-encode rather than reread. This is the case the audit's
 //             schema-evolution note calls breaking, and the version stamp is
 //             what makes it detectable rather than silent.
-inline constexpr uint32_t PUBLIC_VIEW_VERSION = 4;
+inline constexpr uint32_t PUBLIC_VIEW_VERSION = 5;
 
 // --- PvCard -----------------------------------------------------------------
 
@@ -434,6 +434,21 @@ struct PublicView {
     //    for act is remapped to 1 by the declared reader rule. --
     uint8_t keys_reserved;                   // kKey* bitflags (run_state.hpp)
     uint16_t boss_relic_choice_reserved[3];  // S2 boss-chest relic screen
+    // POPULATED FROM v5 (S2.28). The EncounterDef id of the SECOND Act-3 boss
+    // of an A20 double-boss run -- boss_list[1] of that act's shuffle -- and 0
+    // in every other state, which is the declared "not present" value a v4
+    // record already reads truthfully (no v4 run could reach a second boss).
+    //
+    // CARRIED ONLY ONCE IT IS PUBLIC, i.e. from the moment the double-boss
+    // transition puts the player in the second boss room; before that the
+    // identity is a hidden realization the belief sampler continues, and
+    // carrying it would leak. That is not a nicety -- the hidden-twin gate
+    // compares this field, so an early populate FAILS rather than leaks.
+    //
+    // It is NOT redundant with `current_encounter_id`, which is written only
+    // while the phase is COMBAT / COMBAT_REWARD: at RUN_OVER -- the state every
+    // finished run is observed in -- this is the only record of WHICH second
+    // boss the run was decided by.
     uint16_t second_boss_reserved;           // S2 A20 double-boss slot
     uint8_t act_reserved;                    // act index 1..4
     uint8_t pad_tail[3];                     // explicit padding, always zero

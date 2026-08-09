@@ -1427,12 +1427,36 @@ void next_room_transition_impl(RunController& rc, uint8_t dst_x,
     //     omission was unobservable; the boss-chest transition below is the
     //     first edge that leaves a boss room with the run still going, which is
     //     why S2.11 owns the correction (adjudicated at dispatch).
+    //
+    //     THE BOSS LIST ITSELF ADVANCES HERE TOO (S2.28), and its Java pop is at
+    //     a DIFFERENT moment: `bossList.remove(0)` runs in
+    //     MonsterRoomBoss.onPlayerEntry (MonsterRoomBoss.java:27-36), i.e. on
+    //     ENTRY, not on exit. The engine keeps it on EXIT anyway, which makes
+    //     rc.boss_cursor mean "boss rooms COMPLETED" rather than "bossList
+    //     entries popped", and the two differ by exactly one while the player is
+    //     standing in a boss room. That is the meaning the rest of the engine
+    //     already assumes -- public_view.cpp reads boss_list[boss_cursor] as the
+    //     encounter the player is INSIDE, and resample's prefix rule is written
+    //     the same way for all three lists -- so moving the bump to entry would
+    //     have desynchronised those readers and every act's observations with
+    //     them. The one-room offset is instead spelled out at each site that
+    //     needs the Java's number, of which there is exactly one: the A20
+    //     double-boss gate in finish_combat_after_action.
+    //
+    //     Until S2.28 nothing incremented boss_cursor at all -- one boss per act
+    //     and act_transition resets it -- so this line is new behaviour only for
+    //     the double boss and for the Act-1/2 boss-chest floor, where the cursor
+    //     now correctly reads 1 (the act's boss HAS been consumed) instead of 0.
     const RoomType left_room = static_cast<RoomType>(rc.room_type);
     if (rs.floor >= 1 && rc.cur_x != kNeowColumn) {
         if (left_room == RoomType::Monster || left_room == RoomType::Boss) {
             ++rc.monster_cursor;
         } else if (left_room == RoomType::Elite) {
             ++rc.elite_cursor;
+        }
+        if (left_room == RoomType::Boss &&
+            rc.boss_cursor < rc.lists.boss_list_count) {
+            ++rc.boss_cursor;
         }
     }
     // The EMPTY-LIST arm of the same Java block (:1701-1706) calls
@@ -2466,15 +2490,106 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
                                    rc.combat.relic_count);
         fold_back_combat(rc);
         (void)settle_stolen_gold(rc);
+        // The gold add of AbstractRoom.java:286-297, and it is keyed on
+        // `this instanceof MonsterRoomBoss` -- NOT on an act check -- so it fires
+        // for EVERY boss room including the A20 double boss's synthetic second
+        // one. Two rooms, two independent miscRng draws, two discarded payouts
+        // (a20.yaml row 13). It stays AHEAD of the double-boss branch below for
+        // that reason: the first boss must draw before the transition reseeds the
+        // floor streams.
         (void)roll_boss_gold(rc.combat.misc_rng,
                              static_cast<int>(rc.run.ascension));
+
+        // === A20 DOUBLE BOSS (a20.yaml row 20; s2-design section 4.4) =========
+        //
+        // ProceedButton.update (:99-113), the ONLY branch in the game that reads
+        // the pair:
+        //
+        //     if (currentRoom instanceof MonsterRoomBoss)
+        //         if (AbstractDungeon.id.equals("TheBeyond"))
+        //             if (ascensionLevel >= 20 && bossList.size() == 2)
+        //                  goToDoubleBoss();
+        //             else if (!Settings.isEndless) goToVictoryRoomOrTheDoor();
+        //
+        // THE GATE'S ALGEBRA, spelled out rather than shortcut. `bossList.size()`
+        // is read AFTER MonsterRoomBoss.onPlayerEntry popped this room's boss
+        // (MonsterRoomBoss.java:27-36), while rc.boss_cursor does not advance
+        // until the room is LEFT (see next_room_transition_impl). So the Java's
+        // remaining count is
+        //
+        //     boss_list_count - (boss_cursor + 1)
+        //
+        // and the gate is that == 2. With TheBeyond's three-key bossList
+        // (TheBeyond.initializeBoss :147-176, boss_list_count == 3) it reduces to
+        // boss_cursor == 0 -- but the reduction is NOT what is written here, both
+        // because it hides the entry-pop offset and because the count is data.
+        //
+        // EXACTLY TWO BOSSES AT A20, NEVER THREE: after the second room's own
+        // entry pop the remaining count is 1 and this gate fails, so the second
+        // boss falls through to the terminal below.
+        //
+        // ACT-3 ONLY, and that is the `act >= kFinalAct` this whole block already
+        // sits under. Acts 1 and 2 ALSO reach a remaining count of 2 after their
+        // entry pop -- their bossLists are three keys too -- and are excluded by
+        // the `AbstractDungeon.id.equals("TheBeyond")` test, not by the count.
+        // The S1 negative freeze for Act 1 stands; the Act-2 negative is pinned
+        // by a named test.
+        const int32_t bosses_left_after_entry_pop =
+            static_cast<int32_t>(rc.lists.boss_list_count) -
+            (static_cast<int32_t>(rc.boss_cursor) + 1);
+        if (rc.run.ascension >= 20 && bosses_left_after_entry_pop == 2) {
+            // goToDoubleBoss (ProceedButton.java:210-220): bossKey =
+            // bossList.get(0), a synthetic MapRoomNode(-1, 15) carrying a fresh
+            // MonsterRoomBoss, then nextRoomTransitionStart().
+            //
+            // THAT IS A FULL ROOM TRANSITION, not a screen change, and the chain
+            // is the one S2.11 got corrected on: nextRoomTransitionStart ->
+            // AbstractDungeon.updateFading's `if (!isDungeonBeaten)
+            // nextRoomTransition()` (:2317-2326). isDungeonBeaten is set only on
+            // the way OUT of an act (:249-250) and this crossing does not set it,
+            // so the transition runs in full: monsterList.remove(0) (a boss room
+            // IS a MonsterRoom), ++floorNum, the trap-7 five-stream reseed, and
+            // the relic onEnterRoom / justEnteredRoom fan-outs -- Maw Bank pays
+            // again. next_room_transition is that machinery; hand-rolling a
+            // second copy is exactly what the S2.11 note forbids.
+            //
+            // NO REWARD SCREEN EITHER TIME. AbstractRoom.java:327's guard is on
+            // ROOM and DUNGEON only -- there is no outcome or count clause -- so
+            // both Act-3 boss rooms skip dropReward()/combatRewardScreen.open(),
+            // and ProceedButton's chest branch (:111-113) needs
+            // `screen == COMBAT_REWARD` and so cannot fire at either. The player
+            // carries HP and deck across and is granted nothing else.
+            //
+            // NO PLAYER DECISION, hence no new action verb and no fuzz MoveCat.
+            // The proceed click has no alternative: with no reward screen there
+            // is nothing to claim and no map to pick from. That is the same
+            // reading that lets the Act-3 terminal below fire straight out of
+            // finish_combat_after_action instead of parking on a screen, so the
+            // granted MoveCat 32 is RELEASED rather than spent (scarce-namespace
+            // contingencies are released to free, not gapped -- the rule the
+            // colorless-rares batch's Log recorded for exactly this shape).
+            //
+            // AbstractMonster.onFinalBossVictoryLogic (:1058-1085) SKIPS ITS
+            // WHOLE BODY under this same `ascensionLevel >= 20 && size == 2`
+            // pair, and s2-design section 4.4 asked for a re-check of whether
+            // anything sim-visible hangs off it. The answer is a NEGATIVE:
+            // achievements and stopClock only.
+            next_room_transition(rc, 0, /*to_boss=*/true);
+            fill_run_result(rc, res);
+            return;
+        }
+
         rc.combat_outcome = static_cast<uint8_t>(outcome);
         rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
         res = StepResult{};
         res.terminal = true;
         res.reward = 1.0f;  // the run-level win: the +1 analogue of the DEFEAT
                             // path's -1 above. run_is_victory() reads exactly
-                            // the state this branch writes.
+                            // the state this branch writes. EXACTLY ONCE per
+                            // winning run, including an A20 one -- the
+                            // double-boss branch above returns without writing
+                            // either, so the first Act-3 boss kill is not a
+                            // terminal and pays no reward.
         return;
     }
 

@@ -775,6 +775,22 @@ MONSTER_INTENTS = {
                           # ESCAPE; Looter.java:123,131 -- Smoke Bomb telegraphs it
                           # and the Escape turn re-telegraphs it). Value 14 is a
                           # published reserve for the same batch and stays unissued.
+    "DEFEND_DEBUFF": 15,  # The Time Eater's Ripple (AbstractMonster.Intent.
+                          # DEFEND_DEBUFF; TimeEater.java:194,203 -- BOTH arms that
+                          # pick move 3 telegraph it). Block 20 on ITSELF plus
+                          # Vulnerable/Weak on the PLAYER (and Frail from A19), which
+                          # is none of DEFEND (11, pure block), DEBUFF (5, no block)
+                          # or DEFEND_BUFF (2, where the buff is the monster's own).
+                          # S2.28's whole MonsterIntent grant; 14 remains B3.15's
+                          # published reserve and stays unissued.
+                          #
+                          # IT IS NOT DONU'S. The dispatching brief assigned
+                          # DEFEND_DEBUFF to Donu; the tree says otherwise and was
+                          # re-read before the value was spent. Donu's Circle of
+                          # Protection telegraphs Intent.BUFF (Donu.java:339) and
+                          # Deca's Square of Protection telegraphs DEFEND below A19,
+                          # DEFEND_BUFF from A19 (Deca.java:507-511) -- three
+                          # constants that all already existed.
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

@@ -923,7 +923,9 @@ TEST(PublicViewRun, AlwaysBlockScalarsRoundTrip) {
     PublicView pv{};
     encode_public_view(rc, pv);
 
-    EXPECT_EQ(pv.public_view_version, 4u);  // v4: kMonsterCap 7 -> 23 (breaking)
+    EXPECT_EQ(pv.public_view_version, 5u);  // v5: second_boss_reserved populated
+                                            // (additive, case 1); v4 was the
+                                            // kMonsterCap 7 -> 23 breaking bump
     EXPECT_EQ(pv.run_phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
     EXPECT_EQ(pv.combat_active, 0);
 
