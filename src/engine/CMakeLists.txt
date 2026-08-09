@@ -42,6 +42,12 @@ add_library(sts_engine
     monster_transient.cpp
     monster_maw.cpp
     monster_writhing_mass.cpp
+    # S2.24 -- Act-2 City bosses.
+    monster_bronze_automaton.cpp
+    monster_bronze_orb.cpp
+    monster_champ.cpp
+    monster_collector.cpp
+    monster_torch_head.cpp
     # S2.28 -- Act-3 Beyond bosses.
     monster_awakened_one.cpp
     monster_time_eater.cpp
@@ -106,6 +112,7 @@ add_library(sts_engine
     powers/power_sharp_hide.cpp
     powers/power_shifting.cpp
     powers/power_spore_cloud.cpp
+    powers/power_stasis.cpp
     powers/power_the_bomb.cpp
     powers/power_thorns.cpp
     powers/power_time_warp.cpp

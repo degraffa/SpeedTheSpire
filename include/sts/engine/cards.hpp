@@ -378,7 +378,11 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::CLEAR_CARD_QUEUE) ==
             static_cast<uint16_t>(Opcode::CLEAR_CARD_QUEUE) &&
         static_cast<uint16_t>(sts::registry::Opcode::END_PLAYER_TURN) ==
-            static_cast<uint16_t>(Opcode::END_PLAYER_TURN),
+            static_cast<uint16_t>(Opcode::END_PLAYER_TURN) &&
+        static_cast<uint16_t>(sts::registry::Opcode::APPLY_STASIS) ==
+            static_cast<uint16_t>(Opcode::APPLY_STASIS) &&
+        static_cast<uint16_t>(sts::registry::Opcode::STASIS_RETURN) ==
+            static_cast<uint16_t>(Opcode::STASIS_RETURN),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

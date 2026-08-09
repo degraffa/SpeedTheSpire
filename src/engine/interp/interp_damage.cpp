@@ -123,7 +123,12 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 69,
+    // Checked for S2.24's one power, STASIS (id 98, StasisPower.java:16-45,
+    // read in full): its only overrides are updateDescription and onDeath --
+    // a queued give-back of the stolen card, touching no damage number in
+    // any pass, giving or receiving. All three of this file's counts move
+    // again, caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 70,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -229,7 +234,12 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 69,
+    // Checked for S2.24's one power, STASIS (id 98, StasisPower.java:16-45,
+    // read in full): its only overrides are updateDescription and onDeath --
+    // a queued give-back of the stolen card, touching no damage number in
+    // any pass, giving or receiving. All three of this file's counts move
+    // again, caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 70,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -330,7 +340,12 @@ namespace {
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39), which queues an ApplyPowerAction of
     // STRENGTH -- the scaling happens in STRENGTH's own case above.
-    static_assert(sts::registry::manifest::kPowersCount == 69,
+    // Checked for S2.24's one power, STASIS (id 98, StasisPower.java:16-45,
+    // read in full): its only overrides are updateDescription and onDeath --
+    // a queued give-back of the stolen card, touching no damage number in
+    // any pass, giving or receiving. All three of this file's counts move
+    // again, caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 70,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible and Flight do)? Add a case "
                   "here if so.");

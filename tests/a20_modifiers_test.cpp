@@ -502,9 +502,11 @@ TEST(A20Negative, LevelTwentyAddsNothingToAnActOneRun) {
 // explicit engine-work ownership; a row's STATUS moves only when the owning
 // task lands ("rows keep S1 status until their owner lands"). Row 20's owner
 // LANDED (S2.28's double-boss route), so its prefix is IMPLEMENTED now; row
-// 13's remains open (its S2.24 reward-assembly share has not landed), so its
-// prefix must not move. These tests pin the citations by substring, the same
-// discipline the frozen no-such-modifier block already uses.
+// 13 flipped to IMPLEMENTED when S2.24 landed its reward-assembly share (the
+// Act-3 draw-and-discard half was S2.28's; the pin moved with the row, the
+// same discipline as row 20's flip). These tests pin the citations by
+// substring, the same discipline the frozen no-such-modifier block already
+// uses.
 TEST(A20S204, AffectedRowsKeepTheirS1StatusPrefix) {
     const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
     auto row = [&](int level) -> const A20Row& {
@@ -515,7 +517,8 @@ TEST(A20S204, AffectedRowsKeepTheirS1StatusPrefix) {
     EXPECT_EQ(row(5).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
     EXPECT_EQ(row(6).notes.rfind("IMPLEMENTED", 0), std::size_t{0});
     EXPECT_EQ(row(12).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
-    EXPECT_EQ(row(13).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
+    EXPECT_EQ(row(13).notes.rfind("IMPLEMENTED", 0), std::size_t{0})
+        << "S2.24 landed the claimable Act-2 share, closing the row";
     EXPECT_EQ(row(20).notes.rfind("IMPLEMENTED", 0), std::size_t{0})
         << "S2.28 landed the double-boss route";
 }

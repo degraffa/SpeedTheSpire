@@ -13,7 +13,12 @@
 #include "sts/engine/interp.hpp"            // Opcode, make_apply_power_flags (the spawn Minion)
 #include "sts/engine/monster_book_of_stabbing.hpp"  // the growing stab counter
 #include "sts/engine/monster_awakened_one.hpp"  // the Awakened One: the halfDead phase transition
+#include "sts/engine/monster_bronze_automaton.hpp"  // the Automaton: orb summon + death sweep
+#include "sts/engine/monster_bronze_orb.hpp"  // the Bronze Orb: the Stasis thief
 #include "sts/engine/monster_byrd.hpp"     // the Byrd: Flight + the airborne latch
+#include "sts/engine/monster_champ.hpp"    // the Champ: threshold latch + forge counter
+#include "sts/engine/monster_collector.hpp"  // The Collector: slot-recycling summons
+#include "sts/engine/monster_torch_head.hpp"  // the Torch Head: ctor telegraph, one draw
 #include "sts/engine/monster_centurion.hpp"  // the Centurion: aliveCount-driven tree
 #include "sts/engine/monster_chosen.hpp"   // the Chosen: Hex opener + roll tree
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
@@ -250,6 +255,21 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &donu_init;
         case MonsterId::DECA:
             return &deca_init;
+        // S2.24 -- the three Act-2 City bosses draw ONE degenerate
+        // monster_hp_rng roll each (single-arg setHp, the S2.28 reading); the
+        // two minions' inits are the FULL ctor pair (super-arg + setHp) and
+        // are unreachable from any encounter -- both types are summon-only,
+        // and their live path is monster_spawn_at_hp_fn.
+        case MonsterId::BRONZE_AUTOMATON:
+            return &bronze_automaton_init;
+        case MonsterId::BRONZE_ORB:
+            return &bronze_orb_init;
+        case MonsterId::CHAMP:
+            return &champ_init;
+        case MonsterId::THE_COLLECTOR:
+            return &collector_init;
+        case MonsterId::TORCH_HEAD:
+            return &torch_head_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -359,6 +379,17 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &donu_take_turn;
         case MonsterId::DECA:
             return &deca_take_turn;
+        // S2.24.
+        case MonsterId::BRONZE_AUTOMATON:
+            return &bronze_automaton_take_turn;
+        case MonsterId::BRONZE_ORB:
+            return &bronze_orb_take_turn;
+        case MonsterId::CHAMP:
+            return &champ_take_turn;
+        case MonsterId::THE_COLLECTOR:
+            return &collector_take_turn;
+        case MonsterId::TORCH_HEAD:
+            return &torch_head_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -366,7 +397,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 55,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
@@ -552,6 +583,31 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             return &donu_roll_move;
         case MonsterId::DECA:
             return &deca_roll_move;
+        // S2.24: FOUR of the five register. The three bosses and the Bronze
+        // Orb each end takeTurn in a RollMoveAction sitting AFTER the switch
+        // (BronzeAutomaton.java:145, BronzeOrb.java:76, Champ.java:214,
+        // TheCollector.java:177) -- and for the two summoners the queued form
+        // is load-bearing: a SPAWN turn's roll must resolve AFTER the spawned
+        // minions' init rolls, at a pre-computed post-insertion index (the
+        // Gremlin Leader shape). The Automaton's getMove reads num on NO arm
+        // and registers anyway (the Spheric Guardian reason: the draw moves
+        // the shared stream).
+        //
+        // The TORCH HEAD registers NONE, the Transient's reason exactly:
+        // takeTurn re-telegraphs with a queued SetMoveAction (TorchHead.java:
+        // 63), so it decides through this seam never -- one ai_rng draw for
+        // its whole life, at spawn.
+        case MonsterId::BRONZE_AUTOMATON:
+            return &bronze_automaton_roll_move;
+        case MonsterId::BRONZE_ORB:
+            return &bronze_orb_roll_move;
+        case MonsterId::CHAMP:
+            return &champ_roll_move;
+        case MonsterId::THE_COLLECTOR:
+            // Its roll reads OTHER monsters' liveness (isMinionDead over the
+            // derived slot map), so it takes the whole state -- the Centurion
+            // reason.
+            return &collector_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -570,7 +626,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 55,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -643,6 +699,18 @@ MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
             return &gremlin_tsundere_spawn_at_hp;
         case MonsterId::GREMLIN_WIZARD:
             return &gremlin_wizard_spawn_at_hp;
+        // S2.24: the two City-boss minions are SUMMON-ONLY -- neither appears
+        // in any encounter, so this is their whole live entry path. Their HP
+        // arrives PRE-DRAWN (both ctors, super-arg draw included, run at the
+        // SPAWNER'S queue time -- SpawnMonsterAction ctor arguments,
+        // BronzeAutomaton.java:116,122 / TheCollector.java:128-130,:165-168).
+        // Checked for the three S2.24 bosses themselves: none is mid-combat
+        // spawnable -- each is a solo encounter's single member and the two
+        // summoners spawn only their own minion type.
+        case MonsterId::BRONZE_ORB:
+            return &bronze_orb_spawn_at_hp;
+        case MonsterId::TORCH_HEAD:
+            return &torch_head_spawn_at_hp;
         default:
             return nullptr;  // not mid-combat spawnable
     }
@@ -782,7 +850,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 55,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -989,13 +1057,29 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
             // COMPLETE translation and hp_lost is deliberately unread. Spelled as
             // cases so the omission is checkable.
             return;
+
+        // S2.24. Exactly ONE of the five declares damage() -- Champ.damage
+        // (Champ.java:229-235), and it is empty here for the Sentry's reason:
+        // `super.damage(info)` followed ONLY by the Hit spine animation, gated
+        // on a non-THORNS hit with output > 0. No combat state, no RNG. The
+        // Automaton, The Collector, the Bronze Orb and the Torch Head do NOT
+        // override damage() at all; they are spelled out with the Champ so the
+        // whole batch is checkable in one place. Nothing in this batch reacts
+        // to being hit through this seam -- the Automaton's Artifact and the
+        // orbs' Stasis are POWER machinery, dispatched elsewhere.
+        case MonsterId::BRONZE_AUTOMATON:
+        case MonsterId::BRONZE_ORB:
+        case MonsterId::CHAMP:
+        case MonsterId::THE_COLLECTOR:
+        case MonsterId::TORCH_HEAD:
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 55,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -1092,6 +1176,30 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             // Repulsor.java declares only takeTurn and getMove, so it inherits
             // AbstractMonster's empty body (AbstractMonster.java:953-954).
             // Explicit nullptr, the Chosen's precedent.
+            return nullptr;
+
+        // S2.24. ONE of the five declares usePreBattleAction with combat
+        // content; all five are spelled out rather than left to `default:`.
+        case MonsterId::BRONZE_AUTOMATON:
+            // ApplyPowerAction(this, this, new ArtifactPower(this, 3)) -- the
+            // 3 is a FLAT literal at every ascension (BronzeAutomaton.java:
+            // 103; the dispatching brief guessed a branch, the source says
+            // no). BGM/UnlockTracker are presentation. No RNG.
+            return &bronze_automaton_use_pre_battle_action;
+        case MonsterId::CHAMP:
+        case MonsterId::THE_COLLECTOR:
+            // Both DECLARE the method and both bodies are entirely BGM +
+            // UnlockTracker.markBossAsSeen (Champ.java:143-148 /
+            // TheCollector.java:116-121) -- the Hexaghost/Slime Boss shape:
+            // no combat state, no RNG, so nullptr IS the translation.
+            return nullptr;
+        case MonsterId::BRONZE_ORB:
+        case MonsterId::TORCH_HEAD:
+            // Neither class declares the method at all (BronzeOrb.java
+            // declares takeTurn/update/getMove; TorchHead.java takeTurn/
+            // update/getMove) -- the inherited empty base body. Explicit
+            // nullptrs, the Chosen's precedent. This is also why their spawn
+            // items never set kSpawnRunPreBattle.
             return nullptr;
 
         // S2.28. All four Act-3 bosses declare usePreBattleAction with real
@@ -1244,7 +1352,7 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
 }
 
 MonsterDieFn monster_die_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 55,
                   "new monster: does its Java class override die()? Read the "
                   "method. If everything before `super.die()` is presentation -- "
                   "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
@@ -1359,6 +1467,21 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
             // a Time Eater room ever sets that latch (the Awakened One's
             // usePreBattleAction is its only producer in Act 3).
             return nullptr;
+        // S2.24. All THREE City bosses override die(), and all three are
+        // presentation on the pre-super side: the Automaton (:177-180) and
+        // The Collector (:229-232) a shake/rumble/deathTimer, the Champ
+        // (:306-308) the same pair -- each calls super.die() before any
+        // content. Their content is post-super: the two summoners' suicide
+        // sweeps register in monster_die_after_fn; the Champ's tail is an
+        // UNSEEDED MathUtils sound coin plus onBossVictoryLogic, not
+        // sim-visible on either side. Explicit nullptr cases, the reading
+        // checkable. Neither minion declares die() at all -- the Bronze Orb's
+        // Stasis give-back is its POWER's onDeath, dispatched by the ordinary
+        // death edge, not a die() body.
+        case MonsterId::BRONZE_AUTOMATON:
+        case MonsterId::CHAMP:
+        case MonsterId::THE_COLLECTOR:
+            return nullptr;
         default:
             return nullptr;  // die() is presentation only, or absent
     }
@@ -1372,7 +1495,7 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
 // three carry achievements and victory bookkeeping only. The slot exists because
 // the batches that need it run in parallel and must not each invent their own.
 MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 50,
+    static_assert(sts::registry::manifest::kMonstersCount == 55,
                   "new monster: does its Java die() override do anything AFTER "
                   "`super.die()`? Read the method. Content before super.die() "
                   "belongs in monster_die_fn; content after it belongs here, "
@@ -1411,6 +1534,23 @@ MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
             // onFinalBossVictoryLogic (AbstractMonster.java:1058-1085) is
             // achievements + stopClock, and it skips its whole body outright at
             // A20 with two bosses left. Explicit nullptr cases.
+            return nullptr;
+        // S2.24: the two summoners' suicide sweeps -- `super.die()`,
+        // onBossVictoryLogic (not sim-visible), then `for (m : monsters)
+        // if (!m.isDead && !m.isDying) addToTop(SuicideAction(m))`
+        // (BronzeAutomaton.java:181-187 / TheCollector.java:233-239). Strictly
+        // post-super: run before it, the boss would sweep itself (the
+        // Reptomancer regress this slot exists to prevent). The 1-arg
+        // SuicideAction means relicTrigger TRUE, so a swept Bronze Orb's
+        // Stasis onDeath fires and the stolen card returns.
+        case MonsterId::BRONZE_AUTOMATON:
+            return &bronze_automaton_die_after;
+        case MonsterId::THE_COLLECTOR:
+            return &collector_die_after;
+        case MonsterId::CHAMP:
+            // Post-super content exists (:309-317) and none of it is
+            // sim-visible: an UNSEEDED MathUtils sound coin, fadeInAmbiance,
+            // onBossVictoryLogic, UnlockTracker. Explicit nullptr.
             return nullptr;
         default:
             return nullptr;  // no post-super content (or no die() at all)

@@ -802,6 +802,42 @@ inline constexpr uint32_t kMonsterFlagAwakenedFirstTurn = 0x1000u;
 inline constexpr uint32_t kMonsterFlagTimeEaterUsedHaste = 0x2000u;
 inline constexpr uint32_t kMonsterFlagShapeAttacking = 0x4000u;
 
+// S2.24 (Act-2 City bosses). FOUR type-scoped bits, the SAME deliberate reuse
+// of the Hexaghost's 0x0800-0x4000 that S2.28 argued above -- and a THREE-way
+// share now, which the region's rule permits for the same structural reason:
+// a combat contains exactly one boss encounter, so an Act-2 boss record can
+// co-occur with neither the Act-1 Hexaghost nor S2.28's Act-3 bosses, and
+// every one of these bits is read only by its own monster's module. (The two
+// City-boss MINIONS spend nothing here: the Torch Head has no per-instance
+// state at all, and the Bronze Orb's one latch is USED_STASIS below --
+// disjoint from its boss's bits even though they share a group, because a bit
+// is per-RECORD and each record reads only its own type's meaning.) The
+// power-owned-bit caveat does not bite: none of these is a power's latch.
+//
+//   * CHAMP_THRESHOLD    -- Champ.thresholdReached (Champ.java:91,263-264): the
+//                           below-half-HP one-shot that fires ANGER and turns
+//                           the EXECUTE pattern on. Set at DECISION time inside
+//                           getMove, never cleared -- healing back above half
+//                           does not disarm it.
+//   * BRONZE_ORB_USED_STASIS -- BronzeOrb.usedStasis (BronzeOrb.java:44,87-90):
+//                           once-per-combat theft latch, set at DECISION time
+//                           when getMove picks STASIS. Per-RECORD, so each of
+//                           the two orbs steals once.
+//   * COLLECTOR_INITIAL_SPAWN -- TheCollector.initialSpawn (TheCollector.java:
+//                           76,133,182): SET == the opening SPAWN has not been
+//                           TAKEN yet. Unlike the consumed-at-init firstTurn
+//                           latches it is cleared in takeTurn case 1 (:133),
+//                           not in getMove, so it needs storage (the Spheric
+//                           secondMove reasoning).
+//   * COLLECTOR_ULT_USED -- TheCollector.ultUsed (TheCollector.java:75,159):
+//                           once-per-combat MEGA_DEBUFF latch, set in takeTurn
+//                           case 4 (:159) -- takeTurn-time, not decision-time,
+//                           which is why it too needs storage.
+inline constexpr uint32_t kMonsterFlagChampThreshold = 0x0800u;
+inline constexpr uint32_t kMonsterFlagBronzeOrbUsedStasis = 0x1000u;
+inline constexpr uint32_t kMonsterFlagCollectorInitialSpawn = 0x2000u;
+inline constexpr uint32_t kMonsterFlagCollectorUltUsed = 0x4000u;
+
 // ESCAPED -- the FIRST global flag bit, bit 24, the bottom of the 24-31 global
 // region: the monster left the fight ALIVE. (HALF_DEAD, bit 25, is the second;
 // it is declared just below.)

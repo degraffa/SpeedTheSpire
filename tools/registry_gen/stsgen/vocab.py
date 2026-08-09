@@ -355,9 +355,9 @@ OPCODES = {
     # key and the empty-list fallback recipient. No `extra` operand.
     "BLOCK_RANDOM_MONSTER": 67,
     # S2.2F (the shared Act-2/3 monster framework). 68-70 are this task's whole
-    # opcode grant (stage-b-tasks.md "S2 Wave-3 allocations"); 71-72 belong to
-    # S2.24 and stay UNISSUED here. All three land as bodies with no producer --
-    # the consumers are the content batches this framework unblocks.
+    # opcode grant (stage-b-tasks.md "S2 Wave-3 allocations"); 71-72 are
+    # S2.24's, ISSUED below. All three landed as bodies with no producer --
+    # the consumers are the content batches this framework unblocked.
     #
     # AddCardToDeckAction (AddCardToDeckAction.java:83-88): an in-combat write to
     # the MASTER DECK. The Writhing Mass's MEGA_DEBUFF is the only producer in
@@ -393,6 +393,34 @@ OPCODES = {
     # verb. Time Warp's 12th card is the consumer (TimeWarpPower.java:52-70).
     # No operands.
     "END_PLAYER_TURN": 70,
+    # S2.24 (City bosses). 71-72 are this task's whole opcode grant
+    # (stage-b-tasks.md "S2 Wave-3 allocations": 71 APPLY_STASIS, 72
+    # contingency -- SPENT as the return half, reported in the S2.24 Log).
+    #
+    # APPLY_STASIS is ApplyStasisAction.update (ApplyStasisAction.java:32-80),
+    # the Bronze Orb's card theft (BronzeOrb.java:73). Authored in the orb's
+    # STASIS move row: like BLOCK_RANDOM_MONSTER its only operand is `src` (the
+    # acting monster, which this domain's queue helper stamps), and EVERYTHING
+    # else is an execute-time fact -- both piles empty ends the action with
+    # ZERO draws and NO power (:34-37); otherwise the DRAW pile is preferred
+    # and the DISCARD used only when the draw pile is empty (:39,51); the pick
+    # is a RARE -> UNCOMMON -> COMMON -> unfiltered cascade of
+    # CardGroup.getRandomCard(cardRandomRng, rarity) (CardGroup.java:526-538),
+    # each NON-EMPTY filtered view costing ONE cardRandomRng draw over its
+    # Collections.sort()ed (cardID-compare) membership and each EMPTY view
+    # costing ZERO; the unfiltered fallback (CardGroup.java:498-500) indexes
+    # the pile IN PILE ORDER, unsorted. The stolen instance moves to the limbo
+    # pile (:64) and an addToTop'd ApplyPowerAction then applies the Stasis
+    # power holding it (:77) -- the pool index rides the APPLY_POWER counter
+    # operand, see powers.yaml id 98.
+    "APPLY_STASIS": 71,
+    # STASIS_RETURN is StasisPower.onDeath (StasisPower.java:38-44): give the
+    # stolen card back when the orb dies. Engine-emitted only (the operand is
+    # the stolen card's runtime pool index, carried in the power slot's
+    # `counter`); the HAND-vs-DISCARD destination is decided at QUEUE time
+    # (`player.hand.size() != 10`, :39) and the HAND arm re-checks the cap at
+    # RESOLVE time (MakeTempCardInHandAction.update:71-77 spills to discard).
+    "STASIS_RETURN": 72,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -491,6 +519,15 @@ STEP_TARGETS = {"SELF": 0, "CARD_TARGET": 1, "ALL_ENEMY": 2, "RANDOM_ENEMY": 3}
 # because Dual Wield's eligibility predicate is `type == ATTACK || type == POWER`,
 # DualWieldAction.isDualWieldable:95-97; B3.7 lands the power cards themselves).
 CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2, "CURSE": 3, "POWER": 4}
+# CardRarity (AbstractCard.CardRarity, declaration order BASIC, SPECIAL,
+# COMMON, UNCOMMON, RARE, CURSE). S2.24 promotes the rows' documentation-only
+# `rarity:` column into a generated card_rarity(CardId) table, because
+# ApplyStasisAction's pick cascade filters on the LIVE CardRarity -- where a
+# BASIC Strike is NOT a COMMON, a status IS (Wound.java:24 rarity COMMON), and
+# a poolable curse is CURSE while Ascender's Bane is SPECIAL
+# (AscendersBane.java:24). Values are pinned/append-only like every enum here.
+CARD_RARITIES = {"BASIC": 0, "SPECIAL": 1, "COMMON": 2, "UNCOMMON": 3,
+                 "RARE": 4, "CURSE": 5}
 # DamageType (interp.hpp DamageType): the DAMAGE opcode's `flags` low byte. A card
 # DAMAGE step defaults to NORMAL (the full applyPowers pipeline); a status/curse's
 # self-inflicted DAMAGE is THORNS (Burn/Decay -- new DamageInfo(player, n, THORNS),

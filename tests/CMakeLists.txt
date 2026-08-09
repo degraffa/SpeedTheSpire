@@ -242,6 +242,22 @@ sts_add_test(guardian_test)
 # The A20 double-boss ROUTE is pinned in run_advance_test.cpp.
 sts_add_test(beyond_bosses_test)
 
+# S2.24: the Act-2 City bosses -- the Bronze Automaton (the two-arm-only beam
+# counter, the A19-swapped recovery turn, the queue-time orb ctor draws and the
+# addToTop Minion position, the post-super suicide sweep), the Bronze Orb (the
+# decision-time usedStasis latch and the whole Stasis theft: rarity cascade
+# over live CardRarity, the stable cardID sort, pile preference, the limbo
+# park, the counter-carried pool index, both hand reads of the give-back, the
+# knowledge-chain removal), the Champ (three independent tier ladders, the
+# threshold one-shot, the lastMoveBefore EXECUTE pattern, the A19-widened
+# forge bound, ANGER's strip-then-triple), The Collector (the derived
+# draw_x revive-slot map, the composed A19 block column, the self-inclusive
+# Strength fan-out) and the Torch Head (ctor telegraph, one lifetime ai draw).
+# Boss-flag typing (Pantograph through the boss record, never a minion's) is
+# here too; the A13 boss-gold economics live in run_advance_test.cpp /
+# combat_rewards_test.cpp.
+sts_add_test(city_bosses_test)
+
 # B3.22: Hexaghost -- the A9 HP column and the A4/A19 stat columns, the forced
 # two-turn ACTIVATE/DIVIDER opener, Divider's player-HP-derived base pinned
 # against the formula at Hexaghost.java:151, the 7-long orb-count cycle

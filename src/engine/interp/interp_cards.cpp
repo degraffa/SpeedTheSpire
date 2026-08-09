@@ -21,8 +21,10 @@
 #include "sts/engine/rng_jdk.hpp"       // JdkRandom / jdk_shuffle (temp-list shuffle)
 #include "sts/engine/rng_stream.hpp"    // random / random_boolean (spoon roll)
 #include "sts/engine/types.hpp"
+#include "sts/registry/game_ids.hpp"    // card_game_id (APPLY_STASIS's sort key)
 
 #include <span>
+#include <string_view>
 
 namespace sts::engine {
 
@@ -2149,6 +2151,139 @@ void apply_choice_selection(CombatState& s, uint8_t slot, ChoiceKind kind,
         return;
     }
     apply_choice_to_slot(s, slot, kind, copies);
+}
+
+// --- APPLY_STASIS / STASIS_RETURN (S2.24, the Bronze Orb's card theft) --------
+
+void op_apply_stasis(CombatState& s, uint8_t owner) noexcept {
+    // ApplyStasisAction.update (ApplyStasisAction.java:32-80). Both piles empty
+    // ends the action before ANY draw and before any power is applied (:34-37).
+    if (s.draw_count == 0 && s.discard_count == 0) {
+        return;
+    }
+    // Source pile: the DRAW pile unless it is empty, then the DISCARD (:39,:51).
+    const bool from_draw = s.draw_count != 0;
+    CardPoolIndex* pile = from_draw ? s.draw : s.discard;
+    const uint8_t count = from_draw ? s.draw_count : s.discard_count;
+
+    // getRandomCard(cardRandomRng, rarity), RARE -> UNCOMMON -> COMMON
+    // (CardGroup.java:526-538). Each pass builds the rarity-filtered view in
+    // GROUP ORDER (index 0 == pile bottom; both engine pile arrays share that
+    // convention -- draw[draw_count-1] is the top), Collections.sort()s it by
+    // cardID (AbstractCard.compareTo == cardID.compareTo, :2583-2584 -- the
+    // GAME_ID string, and the sort is STABLE, so two Strikes keep their pile
+    // order), and spends ONE card_random_rng random(size-1). An EMPTY view
+    // returns null WITHOUT drawing. The rarity read is the LIVE CardRarity
+    // (registry card_rarity): a BASIC Strike matches no pass, a Wound is
+    // COMMON, a poolable curse is CURSE and only the fallback can take it.
+    static_assert(kDrawCap >= kDiscardCap,
+                  "cand[] below is sized by the larger pile");
+    struct Cand {
+        std::string_view gid;
+        uint8_t pos;  // position in the pile array (group order)
+    };
+    Cand cand[kDrawCap];
+    int picked_pos = -1;
+    constexpr sts::registry::CardRarity kCascade[3] = {
+        sts::registry::CardRarity::RARE, sts::registry::CardRarity::UNCOMMON,
+        sts::registry::CardRarity::COMMON};
+    for (const sts::registry::CardRarity want : kCascade) {
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < count; ++i) {
+            const CardId cid = static_cast<CardId>(s.card_pool[pile[i]].card_id);
+            if (sts::registry::card_rarity(cid) != want) {
+                continue;
+            }
+            cand[n].gid = sts::registry::card_game_id(cid);
+            cand[n].pos = i;
+            ++n;
+        }
+        if (n == 0) {
+            continue;  // null, no draw
+        }
+        // Stable insertion sort by game_id -- Collections.sort is stable and
+        // ties (identical cardIDs) must keep group order. In-place, no heap
+        // (std::stable_sort may allocate; N <= 128 makes this cheap).
+        for (uint8_t i = 1; i < n; ++i) {
+            const Cand key = cand[i];
+            int j = static_cast<int>(i) - 1;
+            while (j >= 0 && key.gid < cand[j].gid) {
+                cand[j + 1] = cand[j];
+                --j;
+            }
+            cand[j + 1] = key;
+        }
+        const int32_t pick =
+            random(s.card_random_rng, static_cast<int32_t>(n) - 1);
+        picked_pos = cand[pick].pos;
+        break;
+    }
+    if (picked_pos < 0) {
+        // The unfiltered fallback, getRandomCard(rng) (CardGroup.java:498-500):
+        // ONE draw indexing the pile IN PILE ORDER -- no filter, no sort.
+        picked_pos = static_cast<int>(
+            random(s.card_random_rng, static_cast<int32_t>(count) - 1));
+    }
+
+    // removeCard + player.limbo.addToBottom(card) (:50,:62,:64): the ORIGINAL
+    // instance moves -- everything the row carries (upgrade count, Rampage
+    // misc, a permanent cost write) survives, which is exactly what the return
+    // path's makeSameInstanceOf copy preserves in the game.
+    const CardPoolIndex pi = pile[picked_pos];
+    if (from_draw) {
+        for (uint8_t j = static_cast<uint8_t>(picked_pos);
+             j + 1 < s.draw_count; ++j) {
+            s.draw[j] = s.draw[j + 1];
+        }
+        --s.draw_count;
+        // Observer: the theft is player-visible (the addToTop'd ShowCardAction,
+        // :78, displays the stolen card), so the pool index leaves the
+        // knowledge chain; entries above a known-exact prefix keep their
+        // positions -- an exact position excludes the stolen card having sat
+        // between them (knowledge.cpp chain_remove_at).
+        knowledge_on_remove_known(s, pi);
+    } else {
+        for (uint8_t j = static_cast<uint8_t>(picked_pos);
+             j + 1 < s.discard_count; ++j) {
+            s.discard[j] = s.discard[j + 1];
+        }
+        --s.discard_count;
+    }
+    limbo_add(s, pi);
+
+    // addToTop(new ApplyPowerAction(owner, owner, new StasisPower(owner, card)))
+    // (:77). The ShowCardAction addToTop'd after it (:78) resolves first and is
+    // presentation. Amount is StasisPower's explicit -1 (StasisPower.java:27);
+    // the stolen pool index rides the APPLY_POWER counter operand into the
+    // slot's `counter` as index + 1 (powers.yaml id 98).
+    ActionQueueItem apply{};
+    apply.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    apply.src = owner;
+    apply.tgt = owner;
+    apply.amount = -1;
+    apply.flags = make_apply_power_flags(PowerId::STASIS,
+                                         static_cast<int>(pi) + 1);
+    add_to_top(s, apply);
+}
+
+void op_stasis_return(CombatState& s, const ActionQueueItem& item) noexcept {
+    // StasisPower.onDeath queued this with the destination decided THEN
+    // (`player.hand.size() != 10`, StasisPower.java:39); the HAND arm still
+    // spills to the discard if the hand has filled by RESOLVE time
+    // (MakeTempCardInHandAction.update:71-77) -- e.g. a boss-death sweep that
+    // returns several stolen cards back-to-back.
+    if (item.amount < 0 || item.amount >= kCardPoolCap) {
+        return;
+    }
+    const CardPoolIndex pi = static_cast<CardPoolIndex>(item.amount);
+    if (!limbo_remove(s, pi)) {
+        return;  // defensive: the card is not parked (nothing stole it)
+    }
+    if (stasis_return_to_hand(item.flags) && s.hand_count < kHandCap) {
+        s.hand[s.hand_count++] = pi;
+    } else if (s.discard_count < kDiscardCap) {
+        s.discard[s.discard_count++] = pi;
+    }
 }
 
 }  // namespace sts::engine

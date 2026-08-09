@@ -115,6 +115,13 @@ GENERAL_OPS = frozenset({
     # pile to split and nothing to stamp from a played card, so GENERAL_OPS
     # rather than CARD_CONTEXT_OPS, exactly as BLOCK_RANDOM_MONSTER above.
     "OBTAIN_CARD",
+    # S2.24 (the Bronze Orb's card theft). APPLY_STASIS carries NO operand at
+    # all beyond `src` (the acting monster, the future Stasis owner), which the
+    # monster domain's queue helper stamps -- the pile choice, the rarity
+    # cascade, the pick and the stolen pool index are all EXECUTE-time facts
+    # (ApplyStasisAction.java:32-80). GENERAL_OPS, not CARD_CONTEXT_OPS: it is
+    # authored in a MONSTER move program, the BLOCK_RANDOM_MONSTER shape.
+    "APPLY_STASIS",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -153,6 +160,10 @@ ENGINE_EMITTED_OPS = frozenset({
     # verb any registry program should be able to reach.
     "CLEAR_CARD_QUEUE",
     "END_PLAYER_TURN",
+    # S2.24. STASIS_RETURN's operand is the stolen card's runtime pool index,
+    # carried in the dying orb's Stasis power slot `counter` -- a handle no
+    # YAML author can name. Emitted only by power_stasis.cpp's onDeath body.
+    "STASIS_RETURN",
 })
 
 # Every opcode must land in exactly one group: a new opcode is then a DELIBERATE
@@ -248,6 +259,12 @@ MONSTER_MOVE_OPS = frozenset({
     "VAMPIRE_DAMAGE",
     "BLOCK_RANDOM_MONSTER", "HEAL", "OBTAIN_CARD",
     "REMOVE_DEBUFFS", "CAN_LOSE",
+    # S2.24. APPLY_STASIS is monster-only for the BLOCK_RANDOM_MONSTER reason:
+    # the game's single ApplyStasisAction caller is the Bronze Orb's STASIS
+    # move (BronzeOrb.java:73), and the opcode's `src` -- the future power
+    # owner -- is what this domain's queue helper sets to the acting monster.
+    # No extra operand, so no pack_extra branch.
+    "APPLY_STASIS",
 })
 MONSTER_DOMAIN = StepDomain("monsters", "monsters.yaml", MONSTER_MOVE_OPS)
 

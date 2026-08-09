@@ -99,7 +99,10 @@ namespace {
     // updateDescription + duringTurn (ExplosivePower.java:41-57) and
     // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
     // (GenericStrengthUpPower.java:29-39) -- none touches block.
-    static_assert(sts::registry::manifest::kPowersCount == 69,
+    // Checked for S2.24's one power, STASIS (id 98): it overrides ONLY
+    // updateDescription and onDeath (StasisPower.java:32-44, read in full) --
+    // neither block pass gains a case.
+    static_assert(sts::registry::manifest::kPowersCount == 70,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

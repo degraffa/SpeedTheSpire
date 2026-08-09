@@ -10,8 +10,8 @@ from __future__ import annotations
 from ..loader import card_id_map, power_id_map
 from ..steps import CARD_DOMAIN, padded_step_literals, parse_steps
 from ..vocab import (
-    BANNER, CARD_FLAGS, CARD_TARGETING, CARD_TARGET_KINDS, CARD_TRIGGERS,
-    CARD_TYPES, OPCODES, STEP_TARGETS, fail, pascal,
+    BANNER, CARD_FLAGS, CARD_RARITIES, CARD_TARGETING, CARD_TARGET_KINDS,
+    CARD_TRIGGERS, CARD_TYPES, OPCODES, STEP_TARGETS, fail, pascal,
 )
 
 
@@ -291,6 +291,12 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         # before B3.6; the pool builder now reads them.
         color = str(c.get("color", "")).upper()
         rarity = str(c.get("rarity", "")).upper()
+        if rarity not in CARD_RARITIES:
+            # S2.24: rarity graduated from documentation to a generated table
+            # (card_rarity below feeds ApplyStasisAction's pick cascade), so an
+            # unknown spelling is now a generation failure, not a shrug.
+            raise fail(f"cards.yaml: card {c['name']} has unknown rarity "
+                       f"{rarity!r} (expected one of {sorted(CARD_RARITIES)})")
         healing = bool(c.get("healing", False))
 
         max_steps = max(max_steps, len(steps), len(up_steps),
@@ -743,6 +749,30 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
                    f"return &k{pascal(r['name'])};")
     out.append("        case CardId::NONE:")
     out.append("        default: return nullptr;")
+    out.append("    }")
+    out.append("}\n")
+
+    # S2.24: the live CardRarity per card. Promoted from a documentation-only
+    # column because ApplyStasisAction's RARE -> UNCOMMON -> COMMON cascade
+    # filters on the LIVE AbstractCard.CardRarity (CardGroup.java:526-538) --
+    # where a BASIC Strike is NOT a COMMON, every status IS (Wound.java:24),
+    # a poolable curse is CURSE and Ascender's Bane is SPECIAL
+    # (AscendersBane.java:24). Every row already carried `rarity:`; the loader
+    # now validates it against the pinned CARD_RARITIES vocabulary.
+    out.append("// AbstractCard.CardRarity, declaration order (S2.24).")
+    out.append("enum class CardRarity : uint8_t {")
+    for name, val in sorted(CARD_RARITIES.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name} = {val},")
+    out.append("};\n")
+    out.append("[[nodiscard]] inline constexpr CardRarity "
+               "card_rarity(CardId id) noexcept {")
+    out.append("    switch (id) {")
+    for r in rows:
+        out.append(f"        case CardId::{r['name']}: "
+                   f"return CardRarity::{r['rarity']};")
+    out.append("        case CardId::NONE:")
+    out.append("        default: return CardRarity::SPECIAL;  // no row: never "
+               "matches a RARE/UNCOMMON/COMMON filter")
     out.append("    }")
     out.append("}\n")
     out.append("}  // namespace sts::registry")
