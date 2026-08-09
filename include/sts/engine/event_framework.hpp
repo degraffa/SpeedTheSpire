@@ -86,6 +86,7 @@
 
 #include "sts/engine/map_rooms.hpp"  // RoomType (the onEnterRoom fan-out's gate)
 #include "sts/engine/run_state.hpp"
+#include "sts/engine/types.hpp"      // CardId (event_draw_colorless_uncommon)
 
 namespace sts::engine {
 
@@ -447,11 +448,14 @@ void event_flag_set(RunState& rs, uint16_t id) noexcept;
 
 // --- The dialog framework ----------------------------------------------------
 
-// Cap on simultaneously offered dialog options. Act-1 dialog screens top out
-// well below this (largest is 4 buttons); grid-style screens (e.g. Match and
-// Keep's 12-card board) may instead reuse the card-screen machinery -- their
-// owning content task decides.
-inline constexpr int kEventOptionCap = 12;
+// Cap on simultaneously offered dialog options. Dialog-button screens top out
+// at 4; the cap is set by the two BOARD screens that expose one option per
+// slot: Match and Keep's 12-card board and The Library's 20-card read pile
+// (TheLibrary.java:66-91 -- twenty unique-by-cardID getCard(rollRarity())
+// draws, pick exactly one). Raised 12 -> 20 by S2.32 for the Library; this cap
+// sizes RunActionMask.can_choose_event_option and therefore the PublicView
+// mask channel, so moving it is a PUBLIC_VIEW_VERSION event (v6).
+inline constexpr int kEventOptionCap = 20;
 
 // One dialog screen's options, rebuilt from scratch on every legal_actions
 // call (never cached), exactly like build_rest_menu. `enabled[i]` for
@@ -468,8 +472,20 @@ static_assert(std::is_trivially_copyable_v<EventDialogMenu>);
 // twice) and the player flips ten of them across five attempts
 // (GremlinMatchGame.java:55-92, 179-244). That board is per-visit screen state
 // the game holds in the event object, so it lives here beside `scratch*`
-// rather than in the save-parity RunState. No other Act-1 dialog uses it.
-inline constexpr int kEventBoardCap = 12;
+// rather than in the save-parity RunState. S2.32's The Library is the second
+// board user -- twenty rolled cards, pick one (TheLibrary.java:66-91) -- and
+// it is what moved the cap 12 -> 20 (all M&K indices are unchanged; the eight
+// extra slots simply stay empty for it). The board is mirrored into
+// PublicView, so this cap is part of the v6 layout.
+inline constexpr int kEventBoardCap = 20;
+
+// Match and Keep's OWN board size -- the twelve dealt cards
+// (GremlinMatchGame.java:55-92). Split from kEventBoardCap when the Library
+// widened the cap: every M&K loop (the deal, the option surface, the pick
+// bound, the resampler's hidden-slot permutation) runs over THIS constant, so
+// the cap's spare slots can never enter its board.
+inline constexpr int kMatchBoardSize = 12;
+static_assert(kMatchBoardSize <= kEventBoardCap);
 
 struct EventBoardCard {
     uint16_t card_id;  // CardId; 0 (CardId::NONE) in an unused slot
@@ -512,12 +528,23 @@ static_assert(sizeof(EventDialogState) == 12 + 4 * kEventBoardCap);
 // mutation is the same transform_card door. It also takes TWO picks, which is
 // the body's business (it keeps the grid open across the first), not this
 // enum's.
+// S2.32 adds two:
+//   DUPLICATE -- the Duplicator's grid opens over the WHOLE master deck
+//     (gridSelectScreen.open(player.masterDeck, 1, ...), Duplicator.java:87):
+//     no purgeable filter, no bottled exclusion, so every index is legal.
+//   TRANSFORM_PAIR_SECOND -- the second pick of the Designer's two-card
+//     transform (Designer.java:200, numCards == 2 over the unbottled
+//     purgeable group): same legality as TRANSFORMABLE minus the card already
+//     selected, whose deck index the body parks in scratch3. The only
+//     consumer is the Designer; the scratch3 read is documented there.
 enum class EventGridKind : uint8_t {
     NONE = 0,
     PURGE = 1,
     UPGRADE = 2,
     TRANSFORMABLE = 3,
     TRANSFORMABLE_ANY = 4,
+    DUPLICATE = 5,
+    TRANSFORM_PAIR_SECOND = 6,
 };
 
 void open_event_grid(EventDialogState& es, EventGridKind kind) noexcept;
@@ -572,6 +599,60 @@ struct EventDialogImpl {
 // but only AFTER generate_event has committed the exact selection and
 // pool-removal bookkeeping.
 [[nodiscard]] const EventDialogImpl* event_dialog_impl(uint16_t event_id) noexcept;
+
+// AbstractDungeon.returnColorlessCard(UNCOMMON) (AbstractDungeon.java:
+// 1100-1113): ONE shuffleRng.randomLong (rc.combat.shuffle_rng, the floor
+// stream) drives a JDK shuffle of the LIVE colorlessCardPool IN PLACE, then
+// the FIRST entry of the requested rarity wins; SwiftStrike is the never-taken
+// fallback. The live pool's order is rc.colorless_order (run_advance.hpp) --
+// persistent across calls within an act because the game's shuffle mutates the
+// list it reads, which is observable from the SECOND call on (Knowing Skull
+// can buy several cards in one visit). Consumers: Match and Keep's A<15 slot
+// (shrines.cpp, which used a local-copy shuffle until this second consumer
+// forced the persistent order) and Knowing Skull's CARD purchase.
+// Implemented in event_framework.cpp beside the other pool machinery.
+[[nodiscard]] CardId event_draw_colorless_uncommon(RunController& rc) noexcept;
+
+// initializeCardPools' colorless fill (AbstractDungeon.java:1203-1210): the
+// LIVE pool returns to plain CardLibrary library order -- the REVERSED emitted
+// kColorlessPool -- in EVERY dungeon constructor, i.e. at run start and at
+// each act crossing. run_begin and act_transition both call this.
+void init_colorless_order(RunController& rc) noexcept;
+
+// --- The Colosseum reopen seam (city_events_ii.cpp) --------------------------
+//
+// Colosseum.reopen (Colosseum.java:100-110) is the ONE non-empty
+// AbstractEvent.reopen override in the game, and Colosseum.buttonEffect:55 is
+// the one `rewardAllowed = false` writer -- so the "combat ended, return to
+// the event dialog instead of a reward screen" edge exists for exactly one
+// event and is keyed on it by name in finish_combat_after_action.
+//
+// event_combat_reopens: true iff the just-finished event combat belongs to a
+// Colosseum whose dialog state says reopen() would re-enter the image (screen
+// != LEAVE -- i.e. the Slavers fight, whatever its survivor outcome: victory,
+// Smoke Bomb, or a mug). The caller has already handled the defeat branch.
+//
+// event_combat_reopen: the battle-over + reopen tail, run AFTER fold_back:
+//   (1) dropReward() -- AbstractRoom's body is EMPTY for an EventRoom
+//       (AbstractRoom.java:454-455); nothing to do.
+//   (2) addPotionToRewards() (AbstractRoom.java:330-341 run it even with
+//       rewardAllowed false): one potionRng chance roll at 40 + blizzard mod
+//       (EventRoom arm), the +/-10 ratchet, and on a hit the returnRandomPotion
+//       draws -- whose item reopen()'s rewards.clear() then throws away.
+//   (3) reopen(): resetPlayer (transient), preBattlePrep -- whose ONE
+//       state-visible line is drawPile.initializeDeck's
+//       shuffleRng.randomLong() (CardGroup.java:929-931), advancing the floor
+//       stream the Nobs fight will inherit -- then the atPreBattle relic pass
+//       (fired against the folded-back combat mirror: Snecko's Confusion lands
+//       on a dead CombatState and is discarded, exactly as the game's lands on
+//       a player the next preBattlePrep resets; a future atPreBattle body that
+//       draws floor RNG at dispatch time advances the preserved streams, which
+//       is the point), monsters.usePreBattleAction on the dead Slavers (both
+//       inherit the empty base body -- no-op), and enterImageFromCombat's
+//       rewards.clear().
+// Leaves rc in EVENT_DIALOG at the POST_COMBAT screen.
+[[nodiscard]] bool event_combat_reopens(const RunController& rc) noexcept;
+void event_combat_reopen(RunController& rc) noexcept;
 
 // The framework's proof body (the "minimal synthetic seam"): a two-screen
 // dialog with a conditional (gold-gated) option, wired to a reserved id that

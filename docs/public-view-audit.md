@@ -619,3 +619,23 @@ lifecycle rule; no in-place reinterpretation exists):
     `sizeof(PublicView)` and every offset are byte-identical to v4.
     `twins_v1.bin` was regenerated for the version stamp alone (the loader
     refuses a stamp mismatch by design, which is the tripwire working).
+- v6 — S2.32: `kEventOptionCap` and `kEventBoardCap` 12 → 20, for The
+  Library's twenty-card read board (TheLibrary.java:66-91: one option per
+  rolled card, pick exactly one). **BREAKING — the v4 shape, not a tail
+  append.** `PvEvent.board` sits mid-record, so every offset after the event
+  section moves (`kPublicViewFixedBytes` 8312 → 8360), and
+  `RunActionMask.can_choose_event_option` is embedded in the mask channel, so
+  `sizeof(PvMask)` grows 616 → 624 and `sizeof(PublicView)` 8932 → 8988. A v5
+  record cannot be reinterpreted as v6; consumers re-encode.
+  - *Board classification for the new user*: The Library deals its twenty
+    cards FACE UP, so every non-empty slot is `revealed` (the opposite
+    reading from Match and Keep's face-down deal; both live in
+    `encode_event`, and the `byte_class.hpp` board row now names the pair).
+    Match and Keep's own loops moved to `kMatchBoardSize` (12), so the cap's
+    spare slots can never enter its board or its resampler permutation.
+  - New scratch classifications for the ten S2.32 bodies live in
+    `event_scratch_public_mask` (public_view.cpp): nine print their scratch
+    on the dialog (the 0x0F group); The Joust's `ownerWins` is the second
+    Dead-Adventurer-shaped hidden realization and stays masked (0x01 — the
+    bet itself is the player's own displayed choice).
+  - `twins_v1.bin` regenerated with its checked-in generator, as at v4/v5.

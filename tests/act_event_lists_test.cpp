@@ -274,20 +274,15 @@ TEST(ActEventLists, CityEventListIsThirteenRowsInJavaAddOrder) {
         EXPECT_TRUE(r::event_in_act(id, 2));
         EXPECT_FALSE(r::event_in_act(id, 1));
         EXPECT_FALSE(r::event_in_act(id, 3));
-        // Every Act-2 row is native; S2.31 landed the eight non-combat BODIES
-        // and S2.32 owns the rest, so this list-shape test asserts the
-        // INVARIANT that ties the two columns together rather than a snapshot
-        // of how far the batches have got. WHICH eight are implemented is
-        // pinned by name in city_events_i_test.cpp
-        // (CityEventsI.RegistryMarksExactlyTheEightNonCombatRowsImplemented) --
-        // the place a future batch has to edit, deliberately not here.
+        // Every Act-2 row is native, and -- as of S2.31 (the eight non-combat
+        // bodies) plus S2.32 (the five combat-embed / one-timer bodies) --
+        // every Act-2 row is IMPLEMENTED with a real screen count. WHICH rows
+        // each batch landed stays pinned by name in city_events_i_test.cpp and
+        // city_events_ii_test.cpp -- the places a future batch has to edit,
+        // deliberately not here.
         EXPECT_TRUE(def->native) << kCityEventList[i];
-        if (def->implemented) {
-            EXPECT_GT(def->screen_count, 0) << kCityEventList[i];
-        } else {
-            EXPECT_EQ(def->screen_count, 0) << kCityEventList[i];
-            EXPECT_EQ(def->a15_change_count, 0) << kCityEventList[i];
-        }
+        EXPECT_TRUE(def->implemented) << kCityEventList[i];
+        EXPECT_GT(def->screen_count, 0) << kCityEventList[i];
     }
 }
 
@@ -468,16 +463,18 @@ TEST(ActEventLists, SpecialOneTimeRowsCarryTheirGetShrineActGate) {
     EXPECT_EQ(specials, 14);
 }
 
-// The six rows B4.13 left unimplemented because no Act-1 draw can reach them
-// are exactly the rows whose act mask excludes Act 1. That equivalence is the
-// reason the S1 registry could leave them bodiless, so it is worth pinning
-// rather than re-deriving.
-TEST(ActEventLists, ActOneUnreachableSpecialsAreExactlyTheUnimplementedOnes) {
+// RETIRED CLAIM, replaced (the S2.13 Log said S2.3x would retire it): through
+// S1 the unimplemented specials were exactly the Act-1-unreachable ones.
+// S2.32 landed the five act-gated one-timer bodies, so the residue is now
+// pinned by name: every SPECIAL row is implemented EXCEPT SECRET_PORTAL,
+// whose body stays out behind the playtime pin (s2-design section 5 trap 5,
+// owner S2.33).
+TEST(ActEventLists, EverySpecialBodyIsLandedExceptTheSecretPortalPin) {
     for (const SpecialActGate& g : kSpecialActGates) {
         const r::EventDef* def = r::event_def(g.id);
         ASSERT_NE(def, nullptr);
-        const bool act_one = (g.act_mask & r::kEventActMaskExordium) != 0u;
-        EXPECT_EQ(def->implemented, act_one)
+        const bool expected_implemented = g.id != r::EventId::SECRET_PORTAL;
+        EXPECT_EQ(def->implemented, expected_implemented)
             << r::event_game_id(g.id) << ": " << g.why;
     }
 }

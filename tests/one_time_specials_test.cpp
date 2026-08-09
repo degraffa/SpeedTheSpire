@@ -135,8 +135,17 @@ TEST(OneTimeSpecials, ActOneOffersExactlyTheEightImplementedSpecials) {
                              EventId::SECRET_PORTAL, EventId::THE_JOUST}) {
         EXPECT_FALSE(pool_offers(rc.run, id))
             << "EventId " << static_cast<int>(id) << " must be act-gated out";
-        EXPECT_EQ(event_dialog_impl(static_cast<uint16_t>(id)), nullptr);
     }
+    // The Act-1 exclusion is carried by the getShrine ACT GATES alone now:
+    // the five act-gated one-timer BODIES landed with S2.32 (only
+    // SecretPortal stays dispatch-null, pinned by its playtime row).
+    for (const EventId id : {EventId::DESIGNER, EventId::DUPLICATOR,
+                             EventId::KNOWING_SKULL, EventId::NLOTH,
+                             EventId::THE_JOUST}) {
+        EXPECT_NE(event_dialog_impl(static_cast<uint16_t>(id)), nullptr);
+    }
+    EXPECT_EQ(event_dialog_impl(
+                  static_cast<uint16_t>(EventId::SECRET_PORTAL)), nullptr);
 }
 
 TEST(OneTimeSpecials, EachExcludedSpecialAppearsOnceItsGatingActArrives) {

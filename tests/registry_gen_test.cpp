@@ -609,9 +609,12 @@ TEST(RegistryGen, ManifestCounts) {
                                       // The block 93-94 is spent exactly; 95
                                       // (Malleable) is the NEXT city batch's row,
                                       // not this one's
-    EXPECT_EQ(m::kMonstersCount, 59u); // + S2.27's three Act-3 beyond ELITES
-                                       // and the dagger: Giant Head (58),
-                                       // Nemesis (59), Reptomancer (60) and
+    EXPECT_EQ(m::kMonstersCount, 62u); // + S2.32's Masked Bandits event trio:
+                                       // BanditPointy (45, game_id
+                                       // "BanditChild"), BanditLeader (46),
+                                       // BanditBear (47) -- on top of S2.27's
+                                       // Giant Head (58), Nemesis (59),
+                                       // Reptomancer (60) and
                                        // SnakeDagger (61, game_id "Dagger"),
                                        // the 58-61 block spent exactly.
                                        // + S2.24's five City bosses: Bronze
@@ -700,7 +703,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 578u);  // 132 + 72 + 59 + 150 + 33 + 51 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 581u);  // 132 + 72 + 62 + 150 + 33 + 51 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1899,19 +1902,18 @@ TEST(RegistryGen, EventIdsFollowCanonicalJavaListOrder) {
         << "game_id strings must be unique -- they are the translator join key";
 }
 
-// Scope: the S1 block, ids 1-31. S2.02's ids 32-51 are identity rows with no
-// body (implemented false, zero screens) and are pinned in
+// Scope: the S1 block, ids 1-31. Ids 32-51 (S2.02's identity rows, of which
+// S2.32's five City rows now carry bodies) are pinned in
 // tests/act_event_lists_test.cpp instead, so this case keeps saying exactly
-// what it said about the Act-1 rows.
+// what it says about the Act-1 block.
 TEST(RegistryGen, ExordiumEventsCarryAuditedNativeBodyMetadata) {
     namespace r = sts::registry;
-    // The only unimplemented rows are the six one-time specials whose
-    // getShrine gates cannot be met in Act 1 (AbstractDungeon.java:1894-1933):
-    // Designer, Duplicator, Knowing Skull, N'loth, SecretPortal, The Joust.
-    const auto act_gated_out = [](uint16_t raw) {
-        return raw == 20 || raw == 21 || raw == 24 || raw == 26 ||
-               raw == 28 || raw == 29;
-    };
+    // The only unimplemented row left in the S1 block is SecretPortal (28),
+    // whose body stays out behind the playtime pin (s2-design section 5 trap
+    // 5, owner S2.33). The other five act-gated one-timers -- Designer (20),
+    // Duplicator (21), Knowing Skull (24), N'loth (26), The Joust (29) --
+    // gained bodies with S2.32.
+    const auto act_gated_out = [](uint16_t raw) { return raw == 28; };
     for (uint16_t raw = 1; raw <= 31; ++raw) {
         const auto id = static_cast<r::EventId>(raw);
         const r::EventDef* def = r::event_def(id);

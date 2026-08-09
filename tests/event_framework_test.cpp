@@ -809,13 +809,17 @@ TEST(EventDialog, DispatchMatchesImplementedRegistryRows) {
             EXPECT_EQ(event_dialog_impl(id), nullptr) << "EventId " << id;
         }
     }
-    // Named so that flipping one of them on without an Act-1 reachability
-    // argument fails here rather than passing silently.
+    // The act-gated one-timers now HAVE bodies (S2.32) -- they stay
+    // Act-1-unreachable through their getShrine act gates, not through a
+    // dispatch hole. The two whose bodies remain unlanded stay pinned null:
+    // Lab's listing question and SecretPortal's playtime pin are S2.33's.
     for (const EventId id : {EventId::DESIGNER, EventId::DUPLICATOR,
                              EventId::KNOWING_SKULL, EventId::NLOTH,
-                             EventId::SECRET_PORTAL, EventId::THE_JOUST}) {
-        EXPECT_EQ(event_dialog_impl(static_cast<uint16_t>(id)), nullptr);
+                             EventId::THE_JOUST}) {
+        EXPECT_NE(event_dialog_impl(static_cast<uint16_t>(id)), nullptr);
     }
+    EXPECT_EQ(event_dialog_impl(
+                  static_cast<uint16_t>(EventId::SECRET_PORTAL)), nullptr);
     EXPECT_EQ(event_dialog_impl(0), nullptr);
     EXPECT_NE(event_dialog_impl(kSyntheticEventId), nullptr);
 }
@@ -1503,11 +1507,14 @@ TEST(S213EventFlags, AnActTwoDrawSetsTheHiWordAndLeavesTheLoWordAlone) {
 
 // --- F. the end state S2.31-S2.33 inherit -------------------------------------
 
-TEST(S213CrossAct, AnActTwoQuestionMarkRoomSelectsACityRowAndParks) {
-    // After S2.13 an Act-2 ? room that resolves to EVENT selects the RIGHT id,
-    // commits the right pool bit and the right flag word -- and then has no
-    // body, because all 20 Act-2/3 rows are S2.31-S2.33's. That park is the
-    // expected end state, not a gap.
+TEST(S213CrossAct, AnActTwoQuestionMarkRoomSelectsACityRowAndCommitsIt) {
+    // After S2.13 an Act-2 ? room that resolves to EVENT selects the RIGHT id
+    // and commits the right pool bit and the right flag word. Whether the id
+    // then opens a dialog or parks depends on which body batch has landed --
+    // S2.32's five City rows dispatch, S2.31's eight park until their batch --
+    // so this test pins the SELECTION commit and checks the dispatch answer
+    // against the registry's own implemented column rather than a hardcoded
+    // "all park" claim.
     RunState rs = fresh_act_state(2);
     rs.gold = 999;
     rs.floor = 17 + 9;
@@ -1522,8 +1529,12 @@ TEST(S213CrossAct, AnActTwoQuestionMarkRoomSelectsACityRowAndParks) {
     const unsigned bit = static_cast<unsigned>(drawn - event_list_first_id(2));
     EXPECT_EQ((static_cast<unsigned>(rs.event_membership) >> bit) & 1u, 0u)
         << "the drawn row must leave the pool";
-    EXPECT_EQ(event_dialog_impl(drawn), nullptr)
-        << "no Act-2 body exists yet; S2.31-S2.33 own them";
+    const sts::registry::EventDef* def =
+        sts::registry::event_def(static_cast<EventId>(drawn));
+    ASSERT_NE(def, nullptr);
+    EXPECT_EQ(event_dialog_impl(drawn) != nullptr, def->implemented)
+        << "dispatch and the registry's implemented column disagree for id "
+        << drawn;
 }
 
 }  // namespace

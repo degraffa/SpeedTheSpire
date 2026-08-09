@@ -499,7 +499,7 @@ TEST(WheelOfChange, DamageResultIsNullOwnerHpLossAndA15RaisesThePercent) {
 // =============================================================================
 
 // The independent hand-derivation of initializeCards + the board shuffle.
-std::array<CardId, kEventBoardCap> derive_match_board(RngStream& card_rng,
+std::array<CardId, kMatchBoardSize> derive_match_board(RngStream& card_rng,
                                                       RngStream& shuffle_rng,
                                                       RngStream& misc_rng,
                                                       int ascension) {
@@ -540,7 +540,7 @@ std::array<CardId, kEventBoardCap> derive_match_board(RngStream& card_rng,
     }
     ids[5] = CardId::BASH;
 
-    std::array<CardId, kEventBoardCap> board{};
+    std::array<CardId, kMatchBoardSize> board{};
     for (int i = 0; i < 6; ++i) {
         board[static_cast<std::size_t>(i)] = ids[static_cast<std::size_t>(i)];
         board[static_cast<std::size_t>(i + 6)] =
@@ -559,7 +559,7 @@ TEST(MatchAndKeep, DealIsThreeStreamsAndMatchesTheHandDerivation) {
     RngStream card = rc.run.card_rng;
     RngStream shuffle = rc.combat.shuffle_rng;
     RngStream misc = rc.combat.misc_rng;
-    const std::array<CardId, kEventBoardCap> expected =
+    const std::array<CardId, kMatchBoardSize> expected =
         derive_match_board(card, shuffle, misc, 0);
 
     enter(rc);
@@ -572,16 +572,16 @@ TEST(MatchAndKeep, DealIsThreeStreamsAndMatchesTheHandDerivation) {
     EXPECT_EQ(rc.combat.shuffle_rng.counter, shuffle.counter);
     EXPECT_EQ(rc.combat.misc_rng.counter, misc.counter);
 
-    for (int i = 0; i < kEventBoardCap; ++i) {
+    for (int i = 0; i < kMatchBoardSize; ++i) {
         EXPECT_EQ(rc.event.board[i].card_id,
                   static_cast<uint16_t>(expected[static_cast<std::size_t>(i)]))
             << "board slot " << i;
         EXPECT_EQ(rc.event.board[i].taken, 0);
     }
     // Six identities, each dealt exactly twice.
-    for (int i = 0; i < kEventBoardCap; ++i) {
+    for (int i = 0; i < kMatchBoardSize; ++i) {
         int copies = 0;
-        for (int j = 0; j < kEventBoardCap; ++j) {
+        for (int j = 0; j < kMatchBoardSize; ++j) {
             copies += rc.event.board[i].card_id == rc.event.board[j].card_id;
         }
         EXPECT_GE(copies, 2);
@@ -598,7 +598,7 @@ TEST(MatchAndKeep, A15SwapsTheColorlessSlotForASecondCurseAndSkipsShuffleRng) {
     RngStream card = rc.run.card_rng;
     RngStream shuffle = rc.combat.shuffle_rng;
     RngStream misc = rc.combat.misc_rng;
-    const std::array<CardId, kEventBoardCap> expected =
+    const std::array<CardId, kMatchBoardSize> expected =
         derive_match_board(card, shuffle, misc, 15);
 
     enter(rc);
@@ -608,12 +608,12 @@ TEST(MatchAndKeep, A15SwapsTheColorlessSlotForASecondCurseAndSkipsShuffleRng) {
     EXPECT_EQ(rc.run.card_rng.counter, from_seed(778899).counter + 5);
     EXPECT_EQ(rc.combat.shuffle_rng.counter, from_seed(112233).counter);
     EXPECT_EQ(rc.combat.misc_rng.counter, misc.counter);
-    for (int i = 0; i < kEventBoardCap; ++i) {
+    for (int i = 0; i < kMatchBoardSize; ++i) {
         EXPECT_EQ(rc.event.board[i].card_id,
                   static_cast<uint16_t>(expected[static_cast<std::size_t>(i)]));
     }
     int curses = 0;
-    for (int i = 0; i < kEventBoardCap; ++i) {
+    for (int i = 0; i < kMatchBoardSize; ++i) {
         const CardDef* def =
             card_def(static_cast<CardId>(rc.event.board[i].card_id));
         ASSERT_NE(def, nullptr);
@@ -631,22 +631,22 @@ TEST(MatchAndKeep, FiveAttemptsMatchesObtainAndMissesOnlyFlipBack) {
     ASSERT_EQ(rc.event.screen, 2);
 
     const EventDialogMenu board_menu = menu(rc);
-    ASSERT_EQ(board_menu.count, kEventBoardCap);
-    for (int i = 0; i < kEventBoardCap; ++i) {
+    ASSERT_EQ(board_menu.count, kMatchBoardSize);
+    for (int i = 0; i < kMatchBoardSize; ++i) {
         EXPECT_TRUE(board_menu.enabled[i]);
     }
 
     // Locate a genuine pair and a mismatching slot from the dealt board.
     int a = 0;
     int b = -1;
-    for (int j = 1; j < kEventBoardCap && b < 0; ++j) {
+    for (int j = 1; j < kMatchBoardSize && b < 0; ++j) {
         if (rc.event.board[j].card_id == rc.event.board[0].card_id) {
             b = j;
         }
     }
     ASSERT_GE(b, 0);
     int c = -1;
-    for (int j = 1; j < kEventBoardCap && c < 0; ++j) {
+    for (int j = 1; j < kMatchBoardSize && c < 0; ++j) {
         if (j != b && rc.event.board[j].card_id != rc.event.board[0].card_id) {
             c = j;
         }
@@ -683,7 +683,7 @@ TEST(MatchAndKeep, FiveAttemptsMatchesObtainAndMissesOnlyFlipBack) {
     while (rc.event.screen == 2) {
         int first = -1;
         int second = -1;
-        for (int j = 0; j < kEventBoardCap; ++j) {
+        for (int j = 0; j < kMatchBoardSize; ++j) {
             if (rc.event.board[j].taken != 0) {
                 continue;
             }
@@ -718,13 +718,13 @@ TEST(MatchAndKeep, MatchedCurseStillPassesThroughTheOmamoriDoor) {
 
     int a = -1;
     int b = -1;
-    for (int i = 0; i < kEventBoardCap && a < 0; ++i) {
+    for (int i = 0; i < kMatchBoardSize && a < 0; ++i) {
         const CardDef* def =
             card_def(static_cast<CardId>(rc.event.board[i].card_id));
         if (def == nullptr || def->type != CardType::CURSE) {
             continue;
         }
-        for (int j = i + 1; j < kEventBoardCap; ++j) {
+        for (int j = i + 1; j < kMatchBoardSize; ++j) {
             if (rc.event.board[j].card_id == rc.event.board[i].card_id) {
                 a = i;
                 b = j;

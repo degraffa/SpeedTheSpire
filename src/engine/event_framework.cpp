@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <span>
 
 #include "relics/relic_pickup.hpp"    // gain_gold / heal_out_of_combat doors
+#include "sts/engine/rng_jdk.hpp"     // JdkRandom / jdk_shuffle (colorless order)
 #include "sts/engine/card_pools.hpp"  // transform_card (the ONE transformCard list)
 #include "sts/engine/cards.hpp"       // card_def / CardType (isCursed)
 #include "sts/engine/potions.hpp"     // potion_def / PotionId (Fairy in a Bottle)
@@ -557,6 +559,46 @@ uint16_t generate_event(RunState& rs) noexcept {
     return id;
 }
 
+void init_colorless_order(RunController& rc) noexcept {
+    // addColorlessCards fills the live pool with addToTop == APPEND
+    // (AbstractDungeon.java:1203-1210, CardGroup.java:455-457) over
+    // CardLibrary order, while the emitted kColorlessPool models
+    // srcColorlessCardPool's PREPENDING addToBottom fill (:1185-1187) --
+    // the same membership REVERSED. Reading the emitted array backwards
+    // restores the live order (the discipline the RED pools use, and the
+    // one the old local-copy draw_colorless_uncommon already followed).
+    for (int i = 0; i < kColorlessOrderCap; ++i) {
+        rc.colorless_order[i] =
+            i < kColorlessPoolCount
+                ? static_cast<uint16_t>(kColorlessPool[
+                      static_cast<std::size_t>(kColorlessPoolCount - 1 - i)])
+                : uint16_t{0};
+    }
+}
+
+CardId event_draw_colorless_uncommon(RunController& rc) noexcept {
+    // returnRandomCard's colorless sibling, returnColorlessCard(UNCOMMON)
+    // (AbstractDungeon.java:1100-1113): Collections.shuffle(
+    // colorlessCardPool.group, new java.util.Random(shuffleRng.randomLong()))
+    // -- ONE floor-stream randomLong -- then the first UNCOMMON entry wins.
+    // The shuffle is IN PLACE on the live pool, so rc.colorless_order carries
+    // the permutation into the next call; SwiftStrike is the never-taken
+    // fallback (the pool always holds uncommons).
+    JdkRandom jdk(random_long(rc.combat.shuffle_rng));
+    jdk_shuffle(std::span<uint16_t>(rc.colorless_order,
+                                    static_cast<std::size_t>(
+                                        kColorlessPoolCount)),
+                jdk);
+    for (int i = 0; i < kColorlessPoolCount; ++i) {
+        const CardId id = static_cast<CardId>(rc.colorless_order[i]);
+        if (sts::registry::event_card_rarity(id) ==
+            sts::registry::EventCardRarity::UNCOMMON) {
+            return id;
+        }
+    }
+    return CardId::SWIFT_STRIKE;
+}
+
 void open_event_grid(EventDialogState& es, EventGridKind kind) noexcept {
     es.grid_kind = static_cast<uint8_t>(kind);
 }
@@ -595,6 +637,18 @@ bool event_grid_card_legal(const RunState& rs, const EventDialogState& es,
             // why this one grid keeps bottled cards. rest_card_purgeable IS
             // getPurgeableCards' predicate (CardGroup.java:978-985).
             return rest_card_purgeable(rs.master_deck[deck_index]);
+        case EventGridKind::DUPLICATE:
+            // Duplicator opens over the WHOLE master deck -- no purgeable
+            // filter, no bottled exclusion (Duplicator.java:87). Every index
+            // below master_deck_count (checked above) is legal.
+            return true;
+        case EventGridKind::TRANSFORM_PAIR_SECOND:
+            // The Designer's second transform pick (Designer.java:200,
+            // numCards == 2): same pool as TRANSFORMABLE minus the already
+            // selected card, whose deck index the body parked in scratch3
+            // (the enum's declaration documents the coupling).
+            return deck_index != static_cast<uint16_t>(es.scratch3) &&
+                   master_card_purgeable_unbottled(rs.master_deck[deck_index]);
         case EventGridKind::NONE:
         default:
             return false;

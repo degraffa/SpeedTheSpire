@@ -237,6 +237,15 @@ enum class RewardCardRarity : uint8_t { COMMON = 0, UNCOMMON = 1, RARE = 2 };
 // AbstractRoom.getCardRarity(roll) for the three room kinds that give combat
 // rewards. `roll` is the ALREADY-BIASED value cardRng.random(99) +
 // cardBlizzRandomizer. Thresholds, not widths (see the provenance block).
+//
+// NOTE this constexpr form carries NO relic pass: it is getCardRarity(roll,
+// false)'s threshold arithmetic. Every LIVE reward roll goes through the
+// rs-aware overload below, which is getCardRarity(roll, true) -- the
+// alterCardRarityProbabilities pass (AbstractRoom.java:152-186) whose one
+// registered binder is Nloth's Gift (changeRareCardRewardChance -> x3,
+// NlothsGift.java:26-29; no relic in scope overrides the uncommon hook).
+// The relic-less form stays because dist_check and the boundary tests pin the
+// raw thresholds through it.
 [[nodiscard]] constexpr RewardCardRarity reward_card_rarity(int roll,
                                                             RoomType room) noexcept {
     if (room == RoomType::Boss) {
@@ -254,6 +263,29 @@ enum class RewardCardRarity : uint8_t { COMMON = 0, UNCOMMON = 1, RARE = 2 };
     }
     return RewardCardRarity::COMMON;
 }
+
+// getCardRarity(roll, true): the base thresholds with the relic alternation
+// pass applied. rareCardChance is multiplied x3 per held Nloth's Gift (a
+// fan-out over the relic LIST in the Java, so a hand-built duplicate would
+// stack -- reproduced by multiplying per instance); uncommonCardChance has no
+// binder in scope. MonsterRoomBoss overrides getCardRarity wholesale
+// (MonsterRoomBoss.java:40-42, RARE without thresholds), so the boss arm never
+// sees the pass. Consumers: roll_card_reward_item and The Library's
+// twenty-card rollRarity loop (city_events_ii.cpp).
+[[nodiscard]] RewardCardRarity reward_card_rarity_with_relics(
+    const RunState& rs, int roll, RoomType room) noexcept;
+
+// The battle-over potion drop for an EVENT-ROOM combat that opens NO screen:
+// Colosseum's Slavers fight sets rewardAllowed = false (Colosseum.java:55),
+// and AbstractRoom's battle-over block STILL runs addPotionToRewards
+// (AbstractRoom.java:330-341 -- dropReward and the potion roll sit ahead of
+// the rewardAllowed test) before reopen()'s rewards.clear() throws the item
+// away. So: one potionRng chance roll at 40 + blizzard mod (the EventRoom arm,
+// :590-592; White Beast Statue forces 100, >= `items_assembled` >= 4 forces 0),
+// the +/-10 ratchet, and on a hit the returnRandomPotion identity draws --
+// value discarded, stream movement and ratchet kept.
+void roll_event_potion_drop_unopened(RunState& rs,
+                                     uint8_t items_assembled) noexcept;
 
 // --- Gold rolls (trap 18: boss = miscRng, elite/normal = treasureRng) --------
 

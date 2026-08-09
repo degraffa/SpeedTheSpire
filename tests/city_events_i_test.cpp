@@ -115,32 +115,34 @@ void give_relic(RunState& rs, RelicId id, int16_t counter = -1) {
 // not carry (it asserts the invariant; this asserts the roster).
 // =============================================================================
 
-TEST(CityEventsI, RegistryMarksExactlyTheEightNonCombatRowsImplemented) {
+TEST(CityEventsI, RegistryMarksAllThirteenCityRowsImplemented) {
     struct Row {
         r::EventId id;
         bool implemented;
         int screens;
         int a15_changes;
     };
-    // TheCity.initializeEventList order (TheCity.java:185-198). The five
-    // `false` rows are S2.32's -- four combat-embedding or card-reward bodies
-    // plus Vampires' deck surgery -- and are listed so that flipping one
-    // without updating this roster is a failing test rather than a silent
-    // scope creep.
+    // TheCity.initializeEventList order (TheCity.java:185-198). All thirteen
+    // are implemented as of S2.31 (the eight non-combat bodies this file
+    // pins) + S2.32 (the five combat-embed / deck-surgery bodies, pinned in
+    // city_events_ii_test.cpp); the roster stays by-name so flipping one
+    // without updating it is a failing test rather than a silent scope creep.
+    // The S2.32 rows' screens/a15 values are that batch's, carried here at
+    // integration (2026-08-09).
     constexpr Row kRows[] = {
         {r::EventId::ADDICT, true, 2, 0},
         {r::EventId::BACK_TO_BASICS, true, 3, 0},
         {r::EventId::BEGGAR, true, 4, 0},
-        {r::EventId::COLOSSEUM, false, 0, 0},
+        {r::EventId::COLOSSEUM, true, 3, 0},
         {r::EventId::CURSED_TOME, true, 6, 1},
         {r::EventId::DRUG_DEALER, true, 3, 0},
         {r::EventId::FORGOTTEN_ALTAR, true, 2, 1},
         {r::EventId::GHOSTS, true, 2, 1},
-        {r::EventId::MASKED_BANDITS, false, 0, 0},
+        {r::EventId::MASKED_BANDITS, true, 4, 0},
         {r::EventId::NEST, true, 3, 1},
-        {r::EventId::THE_LIBRARY, false, 0, 0},
-        {r::EventId::THE_MAUSOLEUM, false, 0, 0},
-        {r::EventId::VAMPIRES, false, 0, 0},
+        {r::EventId::THE_LIBRARY, true, 3, 1},
+        {r::EventId::THE_MAUSOLEUM, true, 2, 1},
+        {r::EventId::VAMPIRES, true, 2, 0},
     };
     for (const Row& row : kRows) {
         const r::EventDef* def = r::event_def(row.id);

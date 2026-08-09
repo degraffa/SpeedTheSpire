@@ -96,6 +96,32 @@ void relic_native_gremlin_mask(CombatState& s, RelicHook hook,
     add_to_bottom(s, weak);
 }
 
+void relic_native_red_mask(CombatState& s, RelicHook hook,
+                           RelicSlot& /*slot*/,
+                           const RelicHookContext& /*ctx*/) noexcept {
+    if (hook != RelicHook::AT_BATTLE_START) {
+        return;
+    }
+    // RedMask.atBattleStart (RedMask.java:33-40): per group member, a cosmetic
+    // RelicAboveCreatureAction (queues nothing here) then ApplyPowerAction(mo,
+    // player, new WeakPower(mo, 1, false), 1, true) -- Gremlin Mask's shape
+    // fanned over the monsters, and the same explicit isSourceMonster=false:
+    // a MONSTER-owned Weak would normally take the justApplied end-of-turn
+    // latch, but this stack must tick down at the monsters' own first round
+    // end. The Java loop iterates every member unconditionally; the shared
+    // APPLY_POWER body's isDeadOrEscaped refusal (op_apply_power) is
+    // ApplyPowerAction.java:114-118's own drop, so no filter belongs here.
+    for (uint8_t mi = 0; mi < s.monster_count; ++mi) {
+        ActionQueueItem weak{};
+        weak.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        weak.src = kActorPlayer;
+        weak.tgt = mi;
+        weak.amount = 1;
+        weak.flags = make_apply_power_flags(PowerId::WEAK, 0, false);
+        add_to_bottom(s, weak);
+    }
+}
+
 // --- DEFERRED combat bodies --------------------------------------------------
 
 void relic_native_warped_tongs(CombatState& s, RelicHook hook,

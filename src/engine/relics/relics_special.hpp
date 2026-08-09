@@ -27,6 +27,8 @@ void relic_native_face_of_cleric(CombatState& s, RelicHook hook, RelicSlot& slot
                                  const RelicHookContext& ctx) noexcept;
 void relic_native_gremlin_mask(CombatState& s, RelicHook hook, RelicSlot& slot,
                                const RelicHookContext& ctx) noexcept;
+void relic_native_red_mask(CombatState& s, RelicHook hook, RelicSlot& slot,
+                           const RelicHookContext& ctx) noexcept;
 
 // --- DEFERRED combat body (explicit empty definition) ------------------------
 void relic_native_warped_tongs(CombatState& s, RelicHook hook, RelicSlot& slot,

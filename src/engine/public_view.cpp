@@ -174,6 +174,17 @@ void encode_knowledge(const CombatState& s, const KnowledgeState& k,
 // Return value: bit i set == scratch[i] is public and carried.
 [[nodiscard]] uint8_t event_scratch_public_mask(uint16_t event_id) noexcept {
     switch (static_cast<sts::registry::EventId>(event_id)) {
+        // THE JOUST -- the second partially-hidden row. joust_choose
+        // (events/city_one_timers.cpp, TheJoust.java:101) parks
+        // miscRng.randomBoolean(0.3f) -- ownerWins -- in scratch1 at the
+        // PRE_JOUST continue, ONE SCREEN before the result is shown; scratch0
+        // is the player's own displayed bet. The outcome stays masked even
+        // after the reveal because the payout is already observable in gold
+        // (the Dead Adventurer's coarsening rule: derivable-from-presses
+        // reads are masked rather than carried under a transform).
+        case sts::registry::EventId::THE_JOUST:
+            return 0x01u;
+
         // DEAD ADVENTURER -- the one hidden row. dead_enter (events/
         // exordium_events_i.cpp, DeadAdventurer.java:61-207) packs a miscRng
         // JDK shuffle of {gold, nothing, relic} into scratch0 and the identity
@@ -226,35 +237,54 @@ void encode_knowledge(const CombatState& s, const KnowledgeState& k,
         case sts::registry::EventId::NLOTH:
         case sts::registry::EventId::NOTE_FOR_YOURSELF:
         case sts::registry::EventId::SECRET_PORTAL:
-        case sts::registry::EventId::THE_JOUST:
         case sts::registry::EventId::WE_MEET_AGAIN:
         case sts::registry::EventId::THE_WOMAN_IN_BLUE:
+        // S2.32's ten bodies, classified with their landing. The five
+        // one-timers (KNOWING_SKULL / NLOTH / DESIGNER / DUPLICATOR above,
+        // THE_JOUST in its own case) were already enumerated; the five City
+        // eventList rows move here from the masked identity group below.
+        // Each either prints its scratch on the dialog or leaves it zero:
+        //   THE_LIBRARY    scratch0 = the shown Sleep heal amount (the board
+        //                  identities ride PvEvent.board, all face-up)
+        //   THE_MAUSOLEUM  unused
+        //   VAMPIRES       scratch0 = the shown max-HP cost
+        //   COLOSSEUM      unused (the two-fight flow is all in `screen`)
+        //   MASKED_BANDITS unused
+        //   KNOWING_SKULL  scratch0/1/2 = the three shown ramping costs
+        //   NLOTH          scratch0/1 = the two offered relics, named on the
+        //                  buttons
+        //   DESIGNER       scratch0/1 = the two service coins, revealed by the
+        //                  option WORDING (upgrade-one vs upgrade-two, remove
+        //                  vs transform); scratch3 = the player's own first
+        //                  transform pick
+        //   DUPLICATOR     unused
+        case sts::registry::EventId::THE_LIBRARY:
+        case sts::registry::EventId::THE_MAUSOLEUM:
+        case sts::registry::EventId::VAMPIRES:
+        case sts::registry::EventId::COLOSSEUM:
+        case sts::registry::EventId::MASKED_BANDITS:
             return 0x0Fu;
 
-        // S2.02's twenty Act-2/3 eventList rows (registry/events.yaml ids
-        // 32-51). They are IDENTITY ROWS: no body is linked, so nothing ever
-        // writes their scratch and it reads zero whichever answer this switch
-        // gives. Masked rather than carried because that is the only choice
-        // that stays correct if a body lands WITHOUT revisiting this site --
+        // The REMAINING Act-2/3 eventList identity rows (S2.31's eight and
+        // S2.33's seven; S2.32's five were reclassified above with their
+        // bodies). No body is linked for these, so nothing ever writes their
+        // scratch and it reads zero whichever answer this switch gives.
+        // Masked rather than carried because that is the only choice that
+        // stays correct if a body lands WITHOUT revisiting this site --
         // Mind Bloom's boss shuffle and Cursed Tome's book draw are exactly
         // the Dead-Adventurer shape (a miscRng realization parked at entry and
         // not on screen), and a leak here is invisible to every downstream
-        // twin test. S2.31-S2.33 own the reclassification: a body that parks a
+        // twin test. S2.31/S2.33 own the reclassification: a body that parks a
         // DISPLAYED number moves its id up into the 0x0F group above, with the
         // same one-line justification the rows there carry.
         case sts::registry::EventId::ADDICT:
         case sts::registry::EventId::BACK_TO_BASICS:
         case sts::registry::EventId::BEGGAR:
-        case sts::registry::EventId::COLOSSEUM:
         case sts::registry::EventId::CURSED_TOME:
         case sts::registry::EventId::DRUG_DEALER:
         case sts::registry::EventId::FORGOTTEN_ALTAR:
         case sts::registry::EventId::GHOSTS:
-        case sts::registry::EventId::MASKED_BANDITS:
         case sts::registry::EventId::NEST:
-        case sts::registry::EventId::THE_LIBRARY:
-        case sts::registry::EventId::THE_MAUSOLEUM:
-        case sts::registry::EventId::VAMPIRES:
         case sts::registry::EventId::FALLING:
         case sts::registry::EventId::MIND_BLOOM:
         case sts::registry::EventId::THE_MOAI_HEAD:
@@ -473,14 +503,18 @@ void encode_event(const EventDialogState& s, PublicView& out) noexcept {
 
     // The Match-and-Keep board: identities masked until the slot is flipped
     // (scratch1 names the one currently face up) or matched away (taken).
-    const bool board_live =
-        static_cast<sts::registry::EventId>(s.event_id) ==
-        sts::registry::EventId::MATCH_AND_KEEP;
+    // The Library's board (v6) is the opposite reading: all twenty rolled
+    // cards are dealt FACE UP (the grid the player picks from displays every
+    // identity, TheLibrary.java:91), so every non-empty slot is revealed.
+    const auto event_id = static_cast<sts::registry::EventId>(s.event_id);
+    const bool board_live = event_id == sts::registry::EventId::MATCH_AND_KEEP;
+    const bool board_face_up = event_id == sts::registry::EventId::THE_LIBRARY;
     for (int i = 0; i < kEventBoardCap; ++i) {
         PvEventBoardCard& o = out.event.board[i];
         o.taken = s.board[i].taken;
         const bool revealed =
-            board_live && (s.board[i].taken != 0 || s.scratch1 == i);
+            (board_live && (s.board[i].taken != 0 || s.scratch1 == i)) ||
+            (board_face_up && s.board[i].card_id != 0);
         o.revealed = revealed ? uint8_t{1} : uint8_t{0};
         if (revealed) {
             o.card_id = s.board[i].card_id;

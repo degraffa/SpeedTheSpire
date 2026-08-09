@@ -179,19 +179,26 @@ TEST(S2EventContent, S2RelicGameIdsJoinTheOracleStrings) {
     EXPECT_EQ(sts::registry::relic_from_game_id("Nilrys Codex"), RelicId::NONE);
 }
 
-// EVERY S2 relic row is combat-inert: zero bound hooks, native == false, and
-// dispatching every RelicHook at it queues nothing and moves no HP. Five of the
-// eight DO have a combat or run-layer body in the Java (Bloody Idol's
-// onGainGold, Enchiridion's atPreBattle, Nilry's Codex's onPlayerEndTurn,
-// Mutagenic Strength's atBattleStart, Red Mask's atBattleStart, N'loth's Gift's
-// reward-chance multiplier and Mark of the Bloom's onPlayerHeal); each is
-// DEFERRED to the S2 task named in its registry row. This test is what makes
-// that deferral visible: the task that writes a body has to come here and change
-// it, instead of quietly binding a hook nobody re-checked.
+// The S2 relic rows are combat-inert UNTIL their named body task lands, and
+// this test is where a landing becomes visible. S2.32 landed two: Red Mask
+// binds atBattleStart (relic_native_red_mask -- one player-sourced,
+// justApplied-free Weak per group slot) and N'loth's Gift's multiplier lives
+// at the reward-rarity seam (reward_card_rarity_with_relics), which binds NO
+// RelicHook -- so the gift stays in the inert list below while its behaviour
+// is pinned by CityOneTimers.NlothsGiftTriplesTheRareRewardChance. The
+// remaining bodies (Bloody Idol's onGainGold, Enchiridion's atPreBattle,
+// Nilry's Codex's onPlayerEndTurn, Mutagenic Strength's atBattleStart, Mark
+// of the Bloom's onPlayerHeal) stay DEFERRED to the S2 task named in each
+// registry row.
 TEST(S2EventContent, EveryS2RelicIsInertUntilItsBodyTaskLands) {
     for (RelicId id : kS2Relics) {
         const sts::registry::RelicDef* d = relic_def(id);
         ASSERT_NE(d, nullptr) << static_cast<int>(id);
+        if (id == RelicId::RED_MASK) {
+            EXPECT_EQ(d->hook_count, 1) << "Red Mask binds atBattleStart";
+            EXPECT_TRUE(d->native);
+            continue;  // its behaviour is pinned by the Masked Bandits tests
+        }
         EXPECT_EQ(d->hook_count, 0) << "relic " << static_cast<int>(id);
         EXPECT_FALSE(d->native) << "relic " << static_cast<int>(id);
 

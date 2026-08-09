@@ -51,6 +51,8 @@ add_library(sts_engine
     monster_champ.cpp
     monster_collector.cpp
     monster_torch_head.cpp
+    # S2.32 -- the Masked Bandits event trio.
+    monster_bandits.cpp
     # S2.28 -- Act-3 Beyond bosses.
     monster_awakened_one.cpp
     monster_time_eater.cpp
@@ -169,6 +171,10 @@ add_library(sts_engine
     events/one_time_specials.cpp
     events/city_events_i.cpp
     events/beyond_events.cpp
+    # S2.32 -- City events II (five eventList bodies incl. the two combat
+    # embeds) + the five act-gated one-timer bodies.
+    events/city_events_ii.cpp
+    events/city_one_timers.cpp
     # The floor-0 Neow blessing: category tables, payouts, sub-screens.
     neow.cpp
     run_advance.cpp

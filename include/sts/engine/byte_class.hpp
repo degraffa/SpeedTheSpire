@@ -232,7 +232,8 @@ inline constexpr ClassRow kEventDialogRows[] = {
     STS_BC_ROW(EventDialogState, board, ByteClass::MIXED,
                "audit 8.5: Match and Keep deals twelve FACE-DOWN cards; a "
                "slot's identity is hidden until flipped or matched, `taken` is "
-               "public. Per slot, not per byte range"),
+               "public. The Library (v6) deals its twenty FACE UP, so its "
+               "slots are all public. Per (event, slot), not per byte range"),
 };
 STS_BC_TABLE(kEventDialogTable, EventDialogState, kEventDialogRows);
 
@@ -455,6 +456,11 @@ inline constexpr ClassRow kRunControllerRows[] = {
     STS_BC_ROW(RunController, pending_bottle, ByteClass::PUBLIC,
                "audit 5: the modal overlay is on screen"),
     STS_BC_ROW(RunController, pad2, ByteClass::PADDING, ""),
+    STS_BC_ROW(RunController, colorless_order, ByteClass::HIDDEN,
+               "audit 1's realization rule: the live colorlessCardPool order "
+               "is a pure function of hidden shuffleRng draws; the player "
+               "observes only the drawn card, which PublicView carries "
+               "through the ordinary obtain channels"),
     STS_BC_ROW(RunController, knowledge, ByteClass::PUBLIC,
                "audit 10: a record OF public reveals. Never carried raw (its "
                "chain holds pool indices); projected as per-slot order "
