@@ -82,7 +82,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | `generateStrongEnemies(12)` regeneration on an exhausted `monsterList` | S2.11 (the boss-exit pop it added) | S2.12 | **DISCHARGED — UNREACHABLE, no body written** (2026-08-07, S2.12). Re-derived for Acts 2–3, which call `generateWeakEnemies(2)`: SUPPLY is weak + 1 first-strong + 12 strong = **15** (Act 1 = 16); DEMAND is at most **14** — one walked path visits 15 rooms, one per map row, of which the act-independent generator forces row 8 Treasure and row 14 Rest, leaving 13 `monsterList`-consuming rooms (a ? room that rolls MONSTER is one of those 13, not an extra) plus the one pop that leaving the boss room performs. Margin 2 in Act 1, **1** in Acts 2–3. The loud `assert` in `next_room_transition_impl` stays and now carries that arithmetic in full; writing untestable machinery for an unreachable arm would be worse than an assert that names why it cannot fire |
 | Fork redeploy + bottle-taking capture (stage-b table row, "next capture-campaign owner") | wave-runlayer S3 (stage-b) | S2.43 | S2.43 is the next capture campaign; validate the `in_bottle_*` boundary end-to-end and mark the stage-b row DISCHARGED there |
 | `BOSS_REWARD.screen_state.relics` — schema **storage** for the boss-relic offers | S2.42 (which promoted the disposition but not the storage) | S2.43 | **Evidence:** PROTOCOL.md §3.8 dispositioned this `I (S2 scope)` because "the run terminates at act-1 boss combat rewards, before the boss chest" — no longer true at capture driver `b1.7.0`, which plays through the chest. An `I` field is **never diffed**, so design §6 S2-G2 item 2 (a *zero-diff* boss-chest boss-relic pick) was unachievable while the row said `I`, and **no S2 ledger row owned changing it**. S2.42 took the contained half: the row now reads `S`, the offers are registry-**joined** (an unknown boss relic fails translation loudly), and the field is `fr.defer`red — pinned by `Translator.BossRewardRelicsAreDeferredNotIgnored` and `Translator.BossRewardRelicsStillJoinTheRegistryAndFailLoud`. What remains is **storage**, which is not contained: the three offers live in `RunController.boss_chest` (`BossChestState`, `boss_chest.hpp`), which is transient, while the translator emits `RunState`/`CombatState` and the differ compares those — so landing it needs new `RunState` storage **plus** a `SCHEMA_VERSION` bump, a trace-container change and an oracle-adapter change. A `SCHEMA_VERSION` bump outside the places the ledger plans for it is stop-the-line (conventions §5), so S2.42 declined it rather than improvising. **S2.43 needs this before it can claim G2-2 item 2.** |
-| S2.31 payout relics/cards are now REACHABLE with their bodies still deferred | S2.03 (landed them acquisition-only, naming S2.31 as body owner) / S2.31 (granted the acquisition, declined the bodies) | **S2.34** (opened 2026-08-09, satisfying this row's "body task before the gate" demand) | S2.31's acceptance is the ledger's: *option/gate/A15 audit + payout rows **acquisition**-tested*. It grants six relics and three cards whose non-acquisition bodies S2.03 had pencilled onto S2.31, and it deliberately does **not** write them — but they stop being unreachable the moment these events land, so the deferral is recorded here rather than left implied. Open, each with the event that now grants it: **Bloody Idol** `onGainGold` heal 5 (Forgotten Altar) — the only RUN-layer one, and the reason it is not a one-liner is that `AbstractPlayer.gainGold`'s fan-out fires in combat too, where `heal` takes the Magic Flower / phase-gated path that `gain_gold` (relics/relic_pickup.hpp) does not model; **Enchiridion** `atPreBattle`, **Nilry's Codex** `onPlayerEndTurn`/`CodexAction`, **Necronomicon** `onUseCard`/`atTurnStart` (its `onEquip` was already live) and **Necronomicurse** `triggerOnExhaust` (all four from Cursed Tome's book reward); **Mutagenic Strength** `atBattleStart` (Drug Dealer); **Ritual Dagger**'s effect program, still deliberately EMPTY pending its bespoke `misc`-growth opcode (Nest). Every one of those registry rows had its `owner S2.31` string amended in place to point here, so no row now claims a landed task will write it. Each is pinned inert by the existing tier-2 suite, which is what makes this a loud deferral: the cards visibly do nothing and the relics bind no hook |
+| S2.31 payout relics/cards are now REACHABLE with their bodies still deferred | S2.03 (landed them acquisition-only, naming S2.31 as body owner) / S2.31 (granted the acquisition, declined the bodies) | **S2.34** (opened 2026-08-09, satisfying this row's "body task before the gate" demand) | **DISCHARGED by S2.34 (2026-08-09) — all seven bodies landed, each pinned tier-2 against its cited Java re-read in full; see the S2.34 Log.** The seven: **Bloody Idol** `onGainGold` heal 5 at BOTH gainGold doors — the run-layer `gain_gold` fan-out (heal through the out-of-combat onPlayerHeal door) AND the in-combat producer the row's own framing under-counted: Hand of Greed's `GreedAction` calls `player.gainGold` at the kill (GreedAction.java:38, the ONLY in-combat gainGold in Acts 1–3 scope), so `op_damage_greed` now runs Ectoplasm's early return and the fan-out at combat time, healing through `heal_player_with_relics` (Magic Flower ×1.5, Mark of the Bloom → 0); **Enchiridion** `atPreBattle` (native, rides RANDOM_ATTACK_TO_HAND's new pool selector over the pre-existing `kIroncladPowerPool`); **Nilry's Codex** `onPlayerEndTurn` → `Opcode::CODEX` (the DISCOVERY choice surface, RED-combat-pool sampler, always-skippable, zero wasted regens, random-spot draw-pile insert); **Necronomicon** `onUseCard` once-per-turn replay + `atTurnStart` re-arm (Double Tap's replay machinery; latch = `CombatState.flags` bit 6, counter stays −1); **Necronomicurse** `triggerOnExhaust` — NO new CardTrigger was needed (the S2.31-era premise was stale: the `on_exhaust:` program column, live since Sentinel, IS the triggerOnExhaust seam) — authored as an addToBot MAKE_CARD via the new `on_exhaust_bottom` column; **Mutagenic Strength** `atBattleStart` native (addToTop reversal → resolution cosmetic/LoseStrength/Strength, slot order pinned); **Ritual Dagger** `Opcode::RITUAL_DAGGER` (73) — misc-based damage, DAMAGE_GREED kill gate, `initial_misc: 15` seeded at the obtain door, master-deck propagation at the combat fold-back (documented deviation: a same-uuid replay-copy kill grows only the transient copy). Also closed in passing: **Mark of the Bloom's in-combat onPlayerHeal half** (the S2.33 acquisition made it reachable while `heal_player_with_relics` knew only Magic Flower) |
 | Mind Bloom boss re-fight **directed capture** (the oracle half of S2.33's acceptance) | S2.33 (sim half landed + pinned; no capture seat) | S2.43 | S2.33's acceptance reads "Mind Bloom's Act-1-boss re-fight replays zero-diff in a directed capture". The SIM half is landed and pinned against the decompile (beyond_events_test.cpp: the one-randomLong JDK shuffle twin, the fixed 25/50 gold row, the RARE `returnRandomRelic` pop, the EventRoom-not-boss combat flags, and the victory→reward→map walk), but the bridge never runs from a task worktree and two sibling event batches held the game install concurrently, so **no live capture was run** — deferred, not skipped. S2.43 (the next capture campaign) owes: a directed Act-3 capture that draws MindBloom, takes "I am War", plays the re-fight to the reward claim, and scores zero-diff through the differ; the seed/policy triple can come from `seed_scan --need-boss-id` once Act-3 reach is live (see the reach row above). Watch two rows while scoring it: the translator's act-local FIRED derivation (row above — an Act-2/3 event capture is exactly where it false-REDs) and trap-5's requirement that the driver record playtime |
 | Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). **RE-RUN HALF DISCHARGED by S2.41 (2026-08-09)**: with every S2.2x/S2.3x batch landed, §1's command was re-run verbatim (50,000 rows, release, `determinism_mismatches=0`) and the Act-2/3 cells are now **measured, at 0** — Act-1 reproduced to the row, `room_unimplemented` went 8 → 0, and the fuzz soak's new per-act coverage agrees over 100,000 independent cases (act 2 entered by 0.11 % of cases, act-2 boss fought 0 times, act 3 never). What is left of this row is therefore **not a content obligation**: sim-side depth is bounded by the E0 policies (~×30 loss per act), so a three-act sim number needs a different policy or the driver, not a later re-run. S2.43's live driver numbers are the remaining half. [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
 
@@ -1813,7 +1813,7 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   (a15 counts per row) + the a20 row-13 pin updated to the LANDED wording.
   Six presets green; `check_stale_counts` + `check_doc_links` clean.
 
-- **S2.34** `[ ]` **Payout relic/card bodies (the S2.31 deferral, discharged
+- **S2.34** `[x]` **Payout relic/card bodies (the S2.31 deferral, discharged
   before the gate).** The seven combat/run bodies the deferred-obligations
   row "S2.31 payout relics/cards are now REACHABLE with their bodies still
   deferred" enumerates, each currently pinned INERT by tier-2 (this task
@@ -1853,7 +1853,82 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   SCHEMA_VERSION / PUBLIC_VIEW_VERSION movement (none is granted); Stage-A
   fixtures byte-identical; six presets green; the deferred-obligations row
   marked DISCHARGED pointing here.
-  **Log:** —
+  **Log:** 2026-08-09 — landed; the deferred-obligations row above is
+  DISCHARGED in place with the per-body summary. Namespace values spent
+  (claimed in stage-b-tasks.md "S2.34 allocations" FIRST): opcode **73**
+  `RITUAL_DAGGER` (CARD_CONTEXT, the DAMAGE_RAMPAGE source-index-stamp
+  shape), opcode **74** `CODEX` (ENGINE_EMITTED), `CombatState.flags` bit
+  **6** `kCombatFlagNecronomiconUsed` (INVERTED so zero-init == armed; the
+  observable counter stays −1), and RANDOM_ATTACK_TO_HAND's previously-zero
+  `flags` as a pool selector (0 = ATTACK byte-identical, 1 = POWER for
+  Enchiridion). NO new RelicHook, NO new ChoiceKind (Codex rides the
+  DISCOVERY choice surface + item packing with its own opcode: always
+  skippable, ZERO wasted regens — CodexAction.java:33-36 generates INSIDE
+  the open-tick branch, unlike DiscoveryAction.java:47 — and the pick goes to
+  the draw pile at a random spot via op_make_card's DRAW_RANDOM arm at
+  registry cost), and NO new CardTrigger: the brief's premise that
+  Necronomicurse needed an ON_EXHAUST trigger was STALE — the `on_exhaust:`
+  program column (Sentinel, B3.6) IS the triggerOnExhaust seam, dispatched on
+  every exhaust path. Registry-schema additions (recorded with the claims):
+  cards.yaml `initial_misc:` (CardDef.initial_misc — ctor misc seed AND the
+  run-persistent fold-back marker) and `on_exhaust_bottom: true`
+  (CardDef.on_exhaust_add_to_bottom — Necronomicurse addToBot's where
+  Sentinel addToTop's; the exhaust dispatch now honours direction and
+  performs the MAKE_CARD pile split). Findings/corrections beyond the brief:
+  (1) **Bloody Idol's in-combat path IS reachable** — Hand of Greed's
+  GreedAction calls player.gainGold at the kill (GreedAction.java:38; the
+  whole-tree grep found no other in-combat gainGold in Acts 1–3 scope,
+  FameAndFortune is Watcher) — so op_damage_greed now runs the gainGold seam
+  at the kill: Ectoplasm's early return (nothing accrues) and the onGainGold
+  fan-out (heal 5 through heal_player_with_relics, at combat time, where it
+  is lethality-relevant); the fold-back settle became a RAW += so the
+  fan-out cannot double-fire (run_advance_test's Ectoplasm settle test
+  rewritten to the new contract). (2) **Mark of the Bloom's in-combat
+  onPlayerHeal half was a GAP** — S2.33 landed the acquisition while
+  heal_player_with_relics knew only Magic Flower; closed here (row 150
+  provenance corrected: run half S2.12, combat half S2.34). (3) The brief's
+  "3-of-colourless" description of CodexAction was wrong — CodexAction.java:54
+  calls the NO-ARG returnTrulyRandomCardInCombat(), the RED combat pool
+  (kIroncladCombatPool); the Java won. (4) Two stale "deferred" comments
+  corrected in place (relics_special.hpp/.cpp said Warped Tongs was this
+  tier's deferred empty body — opcode 64 landed it long ago; conventions §8
+  "comment asserting X"). (5) enter_combat now seeds pool misc FROM the
+  master row (makeSameInstanceOf copies misc — byte-identical for every deck
+  without a persistent-misc card) and fold_back_combat writes it back for
+  initial_misc-marked rows only, so Rampage's combat-scratch misc never
+  folds. Documented deviation (registry row 131 + op_ritual_dagger): a kill
+  scored by a same-uuid REPLAY COPY (Double Tap / Necronomicon on a
+  cost-raised dagger) grows only the transient copy — the engine's replay
+  copies carry no uuid link and adding one is CombatState storage no schema
+  grant covers; the copy's DAMAGE is right (misc copied at replay time),
+  only the growth's persistence is short. Necronomicon threading:
+  resolve_card_play now derives X-cost energyOnUse ONCE (hoisted, without
+  Chemical X's repetition boost — the relic boosts reps, not the field) and
+  passes it with action.target through dispatch_on_use_card into
+  RelicHookContext; the relic replay fires AFTER Double Tap's, per
+  UseCardAction.java:41-64. Tests: relic_boss_special_test +9
+  (MutagenicStrengthResolvesLoseStrengthThenStrength,
+  EnchiridionPreBattleDrawsOneFreePowerIntoHand,
+  RandomToHandFlagsZeroStillMeansTheAttackPool,
+  NilrysCodexEndTurnQueuesTheCodexScreen,
+  CodexOfferIsTheRejectionSamplerOverTheRedCombatPool,
+  CodexPickInsertsAtARandomDrawPileSpotAtRegistryCost,
+  CodexIsAZeroDrawNoOpWhenMonstersAreBasicallyDead,
+  NecronomiconReplaysTheFirstTwoCostAttackOncePerTurn /
+  ...IgnoresCheapFreeAndNonAttackPlays / ...XCostArmReadsEnergyOnUse,
+  BloodyIdolHealsFiveOnAHandOfGreedKill /
+  ...HealRoutesThroughTheCombatHealSeam, MarkOfTheBloomZeroesInCombatHeals);
+  s2_event_content_test rewritten pins (S2RelicHookBindingsMatchTheLanded-
+  Bodies replaces EveryS2RelicIsInertUntilItsBodyTaskLands;
+  RitualDaggerProgramIsItsOpcodeAndItsMiscSeed /
+  ...AcquisitionSeedsMiscFifteen / ...DealsMiscDamageAndGrowsOnlyOnARealKill /
+  ...PaysNothingForHalfDeadOrMinionKills replace the empty-program pin;
+  NecronomicurseIsUnplayableAndRespawnsOnExhaust /
+  ExhaustingNecronomicurseReturnsACopyToHandAddToBot replace the inert-curse
+  pin); run_advance_test EctoplasmSuppressesTheAccrualAtTheKill (rewritten)
+  + RitualDaggerKillFoldsItsGrownMiscToTheMasterDeck. Six presets green;
+  Stage-A fixtures byte-identical; check_stale_counts + check_doc_links
+  clean.
 
 ### S2-G1 `[ ]` **Gate: S2 rules complete** — tag `s2-g1-content`
 **Deps:** all S2.0x, S2.1x, S2.2x, S2.3x

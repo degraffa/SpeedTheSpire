@@ -42,6 +42,7 @@
 
 #include <cstdint>
 
+#include "sts/engine/action_queue.hpp"  // kActorPlayer (defaulted ctx fields)
 #include "sts/engine/combat_state.hpp"  // CombatState
 #include "sts/engine/run_state.hpp"     // RelicSlot (the {relic_id, counter} slot)
 #include "sts/engine/types.hpp"         // RelicId, CardId, PowerId
@@ -91,6 +92,15 @@ struct RelicHookContext {
     // only fires the relic fan-out for AbstractMonster victims
     // (AbstractCreature.java:159-167), so this is always a monster slot.
     uint8_t block_broken_monster = 0;
+    // on_use_card: `action.target` -- the monster the card was played at
+    // (kActorPlayer for a self/none card, which is what the game's null target
+    // becomes here). Necronomicon aims its replay copy at it
+    // (Necronomicon.java:65-67), exactly as Double Tap's power ctx does.
+    uint8_t target = kActorPlayer;
+    // on_use_card: the played card's AbstractCard.energyOnUse at fan-out time
+    // (non-zero only for an X-cost play; Chemical X's repetition boost is NOT
+    // in it). Necronomicon's X-cost arm reads it (Necronomicon.java:62).
+    int32_t energy_on_use = 0;
 };
 
 // Does the player own `id`? Scans the CombatState relic mirror (acquisition
@@ -154,7 +164,9 @@ void dispatch_relics_at_turn_start_post_draw(CombatState& s, RelicSlot* relics,
 void dispatch_relics_on_player_end_turn(CombatState& s, RelicSlot* relics,
                                         uint8_t count) noexcept;
 void dispatch_relics_on_use_card(CombatState& s, RelicSlot* relics, uint8_t count,
-                                 uint16_t card_id, uint8_t pool_index) noexcept;
+                                 uint16_t card_id, uint8_t pool_index,
+                                 uint8_t target = kActorPlayer,
+                                 int32_t energy_on_use = 0) noexcept;
 void dispatch_relics_on_play_card(CombatState& s, RelicSlot* relics, uint8_t count,
                                   uint16_t card_id) noexcept;
 void dispatch_relics_on_exhaust(CombatState& s, RelicSlot* relics, uint8_t count,

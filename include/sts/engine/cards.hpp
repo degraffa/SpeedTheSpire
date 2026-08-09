@@ -382,7 +382,11 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::APPLY_STASIS) ==
             static_cast<uint16_t>(Opcode::APPLY_STASIS) &&
         static_cast<uint16_t>(sts::registry::Opcode::STASIS_RETURN) ==
-            static_cast<uint16_t>(Opcode::STASIS_RETURN),
+            static_cast<uint16_t>(Opcode::STASIS_RETURN) &&
+        static_cast<uint16_t>(sts::registry::Opcode::RITUAL_DAGGER) ==
+            static_cast<uint16_t>(Opcode::RITUAL_DAGGER) &&
+        static_cast<uint16_t>(sts::registry::Opcode::CODEX) ==
+            static_cast<uint16_t>(Opcode::CODEX),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

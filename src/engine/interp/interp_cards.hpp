@@ -44,8 +44,9 @@ void apply_corruption_cost_modifier(CombatState& s) noexcept;
 // EXHAUST_NON_ATTACKS (Sever Soul).
 void op_exhaust_non_attacks(CombatState& s) noexcept;
 
-// RANDOM_ATTACK_TO_HAND (Infernal Blade).
-void op_random_attack_to_hand(CombatState& s) noexcept;
+// RANDOM_ATTACK_TO_HAND (Infernal Blade, and -- via the S2.34 pool selector in
+// `flags`, interp.hpp kRandomToHandPool* -- Enchiridion's POWER draw).
+void op_random_attack_to_hand(CombatState& s, uint32_t flags) noexcept;
 
 // PLAY_CARD -- the general recursive-play verb (interp.hpp Opcode::PLAY_CARD and
 // its kPlayCard* flag set). Shared by the queued opcode and by the SYNCHRONOUS

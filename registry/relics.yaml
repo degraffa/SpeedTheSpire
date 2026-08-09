@@ -1622,68 +1622,79 @@
 #                       option (TombRedMask.java:38, 52-57).
 #   Mark of the Bloom   MindBloom's upgrade branch (MindBloom.java:101-102).
 #
-# HOOK BODIES ARE DEFERRED, DELIBERATELY AND VISIBLY. These are identity rows:
-# not one of the eight binds `hooks:` or sets `native:`, because a `native: true`
-# row without a body is an undefined reference at link time and a bound hook with
-# an empty program is a claim that the body exists. Each relic below whose Java
-# defines a hook names the S2 task that grants it and therefore owns making it
-# live. relic_boss_special_test's S2 inertness test asserts every one of these
-# eight carries zero hooks and native == false, so the task that writes a body
-# sees that test fail rather than silently changing behaviour nobody watched.
-#   Bloody Idol         onGainGold -> heal 5. Run-layer seam (gain_gold,
-#                       relics/relic_pickup.hpp). Body owner: S2.31.
-#   Enchiridion         atPreBattle -> a free-this-turn POWER from
-#                       returnTrulyRandomCardInCombat(POWER) into hand. Needs a
-#                       POWER-typed sibling of kIroncladAttackPool /
-#                       kIroncladSkillPool. Body owner: S2.31.
-#   Nilry's Codex       onPlayerEndTurn -> CodexAction (a 3-of-colourless choice).
-#                       Needs the CodexAction draw model. Body owner: S2.31.
-#   Necronomicon        onUseCard -> replay the first >= 2-cost attack each turn.
-#                       Needs the card-replay machinery. Body owner: S2.31. The
-#                       onEquip half is NOT deferred: see the row.
-#   Mutagenic Strength  atBattleStart -> Strength 3 + LoseStrength 3. Body owner:
-#                       S2.31.
-#   N'loth's Gift       changeRareCardRewardChance -> x3. A combat-reward seam
-#                       (the card-rarity roll) with no relic hook today. Body
-#                       owner: S2.32.
-#   Red Mask            atBattleStart -> Weak 1 on every enemy, with WeakPower's
-#                       explicit isSourceMonster=false (the Gremlin Mask problem,
-#                       mirrored). Body owner: S2.32.
-#   Mark of the Bloom   onPlayerHeal -> return 0. The onPlayerHeal seam already
-#                       exists (Magic Flower); this is its second consumer and an
-#                       absolute suppressor. Body owner: S2.33.
+# HOOK BODIES: ALL EIGHT ARE NOW LANDED (the S2.31-era deferral is fully
+# discharged -- S2.32 landed N'loth's Gift and Red Mask, S2.12 the run-layer
+# half of Mark of the Bloom, and S2.34 the remaining five plus Mark of the
+# Bloom's in-combat half). The historical shape is kept because it
+# explains the rows: a `native: true` row without a body is an undefined
+# reference at link time, so each body landed in the SAME commit as its row
+# flip. Where each body lives:
+#   Bloody Idol         onGainGold -> heal 5. NO RelicHook: the consumers are
+#                       the two gainGold doors -- gain_gold's onGainGold
+#                       fan-out (relics/relic_pickup.hpp, run layer) and
+#                       op_damage_greed's in-combat payout (interp_damage.cpp,
+#                       the one in-scope in-combat gainGold producer). S2.34.
+#   Enchiridion         atPreBattle -> RANDOM_ATTACK_TO_HAND with the POWER
+#                       pool selector (relic_native_enchiridion). S2.34.
+#   Nilry's Codex       onPlayerEndTurn -> Opcode::CODEX (the CodexAction
+#                       model; relic_native_nilrys_codex). S2.34.
+#   Necronomicon        onUseCard once-per-turn replay + atTurnStart re-arm
+#                       (relic_native_necronomicon; the latch is
+#                       kCombatFlagNecronomiconUsed, NOT counter). The onEquip
+#                       half landed earlier with the row. S2.34.
+#   Mutagenic Strength  atBattleStart -> two addToTop APPLY_POWERs
+#                       (relic_native_mutagenic_strength). S2.34.
+#   N'loth's Gift       changeRareCardRewardChance -> x3 at the reward-rarity
+#                       seam; still binds NO RelicHook. S2.32.
+#   Red Mask            atBattleStart -> Weak 1 on every enemy
+#                       (relic_native_red_mask). S2.32.
+#   Mark of the Bloom   onPlayerHeal -> return 0 at BOTH onPlayerHeal seams;
+#                       binds NO RelicHook. Run layer S2.12, combat S2.34.
 
 - id: 143
   name: BLOODY_IDOL
   game_id: "Bloody Idol"
   tier: SPECIAL
-  provenance: "BloodyIdol (BloodyIdol.java:14-39) -- ID 'Bloody Idol', RelicTier.SPECIAL (:20), HEAL_AMOUNT = 5 (:17). onGainGold (:28-33): flash, a cosmetic RelicAboveCreatureAction, then AbstractDungeon.player.heal(5, true). That is a RUN-LAYER heal on the gold seam, not a combat hook, so the row binds no RelicHook -- gain_gold (relics/relic_pickup.hpp) is the reader, exactly as it already is for Ectoplasm's suppression, and the two compose: an Ectoplasm owner never heals, because AbstractPlayer.gainGold returns before the onGainGold fan-out (AbstractPlayer.java:719-724). ACQUISITION LANDED by S2.31 (Forgotten Altar grants it, ForgottenAltar.java:99-115); the onGainGold BODY is still DEFERRED and its owner is no longer S2.31 -- see the s2-tasks.md deferred-obligations row named 'S2.31 payout relics/cards are now REACHABLE with their bodies still deferred'. gain_gold (relics/relic_pickup.hpp) still names this as the corpus override it does not write."
+  provenance: "BloodyIdol (BloodyIdol.java:14-39) -- ID 'Bloody Idol', RelicTier.SPECIAL (:20), HEAL_AMOUNT = 5 (:17). onGainGold (:28-33): flash, a cosmetic RelicAboveCreatureAction, then AbstractDungeon.player.heal(5, true) -- a SYNCHRONOUS heal inside the gainGold fan-out, not a queued action. The row binds no RelicHook: onGainGold has no hook id in the engine because gainGold itself is the seam, and it has exactly TWO reachable producers in Ironclad S2 scope. (1) The RUN LAYER: every event/reward/Neow gold gain goes through gain_gold (relics/relic_pickup.hpp), whose onGainGold fan-out heals 5 through the out-of-combat onPlayerHeal door (Mark of the Bloom can zero it; Magic Flower is combat-gated identity out there). (2) IN COMBAT: Hand of Greed's GreedAction calls player.gainGold the instant the kill lands (GreedAction.java:38) -- the ONLY in-combat gainGold in Acts 1-3 scope (FameAndFortune is Watcher) -- so op_damage_greed (interp_damage.cpp) runs the same fan-out at the payout: heal 5 through heal_player_with_relics, where Magic Flower's x1.5 (MathUtils.round) and Mark of the Bloom's zero apply, at combat time, before the gold itself settles at the fold-back. ECTOPLASM COMPOSES BY RETURNING FIRST (AbstractPlayer.java:719-724, before the += AND before the fan-out): an Ectoplasm owner gains nothing and heals nothing, at both producers. amount <= 0 skips the += and the fan-out too (:725-733), which gain_gold's amount gate mirrors. BODY LANDED by S2.34; the s2-tasks.md deferred-obligations row 'S2.31 payout relics/cards are now REACHABLE with their bodies still deferred' is DISCHARGED there. ACQUISITION landed by S2.31 (Forgotten Altar, ForgottenAltar.java:99-115)."
 
 - id: 144
   name: ENCHIRIDION
   game_id: "Enchiridion"
   tier: SPECIAL
-  provenance: "Enchiridion (Enchiridion.java:17-45) -- ID 'Enchiridion', RelicTier.SPECIAL (:22). atPreBattle (:30-39): flash, then AbstractDungeon.returnTrulyRandomCardInCombat(CardType.POWER).makeCopy(); if that copy's cost != -1 it is setCostForTurn(0) -- the THIS-TURN-ONLY zeroing, not the permanent Chrysalis one, so an X-cost power is left at X; then addToBot MakeTempCardInHandAction(c). The pool is the same three-way srcCommon+srcUncommon+srcRare concatenation minus CardTags.HEALING that Infernal Blade and Chrysalis draw from (AbstractDungeon.java:964-979), filtered to POWER, at a cost of exactly ONE cardRandomRng draw -- so the body needs a POWER-typed emission alongside kIroncladAttackPool/kIroncladSkillPool. It binds AT_PRE_BATTLE, not AT_BATTLE_START (the Snecko Eye distinction: pre-battle runs before the opening draw). ACQUISITION LANDED by S2.31 (Cursed Tome pays it through a reward row); the atPreBattle BODY is still DEFERRED and re-pointed off S2.31 -- see the s2-tasks.md deferred-obligations row named 'S2.31 payout relics/cards are now REACHABLE with their bodies still deferred'."
+  native: true
+  hooks:
+    at_pre_battle: []
+  provenance: "Enchiridion (Enchiridion.java:17-45) -- ID 'Enchiridion', RelicTier.SPECIAL (:22). atPreBattle (:30-39): flash, then AbstractDungeon.returnTrulyRandomCardInCombat(CardType.POWER).makeCopy(); if that copy's cost != -1 it is setCostForTurn(0) -- the THIS-TURN-ONLY zeroing, not the permanent Chrysalis one, so an X-cost power would be left at X (the Ironclad POWER pool holds none, but the guard is modelled anyway: set_cost_for_turn's X-cost no-op is the same clause); then addToBot MakeTempCardInHandAction(c) (hand-cap spill to discard). The pool is the same three-way srcCommon+srcUncommon+srcRare concatenation minus CardTags.HEALING that Infernal Blade and Chrysalis draw from (AbstractDungeon.java:964-979), filtered to POWER, at a cost of exactly ONE cardRandomRng draw -- kIroncladPowerPool, which already existed for Power Potion. It binds AT_PRE_BATTLE, not AT_BATTLE_START (the Snecko Eye distinction: pre-battle runs before the opening draw). BODY LANDED by S2.34 (relic_native_enchiridion, relics/relics_special.cpp): the queued item is Opcode::RANDOM_ATTACK_TO_HAND (33) with the S2.34-claimed previously-zero flags POOL SELECTOR set to POWER -- Infernal Blade's body IS this body with one pool changed, so the draw-at-execute accounting and the free-this-turn copy are shared rather than re-derived (nothing between the pre-battle fan-out and the item's execution reads cardRandomRng, so the execute-time draw is stream-identical to the Java's fan-out-time draw). ACQUISITION landed by S2.31 (Cursed Tome); the deferred-obligations row is DISCHARGED by S2.34."
 
 - id: 145
   name: NILRYS_CODEX
   game_id: "Nilry's Codex"
   tier: SPECIAL
-  provenance: "NilrysCodex (NilrysCodex.java:15-38) -- the join key is the ID string \"Nilry's Codex\", apostrophe included, not the class name; RelicTier.SPECIAL (:20). onPlayerEndTurn (:28-32): addToBot a cosmetic RelicAboveCreatureAction, then addToBot a new CodexAction() -- the whole mechanic lives in that action, not in the relic. ACQUISITION LANDED by S2.31 (Cursed Tome pays it through a reward row); the onPlayerEndTurn BODY is still DEFERRED and re-pointed off S2.31 -- see the s2-tasks.md deferred-obligations row named 'S2.31 payout relics/cards are now REACHABLE with their bodies still deferred'. CodexAction's own draw accounting must be read in full there before any step is authored, because its choice screen is rng-visible."
+  native: true
+  hooks:
+    on_player_end_turn: []
+  provenance: "NilrysCodex (NilrysCodex.java:15-38) -- the join key is the ID string \"Nilry's Codex\", apostrophe included, not the class name; RelicTier.SPECIAL (:20). onPlayerEndTurn (:28-32): addToBot a cosmetic RelicAboveCreatureAction, then addToBot a new CodexAction() -- the whole mechanic lives in that action, not in the relic. BODY LANDED by S2.34 (relic_native_nilrys_codex queues one Opcode::CODEX item; CodexAction.java:22-64 read IN FULL): (a) areMonstersBasicallyDead is a ZERO-DRAW no-op (:29-32); (b) the offer is THREE DISTINCT cards from the NO-ARG returnTrulyRandomCardInCombat() -- the RED combat pool (kIroncladCombatPool), NOT a colorless pool -- one cardRandomRng draw per attempt with same-cardID rejection redraws (:50-64), the DISCOVERY sampler over a different pool; (c) the screen is customCombatOpen(..., skippable=TRUE) (:34), so skip is always legal and a skip creates nothing (discoveryCard stays null); (d) UNLIKE DiscoveryAction the generator is called INSIDE the first-tick branch (:33-36 vs DiscoveryAction.java:47), so closing the screen burns ZERO wasted regenerations; (e) the pick is makeStatEquivalentCopy'd at its REGISTRY cost -- NO setCostForTurn -- and goes to the DRAW PILE AT A RANDOM SPOT via ShowCardAndAddToDrawPileEffect(randomSpot=true) -> CardGroup.addToRandomSpot (CardGroup.java:463-468): ONE more cardRandomRng draw, or ZERO when the draw pile is empty (op_make_card's DRAW_RANDOM arm is exactly this). ACQUISITION landed by S2.31 (Cursed Tome); the deferred-obligations row is DISCHARGED by S2.34."
 
 - id: 146
   name: NECRONOMICON
   game_id: "Necronomicon"
   tier: SPECIAL
+  native: true
+  hooks:
+    on_use_card: []
+    at_turn_start: []
   pickup:
     on_equip: true
-  provenance: "Necronomicon (Necronomicon.java:24-96) -- ID 'Necronomicon', RelicTier.SPECIAL (:31), COST_THRESHOLD = 2 (:27), and a PRIVATE `boolean activated = true` (:28) that is NOT AbstractRelic.counter: the class never writes counter, so the observable counter stays the inherited -1 and this row takes no initial_counter (the Centennial Puzzle precedent). onEquip (:39-45) is LIVE HERE -- it adds a Necronomicurse (cards.yaml NECRONOMICURSE) to the master deck through ShowCardAndObtainEffect (:43), whose constructor (ShowCardAndObtainEffect.java:30-45) tests Omamori FIRST: a CURSE-coloured card with a held Omamori charge consumes the charge and sets isDone true in the ctor, so it never reaches update()'s souls.obtain; update() otherwise (:94-109) runs the relics' onObtainCard fan-out, appends via souls.obtain, then runs onMasterDeckChange. That is add_card_to_master_deck's contract exactly (the Calling Bell precedent, relic_pickup_boss.cpp), which is why this surface is taken and implemented rather than deferred. onUnequip (:47-58) removes the first Necronomicurse from the master deck; UNREACHABLE through S2 -- the only relic-removal paths are Neow's swap and the boss-relic swap, both of which act on a BOSS-tier slot, and this relic is SPECIAL. onUseCard (:60-80), the once-per-turn replay of an attack whose costForTurn >= 2 (or an X-cost play with energyOnUse >= 2) that is not freeToPlayOnce, plus atTurnStart (:82-85) re-arming `activated`, is a DEFERRED combat body needing the card-replay machinery; S2.31 landed only the ACQUISITION (Cursed Tome pays it through a reward row) and the body is re-pointed off S2.31 -- see the s2-tasks.md deferred-obligations row named 'S2.31 payout relics/cards are now REACHABLE with their bodies still deferred'. The row binds no RelicHook, so that deferral cannot be mistaken for an implemented no-op."
+  provenance: "Necronomicon (Necronomicon.java:24-96) -- ID 'Necronomicon', RelicTier.SPECIAL (:31), COST_THRESHOLD = 2 (:27), and a PRIVATE `boolean activated = true` (:28) that is NOT AbstractRelic.counter: the class never writes counter, so the observable counter stays the inherited -1 and this row takes no initial_counter (the Centennial Puzzle precedent). onEquip (:39-45) adds a Necronomicurse (cards.yaml NECRONOMICURSE) to the master deck through ShowCardAndObtainEffect (:43), whose constructor (ShowCardAndObtainEffect.java:30-45) tests Omamori FIRST: a CURSE-coloured card with a held Omamori charge consumes the charge and sets isDone true in the ctor, so it never reaches update()'s souls.obtain; update() otherwise (:94-109) runs the relics' onObtainCard fan-out, appends via souls.obtain, then runs onMasterDeckChange. That is add_card_to_master_deck's contract exactly (the Calling Bell precedent, relic_pickup_boss.cpp). onUnequip (:47-58) removes the first Necronomicurse from the master deck; UNREACHABLE through S2 -- the only relic-removal paths are Neow's swap and the boss-relic swap, both of which act on a BOSS-tier slot, and this relic is SPECIAL. COMBAT BODY LANDED by S2.34 (relic_native_necronomicon; the deferred-obligations row is DISCHARGED there). onUseCard (:60-80): fires in the UseCardAction-CONSTRUCTOR fan-out (player powers -> player RELICS -> cards -> monster powers, UseCardAction.java:41-64 -- i.e. AFTER Double Tap), and when `card.type == ATTACK && (costForTurn >= 2 && !freeToPlayOnce || cost == -1 && energyOnUse >= 2) && activated` it clears the latch and plays a makeSameInstanceOf copy: purgeOnUse, applyPowers'd, aimed at action.target, addCardQueueItem(..., true) = FRONT of the card queue with ignoreEnergyTotal + autoplay -- op_play_card with kPlayCardCopy|kPlayCardPurge|kPlayCardQueueFront, DoubleTapPower's exact shape (power_double_tap.cpp), so the replay machinery is shared, not re-derived. The latch is kCombatFlagNecronomiconUsed (CombatState.flags bit 6, claimed by S2.34), stored INVERTED so value-init == armed; atTurnStart (:82-85) clears it every turn, turn 1 included. checkTrigger (:88-90) is presentation (pulse) and is not modelled. NOT MODELLED, deliberately: nothing else -- the game's energyOnUse for the X-cost arm is threaded to the fan-out from the same derivation the X-cost play itself uses (without Chemical X's +2, which boosts repetitions, not energyOnUse)."
 
 - id: 147
   name: MUTAGENIC_STRENGTH
   game_id: "MutagenicStrength"
   tier: SPECIAL
-  provenance: "MutagenicStrength (MutagenicStrength.java:17-43) -- the join key is 'MutagenicStrength', one word and not the display name (:19); RelicTier.SPECIAL (:23); STR_AMT = 3 (:20). atBattleStart (:31-37) is three addToTop calls in source order -- ApplyPowerAction(player, player, StrengthPower 3, 3), then ApplyPowerAction(player, player, LoseStrengthPower 3, 3), then the cosmetic RelicAboveCreatureAction -- so the RESOLUTION order is the reverse: cosmetic, LoseStrength, Strength. Both powers already have rows (powers.yaml STRENGTH, LOSE_STRENGTH). ACQUISITION LANDED by S2.31 (Drug Dealer option 2 grants it, DrugDealer.java:73-79); the atBattleStart BODY is still DEFERRED and re-pointed off S2.31 -- see the s2-tasks.md deferred-obligations row named 'S2.31 payout relics/cards are now REACHABLE with their bodies still deferred'. The row is left unbound rather than transcribed into a two-step data program, because a `hooks:` list is queued addToBot in list order, which is not what three addToTop calls do, and the resulting slot order of the two power entries is publicly observable."
+  native: true
+  hooks:
+    at_battle_start: []
+  provenance: "MutagenicStrength (MutagenicStrength.java:17-43) -- the join key is 'MutagenicStrength', one word and not the display name (:19); RelicTier.SPECIAL (:23); STR_AMT = 3 (:20). atBattleStart (:31-37) is three addToTop calls in source order -- ApplyPowerAction(player, player, StrengthPower 3, 3), then ApplyPowerAction(player, player, LoseStrengthPower 3, 3), then the cosmetic RelicAboveCreatureAction -- so the RESOLUTION order is the reverse: cosmetic (queues nothing), LoseStrength 3, THEN Strength 3, and the resulting power-slot order [LOSE_STRENGTH, STRENGTH] is publicly observable. BODY LANDED by S2.34 (relic_native_mutagenic_strength, relics/relics_special.cpp; the deferred-obligations row is DISCHARGED there): NATIVE, not a `hooks:` data program, because a data program queues addToBot in list order -- it can reproduce either the resolution order or the authoring order but not the addToTop reversal both at once at this hook's queue position; the native body add_to_top's Strength then LoseStrength, landing them in the Java's resolution order. Both powers already have rows (powers.yaml STRENGTH, LOSE_STRENGTH; LoseStrengthPower's end-of-turn self-removal is the landed Flex machinery). ACQUISITION landed by S2.31 (Drug Dealer option 2, DrugDealer.java:73-79)."
 
 - id: 148
   name: NLOTHS_GIFT
@@ -1704,4 +1715,4 @@
   name: MARK_OF_THE_BLOOM
   game_id: "Mark of the Bloom"
   tier: SPECIAL
-  provenance: "MarkOfTheBloom (MarkOfTheBloom.java:12-35) -- ID 'Mark of the Bloom', RelicTier.SPECIAL (:17). Its ONLY override is onPlayerHeal(int healAmount) -> flash then `return 0` (:25-29): an ABSOLUTE suppressor, not a modifier, and it ignores its argument entirely. The onPlayerHeal seam already exists in the engine for Magic Flower; this is its second consumer and the first one that can zero the result, so every caller of that seam (rest heals, combat heals, potions, increaseMaxHp's inner heal) has to handle a 0 return. No combat RelicHook is bound. DEFERRED body, owner S2.33 (Mind Bloom)."
+  provenance: "MarkOfTheBloom (MarkOfTheBloom.java:12-35) -- ID 'Mark of the Bloom', RelicTier.SPECIAL (:17). Its ONLY override is onPlayerHeal(int healAmount) -> flash then `return 0` (:25-29): an ABSOLUTE suppressor, not a modifier, and it ignores its argument entirely -- and UNCONDITIONAL, unlike Magic Flower's combat-phase gate, so it zeroes heals in combat and out. No combat RelicHook is bound: both onPlayerHeal doors read membership directly. BODY: the RUN-LAYER door landed with the seam itself (apply_on_player_heal_out_of_combat, relics/relic_pickup.hpp, S2.12 -- rest heals, event heals, the act-transition heal); the IN-COMBAT door landed by S2.34 (heal_player_with_relics, relic_hooks.cpp -- potion/relic/card heals, Bloody Idol's in-combat heal 5 among them), which closed a gap: the acquisition (Mind Bloom's upgrade branch, S2.33) made the relic reachable while the combat seam still only knew Magic Flower. Suppression runs BEFORE Magic Flower's multiply in the fan-out order (relic list order is acquisition order; 0 * 1.5 == round(0) either way, so the order is unobservable for this pair)."

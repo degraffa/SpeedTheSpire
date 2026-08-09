@@ -421,6 +421,38 @@ OPCODES = {
     # (`player.hand.size() != 10`, :39) and the HAND arm re-checks the cap at
     # RESOLVE time (MakeTempCardInHandAction.update:71-77 spills to discard).
     "STASIS_RETURN": 72,
+    # S2.34 (payout relic/card bodies). 73-74 are this task's whole opcode
+    # grant (stage-b-tasks.md "S2.34 allocations").
+    #
+    # RITUAL_DAGGER is RitualDaggerAction.update (RitualDaggerAction.java:
+    # 34-58): ordinary `target.damage(info)` -- the DamageInfo is built from
+    # this.damage, whose base is the card's PER-INSTANCE `misc` (ctor
+    # `baseDamage = this.misc`, misc starts 15, RitualDagger.java:27-29) -- and
+    # then, IF the hit left the target dead (the DAMAGE_GREED gate exactly:
+    # !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))),
+    # `misc += increaseAmount` (magicNumber, 3 base / 5 upgraded) on the
+    # master-deck card with the same uuid AND every in-battle instance, each
+    # followed by `baseDamage = misc`. CARD_CONTEXT: `amount` is the authored
+    # increase and queue_effect_step stamps the SOURCE POOL INDEX into `flags`
+    # (the DAMAGE_RAMPAGE shape) -- the base damage and the growth target are
+    # both that instance's misc, read/written at EXECUTE time. The master-deck
+    # half settles at the combat fold-back (the combat layer has no RunState;
+    # the combat_gold precedent) keyed on CardDef.initial_misc != 0.
+    "RITUAL_DAGGER": 73,
+    # CODEX is CodexAction (CodexAction.java:22-64), queued addToBot by
+    # Nilry's Codex's onPlayerEndTurn (NilrysCodex.java:29-32). All-monsters-
+    # basically-dead is a ZERO-DRAW no-op (:29-32); otherwise ONE 3-distinct-
+    # card offer over the no-arg returnTrulyRandomCardInCombat() pool (the RED
+    # combat pool -- NOT colorless; :54 calls the no-arg overload) exactly as
+    # DISCOVERY generates its offers, opened ALWAYS-SKIPPABLE
+    # (customCombatOpen(..., true), :34). Unlike DISCOVERY the generator runs
+    # INSIDE the first-tick branch (:33-36), so a close burns NO wasted
+    # regenerations; the pick is makeStatEquivalentCopy'd at its REGISTRY cost
+    # (no setCostForTurn) and lands in the DRAW PILE at a RANDOM SPOT --
+    # ShowCardAndAddToDrawPileEffect(randomSpot=true) -> CardGroup.
+    # addToRandomSpot (:463-468), ONE cardRandomRng draw unless the pile is
+    # empty. ENGINE_EMITTED: only the relic's native body queues it.
+    "CODEX": 74,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional

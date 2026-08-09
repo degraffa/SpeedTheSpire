@@ -329,6 +329,30 @@ S2.12 → S2.28 (S2.12 landed without it; recorded here so the drift is
 explicit). Batch dependency order: S2.2F → {S2.23 ∥ S2.25 ∥ S2.26 ∥ S2.28} →
 {S2.24 ∥ S2.27} (both need S2.23's MINION row and its spawn pattern).
 
+### S2.34 allocations — 2026-08-09 (payout relic/card bodies; claimed at dispatch, re-derived from the tree at claim time)
+
+Maxima re-derived at claim time: opcode max 72 (`STASIS_RETURN`), `RelicHook`
+max 16 (no new hook needed — all four relic bodies bind existing hooks),
+`ChoiceKind` max 12 (no new kind needed — Nilry's Codex rides the DISCOVERY
+choice surface with its own opcode), CardTrigger max 3 (no new trigger needed —
+the `on_exhaust:` program column, live since Sentinel, IS the triggerOnExhaust
+seam), `CombatState.flags` bits: 0–5, 8–18 and 20–24 spent, 6/7/19/25+ free
+(19 and 25 previously RELEASED; scarce bits are reusable, unlike ids).
+
+| Namespace | Claim |
+|---|---|
+| Opcode | **73** `RITUAL_DAGGER` (kill-conditional per-instance `misc` growth, RitualDaggerAction.java:34-58; CARD_CONTEXT — queue-time source-index stamp, the DAMAGE_RAMPAGE shape), **74** `CODEX` (CodexAction.java:22-64 — end-of-turn skippable 3-of-RED-combat-pool choice adding to the draw pile at a random spot; ENGINE_EMITTED, queued only by Nilry's Codex's native body) |
+| `CombatState.flags` bit | **6** `kCombatFlagNecronomiconUsed` — Necronomicon's private `activated` latch, stored INVERTED (zero-init == armed) so no fixture byte moves; NOT RelicSlot.counter (the observable counter stays -1, Necronomicon.java:28) |
+| `RANDOM_ATTACK_TO_HAND` (33) `flags` | previously-zero low bits become a **pool selector**: 0 = ATTACK pool (every existing item byte-identical), **1 = POWER pool** (Enchiridion — returnTrulyRandomCardInCombat(POWER), Enchiridion.java:33). The B3.10c "previously-zero bits of an existing opcode" precedent |
+
+Non-numeric registry-schema additions recorded with the claims (generator
+fail-loud validation, no numbered namespace touched): cards.yaml `initial_misc:`
+(CardDef.initial_misc — Ritual Dagger's ctor `misc = 15`, also the marker for
+the run-persistent-misc fold-back) and `on_exhaust_bottom: true`
+(CardDef.on_exhaust_add_to_bottom — Necronomicurse addToBot's its
+triggerOnExhaust program where Sentinel addToTop's, Necronomicurse.java:48 vs
+Sentinel.java:37-43).
+
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 
 Published here rather than only in the dispatching briefs, per the rule above.

@@ -8,9 +8,11 @@
 
 #include <cstdint>
 
-#include "sts/engine/action_queue.hpp"  // add_to_bottom / kActor*
+#include "../interp/interp_cards.hpp"   // op_play_card (Necronomicon's replay)
+#include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
+#include "sts/engine/cards.hpp"         // card_def, CardType (Necronomicon)
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/interp.hpp"        // Opcode
+#include "sts/engine/interp.hpp"        // Opcode, kPlayCard*, kRandomToHandPool*
 #include "sts/engine/run_state.hpp"  // RelicSlot
 #include "sts/engine/types.hpp"
 
@@ -122,7 +124,138 @@ void relic_native_red_mask(CombatState& s, RelicHook hook,
     }
 }
 
-// --- DEFERRED combat bodies --------------------------------------------------
+// --- S2.34: the payout-relic combat bodies -----------------------------------
+
+void relic_native_enchiridion(CombatState& s, RelicHook hook,
+                              RelicSlot& /*slot*/,
+                              const RelicHookContext& /*ctx*/) noexcept {
+    // Enchiridion.atPreBattle (Enchiridion.java:30-39): flash, ONE
+    // returnTrulyRandomCardInCombat(CardType.POWER) draw, makeCopy() a BASE
+    // instance, setCostForTurn(0) unless cost == -1, addToBot
+    // MakeTempCardInHandAction(c). That is Infernal Blade's body with one
+    // CardType changed, so the queued item is RANDOM_ATTACK_TO_HAND with the
+    // S2.34 POWER pool selector -- the draw happens at the item's execute,
+    // which is stream-identical here: nothing queued at pre-battle by any
+    // in-scope relic consumes cardRandomRng (Snecko Eye's Confusion apply
+    // draws only at later card draws), so the fan-out-time draw and the
+    // execute-time draw see the same stream position. AT_PRE_BATTLE, not
+    // AT_BATTLE_START: the item resolves before the opening draw
+    // (combat_begin / enter_combat dispatch this hook ahead of
+    // begin_first_turn), so the free power is in hand when turn 1 opens.
+    if (hook != RelicHook::AT_PRE_BATTLE) {
+        return;
+    }
+    ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(Opcode::RANDOM_ATTACK_TO_HAND);
+    item.src = kActorPlayer;
+    item.tgt = kActorPlayer;
+    item.flags = kRandomToHandPoolPower;
+    add_to_bottom(s, item);  // addToBot (Enchiridion.java:38)
+}
+
+void relic_native_nilrys_codex(CombatState& s, RelicHook hook,
+                               RelicSlot& /*slot*/,
+                               const RelicHookContext& /*ctx*/) noexcept {
+    // NilrysCodex.onPlayerEndTurn (NilrysCodex.java:28-32): addToBot a
+    // cosmetic RelicAboveCreatureAction (queues nothing here), then addToBot a
+    // new CodexAction(). The whole mechanic lives in the CODEX item: prepared
+    // and intercepted at the pump head (the DISCOVERY shape), always
+    // skippable, resolving to a random-spot draw-pile insert -- interp.hpp
+    // Opcode::CODEX carries the full CodexAction.java derivation.
+    if (hook != RelicHook::ON_PLAYER_END_TURN) {
+        return;
+    }
+    ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(Opcode::CODEX);
+    item.src = kActorPlayer;
+    item.tgt = kActorPlayer;
+    add_to_bottom(s, item);  // addToBot (NilrysCodex.java:31)
+}
+
+void relic_native_necronomicon(CombatState& s, RelicHook hook,
+                               RelicSlot& /*slot*/,
+                               const RelicHookContext& ctx) noexcept {
+    // Necronomicon.atTurnStart (Necronomicon.java:82-85): `activated = true`.
+    // The latch is the INVERTED kCombatFlagNecronomiconUsed bit
+    // (combat_state.hpp), so re-arming CLEARS it; this hook fires on every
+    // turn, turn 1 included, which is what makes cross-combat residue
+    // unobservable.
+    if (hook == RelicHook::AT_TURN_START) {
+        s.flags &= ~kCombatFlagNecronomiconUsed;
+        return;
+    }
+    if (hook != RelicHook::ON_USE_CARD) {
+        return;
+    }
+    // Necronomicon.onUseCard (Necronomicon.java:60-80), fired in the
+    // UseCardAction-CONSTRUCTOR fan-out AFTER player powers (so after Double
+    // Tap) and BEFORE monster powers. The gate (:62):
+    //     card.type == ATTACK
+    //  && (card.costForTurn >= 2 && !card.freeToPlayOnce
+    //      || card.cost == -1 && card.energyOnUse >= 2)
+    //  && this.activated
+    // Note there is NO !purgeOnUse conjunct (that is Double Tap's, :44): a
+    // replay copy that still meets the cost bar re-triggers, held off only by
+    // the once-per-turn latch. The replay itself is Double Tap's exact
+    // machinery -- makeSameInstanceOf, applyPowers, purgeOnUse,
+    // addCardQueueItem(new CardQueueItem(tmp, m, card.energyOnUse, true,
+    // true), true) == front-of-queue autoplay (:70-77) -- so it calls the
+    // shared PLAY_CARD verb synchronously, exactly as power_double_tap.cpp
+    // does and for the same reason (the enqueue happens inside the
+    // constructor, not through a queued action).
+    if ((s.flags & kCombatFlagNecronomiconUsed) != 0u ||
+        ctx.card_pool_index >= kCardPoolCap) {
+        return;
+    }
+    const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+    if (cd == nullptr || cd->type != CardType::ATTACK) {
+        return;  // `card.type == CardType.ATTACK` (:62)
+    }
+    const CardInstance& card = s.card_pool[ctx.card_pool_index];
+    const bool is_xcost = has_card_flag(card.flags, CardFlag::XCOST);
+    const bool cost_arm =
+        !is_xcost && static_cast<int>(card.cost_now) >= 2 &&
+        !has_card_flag(card.flags, CardFlag::FREE_TO_PLAY_ONCE);
+    const bool xcost_arm = is_xcost && ctx.energy_on_use >= 2;
+    if (!cost_arm && !xcost_arm) {
+        return;
+    }
+    s.flags |= kCombatFlagNecronomiconUsed;  // this.activated = false (:63)
+    op_play_card(s, ctx.target, static_cast<int>(ctx.card_pool_index),
+                 kPlayCardCopy | kPlayCardPurge | kPlayCardQueueFront);
+}
+
+void relic_native_mutagenic_strength(CombatState& s, RelicHook hook,
+                                     RelicSlot& /*slot*/,
+                                     const RelicHookContext& /*ctx*/) noexcept {
+    // MutagenicStrength.atBattleStart (MutagenicStrength.java:31-37): THREE
+    // addToTop calls in source order -- ApplyPowerAction(StrengthPower 3),
+    // ApplyPowerAction(LoseStrengthPower 3), cosmetic RelicAboveCreatureAction
+    // -- so the RESOLUTION order is the reverse: cosmetic (queues nothing),
+    // LoseStrength 3, THEN Strength 3, and the power list ends up
+    // [LOSE_STRENGTH, STRENGTH], which is publicly observable slot order.
+    // NATIVE for exactly that reason (the registry row says why): a data
+    // program queues addToBot in list order and cannot reproduce the addToTop
+    // reversal at this queue position. add_to_top'ing Strength FIRST then
+    // LoseStrength lands them in the Java's resolution order.
+    if (hook != RelicHook::AT_BATTLE_START) {
+        return;
+    }
+    ActionQueueItem str{};
+    str.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    str.src = kActorPlayer;
+    str.tgt = kActorPlayer;
+    str.amount = 3;
+    str.flags = make_apply_power_flags(PowerId::STRENGTH);
+    add_to_top(s, str);
+    ActionQueueItem lose{};
+    lose.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    lose.src = kActorPlayer;
+    lose.tgt = kActorPlayer;
+    lose.amount = 3;
+    lose.flags = make_apply_power_flags(PowerId::LOSE_STRENGTH);
+    add_to_top(s, lose);
+}
 
 void relic_native_warped_tongs(CombatState& s, RelicHook hook,
                                RelicSlot& /*slot*/,
@@ -131,7 +264,9 @@ void relic_native_warped_tongs(CombatState& s, RelicHook hook,
     // ledger cited :24-29; the file is 40 lines): flash(), addToBot a cosmetic
     // RelicAboveCreatureAction, addToBot a new UpgradeRandomCardAction().
     //
-    // DEFERRED, and RNG-VISIBLE when it lands. UpgradeRandomCardAction.update
+    // RNG-VISIBLE (and LIVE -- this comment's old "DEFERRED" went stale when
+    // Opcode::UPGRADE_RANDOM_CARD landed; corrected by S2.34, the conventions
+    // §8 "comment asserting X" shape). UpgradeRandomCardAction.update
     // (UpgradeRandomCardAction.java:28-50):
     //     if (hand.isEmpty()) { done; }                       -- no draw
     //     upgradeable = hand filtered to canUpgrade() && type != STATUS

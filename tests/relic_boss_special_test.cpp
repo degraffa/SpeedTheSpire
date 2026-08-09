@@ -1563,5 +1563,389 @@ TEST(RelicBossSpecial, BattleStartRelicsFireInAcquisitionOrder) {
     EXPECT_EQ(queued(b, 1).opcode, kOp(Opcode::APPLY_POWER));
 }
 
+// ============================================================================
+// S2.34 -- the payout-relic bodies (registry ids 143-147, 150's combat half).
+// Each derivation is the cited Java, read in full; the registry rows carry the
+// per-relic provenance.
+// ============================================================================
+
+// MutagenicStrength.atBattleStart (MutagenicStrength.java:31-37): three
+// addToTop calls in SOURCE order (Strength, LoseStrength, cosmetic), so the
+// RESOLUTION order is the reverse -- LoseStrength 3 lands BEFORE Strength 3,
+// and the player's power list ends up [LOSE_STRENGTH, STRENGTH]. That slot
+// order is the whole reason the body is native rather than a data program.
+TEST(RelicBossSpecial, MutagenicStrengthResolvesLoseStrengthThenStrength) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::MUTAGENIC_STRENGTH);
+    dispatch_relics_at_battle_start(s, rv.relics, rv.count);
+    ASSERT_EQ(s.action_count, 2);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags),
+              PowerId::LOSE_STRENGTH);
+    EXPECT_EQ(queued(s, 0).amount, 3);
+    EXPECT_EQ(queued(s, 1).opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(apply_power_id_from_flags(queued(s, 1).flags), PowerId::STRENGTH);
+    EXPECT_EQ(queued(s, 1).amount, 3);
+    drain(s);
+    ASSERT_EQ(s.player_power_count, 2);
+    EXPECT_EQ(s.player_powers[0].power_id,
+              static_cast<uint16_t>(PowerId::LOSE_STRENGTH));
+    EXPECT_EQ(s.player_powers[0].amount, 3);
+    EXPECT_EQ(s.player_powers[1].power_id,
+              static_cast<uint16_t>(PowerId::STRENGTH));
+    EXPECT_EQ(s.player_powers[1].amount, 3);
+}
+
+// Enchiridion.atPreBattle (Enchiridion.java:30-39): one queued item -- the
+// RANDOM_ATTACK_TO_HAND opcode with the POWER pool selector -- whose execute
+// spends exactly ONE cardRandomRng draw over kIroncladPowerPool and puts a
+// BASE library copy in hand at cost 0 for the turn. No other hook responds.
+TEST(RelicBossSpecial, EnchiridionPreBattleDrawsOneFreePowerIntoHand) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ENCHIRIDION);
+    dispatch_relics_at_pre_battle(s, rv.relics, rv.count);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::RANDOM_ATTACK_TO_HAND));
+    EXPECT_EQ(queued(s, 0).flags, kRandomToHandPoolPower);
+
+    s.card_random_rng = from_seed(7);
+    RngStream ref = from_seed(7);
+    const int32_t pick =
+        random(ref, static_cast<int32_t>(kIroncladPowerPoolCount) - 1);
+    const CardId expect = kIroncladPowerPool[static_cast<unsigned>(pick)];
+
+    drain(s);
+    EXPECT_EQ(s.card_random_rng.counter, 1) << "exactly ONE draw";
+    ASSERT_EQ(s.hand_count, 1);
+    const CardInstance& c = s.card_pool[s.hand[0]];
+    EXPECT_EQ(c.card_id, static_cast<uint16_t>(expect));
+    EXPECT_EQ(c.upgrade, 0) << "makeCopy(): a BASE copy";
+    EXPECT_EQ(c.cost_now, 0) << "setCostForTurn(0)";
+    EXPECT_TRUE(has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN))
+        << "this-turn-only, restored by the end-turn sweep";
+    const CardDef* def = card_def(expect);
+    ASSERT_NE(def, nullptr);
+    EXPECT_EQ(def->type, sts::registry::CardType::POWER);
+
+    // The other hooks stay silent (atPreBattle is the ONLY override).
+    CombatState quiet = MakeState();
+    const RelicView qv = give(quiet, RelicId::ENCHIRIDION);
+    dispatch_relics_at_battle_start(quiet, qv.relics, qv.count);
+    dispatch_relics_at_turn_start(quiet, qv.relics, qv.count);
+    dispatch_relics_on_player_end_turn(quiet, qv.relics, qv.count);
+    EXPECT_EQ(quiet.action_count, 0);
+}
+
+// ...and the pool-selector's negative: an Infernal-Blade-shaped item (flags 0)
+// still draws from the ATTACK pool, byte-identical to before the selector
+// existed.
+TEST(RelicBossSpecial, RandomToHandFlagsZeroStillMeansTheAttackPool) {
+    CombatState s = MakeState();
+    s.card_random_rng = from_seed(9);
+    RngStream ref = from_seed(9);
+    const int32_t pick =
+        random(ref, static_cast<int32_t>(kIroncladAttackPoolCount) - 1);
+    const CardId expect = kIroncladAttackPool[static_cast<unsigned>(pick)];
+    ActionQueueItem it{};
+    it.opcode = kOp(Opcode::RANDOM_ATTACK_TO_HAND);
+    it.src = kActorPlayer;
+    it.tgt = kActorPlayer;
+    execute_opcode(s, it);
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id, static_cast<uint16_t>(expect));
+}
+
+// NilrysCodex.onPlayerEndTurn (NilrysCodex.java:28-32): one queued CODEX item
+// (the cosmetic RelicAboveCreatureAction queues nothing). The pump intercepts
+// it at the head -- offer prepared into the item, phase WAITING_ON_USER --
+// exactly the DISCOVERY shape.
+TEST(RelicBossSpecial, NilrysCodexEndTurnQueuesTheCodexScreen) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::NILRYS_CODEX);
+    dispatch_relics_on_player_end_turn(s, rv.relics, rv.count);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::CODEX));
+
+    s.card_random_rng = from_seed(21);
+    pump(s);
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    ASSERT_EQ(s.action_count, 1) << "the item blocks at the head";
+    EXPECT_TRUE(discovery_choice_prepared(queued(s, 0)));
+}
+
+// The offer is CodexAction.generateCardChoices (CodexAction.java:50-64): the
+// rejection sampler over the RED COMBAT pool (the NO-ARG
+// returnTrulyRandomCardInCombat, :54) -- one cardRandomRng draw per attempt,
+// duplicates redraw, three DISTINCT cards.
+TEST(RelicBossSpecial, CodexOfferIsTheRejectionSamplerOverTheRedCombatPool) {
+    CombatState s = MakeState();
+    ActionQueueItem item{};
+    item.opcode = kOp(Opcode::CODEX);
+    s.card_random_rng = from_seed(33);
+
+    // Hand-roll the expectation with an independent stream.
+    RngStream ref = from_seed(33);
+    CardId expect[3] = {CardId::NONE, CardId::NONE, CardId::NONE};
+    int n = 0;
+    int draws = 0;
+    while (n < 3) {
+        const int32_t pick =
+            random(ref, static_cast<int32_t>(kIroncladCombatPoolCount) - 1);
+        ++draws;
+        const CardId id = kIroncladCombatPool[static_cast<unsigned>(pick)];
+        bool dupe = false;
+        for (int i = 0; i < n; ++i) {
+            dupe = dupe || expect[i] == id;
+        }
+        if (!dupe) {
+            expect[n++] = id;
+        }
+    }
+
+    prepare_codex_choice(s, item);
+    EXPECT_EQ(s.card_random_rng.counter, draws);
+    EXPECT_TRUE(discovery_choice_prepared(item));
+    EXPECT_EQ(discovery_choice_card(item, 0), expect[0]);
+    EXPECT_EQ(discovery_choice_card(item, 1), expect[1]);
+    EXPECT_EQ(discovery_choice_card(item, 2), expect[2]);
+    // Prepared exactly once: a second call draws nothing.
+    prepare_codex_choice(s, item);
+    EXPECT_EQ(s.card_random_rng.counter, draws);
+}
+
+// The pick goes to the DRAW PILE AT A RANDOM SPOT at its REGISTRY cost --
+// ShowCardAndAddToDrawPileEffect(randomSpot=true) -> CardGroup.addToRandomSpot
+// (:463-468): ONE cardRandomRng draw against a non-empty pile, ZERO against an
+// empty one. No setCostForTurn anywhere in CodexAction, unlike Discovery.
+TEST(RelicBossSpecial, CodexPickInsertsAtARandomDrawPileSpotAtRegistryCost) {
+    CombatState s = MakeState();
+    put_in_draw(s, CardId::STRIKE);
+    put_in_draw(s, CardId::DEFEND);
+    put_in_draw(s, CardId::BASH);
+    ActionQueueItem item{};
+    item.opcode = kOp(Opcode::CODEX);
+    s.card_random_rng = from_seed(5);
+    prepare_codex_choice(s, item);
+    const int32_t after_offer = s.card_random_rng.counter;
+    const CardId chosen = discovery_choice_card(item, 1);
+
+    resolve_codex_choice(s, item, 1);
+    EXPECT_EQ(s.card_random_rng.counter, after_offer + 1)
+        << "one addToRandomSpot draw against a 3-card pile";
+    ASSERT_EQ(s.draw_count, 4);
+    int found = -1;
+    for (uint8_t i = 0; i < s.draw_count; ++i) {
+        if (s.card_pool[s.draw[i]].card_id == static_cast<uint16_t>(chosen) &&
+            s.card_pool[s.draw[i]].upgrade == 0) {
+            found = i;
+        }
+    }
+    ASSERT_GE(found, 0);
+    const CardInstance& c = s.card_pool[s.draw[found]];
+    const CardDef* def = card_def(chosen);
+    ASSERT_NE(def, nullptr);
+    EXPECT_EQ(c.cost_now, card_cost(*def, 0)) << "REGISTRY cost -- no zeroing";
+    EXPECT_FALSE(has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN));
+
+    // Empty pile: the insert is a free append (CardGroup.java:464-465).
+    CombatState e = MakeState();
+    ActionQueueItem item2{};
+    item2.opcode = kOp(Opcode::CODEX);
+    e.card_random_rng = from_seed(5);
+    prepare_codex_choice(e, item2);
+    const int32_t before = e.card_random_rng.counter;
+    resolve_codex_choice(e, item2, 0);
+    EXPECT_EQ(e.card_random_rng.counter, before) << "empty pile: no draw";
+    EXPECT_EQ(e.draw_count, 1);
+}
+
+// CodexAction.update's front gate (CodexAction.java:29-32): every monster
+// basically dead -> isDone with NO screen and NO draws. Reachable at the pump
+// only inside a cannotLose window (otherwise the combat-over gate ends the
+// fight first, which is the same observable: no draws, no screen).
+TEST(RelicBossSpecial, CodexIsAZeroDrawNoOpWhenMonstersAreBasicallyDead) {
+    CombatState s = MakeState();
+    s.monsters[0].hp = 0;
+    s.flags |= kCombatFlagCannotLose;
+    ActionQueueItem item{};
+    item.opcode = kOp(Opcode::CODEX);
+    item.src = kActorPlayer;
+    item.tgt = kActorPlayer;
+    add_to_bottom(s, item);
+    s.card_random_rng = from_seed(3);
+    pump(s);
+    EXPECT_EQ(s.action_count, 0) << "consumed, never opened";
+    EXPECT_EQ(s.card_random_rng.counter, 0) << "and it drew NOTHING";
+}
+
+// Necronomicon.onUseCard (Necronomicon.java:60-80): once per turn, an ATTACK
+// with costForTurn >= 2 (not freeToPlayOnce) is replayed -- a purge-on-use
+// same-instance copy, front of the card queue, aimed at the played target --
+// and atTurnStart re-arms the latch (:82-85). The latch is private state, NOT
+// the oracle-visible counter.
+TEST(RelicBossSpecial, NecronomiconReplaysTheFirstTwoCostAttackOncePerTurn) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::NECRONOMICON);
+    const CardPoolIndex bash = put_in_hand(s, CardId::BASH);  // cost 2 ATTACK
+
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(CardId::BASH);
+    ctx.card_pool_index = bash;
+    ctx.target = 0;
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+    ASSERT_EQ(s.card_queue_count, 1) << "the replay copy is queued";
+    const CardPoolIndex copy = s.card_queue[0].card_index;
+    EXPECT_NE(copy, bash) << "makeSameInstanceOf: a COPY, not the original";
+    EXPECT_EQ(s.card_pool[copy].card_id, static_cast<uint16_t>(CardId::BASH));
+    EXPECT_TRUE(has_card_flag(s.card_pool[copy].flags, CardFlag::PURGE_ON_USE));
+    EXPECT_EQ(s.card_queue[0].target, 0);
+    EXPECT_EQ(rv.relics[0].counter, -1) << "the latch is NOT the counter";
+
+    // Second qualifying play the same turn: the latch holds.
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+    EXPECT_EQ(s.card_queue_count, 1) << "once per turn";
+
+    // atTurnStart re-arms.
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::AT_TURN_START,
+                        RelicHookContext{});
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+    EXPECT_EQ(s.card_queue_count, 2);
+}
+
+TEST(RelicBossSpecial, NecronomiconIgnoresCheapFreeAndNonAttackPlays) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::NECRONOMICON);
+
+    // Cost 1 attack: below the threshold.
+    const CardPoolIndex strike = put_in_hand(s, CardId::STRIKE);
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(CardId::STRIKE);
+    ctx.card_pool_index = strike;
+    ctx.target = 0;
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+    EXPECT_EQ(s.card_queue_count, 0);
+
+    // A 2-cost SKILL is not an attack.
+    const CardPoolIndex spot = put_in_hand(s, CardId::SPOT_WEAKNESS);
+    ctx.card_id = static_cast<uint16_t>(CardId::SPOT_WEAKNESS);
+    ctx.card_pool_index = spot;
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+    EXPECT_EQ(s.card_queue_count, 0);
+
+    // A freeToPlayOnce 2-cost attack fails the first arm (:62).
+    const CardPoolIndex free_bash = put_in_hand(s, CardId::BASH);
+    s.card_pool[free_bash].flags |=
+        card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE);
+    ctx.card_id = static_cast<uint16_t>(CardId::BASH);
+    ctx.card_pool_index = free_bash;
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+    EXPECT_EQ(s.card_queue_count, 0);
+}
+
+// The X-cost arm: `card.cost == -1 && card.energyOnUse >= 2` (:62). Whirlwind
+// with 2+ energy on use qualifies; with 1 it does not. freeToPlayOnce does NOT
+// gate this arm (the && binds inside each disjunct).
+TEST(RelicBossSpecial, NecronomiconXCostArmReadsEnergyOnUse) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::NECRONOMICON);
+    const CardPoolIndex ww = put_in_hand(s, CardId::WHIRLWIND);
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(CardId::WHIRLWIND);
+    ctx.card_pool_index = ww;
+    ctx.target = 0;
+    ctx.energy_on_use = 1;
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+    EXPECT_EQ(s.card_queue_count, 0) << "X for 1: below the bar";
+    ctx.energy_on_use = 2;
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+    EXPECT_EQ(s.card_queue_count, 1) << "X for 2 qualifies";
+}
+
+// Bloody Idol's in-combat half: Hand of Greed's kill is the one in-combat
+// gainGold in scope (GreedAction.java:38), and the fan-out heals 5 through the
+// IN-COMBAT onPlayerHeal path -- Magic Flower rounds 5 * 1.5 to 8, Mark of the
+// Bloom zeroes it, and Ectoplasm suppresses gold AND heal by returning first.
+TEST(RelicBossSpecial, BloodyIdolHealsFiveOnAHandOfGreedKill) {
+    CombatState s = MakeState();
+    s.monsters[0].hp = 1;
+    give(s, RelicId::BLOODY_IDOL);
+    ActionQueueItem it{};
+    it.opcode = kOp(Opcode::DAMAGE_GREED);
+    it.src = kActorPlayer;
+    it.tgt = 0;
+    it.amount = 20;
+    it.flags = 25;  // the gold operand
+    execute_opcode(s, it);
+    EXPECT_EQ(s.combat_gold, 25);
+    EXPECT_EQ(s.player_hp, 75) << "heal 5, at combat time";
+}
+
+TEST(RelicBossSpecial, BloodyIdolHealRoutesThroughTheCombatHealSeam) {
+    // Magic Flower (acquired first) multiplies: round(5 * 1.5f) == 8.
+    CombatState s = MakeState();
+    s.monsters[0].hp = 1;
+    Relics r;
+    r.add(RelicId::MAGIC_FLOWER);
+    r.add(RelicId::BLOODY_IDOL);
+    install(s, r);
+    ActionQueueItem it{};
+    it.opcode = kOp(Opcode::DAMAGE_GREED);
+    it.src = kActorPlayer;
+    it.tgt = 0;
+    it.amount = 20;
+    it.flags = 25;
+    execute_opcode(s, it);
+    EXPECT_EQ(s.player_hp, 78) << "MathUtils.round(5 * 1.5f) == 8";
+
+    // Mark of the Bloom zeroes the heal but not the gold.
+    CombatState m = MakeState();
+    m.monsters[0].hp = 1;
+    Relics rm;
+    rm.add(RelicId::MARK_OF_THE_BLOOM);
+    rm.add(RelicId::BLOODY_IDOL);
+    install(m, rm);
+    execute_opcode(m, it);
+    EXPECT_EQ(m.combat_gold, 25);
+    EXPECT_EQ(m.player_hp, 70) << "onPlayerHeal returns 0";
+
+    // Ectoplasm: gainGold returns BEFORE the += and the fan-out
+    // (AbstractPlayer.java:721-724) -- no gold accrues, no heal fires.
+    CombatState e = MakeState();
+    e.monsters[0].hp = 1;
+    Relics re;
+    re.add(RelicId::ECTOPLASM);
+    re.add(RelicId::BLOODY_IDOL);
+    install(e, re);
+    execute_opcode(e, it);
+    EXPECT_EQ(e.combat_gold, 0) << "nothing accrues under Ectoplasm";
+    EXPECT_EQ(e.player_hp, 70);
+
+    // A kill that pays nothing (a Minion) fires no fan-out either.
+    CombatState n = MakeState();
+    n.monsters[0].hp = 1;
+    n.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::MINION);
+    n.monsters[0].powers[0].amount = 1;
+    n.monsters[0].power_count = 1;
+    give(n, RelicId::BLOODY_IDOL);
+    execute_opcode(n, it);
+    EXPECT_EQ(n.combat_gold, 0);
+    EXPECT_EQ(n.player_hp, 70);
+}
+
+// Mark of the Bloom's in-combat suppressor stands alone too: every heal routed
+// through heal_player_with_relics becomes 0 (MarkOfTheBloom.java:25-29 --
+// unconditional, unlike Magic Flower's combat gate).
+TEST(RelicBossSpecial, MarkOfTheBloomZeroesInCombatHeals) {
+    CombatState s = MakeState();
+    give(s, RelicId::MARK_OF_THE_BLOOM);
+    ActionQueueItem heal{};
+    heal.opcode = kOp(Opcode::HEAL);
+    heal.src = kActorPlayer;
+    heal.tgt = kActorPlayer;
+    heal.amount = 12;
+    execute_opcode(s, heal);
+    EXPECT_EQ(s.player_hp, 70) << "return 0, in combat too";
+}
+
 }  // namespace
 }  // namespace sts::engine

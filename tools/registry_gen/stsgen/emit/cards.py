@@ -237,6 +237,39 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         else:
             up_ox_steps = list(ox_steps)
 
+        # S2.34: the on-exhaust program's QUEUE DIRECTION. The Java's
+        # triggerOnExhaust bodies choose it per card -- Sentinel addToTop's
+        # (Sentinel.java:37-43), Necronomicurse addToBot's
+        # (Necronomicurse.java:48) -- and the difference is observable whenever
+        # other actions are already queued (a Fiend Fire multi-exhaust). There
+        # is deliberately no `false` spelling: absence means addToTop, the
+        # pre-existing default, so every earlier row is byte-identical.
+        ox_bottom_raw = c.get("on_exhaust_bottom")
+        if ox_bottom_raw is None:
+            on_exhaust_bottom = False
+        elif ox_bottom_raw is True:
+            if not ox_steps:
+                raise fail(f"cards.yaml: card {c['name']} sets on_exhaust_bottom "
+                           "but authors no on_exhaust program")
+            on_exhaust_bottom = True
+        else:
+            raise fail(f"cards.yaml: card {c['name']} on_exhaust_bottom must be "
+                       f"literally `true`, got {ox_bottom_raw!r} -- omit the key "
+                       "to mean addToTop (there is no false spelling)")
+
+        # S2.34: `initial_misc` -- the ctor's `this.misc = N` for the (rare)
+        # cards whose damage lives in per-instance run-persistent state.
+        # Ritual Dagger is the only Acts-1-3 author (RitualDagger.java:27,
+        # misc = 15; baseDamage = misc). A non-zero value is ALSO the marker
+        # the combat fold-back keys on to write the combat instance's grown
+        # misc back to the master-deck row (RitualDaggerAction's
+        # masterDeck-by-uuid loop, :40-46) -- misc is otherwise combat-scratch
+        # (Rampage) and must NOT fold back.
+        initial_misc = int(c.get("initial_misc", 0))
+        if initial_misc < 0 or initial_misc > 0xFFFF:
+            raise fail(f"cards.yaml: card {c['name']} initial_misc "
+                       f"{initial_misc} out of the u16 CardInstance.misc range")
+
         # B3.3 card-property columns (NOT per-instance flags -- CardDef-only, so
         # they never touch CardInstance.flags / the combat fixtures). `strike`
         # mirrors CardTags.STRIKE (Perfected Strike's per-Strike count reads it);
@@ -316,6 +349,8 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             "curse_pool": curse_pool,
             "on_remove_max_hp_loss": on_remove_max_hp_loss,
             "ox_steps": ox_steps, "up_ox_steps": up_ox_steps,
+            "on_exhaust_bottom": on_exhaust_bottom,
+            "initial_misc": initial_misc,
             "id": c["id"], "color": color, "rarity": rarity,
             # The CardType SPELLING (not the emitted numeric value): the shop's
             # type-filtered pools below group by it.
@@ -420,6 +455,17 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    // card_needs_target, never directly.")
     out.append("    bool upgraded_needs_target;")
     out.append("    CardTargetKind upgraded_target_kind;")
+    out.append("    // S2.34: triggerOnExhaust queue direction -- addToBot")
+    out.append("    // (Necronomicurse.java:48) vs the default addToTop")
+    out.append("    // (Sentinel.java:37-43). Read by dispatch_on_exhaust.")
+    out.append("    bool on_exhaust_add_to_bottom;")
+    out.append("    // S2.34: the ctor's `this.misc = N` (Ritual Dagger 15;")
+    out.append("    // 0 for every other row). Non-zero is ALSO the fold-back")
+    out.append("    // marker: run_advance's combat fold writes the combat")
+    out.append("    // instance's misc to the master-deck row exactly for rows")
+    out.append("    // whose initial_misc is non-zero (run-persistent misc);")
+    out.append("    // Rampage-style combat-scratch misc never folds.")
+    out.append("    uint16_t initial_misc;")
     out.append("};\n")
 
     def pad(steps) -> list[str]:
@@ -462,7 +508,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"        {up_ox_txt},")
         out.append("    }},")
         out.append(f"    {'true' if r['up_needs_target'] else 'false'}, "
-                   f"CardTargetKind::{next(k for k, v in CARD_TARGET_KINDS.items() if v == r['up_target_kind'])}}};\n")
+                   f"CardTargetKind::{next(k for k, v in CARD_TARGET_KINDS.items() if v == r['up_target_kind'])}, "
+                   f"{'true' if r['on_exhaust_bottom'] else 'false'}, "
+                   f"{r['initial_misc']}}};\n")
 
     # CardLibrary.getCurse (CardLibrary.java:1043-1050) walks the SEPARATE
     # `curses` HashMap (CardLibrary.java:410, written at :949) -- 14 entries, so

@@ -106,34 +106,6 @@ void relic_astrolabe_transform_cards(RunState& rs, RngStream& misc_rng,
                                      const uint16_t* deck_indices,
                                      int count) noexcept;
 
-// AbstractPlayer.gainGold (AbstractPlayer.java:719-737), the ONE door every
-// run-layer gold gain goes through:
-//
-//     if (hasRelic("Ectoplasm")) { flash(); return; }        // NO gold at all
-//     if (amount <= 0) { log } else { gold += amount; relics' onGainGold(); }
-//
-// Two things live here rather than at each producer. (1) ECTOPLASM SUPPRESSES THE
-// GAIN ENTIRELY -- it returns before the `+=`, so a producer that writes
-// `rs.gold +=` directly silently ignores a registered boss relic; that is why
-// relic_pickup_rare.cpp's Old Coin note asked for this helper "when the boss tier
-// lands". (2) the relics' onGainGold fan-out belongs beside the write; no
-// registered S1 relic overrides onGainGold (the corpus override is Bloody
-// Idol, which is not an S1 row), so the fan-out is an empty pass today and is
-// named rather than written. Maw Bank overrides onEnterRoom/onSpendGold, not
-// onGainGold.
-//
-// Non-positive amounts are NOT added, matching the Java's else-branch.
-inline void gain_gold(RunState& rs, int32_t amount) noexcept {
-    for (uint8_t i = 0; i < rs.relic_count; ++i) {
-        if (rs.relics[i].relic_id == static_cast<uint16_t>(RelicId::ECTOPLASM)) {
-            return;
-        }
-    }
-    if (amount > 0) {
-        rs.gold += amount;
-    }
-}
-
 // AbstractCreature.heal (AbstractCreature.java:385-415) reached through
 // AbstractPlayer.heal (AbstractPlayer.java:1544-1552) -- the gold door's HP
 // twin, for every run-layer heal that happens OUTSIDE a combat:
@@ -216,6 +188,53 @@ inline void heal_out_of_combat(RunState& rs, int32_t amount_in) noexcept {
     // (AbstractCreature.java:404), whose exact integer form is hp * 2 > max.
     if (hp * 2 > rs.max_hp) {
         dispatch_relics_on_not_bloodied_out_of_combat(rs);
+    }
+}
+
+// AbstractPlayer.gainGold (AbstractPlayer.java:719-737), the ONE door every
+// run-layer gold gain goes through:
+//
+//     if (hasRelic("Ectoplasm")) { flash(); return; }        // NO gold at all
+//     if (amount <= 0) { log } else { gold += amount; relics' onGainGold(); }
+//
+// Two things live here rather than at each producer. (1) ECTOPLASM SUPPRESSES
+// THE GAIN ENTIRELY -- it returns before the `+=` AND before the fan-out, so a
+// producer that writes `rs.gold +=` directly silently ignores a registered
+// boss relic; that is why relic_pickup_rare.cpp's Old Coin note asked for this
+// helper "when the boss tier lands". (2) the relics' onGainGold fan-out runs
+// AFTER the += and only for a positive amount (the Java's else-branch wraps
+// both). Bloody Idol is its one override in Acts 1-3 scope
+// (BloodyIdol.onGainGold, BloodyIdol.java:28-33): heal(5, true), which out
+// here is the out-of-combat onPlayerHeal door -- Mark of the Bloom can zero
+// it, Magic Flower is combat-gated identity, and the not-bloodied cross fires
+// on the result (heal_out_of_combat carries all three). Maw Bank overrides
+// onEnterRoom/onSpendGold, not onGainGold.
+//
+// THE ONE PRODUCER THAT DOES NOT SETTLE HERE: Hand of Greed's in-combat kills
+// (the game's only in-combat gainGold in scope, GreedAction.java:38) run this
+// seam's Ectoplasm gate and onGainGold fan-out AT COMBAT TIME in
+// op_damage_greed (interp_damage.cpp -- the heal must take the in-combat
+// onPlayerHeal path, and can be lethality-relevant before the combat ends);
+// the accrued combat_gold then settles through a RAW += at fold_back_combat,
+// deliberately NOT through this door, so the fan-out cannot fire twice.
+//
+// Non-positive amounts are NOT added, matching the Java's else-branch.
+inline void gain_gold(RunState& rs, int32_t amount) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id == static_cast<uint16_t>(RelicId::ECTOPLASM)) {
+            return;
+        }
+    }
+    if (amount <= 0) {
+        return;
+    }
+    rs.gold += amount;
+    // relics' onGainGold, acquisition order (AbstractPlayer.java:730-732).
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::BLOODY_IDOL)) {
+            heal_out_of_combat(rs, 5);  // BloodyIdol.java:32, HEAL_AMOUNT = 5
+        }
     }
 }
 

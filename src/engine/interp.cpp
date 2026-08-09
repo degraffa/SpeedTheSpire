@@ -235,7 +235,9 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_spot_weakness(s, item.tgt, item.amount);
             return;
         case Opcode::RANDOM_ATTACK_TO_HAND:
-            op_random_attack_to_hand(s);
+            // `flags` is the S2.34 pool selector: 0 = Infernal Blade's ATTACK
+            // pool (every pre-existing item), 1 = Enchiridion's POWER pool.
+            op_random_attack_to_hand(s, item.flags);
             return;
         case Opcode::PLAY_CARD:
             // The general recursive-play verb. `amount` is the source card-pool
@@ -508,6 +510,21 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // into the combat accumulator if the hit left the target dead.
             op_damage_greed(s, item.src, item.tgt, item.amount,
                             damage_greed_gold_from_flags(item.flags));
+            return;
+        case Opcode::RITUAL_DAGGER:
+            // Ritual Dagger: damage from the played instance's misc, then the
+            // kill-conditional growth. `flags` low byte = the queue-time-
+            // stamped source pool index; `amount` = the authored increase.
+            op_ritual_dagger(s, item.src, item.tgt,
+                             static_cast<uint8_t>(item.flags & 0xFFu),
+                             item.amount);
+            return;
+        case Opcode::CODEX:
+            // A CODEX item is prepared and intercepted at the action-queue
+            // head (the DISCOVERY shape), then consumed by advance(CHOOSE) or
+            // popped as a zero-draw no-op when all monsters are basically
+            // dead. It never executes as an ordinary popped opcode; direct
+            // execution is a safe no-op.
             return;
         case Opcode::DRAW_PILE_FETCH:
             // Violence / DrawPileToHandAction.update: `amount` cards of the

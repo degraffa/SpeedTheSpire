@@ -186,6 +186,10 @@ inline void dispatch_relics_on_master_deck_change(RunState& run) noexcept {
     c = CardInstance{};
     c.card_id = static_cast<uint16_t>(id);
     c.upgrade = upgrade;
+    // The ctor's `this.misc = N` (Ritual Dagger 15, RitualDagger.java:27 --
+    // 0 for every other row): the card's run-persistent damage state starts
+    // here and grows at the combat fold-back (S2.34).
+    c.misc = def->initial_misc;
     ++run.master_deck_count;
 
     dispatch_relics_on_obtain_card(run, c, *def);
@@ -220,6 +224,7 @@ inline void dispatch_relics_on_master_deck_change(RunState& run) noexcept {
     CardInstance c{};
     c.card_id = static_cast<uint16_t>(id);
     c.upgrade = upgrade;
+    c.misc = def->initial_misc;  // ctor misc (Ritual Dagger 15; else 0)
     dispatch_relics_on_obtain_card(run, c, *def);
     for (uint16_t i = run.master_deck_count; i > 0; --i) {
         run.master_deck[i] = run.master_deck[static_cast<uint16_t>(i - 1)];

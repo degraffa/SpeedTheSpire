@@ -250,7 +250,8 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     // in scope: Armaments+/True Grit+/Warcry, canPickZero == false).
     if (waiting && state.action_count > 0) {
         const ActionQueueItem& front = state.action_queue[state.action_head];
-        if (static_cast<Opcode>(front.opcode) == Opcode::DISCOVERY &&
+        const Opcode front_op = static_cast<Opcode>(front.opcode);
+        if ((front_op == Opcode::DISCOVERY || front_op == Opcode::CODEX) &&
             discovery_choice_prepared(front)) {
             out.choice_pending = true;
             out.choice_from_discard = false;
@@ -266,7 +267,11 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             // `this.cardType != null` (DiscoveryAction.java:49,
             // CardRewardScreen.java:485-500). The Discovery card and the
             // Colorless Potion open the same screen with the button hidden.
-            out.can_skip_choice = discovery_skippable(front);
+            // A CODEX screen passes the literal `true` (CodexAction.java:34),
+            // so it is ALWAYS skippable.
+            out.can_skip_choice = front_op == Opcode::CODEX
+                                      ? true
+                                      : discovery_skippable(front);
             for (int i = 0; i < kHandCap; ++i) {
                 out.can_play[i] = false;
                 out.can_choose[i] = i < kDiscoveryChoiceCount;
@@ -555,6 +560,30 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
             ActionQueueItem& front = s.action_queue[s.action_head];
             const uint8_t slot = action_arg0(a);
             if (mask.choice_from_generated) {
+                // CODEX first: its close is regen-FREE (CodexAction's
+                // generator runs only inside the open tick's branch,
+                // CodexAction.java:33-36 -- the one structural difference
+                // from DiscoveryAction). A pick retrieves the card into the
+                // draw pile at a random spot (one cardRandomRng draw, or none
+                // on an empty pile); a skip consumes the item and creates
+                // nothing (discoveryCard stays null, :38-39).
+                if (static_cast<Opcode>(front.opcode) == Opcode::CODEX) {
+                    if (slot == kChooseSkipCard) {
+                        // can_skip_choice is always true for a codex screen.
+                        ActionQueueItem consumed{};
+                        (void)pop_action_front(s, consumed);
+                        pump(s, dispatch_monster_turn);
+                        break;
+                    }
+                    if (slot >= kDiscoveryChoiceCount || !mask.can_choose[slot]) {
+                        break;
+                    }
+                    resolve_codex_choice(s, front, slot);
+                    ActionQueueItem consumed{};
+                    (void)pop_action_front(s, consumed);
+                    pump(s, dispatch_monster_turn);
+                    break;
+                }
                 // Closing the screen -- pick OR skip -- resumes the frozen
                 // DiscoveryAction, whose remaining ticks each regenerate and
                 // discard a full offer (kDiscoveryWastedRegens, interp.hpp: the

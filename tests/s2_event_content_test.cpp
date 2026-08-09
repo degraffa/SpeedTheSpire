@@ -18,10 +18,11 @@
 //   * Necronomicurse's two unremovability sites, which are separate questions
 //     with separate Java (purgeability at CardGroup.java:981, cursed-ness at
 //     AbstractPlayer.java:744) and are asserted separately below.
-//   * The asserted INERTNESS of every deferred body. Each row whose Java defines
-//     a hook this task did not implement is pinned to bind nothing and do
-//     nothing, so the task that writes the body sees a failing test rather than
-//     silently changing behaviour nobody was watching.
+//   * The hook-binding SHAPE of every landed body, and the continued
+//     hook-dispatch inertness of the marker rows (the seam-read relics that
+//     bind no RelicHook). This block held the deferred-body inertness pins
+//     until S2.34 landed the last bodies; behaviour pins live in
+//     relic_boss_special_test and (for the cards) below.
 
 #include <cstdint>
 
@@ -32,7 +33,9 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/event_framework.hpp"  // event_player_is_cursed
 #include "sts/engine/interp.hpp"
+#include "sts/engine/piles.hpp"            // exhaust_card (the exhaust seam)
 #include "sts/engine/relic_hooks.hpp"
+#include "sts/engine/run_deck.hpp"         // add_card_to_master_deck (misc seed)
 #include "sts/engine/relic_pools.hpp"      // acquire_relic
 #include "sts/engine/relics.hpp"
 #include "sts/engine/rest_sites.hpp"       // rest_card_purgeable
@@ -179,26 +182,38 @@ TEST(S2EventContent, S2RelicGameIdsJoinTheOracleStrings) {
     EXPECT_EQ(sts::registry::relic_from_game_id("Nilrys Codex"), RelicId::NONE);
 }
 
-// The S2 relic rows are combat-inert UNTIL their named body task lands, and
-// this test is where a landing becomes visible. S2.32 landed two: Red Mask
-// binds atBattleStart (relic_native_red_mask -- one player-sourced,
-// justApplied-free Weak per group slot) and N'loth's Gift's multiplier lives
-// at the reward-rarity seam (reward_card_rarity_with_relics), which binds NO
-// RelicHook -- so the gift stays in the inert list below while its behaviour
-// is pinned by CityOneTimers.NlothsGiftTriplesTheRareRewardChance. The
-// remaining bodies (Bloody Idol's onGainGold, Enchiridion's atPreBattle,
-// Nilry's Codex's onPlayerEndTurn, Mutagenic Strength's atBattleStart, Mark
-// of the Bloom's onPlayerHeal) stay DEFERRED to the S2 task named in each
-// registry row.
-TEST(S2EventContent, EveryS2RelicIsInertUntilItsBodyTaskLands) {
-    for (RelicId id : kS2Relics) {
+// The eight-row inertness sweep, in its END STATE: every S2 relic body is now
+// LANDED (S2.32 Red Mask + N'loth's Gift, S2.12/S2.34 Mark of the Bloom's two
+// onPlayerHeal halves, S2.34 the rest), so what this asserts is the exact
+// hook-binding SHAPE each landed body uses -- and that the three rows whose
+// bodies live at a MARKER SEAM rather than a RelicHook (Bloody Idol at the two
+// gainGold doors, N'loth's Gift at the reward-rarity roll, Mark of the Bloom
+// at the two onPlayerHeal doors) still bind NOTHING and stay hook-dispatch
+// inert: binding one of them to a hook would double-fire the seam read.
+// Behaviour pins: relic_boss_special_test (Enchiridion / Nilry's Codex /
+// Necronomicon / Mutagenic Strength / Bloody Idol / Mark of the Bloom),
+// city_events_ii tests (Red Mask), CityOneTimers.NlothsGiftTriplesTheRare-
+// RewardChance.
+TEST(S2EventContent, S2RelicHookBindingsMatchTheLandedBodies) {
+    struct HookShape { RelicId id; int hooks; };
+    const HookShape bound[] = {
+        {RelicId::ENCHIRIDION, 1},         // at_pre_battle
+        {RelicId::NILRYS_CODEX, 1},        // on_player_end_turn
+        {RelicId::NECRONOMICON, 2},        // on_use_card + at_turn_start
+        {RelicId::MUTAGENIC_STRENGTH, 1},  // at_battle_start
+        {RelicId::RED_MASK, 1},            // at_battle_start
+    };
+    for (const HookShape& hs : bound) {
+        const sts::registry::RelicDef* d = relic_def(hs.id);
+        ASSERT_NE(d, nullptr) << static_cast<int>(hs.id);
+        EXPECT_EQ(d->hook_count, hs.hooks) << static_cast<int>(hs.id);
+        EXPECT_TRUE(d->native) << static_cast<int>(hs.id);
+    }
+    const RelicId marker[] = {RelicId::BLOODY_IDOL, RelicId::NLOTHS_GIFT,
+                              RelicId::MARK_OF_THE_BLOOM};
+    for (RelicId id : marker) {
         const sts::registry::RelicDef* d = relic_def(id);
         ASSERT_NE(d, nullptr) << static_cast<int>(id);
-        if (id == RelicId::RED_MASK) {
-            EXPECT_EQ(d->hook_count, 1) << "Red Mask binds atBattleStart";
-            EXPECT_TRUE(d->native);
-            continue;  // its behaviour is pinned by the Masked Bandits tests
-        }
         EXPECT_EQ(d->hook_count, 0) << "relic " << static_cast<int>(id);
         EXPECT_FALSE(d->native) << "relic " << static_cast<int>(id);
 
@@ -411,14 +426,14 @@ TEST(S2EventContent, JaxLosesThreeHpThenGainsStrengthAndOnlyStrengthUpgrades) {
     EXPECT_EQ(up.steps[1].amount, 3);
 }
 
-// Ritual Dagger's identity is authored (cost 1 exhausting ATTACK at one enemy),
-// but its EFFECT PROGRAM is deliberately EMPTY at both levels: the card's damage
-// is per-instance run-persistent state in AbstractCard.misc that grows on a kill
-// (RitualDaggerAction.java:34-58), which needs a bespoke opcode and a writer for
-// CardInstance.misc, neither of which exists. The empty program is the loud
-// spelling of that gap -- a bare 15-damage attack would be a silent one -- and
-// this test is what the body task (S2.31, Nest) has to come back and change.
-TEST(S2EventContent, RitualDaggerCarriesItsIdentityAndAnExplicitlyEmptyProgram) {
+// Ritual Dagger's program is now its bespoke opcode (S2.34, retiring the
+// explicitly-empty pin that held this row since S2.31): ONE RITUAL_DAGGER step
+// whose amount is the magicNumber (3 base, upgradeMagicNumber(2) -> 5,
+// RitualDagger.java:28/:48), and initial_misc == 15 -- the ctor's
+// `misc = 15; baseDamage = misc` (:27-29), which is where the damage lives.
+// The opcode's behaviour is pinned below; the fold-back is pinned in
+// run_advance_test.
+TEST(S2EventContent, RitualDaggerProgramIsItsOpcodeAndItsMiscSeed) {
     const CardDef* d = card_def(CardId::RITUAL_DAGGER);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(d->type, sts::registry::CardType::ATTACK);
@@ -427,20 +442,120 @@ TEST(S2EventContent, RitualDaggerCarriesItsIdentityAndAnExplicitlyEmptyProgram) 
     EXPECT_TRUE(d->needs_target);
     EXPECT_TRUE(has_card_flag(card_flags(*d, 0), CardFlag::EXHAUST));
     EXPECT_TRUE(has_card_flag(card_flags(*d, 1), CardFlag::EXHAUST));
-    EXPECT_EQ(card_step_count(CardId::RITUAL_DAGGER, 0), 0);
-    EXPECT_EQ(card_step_count(CardId::RITUAL_DAGGER, 1), 0);
+    EXPECT_EQ(d->initial_misc, 15);
+    for (uint8_t u = 0; u < 2; ++u) {
+        const CardEffectView v = card_effect_steps(*d, u);
+        ASSERT_EQ(v.count, 1) << int{u};
+        EXPECT_TRUE(StepOpIs(v.steps[0].op, Opcode::RITUAL_DAGGER));
+        EXPECT_EQ(v.steps[0].amount, u == 0 ? 3 : 5);
+        EXPECT_EQ(v.steps[0].target, sts::registry::StepTarget::CARD_TARGET);
+    }
+    // Every OTHER registry row keeps initial_misc == 0: a stray non-zero value
+    // would opt that card's combat-scratch misc into the master-deck fold-back.
+    for (const CardDef* row : sts::registry::kCardDefs) {
+        if (row->id != CardId::RITUAL_DAGGER) {
+            EXPECT_EQ(row->initial_misc, 0) << static_cast<int>(row->id);
+        }
+    }
+}
+
+// The acquisition door seeds the ctor's misc: Nest's grant (and any future
+// grant) goes through add_card_to_master_deck, and the appended row must start
+// at 15 or the first play deals 0.
+TEST(S2EventContent, RitualDaggerAcquisitionSeedsMiscFifteen) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::STRIKE);
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::RITUAL_DAGGER));
+    ASSERT_EQ(rs.master_deck_count, 2);
+    EXPECT_EQ(rs.master_deck[1].card_id,
+              static_cast<uint16_t>(CardId::RITUAL_DAGGER));
+    EXPECT_EQ(rs.master_deck[1].misc, 15);
+    // ...and an ordinary card still seeds 0.
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::DEFEND));
+    EXPECT_EQ(rs.master_deck[2].misc, 0);
+}
+
+// The opcode body, against RitualDaggerAction.java:34-58. Base damage is the
+// instance's misc; the growth fires only on a kill, and the gate is
+// DAMAGE_GREED's -- halfDead and a Minion-power holder both refuse it.
+TEST(S2EventContent, RitualDaggerDealsMiscDamageAndGrowsOnlyOnARealKill) {
+    CombatState s = MakeState();
+    s.monsters[0].hp = 40;
+    const CardPoolIndex pi = 0;
+    s.card_pool[pi].card_id = static_cast<uint16_t>(CardId::RITUAL_DAGGER);
+    s.card_pool[pi].misc = 15;
+
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::RITUAL_DAGGER);
+    it.src = kActorPlayer;
+    it.tgt = 0;
+    it.amount = 3;
+    it.flags = pi;  // the queue-time source-index stamp
+    execute_opcode(s, it);
+    EXPECT_EQ(s.monsters[0].hp, 25) << "base damage IS misc";
+    EXPECT_EQ(s.card_pool[pi].misc, 15) << "no kill, no growth";
+
+    execute_opcode(s, it);  // 25 -> 10
+    execute_opcode(s, it);  // 10 -> dead
+    EXPECT_LE(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.card_pool[pi].misc, 18) << "kill grows misc by the magicNumber";
+
+    // Upgraded increase is 5 (upgradeMagicNumber(2)); the next play's base is
+    // the grown misc.
+    CombatState s2 = MakeState();
+    s2.monsters[0].hp = 18;
+    s2.card_pool[pi].card_id = static_cast<uint16_t>(CardId::RITUAL_DAGGER);
+    s2.card_pool[pi].misc = 18;
+    ActionQueueItem up = it;
+    up.amount = 5;
+    execute_opcode(s2, up);
+    EXPECT_LE(s2.monsters[0].hp, 0);
+    EXPECT_EQ(s2.card_pool[pi].misc, 23);
+}
+
+TEST(S2EventContent, RitualDaggerPaysNothingForHalfDeadOrMinionKills) {
+    // halfDead: the Darkling shape -- HP hits 0 but nothing died.
+    CombatState s = MakeState();
+    s.monsters[0].hp = 10;
+    s.monsters[0].flags |= kMonsterFlagHalfDead;
+    s.card_pool[0].card_id = static_cast<uint16_t>(CardId::RITUAL_DAGGER);
+    s.card_pool[0].misc = 15;
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::RITUAL_DAGGER);
+    it.src = kActorPlayer;
+    it.tgt = 0;
+    it.amount = 3;
+    it.flags = 0;
+    execute_opcode(s, it);
+    EXPECT_EQ(s.card_pool[0].misc, 15) << "halfDead: nothing died";
+
+    // A Minion-power holder pays nothing either (GetAllInBattleInstances is
+    // never reached, GreedAction/RitualDaggerAction's shared gate).
+    CombatState m = MakeState();
+    m.monsters[0].hp = 10;
+    m.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::MINION);
+    m.monsters[0].powers[0].amount = 1;
+    m.monsters[0].power_count = 1;
+    m.card_pool[0].card_id = static_cast<uint16_t>(CardId::RITUAL_DAGGER);
+    m.card_pool[0].misc = 15;
+    execute_opcode(m, it);
+    EXPECT_LE(m.monsters[0].hp, 0);
+    EXPECT_EQ(m.card_pool[0].misc, 15) << "a minion's death pays nothing";
 }
 
 // ============================================================================
 // Necronomicurse -- the two unremovability sites, which are different questions
 // ============================================================================
 
-// Necronomicurse is an unplayable CURSE with no effect program and, unlike
+// Necronomicurse is an unplayable CURSE with no MAIN program and, unlike
 // Ascender's Bane, NO ethereal flag -- it stays in hand (the Curse of the Bell
-// shape). Its triggerOnExhaust respawn (Necronomicurse.java:43-49) is deferred:
-// CardTrigger has no ON_EXHAUST member, so the row runs its (empty) program on
-// the default ON_PLAY trigger it can never reach.
-TEST(S2EventContent, NecronomicurseIsAnInertUnplayableNonEtherealCurse) {
+// shape). Its triggerOnExhaust respawn (Necronomicurse.java:43-49) is LANDED
+// (S2.34, retiring the inertness pin): the `on_exhaust:` program column IS the
+// triggerOnExhaust seam (the S2.31-era note claiming a new CardTrigger was
+// needed conflated the two -- CardTrigger only says when the MAIN program
+// runs), and the program is one MAKE_CARD of itself into the HAND, queued
+// addToBot (`on_exhaust_bottom`, the Java's addToBot vs Sentinel's addToTop).
+TEST(S2EventContent, NecronomicurseIsUnplayableAndRespawnsOnExhaust) {
     const CardDef* d = card_def(CardId::NECRONOMICURSE);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(d->type, sts::registry::CardType::CURSE);
@@ -448,7 +563,58 @@ TEST(S2EventContent, NecronomicurseIsAnInertUnplayableNonEtherealCurse) {
     EXPECT_TRUE(has_card_flag(flags, CardFlag::UNPLAYABLE));
     EXPECT_FALSE(has_card_flag(flags, CardFlag::ETHEREAL));
     EXPECT_FALSE(has_card_flag(flags, CardFlag::EXHAUST));
-    EXPECT_EQ(card_step_count(CardId::NECRONOMICURSE, 0), 0);
+    EXPECT_EQ(card_step_count(CardId::NECRONOMICURSE, 0), 0)
+        << "the MAIN program stays empty (use() is empty, :31-33)";
+    ASSERT_EQ(d->on_exhaust_step_count, 1);
+    EXPECT_TRUE(StepOpIs(d->on_exhaust_steps[0].op, Opcode::MAKE_CARD));
+    EXPECT_EQ(make_card_id_from_flags(d->on_exhaust_steps[0].extra),
+              static_cast<uint16_t>(CardId::NECRONOMICURSE));
+    EXPECT_EQ(d->on_exhaust_steps[0].amount, 1);
+    EXPECT_TRUE(d->on_exhaust_add_to_bottom)
+        << "addToBot (Necronomicurse.java:48), not Sentinel's addToTop";
+    // Sentinel keeps the default addToTop direction -- the column's negative.
+    const CardDef* sentinel = card_def(CardId::SENTINEL);
+    ASSERT_NE(sentinel, nullptr);
+    EXPECT_FALSE(sentinel->on_exhaust_add_to_bottom);
+}
+
+// The seam end-to-end: exhausting a Necronomicurse from the hand queues its
+// copy-return addToBot -- BEHIND anything already pending, the observable half
+// of the direction -- and resolving it puts a FRESH BASE copy back in hand
+// (MakeTempCardInHandAction, hand-cap spill included).
+TEST(S2EventContent, ExhaustingNecronomicurseReturnsACopyToHandAddToBot) {
+    CombatState s = MakeState();
+    const CardPoolIndex pi = 0;
+    s.card_pool[pi].card_id = static_cast<uint16_t>(CardId::NECRONOMICURSE);
+    s.card_pool[pi].flags = card_flags(*card_def(CardId::NECRONOMICURSE), 0);
+    s.hand[s.hand_count++] = pi;
+
+    // Something already queued: the copy-return must land BEHIND it.
+    ActionQueueItem marker{};
+    marker.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+    marker.src = kActorPlayer;
+    marker.tgt = kActorPlayer;
+    marker.amount = 1;
+    add_to_bottom(s, marker);
+
+    exhaust_card(s, pi);
+    ASSERT_EQ(s.exhaust_count, 1);
+    ASSERT_EQ(s.hand_count, 0);
+    ASSERT_EQ(s.action_count, 2);
+    const ActionQueueItem& front = s.action_queue[s.action_head];
+    EXPECT_EQ(front.opcode, static_cast<uint16_t>(Opcode::GAIN_ENERGY))
+        << "addToBot: the pending marker still resolves first";
+
+    ActionQueueItem it{};
+    while (pop_action_front(s, it)) {
+        execute_opcode(s, it);
+    }
+    ASSERT_EQ(s.hand_count, 1);
+    const CardInstance& copy = s.card_pool[s.hand[0]];
+    EXPECT_EQ(copy.card_id, static_cast<uint16_t>(CardId::NECRONOMICURSE));
+    EXPECT_NE(s.hand[0], pi) << "a FRESH copy (makeCopy), not the exhausted one";
+    EXPECT_EQ(copy.upgrade, 0);
+    EXPECT_EQ(s.exhaust_count, 1) << "the exhausted original stays exhausted";
 }
 
 // CardGroup.getPurgeableCards (CardGroup.java:978-985) excludes exactly three

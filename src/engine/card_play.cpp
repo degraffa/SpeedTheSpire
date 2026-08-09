@@ -167,6 +167,13 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         // then increments only this card instance's misc counter.
         item.flags = static_cast<uint32_t>(source_index) |
                      (step.extra << 8u);
+    } else if (step.op ==
+               static_cast<decltype(step.op)>(Opcode::RITUAL_DAGGER)) {
+        // Ritual Dagger: the base damage AND the kill-conditional growth are
+        // both the played instance's misc, so stamp the source pool index into
+        // flags (the DAMAGE_RAMPAGE shape); `amount` already carries the
+        // authored increase (magicNumber 3 / 5).
+        item.flags = static_cast<uint32_t>(source_index);
     }
     // Strike Dummy: AbstractCard.applyPowers runs relic atDamageModify on
     // float(baseDamage) BEFORE the player-power atDamageGive loop
@@ -577,6 +584,29 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     const CardEffectView eff = card_effect_steps(*def, upgrade);
     const bool is_xcost = has_card_flag(inst_flags, CardFlag::XCOST);
 
+    // The card's energyOnUse -- AbstractCard.energyOnUse as the UseCardAction
+    // fan-out and the X-cost repetition both read it: the queue item's
+    // snapshot for an ignoreEnergyTotal autoplay replay (GameActionManager
+    // hands the item's energyOnUse to the card; the AUTOPLAY_X_ENERGY misc
+    // snapshot is this engine's carrier), EnergyPanel.totalCount otherwise
+    // (AbstractPlayer.useCard:1363-1365 clamps down to it), never negative.
+    // Chemical X's +2 is deliberately NOT in this number: the relic boosts the
+    // X-action's REPETITION count (energyOnUse + 2 inside WhirlwindAction.
+    // update), not the field itself, so Necronomicon's `energyOnUse >= 2` arm
+    // (the ON_USE_CARD fan-out below) reads the unboosted value. Hoisted above
+    // step 4 so the fan-out and the repetition loop read one derivation.
+    int energy_on_use = 0;
+    if (is_xcost) {
+        energy_on_use =
+            autoplay &&
+                    has_card_flag(inst_flags, CardFlag::AUTOPLAY_X_ENERGY)
+                ? static_cast<int>(s.card_pool[pool_index].misc)
+                : static_cast<int>(s.player_energy);
+        if (energy_on_use < 0) {
+            energy_on_use = 0;
+        }
+    }
+
     // 4. c.use(): QUEUE the card's effect actions via add_to_bottom, in the
     //    card's addToBot order. Effects resolve later through the pump priority
     //    loop -- they are NOT applied inline here (matches AbstractCard.use()).
@@ -591,24 +621,17 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     if (def->trigger != CardTrigger::ON_PLAY) {
         // no queued effects: the card's program belongs to its passive trigger
     } else if (is_xcost) {
-        int energy_on_use =
-            autoplay &&
-                    has_card_flag(inst_flags, CardFlag::AUTOPLAY_X_ENERGY)
-                ? static_cast<int>(s.card_pool[pool_index].misc)
-                : static_cast<int>(s.player_energy);
-        if (energy_on_use < 0) {
-            energy_on_use = 0;
-        }
         // Chemical X (ChemicalX.java:12-30, BOOST = 2): every X-cost action --
         // WhirlwindAction.update, SkewerAction.update -- computes its repetition
         // count as energyOnUse + 2 while the relic is owned, while the energy
         // actually SPENT in step 6 below is still the un-boosted energyOnUse.
         // The boost is applied AFTER the negative clamp, exactly as the Java
         // adds it to an already-clamped energyOnUse.
+        int reps = energy_on_use;
         if (player_has_relic(s, RelicId::CHEMICAL_X)) {
-            energy_on_use += 2;
+            reps += 2;
         }
-        for (int rep = 0; rep < energy_on_use; ++rep) {
+        for (int rep = 0; rep < reps; ++rep) {
             for (uint8_t k = 0; k < eff.count; ++k) {
                 queue_effect_step(s, eff.steps[k], resolved_target, pool_index);
             }
@@ -630,7 +653,7 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     //    redirect a SKILL to exhaust; the destination is derived from the
     //    instance flags when USE_CARD executes, which is after the fan-out.
     dispatch_on_use_card(s, pool_index, s.card_pool[pool_index].card_id,
-                         resolved_target);
+                         resolved_target, energy_on_use);
     {
         ActionQueueItem use{};
         use.opcode = static_cast<uint16_t>(Opcode::USE_CARD);

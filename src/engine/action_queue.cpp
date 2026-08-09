@@ -797,6 +797,31 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
             r.outcome = PumpOutcome::WAITING_ON_USER;
             return r;
         }
+        if (static_cast<Opcode>(front.opcode) == Opcode::CODEX) {
+            // Nilry's Codex (CodexAction.update). The DISCOVERY shape -- one
+            // offer prepared into the item, then block for advance(CHOOSE) --
+            // with CodexAction's own front gate (:29-32): every monster
+            // basically dead consumes the action with NO screen and NO draws
+            // (isDone before the duration branch). A halfDead monster counts
+            // as alive (MonsterGroup.areMonstersBasicallyDead:90-95), so a
+            // codex still fires mid-Darkling fight.
+            bool basically_dead = true;
+            for (uint8_t i = 0; i < s.monster_count; ++i) {
+                if (!monster_basically_dead(s.monsters[i])) {
+                    basically_dead = false;
+                    break;
+                }
+            }
+            if (basically_dead) {
+                pop_action_front(s, r.executed);
+                r.outcome = PumpOutcome::RAN_ACTION;
+                return r;
+            }
+            prepare_codex_choice(s, front);
+            s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+            r.outcome = PumpOutcome::WAITING_ON_USER;
+            return r;
+        }
         // A DRAW-source CHOOSE_CARD (Secret Technique / Secret Weapon) bills its
         // temp browse group's card_random_rng draws the first time the item is
         // reached here -- SkillFromDeckToHandAction / AttackFromDeckToHandAction

@@ -762,6 +762,47 @@ enum class Opcode : uint16_t {
                               // ENGINE_EMITTED_OPS: the pool index is a
                               // runtime handle (the power slot's counter),
                               // queued only by power_stasis.cpp.
+    // --- S2.34 additions (append-only from 73; the payout relic/card bodies).
+    RITUAL_DAGGER = 73,       // RitualDaggerAction.update (RitualDaggerAction.
+                              // java:34-58): ordinary damage whose BASE is the
+                              // played instance's `misc` (ctor baseDamage =
+                              // misc = 15, RitualDagger.java:27-29), read at
+                              // EXECUTE time; then, iff the hit left the
+                              // target dead by the DAMAGE_GREED gate
+                              // (!halfDead, no Minion power), `misc +=
+                              // amount` on that instance (baseDamage re-seeds
+                              // from misc by construction: the base IS misc).
+                              // `amount` = the authored increase (magicNumber
+                              // 3 / 5); `flags` low byte = the SOURCE POOL
+                              // INDEX, stamped at queue time by
+                              // queue_effect_step (the DAMAGE_RAMPAGE shape).
+                              // The Java's master-deck-by-uuid write settles
+                              // at the run layer's combat fold-back, keyed on
+                              // CardDef.initial_misc != 0 (pool row i is
+                              // master row i for the entry deck; the combat
+                              // layer has no RunState -- combat_gold's
+                              // precedent). See op_ritual_dagger for the one
+                              // documented deviation (same-uuid replay-copy
+                              // kills).
+    CODEX = 74,               // CodexAction (CodexAction.java:22-64), queued
+                              // by Nilry's Codex's onPlayerEndTurn. Prepared
+                              // and intercepted at the action-queue head like
+                              // DISCOVERY (same offer packing in the item's
+                              // flags/amount; same three-distinct-card
+                              // rejection sampler, over the RED COMBAT pool --
+                              // the NO-ARG returnTrulyRandomCardInCombat(),
+                              // :54); ALWAYS skippable (customCombatOpen(...,
+                              // true), :34); ZERO wasted regenerations on
+                              // close (the generator sits INSIDE the
+                              // first-tick branch, :33-36 -- unlike
+                              // DiscoveryAction.java:47); the pick goes to the
+                              // DRAW PILE AT A RANDOM SPOT at its REGISTRY
+                              // cost (no setCostForTurn) -- op_make_card's
+                              // DRAW_RANDOM arm: one cardRandomRng draw, or
+                              // zero on an empty pile (CardGroup.
+                              // addToRandomSpot:463-468). All monsters
+                              // basically dead at the head is a ZERO-DRAW
+                              // consume (:29-32). ENGINE_EMITTED_OPS.
 };
 
 // --- SPAWN_MONSTER field encoding --------------------------------------------
@@ -1317,6 +1358,33 @@ enum class DiscoveryPool : uint8_t {
 // nothing), but the order is the Java's, so a future rng-spending hand-entry
 // hook cannot silently reorder the stream.
 inline constexpr int kDiscoveryWastedRegens = 5;
+
+// --- CODEX item (S2.34) -------------------------------------------------------
+// A CODEX item reuses the DISCOVERY offer packing exactly (choices 0/1 in
+// flags' low/high u16, choice 2 in amount; amount == 0 the unprepared
+// sentinel), so discovery_choice_prepared / discovery_choice_card read it
+// unchanged. What it does NOT reuse, deliberately: the pool selector (a codex
+// offer is always the RED combat pool -- CodexAction.java:54 calls the NO-ARG
+// returnTrulyRandomCardInCombat()), the copies operand (always one), the
+// skippability rule (customCombatOpen's third argument is the literal `true`,
+// :34, so a codex screen ALWAYS shows the skip button), and the wasted-regen
+// model (CodexAction's generator sits INSIDE the first-tick branch, :33-36,
+// so a close regenerates NOTHING -- the one structural difference from
+// DiscoveryAction.java:47). Resolution goes to the DRAW PILE at a RANDOM SPOT
+// at registry cost; see prepare_codex_choice / resolve_codex_choice
+// (interp/interp_cards.cpp) and Opcode::CODEX for the full derivation.
+
+// --- RANDOM_ATTACK_TO_HAND pool selector (S2.34) ------------------------------
+// Previously-zero `flags` low bits of opcode 33 select the source pool:
+// 0 keeps every existing item byte-identical (Infernal Blade's ATTACK pool);
+// 1 draws from the POWER pool instead (Enchiridion.atPreBattle,
+// Enchiridion.java:30-39 -- the SAME returnTrulyRandomCardInCombat(type) body
+// with one CardType changed, so it is a selector on the existing opcode, not a
+// new one). Everything else about the item -- one cardRandomRng draw at
+// execute, a BASE library copy, the this-turn-only cost zero with the X-cost
+// no-op, the hand-cap spill -- is shared.
+inline constexpr uint32_t kRandomToHandPoolAttack = 0;
+inline constexpr uint32_t kRandomToHandPoolPower = 1;
 
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
 inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;   // ChoiceKind bit 2
@@ -1891,6 +1959,18 @@ void resolve_discovery_choice(CombatState& state,
 // capture table pinning it.
 void discard_discovery_regens(CombatState& state, const ActionQueueItem& item,
                               int regens) noexcept;
+
+// CODEX choice lifecycle (S2.34; the "CODEX item" comment block above has the
+// full contract). prepare_codex_choice rejection-samples the three-distinct
+// offer over the RED combat pool exactly once, into the DISCOVERY packing;
+// resolve_codex_choice inserts a base library copy of the selected card into
+// the DRAW PILE at a RANDOM SPOT (op_make_card's DRAW_RANDOM arm -- one
+// cardRandomRng draw, zero on an empty pile) at its registry cost. There is
+// deliberately NO codex analogue of discard_discovery_regens: CodexAction's
+// generator runs only on the open tick (CodexAction.java:33-36).
+void prepare_codex_choice(CombatState& state, ActionQueueItem& item) noexcept;
+void resolve_codex_choice(CombatState& state, const ActionQueueItem& item,
+                          uint8_t slot) noexcept;
 
 // --- Dispatch ----------------------------------------------------------------
 // Execute one popped ActionQueueItem against `state`. One case per Opcode;

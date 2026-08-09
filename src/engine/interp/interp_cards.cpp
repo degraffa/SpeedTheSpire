@@ -1114,24 +1114,38 @@ void op_exhaust_non_attacks(CombatState& s) noexcept {
     }
 }
 
-// RANDOM_ATTACK_TO_HAND (Infernal Blade / InfernalBlade.use:31-35): pick ONE
-// uniformly-random member of the combat ATTACK pool (returnTrulyRandomCardIn-
-// Combat(ATTACK), AbstractDungeon.java:964-979 -- ONE cardRandomRng
-// random(size-1) draw over srcCommon+srcUncommon+srcRare filtered to
-// non-HEALING ATTACKs), makeCopy() a BASE instance, setCostForTurn(0), and add
-// it to the hand (MakeTempCardInHandAction: hand-cap spill to discard). The
-// cost-0 is this-turn-only: COST_MODIFIED_FOR_TURN is reset by the end-turn
-// sweep (AbstractRoom.endTurn:397-405) / on exhaust (ExhaustCardEffect:41-43).
-// Pool membership/order provenance: generated kIroncladAttackPool (cards.hpp).
-void op_random_attack_to_hand(CombatState& s) noexcept {
+// RANDOM_ATTACK_TO_HAND (Infernal Blade / InfernalBlade.use:31-35, and -- via
+// the S2.34 flags pool selector -- Enchiridion.atPreBattle / Enchiridion.
+// java:30-39, which is the SAME returnTrulyRandomCardInCombat(type) body with
+// CardType.POWER): pick ONE uniformly-random member of the selected combat
+// pool (AbstractDungeon.java:964-979 -- ONE cardRandomRng random(size-1) draw
+// over srcCommon+srcUncommon+srcRare filtered to non-HEALING cards of the
+// type), makeCopy() a BASE instance, setCostForTurn(0), and add it to the hand
+// (MakeTempCardInHandAction: hand-cap spill to discard). The cost-0 is
+// this-turn-only: COST_MODIFIED_FOR_TURN is reset by the end-turn sweep
+// (AbstractRoom.endTurn:397-405) / on exhaust (ExhaustCardEffect:41-43).
+// Enchiridion's explicit `if (c.cost != -1)` guard and Infernal Blade's bare
+// setCostForTurn coincide: setCostForTurn is a no-op while costForTurn < 0
+// (AbstractCard.java:2002) -- and neither pool holds an X-cost RED card the
+// distinction could bite on today (Whirlwind is the ATTACK pool's one X-cost,
+// whose XCOST cost_now is 0 either way). Pool membership/order provenance:
+// generated kIroncladAttackPool / kIroncladPowerPool (cards.hpp).
+void op_random_attack_to_hand(CombatState& s, uint32_t flags) noexcept {
     static_assert(kIroncladAttackPoolCount > 0,
                   "Infernal Blade needs a non-empty attack pool");
-    const int32_t pick = random(
-        s.card_random_rng, static_cast<int32_t>(kIroncladAttackPoolCount) - 1);
-    const CardId id = kIroncladAttackPool[static_cast<unsigned>(pick)];
+    static_assert(kIroncladPowerPoolCount > 0,
+                  "Enchiridion needs a non-empty power pool");
+    const bool power_pool = flags == kRandomToHandPoolPower;
+    const int32_t pool_count = power_pool
+                                   ? static_cast<int32_t>(kIroncladPowerPoolCount)
+                                   : static_cast<int32_t>(kIroncladAttackPoolCount);
+    const int32_t pick = random(s.card_random_rng, pool_count - 1);
+    const CardId id = power_pool
+                          ? kIroncladPowerPool[static_cast<unsigned>(pick)]
+                          : kIroncladAttackPool[static_cast<unsigned>(pick)];
     const CardDef* def = card_def(id);
     if (def == nullptr) {
-        return;  // defensive; the pool only holds registry rows
+        return;  // defensive; the pools only hold registry rows
     }
     int slot = -1;
     for (int i = 0; i < kCardPoolCap; ++i) {
@@ -1809,6 +1823,52 @@ void resolve_discovery_choice(CombatState& s,
     for (int i = 0; i < copies; ++i) {
         add_library_copy_to_hand(s, id, /*free_this_turn=*/true);
     }
+}
+
+// CODEX open tick (CodexAction.java:33-36): generateCardChoices() -- the SAME
+// three-distinct rejection sampler as DISCOVERY, but over the fixed no-arg
+// returnTrulyRandomCardInCombat() pool, i.e. the RED combat pool (:50-64 --
+// NOT a colorless pool; the class imports nothing colorless and :54 calls the
+// no-arg overload). One offer, prepared exactly once, in the shared item
+// packing. The all-monsters-basically-dead zero-draw early-out (:29-32) lives
+// at the pump's interception site, not here: it decides whether this is
+// reached at all.
+void prepare_codex_choice(CombatState& s, ActionQueueItem& item) noexcept {
+    if (discovery_choice_prepared(item)) {
+        return;
+    }
+    const DiscoveryPoolView pv = discovery_pool_view(DiscoveryPool::COMBAT);
+    CardId offered[kDiscoveryChoiceCount]{};
+    generate_discovery_offer(s, pv, offered);
+    item.flags =
+        static_cast<uint32_t>(static_cast<uint16_t>(offered[0])) |
+        (static_cast<uint32_t>(static_cast<uint16_t>(offered[1])) << 16u);
+    item.amount =
+        static_cast<int32_t>(static_cast<uint16_t>(offered[2]));
+}
+
+// CODEX resolution (CodexAction.java:38-46): the picked card is
+// makeStatEquivalentCopy'd -- of a FRESH base offer card, so a base library
+// copy at its REGISTRY cost (no setCostForTurn anywhere in the action, unlike
+// Discovery) -- and handed to ShowCardAndAddToDrawPileEffect(..., randomSpot =
+// true), whose constructor runs drawPile.addToRandomSpot immediately
+// (ShowCardAndAddToDrawPileEffect.java:47-48): ONE cardRandomRng.random(size-1)
+// insert, or a free append when the pile is empty (CardGroup.java:463-468).
+// op_make_card's DRAW_RANDOM arm is exactly that, so it is called rather than
+// re-derived. A skip never reaches here (discoveryCard stays null, :39); there
+// are NO wasted regenerations on either path (the generator sits inside the
+// open tick's branch -- the one structural difference from DiscoveryAction).
+void resolve_codex_choice(CombatState& s, const ActionQueueItem& item,
+                          uint8_t slot) noexcept {
+    if (!discovery_choice_prepared(item) || slot >= kDiscoveryChoiceCount) {
+        return;
+    }
+    const CardId id = discovery_choice_card(item, slot);
+    if (id == CardId::NONE) {
+        return;
+    }
+    op_make_card(s, static_cast<uint16_t>(id), CardPile::DRAW_RANDOM,
+                 /*count=*/1, /*upgraded=*/false);
 }
 
 // --- Public: CHOOSE_CARD queries ---------------------------------------------

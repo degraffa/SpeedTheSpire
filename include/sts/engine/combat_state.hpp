@@ -222,6 +222,20 @@ inline constexpr uint32_t kCombatFlagRedSkullActive = 1u << 5;
     return (flags & kCombatFlagRedSkullActive) != 0u;
 }
 
+// CombatState.flags bit for Necronomicon's private `activated` latch (S2.34
+// claim, stage-b-tasks.md "S2.34 allocations").
+//
+// Necronomicon declares `private boolean activated = true` (Necronomicon.
+// java:28) and never writes AbstractRelic.counter, so the oracle-visible
+// counter stays -1 for the whole run -- RelicSlot.counter is OFF LIMITS for
+// exactly the Red Skull reason above. Stored INVERTED ("used this turn") so
+// that a value-init CombatState is ARMED, matching the field's `= true`
+// initializer, and no fixture byte moves. atTurnStart clears it every turn --
+// turn 1 included, so whatever a previous combat left behind is unobservable
+// -- and the once-per-turn replay in relic_native_necronomicon sets it.
+// Internal, not translator-reconstructed, not an acceptance-diff field.
+inline constexpr uint32_t kCombatFlagNecronomiconUsed = 1u << 6;
+
 // CombustPower keeps a private hpLoss counter distinct from its visible damage
 // amount. The player-owned counter lives in otherwise-reserved CombatState
 // flags: the cards are self-only, and this preserves the frozen PowerSlot/POD

@@ -38,6 +38,13 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
                      int gold) noexcept;
 
+// RITUAL_DAGGER (RitualDaggerAction): damage whose base is the played
+// instance's misc, then `misc += increase` on that instance when the hit left
+// tgt dead (the DAMAGE_GREED gate). `source_index` is the queue-time-stamped
+// pool index of the played card (item.flags low byte).
+void op_ritual_dagger(CombatState& s, uint8_t src, uint8_t tgt,
+                      uint8_t source_index, int increase) noexcept;
+
 // VAMPIRE_DAMAGE_ALL (Reaper): hit every live monster, then queue the summed heal.
 void op_vampire_damage_all(CombatState& s, int base) noexcept;
 

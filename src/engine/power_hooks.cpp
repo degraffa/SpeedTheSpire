@@ -156,7 +156,8 @@ void dispatch_on_play_card(CombatState& s, uint16_t card_id,
 }
 
 void dispatch_on_use_card(CombatState& s, uint8_t played_pool_index,
-                          uint16_t card_id, uint8_t target) noexcept {
+                          uint16_t card_id, uint8_t target,
+                          int32_t energy_on_use) noexcept {
     HookContext ctx{};
     ctx.card_id = card_id;
     ctx.card_pool_index = played_pool_index;
@@ -171,9 +172,12 @@ void dispatch_on_use_card(CombatState& s, uint8_t played_pool_index,
     dispatch_actor_powers(s, kActorPlayer, Hook::ON_USE_CARD, ctx);
     // player relics onUseCard (acquisition order), AFTER player powers and BEFORE
     // monster powers -- the UseCardAction.java:41-64 order. Nunchaku/Pen Nib
-    // count attacks here.
+    // count attacks here; Necronomicon replays here (which is why its front-
+    // inserted copy lands AHEAD of a Double Tap copy queued one stage earlier,
+    // exactly as in the game), reading `target` and `energy_on_use`.
     const RelicView rv = player_relics(s);
-    dispatch_relics_on_use_card(s, rv.relics, rv.count, card_id, played_pool_index);
+    dispatch_relics_on_use_card(s, rv.relics, rv.count, card_id,
+                                played_pool_index, target, energy_on_use);
     // hand / discard / draw cards onUseCard -- card-level hooks (later)
     for (uint8_t m = 0; m < s.monster_count; ++m) {
         dispatch_actor_powers(s, m, Hook::ON_USE_CARD, ctx);
@@ -195,24 +199,46 @@ void dispatch_on_exhaust(CombatState& s, uint8_t pool_index,
     dispatch_relics_on_exhaust(s, rv.relics, rv.count, card_id);
     dispatch_actor_powers(s, kActorPlayer, Hook::ON_EXHAUST, ctx);
     // card.triggerOnExhaust: the exhausted card's own on_exhaust program,
-    // LAST in the §5.5 order. Sentinel addToTop's its GainEnergyAction
-    // (Sentinel.java:37-43) -- steps are queued add_to_top, in REVERSE program
-    // order so a multi-step program still resolves first-step-first (every S1
-    // program is single-step).
+    // LAST in the §5.5 order. The QUEUE DIRECTION is per-card, exactly as the
+    // Java bodies choose it: Sentinel addToTop's its GainEnergyAction
+    // (Sentinel.java:37-43), Necronomicurse addToBot's its
+    // MakeTempCardInHandAction (Necronomicurse.java:48) -- the registry's
+    // `on_exhaust_bottom` column (CardDef.on_exhaust_add_to_bottom, default
+    // false == addToTop) carries the choice, observable whenever other
+    // actions are pending (a Fiend Fire multi-exhaust resolves its remaining
+    // hits BEFORE an addToBot copy-return and AFTER an addToTop energy gain).
+    // addToTop steps queue in REVERSE program order so a multi-step program
+    // still resolves first-step-first; addToBot steps queue in program order.
     if (pool_index < kCardPoolCap) {
         const CardDef* def = card_def(static_cast<CardId>(card_id));
         if (def != nullptr) {
             const CardEffectView ox =
                 card_on_exhaust_steps(*def, s.card_pool[pool_index].upgrade);
-            for (uint8_t k = ox.count; k > 0; --k) {
-                const CardEffectStep& step = ox.steps[k - 1];
+            const bool to_bottom = def->on_exhaust_add_to_bottom;
+            for (uint8_t n = 0; n < ox.count; ++n) {
+                const uint8_t k =
+                    to_bottom ? n : static_cast<uint8_t>(ox.count - 1 - n);
+                const CardEffectStep& step = ox.steps[k];
                 ActionQueueItem item{};
                 item.opcode = static_cast<uint16_t>(step.op);
                 item.src = kActorPlayer;
                 item.tgt = kActorPlayer;  // in-scope on-exhaust steps are SELF
                 item.amount = step.amount;
                 item.flags = step.extra;
-                add_to_top(s, item);
+                if (step.op ==
+                    static_cast<decltype(step.op)>(Opcode::MAKE_CARD)) {
+                    // The MAKE_CARD packing split queue_effect_step performs
+                    // for a played program (card_play.cpp): CardId + upgraded
+                    // bit stay in flags, the CardPile moves to `src`.
+                    // Necronomicurse's copy-return is the first MAKE_CARD to
+                    // ride an on-exhaust program.
+                    item.src = static_cast<uint8_t>((step.extra >> 16) & 0xFFu);
+                }
+                if (to_bottom) {
+                    add_to_bottom(s, item);
+                } else {
+                    add_to_top(s, item);
+                }
             }
         }
     }

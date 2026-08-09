@@ -156,10 +156,16 @@ void dispatch_relics_on_player_end_turn(CombatState& s, RelicSlot* relics,
 }
 
 void dispatch_relics_on_use_card(CombatState& s, RelicSlot* relics, uint8_t count,
-                                 uint16_t card_id, uint8_t pool_index) noexcept {
+                                 uint16_t card_id, uint8_t pool_index,
+                                 uint8_t target,
+                                 int32_t energy_on_use) noexcept {
     RelicHookContext ctx{};
     ctx.card_id = card_id;
     ctx.card_pool_index = pool_index;
+    // action.target + the played card's energyOnUse: Necronomicon's replay aim
+    // and its X-cost arm (Necronomicon.java:62,65-67). See the ctx fields.
+    ctx.target = target;
+    ctx.energy_on_use = energy_on_use;
     const CardDef* cd = card_def(static_cast<CardId>(card_id));
     ctx.card_is_attack = (cd != nullptr && cd->type == CardType::ATTACK) ? 1 : 0;
     dispatch_relic_hook(s, relics, count, RelicHook::ON_USE_CARD, ctx);
@@ -242,7 +248,19 @@ void heal_player_with_relics(CombatState& s, int32_t amount) noexcept {
     //
     // MathUtils.round is mirrored bit-for-bit by mathutils_round (interp.hpp),
     // including the float multiply happening before the float->double promotion.
+    //
+    // Mark of the Bloom is the seam's SECOND override (S2.34; MarkOfTheBloom.
+    // onPlayerHeal, MarkOfTheBloom.java:25-29): `return 0`, UNCONDITIONAL --
+    // it ignores its argument and has no combat-phase gate, so unlike Magic
+    // Flower it bites in combat too. The Java fan-out folds each relic's
+    // onPlayerHeal over the running amount in acquisition order; for this pair
+    // the order is unobservable (0 * 1.5f rounds to 0 and round(x*1.5) of 0 is
+    // 0), so a flat membership test is the exact collapsed form -- the same
+    // shape apply_on_player_heal_out_of_combat uses at the run-layer door.
     int32_t healed = amount;
+    if (player_has_relic(s, RelicId::MARK_OF_THE_BLOOM)) {
+        healed = 0;
+    }
     if (healed > 0 && player_has_relic(s, RelicId::MAGIC_FLOWER)) {
         healed = mathutils_round(static_cast<float>(healed) * 1.5f);
     }

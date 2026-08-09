@@ -137,6 +137,11 @@ GENERAL_OPS = frozenset({
 CARD_CONTEXT_OPS = frozenset({
     "MAKE_CARD", "CHOOSE_CARD", "PLAY_TOP_DRAW",
     "DAMAGE_PER_STRIKE", "DAMAGE_UPGRADE_SCALE", "DAMAGE_RAMPAGE",
+    # S2.34. RITUAL_DAGGER's base damage and its kill-conditional growth are
+    # both the PLAYED INSTANCE's misc, so queue_effect_step stamps the source
+    # pool index into `flags` exactly as it does for DAMAGE_RAMPAGE; `amount`
+    # is the authored increase (magicNumber 3 / 5).
+    "RITUAL_DAGGER",
 })
 
 # ENGINE_EMITTED_OPS: pinned in the Opcode enum for the cards.hpp drift check but
@@ -164,6 +169,11 @@ ENGINE_EMITTED_OPS = frozenset({
     # carried in the dying orb's Stasis power slot `counter` -- a handle no
     # YAML author can name. Emitted only by power_stasis.cpp's onDeath body.
     "STASIS_RETURN",
+    # S2.34. CODEX is queued only by Nilry's Codex's native onPlayerEndTurn
+    # body (relics/relics_special.cpp); its offer is persisted in its own
+    # queued item at the pump head, so there is nothing a YAML author could
+    # operand it with.
+    "CODEX",
 })
 
 # Every opcode must land in exactly one group: a new opcode is then a DELIBERATE

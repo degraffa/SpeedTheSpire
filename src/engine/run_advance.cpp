@@ -149,18 +149,19 @@ void spend_wing_boots_charge(RunState& rs) noexcept {
 // enter_combat_reward (victory / mugged / Smoke Bomb) and
 // finish_combat_after_action's defeat branch. Gold is NOT a mirror -- there is
 // no CombatState copy of the purse to fold -- but an in-combat PRODUCER
-// (Hand of Greed, opcode DAMAGE_GREED) has nowhere else to put its payout, so it
-// accrues in CombatState.combat_gold and is settled here through gain_gold, the
-// one run-layer gold door (Ectoplasm's suppression and the onGainGold relic
-// fan-out live behind it, relics/relic_pickup.hpp -- a raw `rs.gold +=` here
-// would silently ignore a registered boss relic). The accumulator is ZEROED as
-// it settles, so the settlement is idempotent even if a future caller folds
-// twice.
+// (Hand of Greed, opcode DAMAGE_GREED) has nowhere else to put its payout, so
+// it accrues in CombatState.combat_gold and settles here. The settle is a RAW
+// += (S2.34): gainGold's two relic reads happen at the Java's moment, INSIDE
+// op_damage_greed -- Ectoplasm's early return means nothing accrues at all,
+// and the onGainGold fan-out (Bloody Idol's in-combat heal) fires at the kill
+// -- so routing the settle back through gain_gold would double-fire the
+// fan-out. The accumulator is ZEROED as it settles, so the settlement is
+// idempotent even if a future caller folds twice.
 //
 // The game gains this gold DURING combat (AbstractPlayer.gainGold the instant
-// GreedAction sees the kill, GreedAction.java:38), so settling at the fold is
-// the same total; a combat-only replay, which never folds, simply carries the
-// accumulator and leaves RunState alone.
+// GreedAction sees the kill, GreedAction.java:38), so settling the PURSE at
+// the fold is the same total; a combat-only replay, which never folds, simply
+// carries the accumulator and leaves RunState alone.
 // How many Fairy in a Bottle potions the belt holds, in slot order over the
 // OCCUPIED slots (`potion_slots`, the A11-reduced count). `hasPotion` walks the
 // same list (AbstractPlayer.java:1484), and the consuming loop returns on the
@@ -205,8 +206,47 @@ void fold_back_combat(RunController& rc) noexcept {
     rc.run.hp = rc.combat.player_hp;
     rc.run.max_hp = rc.combat.player_max_hp;
     if (rc.combat.combat_gold > 0) {
-        gain_gold(rc.run, static_cast<int32_t>(rc.combat.combat_gold));
+        // A RAW += rather than gain_gold, and both of that door's relic reads
+        // are ALREADY PAID at the Java's moment, in op_damage_greed
+        // (interp_damage.cpp): with Ectoplasm nothing ever accrued (the payout
+        // returns before the accumulator), and the onGainGold fan-out (Bloody
+        // Idol's heal 5, through the IN-COMBAT onPlayerHeal path) fired at the
+        // kill. Routing the settle through gain_gold would fire that fan-out a
+        // second time.
+        rc.run.gold += static_cast<int32_t>(rc.combat.combat_gold);
         rc.combat.combat_gold = 0;
+    }
+    // Run-persistent per-instance card state (S2.34): pool row i is master row
+    // i for the entry deck (enter_combat builds the pool 1:1 in deck order,
+    // and nothing removes a master row mid-combat -- OBTAIN_CARD only
+    // appends), so the combat instance's `misc` folds back by index for
+    // exactly the rows whose CardDef declares initial_misc != 0 (Ritual
+    // Dagger: RitualDaggerAction's masterDeck-by-uuid write,
+    // RitualDaggerAction.java:40-46). The card_id equality guard keeps a
+    // mid-combat master APPEND (whose index has no pool row of its own) from
+    // aliasing a MAKE_CARD-created pool row. Combat-scratch misc (Rampage's
+    // accumulator, the AUTOPLAY_X_ENERGY snapshot) never folds: neither
+    // card's def carries initial_misc.
+    {
+        int n_cards = static_cast<int>(rc.run.master_deck_count);
+        if (n_cards > kMasterDeckCap) {
+            n_cards = kMasterDeckCap;
+        }
+        if (n_cards > kCardPoolCap) {
+            n_cards = kCardPoolCap;
+        }
+        for (int i = 0; i < n_cards; ++i) {
+            const CardInstance& pool_card = rc.combat.card_pool[i];
+            CardInstance& master_card = rc.run.master_deck[i];
+            if (pool_card.card_id != master_card.card_id) {
+                continue;
+            }
+            const CardDef* def =
+                card_def(static_cast<CardId>(master_card.card_id));
+            if (def != nullptr && def->initial_misc != 0) {
+                master_card.misc = pool_card.misc;
+            }
+        }
     }
     const uint8_t n =
         rc.combat.relic_count < rc.run.relic_count ? rc.combat.relic_count
@@ -522,7 +562,8 @@ bool have_monsters_escaped(const CombatState& s) noexcept {
 // what IT took.
 //
 // WHY A LATE SETTLEMENT AT ALL. CombatState carries no purse. combat_gold is the
-// Hand of Greed GAIN accumulator, settled once through gain_gold at fold-back --
+// Hand of Greed GAIN accumulator, settled once (a raw +=, its relic reads
+// already paid in-combat -- S2.34) at fold-back --
 // not a mirror of RunState.gold that a steal-time clamp could read -- and adding
 // one would be a CombatState layout change for a number the combat layer never
 // otherwise consults. The engine therefore records each thief's STEAL COUNT
@@ -850,7 +891,12 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
         if (master_card_bottled(rc.run.master_deck[i])) {
             s.card_pool[i].flags |= static_cast<uint16_t>(CardFlag::INNATE);
         }
-        s.card_pool[i].misc = 0;
+        // makeSameInstanceOf copies `misc` (AbstractCard.java:846 via
+        // CardGroup's copy ctor, CardGroup.java:72-77), and the master deck's
+        // misc is 0 for every card except the run-persistent-misc rows
+        // (Ritual Dagger's damage state, seeded 15 at acquisition) -- so this
+        // is byte-identical to the old `= 0` for every deck without one.
+        s.card_pool[i].misc = rc.run.master_deck[i].misc;
     }
 
     // (4) Shuffle the deck into the draw pile (one shuffle_rng.random_long() +

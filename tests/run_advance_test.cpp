@@ -3119,24 +3119,79 @@ TEST(RunCombatGold, ZeroAccumulatorLeavesThePurseUntouched) {
     EXPECT_EQ(rc.run.gold, 99) << "no producer ran, no gain_gold call";
 }
 
-// Routed through the DOOR, not around it: Ectoplasm returns from gainGold before
-// the `+=` (AbstractPlayer.gainGold:719-737), so a settlement that wrote
-// rs.gold directly would silently ignore a registered boss relic.
-TEST(RunCombatGold, EctoplasmSuppressesTheSettlement) {
+// Ectoplasm's gate MOVED to the accrual (S2.34): AbstractPlayer.gainGold
+// returns before the += AND before the onGainGold fan-out, and the game runs
+// that seam AT THE KILL (GreedAction.java:38) -- so op_damage_greed accrues
+// NOTHING under Ectoplasm, and the fold-back settle is a raw += with nothing
+// to settle. The gate is exercised at the combat layer here; the run-level
+// consequence (an untouched purse after a full combat) is what this pins.
+TEST(RunCombatGold, EctoplasmSuppressesTheAccrualAtTheKill) {
     RunController rc = enter_jaw_worm_combat();
     ASSERT_EQ(rc.run.gold, 99);
-    ASSERT_LT(rc.run.relic_count, kRelicCap);
-    rc.run.relics[rc.run.relic_count].relic_id =
+    ASSERT_LT(rc.combat.relic_count, kRelicCap);
+    rc.combat.relics[rc.combat.relic_count].relic_id =
         static_cast<uint16_t>(RelicId::ECTOPLASM);
-    ++rc.run.relic_count;
-    rc.combat.combat_gold = 45;
+    rc.combat.relics[rc.combat.relic_count].counter = -1;
+    ++rc.combat.relic_count;
+
+    // A Hand-of-Greed kill against the live combat: the payout site runs
+    // gainGold's early return, so nothing ever reaches the accumulator.
+    rc.combat.monsters[0].hp = 1;
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::DAMAGE_GREED);
+    it.src = kActorPlayer;
+    it.tgt = 0;
+    it.amount = 20;
+    it.flags = 25;
+    execute_opcode(rc.combat, it);
+    EXPECT_EQ(rc.combat.combat_gold, 0)
+        << "Ectoplasm suppresses the gain at the kill, not at the settle";
 
     play_out_combat(rc);
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
-    EXPECT_EQ(rc.run.gold, 99) << "Ectoplasm suppresses the gain entirely";
-    EXPECT_EQ(rc.combat.combat_gold, 0)
-        << "the accumulator is consumed either way -- the suppression happens "
-           "inside the door";
+    EXPECT_EQ(rc.run.gold, 99) << "nothing accrued, nothing settled";
+}
+
+// The run-persistent misc fold-back (S2.34): a Ritual Dagger kill grows the
+// COMBAT instance's misc (op_ritual_dagger), and the fold copies it to the
+// master-deck row -- pool row i is master row i -- exactly for rows whose
+// CardDef.initial_misc != 0. RitualDaggerAction's masterDeck-by-uuid write
+// (RitualDaggerAction.java:40-46) by the combat_gold-precedent road.
+TEST(RunCombatGold, RitualDaggerKillFoldsItsGrownMiscToTheMasterDeck) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    ASSERT_TRUE(add_card_to_master_deck(rc.run, CardId::RITUAL_DAGGER));
+    const uint16_t dagger_row =
+        static_cast<uint16_t>(rc.run.master_deck_count - 1);
+    ASSERT_EQ(rc.run.master_deck[dagger_row].misc, 15);
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.card_pool[dagger_row].card_id,
+              static_cast<uint16_t>(CardId::RITUAL_DAGGER));
+    EXPECT_EQ(rc.combat.card_pool[dagger_row].misc, 15)
+        << "enter_combat seeds the pool instance from the master row";
+
+    rc.combat.monsters[0].hp = 5;
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::RITUAL_DAGGER);
+    it.src = kActorPlayer;
+    it.tgt = 0;
+    it.amount = 3;
+    it.flags = dagger_row;
+    execute_opcode(rc.combat, it);
+    ASSERT_EQ(rc.combat.card_pool[dagger_row].misc, 18);
+
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.run.master_deck[dagger_row].misc, 18)
+        << "the growth reaches the master card at the fold";
+    // ...and every OTHER master row's misc stayed put (combat-scratch misc,
+    // e.g. Rampage's accumulator, must never fold).
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        if (i != dagger_row) {
+            EXPECT_EQ(rc.run.master_deck[i].misc, 0) << i;
+        }
+    }
 }
 
 // The scripted walk a fuzz seed sweep once dead-ended on, pinned by name.

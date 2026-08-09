@@ -1100,10 +1100,24 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 // for the identical Java condition -- the two share monster_has_minion_power.
 //
 // gainGold itself is NOT called here: the combat layer has no purse. The gold
-// accrues in CombatState.combat_gold and the run layer settles the total through
-// the single gain_gold door at the combat fold-back (run_advance.cpp
-// fold_back_combat) -- so Ectoplasm's suppression and the onGainGold relic seam
-// still see it exactly once, and a combat-only replay simply carries the number.
+// accrues in CombatState.combat_gold and reaches RunState at the combat
+// fold-back (run_advance.cpp fold_back_combat) -- a combat-only replay simply
+// carries the number. But the SEAM is gainGold's, and its two relic reads
+// happen HERE, at the Java's moment (GreedAction.java:38 calls
+// player.gainGold the instant the kill lands):
+//   * ECTOPLASM returns BEFORE the += and before the fan-out
+//     (AbstractPlayer.gainGold, AbstractPlayer.java:721-724), so an Ectoplasm
+//     owner accrues NOTHING here -- which is also what keeps the fold-back's
+//     raw settle exact: nothing to settle.
+//   * the onGainGold fan-out (:730-732) runs over the relic list in
+//     acquisition order once the gold is in. Bloody Idol is its only override
+//     in Acts 1-3 scope (BloodyIdol.onGainGold, BloodyIdol.java:28-33):
+//     heal(5, true), SYNCHRONOUS, at combat time -- routed through
+//     heal_player_with_relics so Magic Flower's x1.5 and Mark of the Bloom's
+//     zero apply, exactly the in-combat onPlayerHeal path the Java takes.
+//     Firing it here (not at the fold-back settle) is load-bearing: the heal
+//     can save a player who would die to a Combust tick later this turn, and
+//     the run-layer settle deliberately does NOT re-run the fan-out.
 void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
                      int gold) noexcept {
     if (tgt >= kMonsterCap) {
@@ -1116,12 +1130,75 @@ void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
         monster_has_minion_power(s.monsters[tgt]) || gold <= 0) {
         return;
     }
+    if (player_has_relic(s, RelicId::ECTOPLASM)) {
+        return;  // gainGold's early return: no gold, no fan-out
+    }
     int32_t total = static_cast<int32_t>(s.combat_gold) + gold;
     if (total > 0xFFFF) {
         total = 0xFFFF;  // saturate rather than wrap (unreachable in S1: 7
                          // monster records x 25 gold is 175)
     }
     s.combat_gold = static_cast<uint16_t>(total);
+    // relics' onGainGold, acquisition order (AbstractPlayer.java:730-732).
+    for (uint8_t i = 0; i < s.relic_count; ++i) {
+        if (s.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::BLOODY_IDOL)) {
+            heal_player_with_relics(s, 5);  // BloodyIdol.java:32, HEAL_AMOUNT
+        }
+    }
+}
+
+// RITUAL_DAGGER (RitualDaggerAction.update, RitualDaggerAction.java:34-58):
+// ordinary `target.damage(info)` -- the DamageInfo is a plain
+// DamageInfo(p, this.damage, damageTypeForTurn) built by RitualDagger.use
+// (RitualDagger.java:35), so Strength/Vulnerable/Weak apply and block absorbs
+// -- whose BASE is the played instance's `misc`, read at EXECUTE time (the
+// card's damage IS misc: ctor baseDamage = misc, RitualDagger.java:29, and the
+// action re-seeds baseDamage = misc after every growth, :44/:50). Then the
+// kill-conditional growth, behind the character-for-character DAMAGE_GREED
+// gate (:39 here, GreedAction.java:37 there): `misc += increaseAmount` when
+// the hit left the target dead and the target was neither halfDead nor a
+// Minion-power holder.
+//
+// WHO GROWS. The Java grows (a) the MASTER-DECK card with the same uuid and
+// (b) every in-battle instance of that uuid (GetAllInBattleInstances.get --
+// cardInUse + all five piles). In this engine:
+//   (a) settles at the run layer's combat fold-back: pool row i IS master row
+//       i for the entry deck (enter_combat builds the pool 1:1 in deck
+//       order), the combat layer has no RunState (the combat_gold precedent),
+//       and the fold copies pool misc -> master misc exactly for rows whose
+//       CardDef.initial_misc != 0 -- so the growth this writes into the
+//       played instance reaches the master card at combat end.
+//   (b) is the played instance itself: with no makeSameInstanceOf copy in
+//       flight, the uuid group is exactly {the played card} (it sits in limbo
+//       as cardInUse while this action resolves, and it is this pool row).
+//
+// DELIBERATELY NOT MODELLED: a kill scored by a same-uuid REPLAY COPY (Double
+// Tap, or Necronomicon on a cost-raised dagger). The game's copy shares the
+// original's uuid (makeSameInstanceOf, AbstractCard.java:819-823), so its
+// kill grows the master card and the original instance; this engine's replay
+// copy is a fresh pool row with no uuid link back (CardInstance carries no
+// identity field, and adding one is CombatState storage no schema grant
+// covers), so such a kill grows only the transient copy, which purges. The
+// copy DOES inherit the original's current misc at copy time (op_play_card's
+// kPlayCardCopy copies the whole instance), so its DAMAGE is right; only the
+// growth's persistence is short. Registry row 131 carries the same note.
+void op_ritual_dagger(CombatState& s, uint8_t src, uint8_t tgt,
+                      uint8_t source_index, int increase) noexcept {
+    if (tgt >= kMonsterCap || source_index >= kCardPoolCap) {
+        return;
+    }
+    CardInstance& card = s.card_pool[source_index];
+    op_damage(s, src, tgt, static_cast<int>(card.misc));
+    if (s.monsters[tgt].hp > 0 || monster_half_dead(s.monsters[tgt]) ||
+        monster_has_minion_power(s.monsters[tgt]) || increase <= 0) {
+        return;
+    }
+    int32_t grown = static_cast<int32_t>(card.misc) + increase;
+    if (grown > 0xFFFF) {
+        grown = 0xFFFF;  // saturate the u16 (a 21845-kill run is not reachable)
+    }
+    card.misc = static_cast<uint16_t>(grown);
 }
 
 // VAMPIRE_DAMAGE_ALL (VampireDamageAllEnemiesAction.update, :53-77): damage every
