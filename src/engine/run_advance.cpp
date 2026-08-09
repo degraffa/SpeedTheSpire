@@ -1705,8 +1705,12 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     //      cannot restore it by accident. It must run AFTER (1)'s rs.act bump.
     reinit_act_event_pools(rs);
     //
-    // (11) initializeCardPools (:294) / initializePotions (:298) -- no RNG, no
-    //      engine state (see the block comment above).
+    // (11) initializeCardPools (:294) / initializePotions (:298) -- no RNG.
+    //      Since S2.32 one piece of it IS engine state: the LIVE colorless
+    //      pool's order returns to plain library order here, wiping whatever
+    //      permutation last act's returnColorlessCard readers left
+    //      (RunController.colorless_order).
+    init_colorless_order(rc);
 
     // === the subclass constructor body (TheCity.java:44-50 / TheBeyond:42-46) =
 
@@ -1846,6 +1850,10 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     // initializeShrineList / initializeSpecialOneTimeEventList (the last
     // NFY-conditional), run by dungeonTransitionSetup. Draw-free.
     init_event_pools(rs);
+    // initializeCardPools' colorless fill (draw-free): the live pool opens in
+    // library order. See RunController.colorless_order for why this is
+    // controller state.
+    init_colorless_order(rc);
 
     // (1) monsterRng: generateMonsters + initializeBoss -> the encounter lists
     //     (Exordium.java:110-221; generate_monster_lists).
@@ -2590,6 +2598,33 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
                             // double-boss branch above returns without writing
                             // either, so the first Act-3 boss kill is not a
                             // terminal and pays no reward.
+        return;
+    }
+
+    // THE COLOSSEUM REOPEN EDGE -- the one combat in the game that ends by
+    // returning to its event dialog instead of a reward screen. Colosseum's
+    // Slavers fight runs with rewardAllowed = false (Colosseum.java:55, the
+    // only writer of that field anywhere) and a non-LEAVE screen, so the
+    // battle-over block opens nothing and EventRoom.update's event.reopen()
+    // re-enters the image (EventRoom.java:38-41, Colosseum.java:100-110).
+    // endBattle still ran first -- Meat on the Bone and the onVictory relic
+    // pass fire exactly as they do ahead of an opened screen -- and the
+    // battle-over draws are consumed inside event_combat_reopen. Any SURVIVOR
+    // outcome takes this path (a Smoke Bomb out of the Slavers returns to the
+    // dialog too; the defeat branch returned above).
+    if (static_cast<RoomType>(rc.room_type) == RoomType::Event &&
+        event_combat_reopens(rc)) {
+        apply_meat_on_the_bone_pre_victory(rc.combat);
+        dispatch_relics_on_victory(rc.combat, rc.combat.relics,
+                                   rc.combat.relic_count);
+        fold_back_combat(rc);
+        (void)settle_stolen_gold(rc);
+        rc.combat_outcome = static_cast<uint8_t>(outcome);
+        event_combat_reopen(rc);
+        const float combat_reward = res.reward;
+        res = StepResult{};  // back on a dialog: no combat observation view.
+        res.reward = combat_reward;
+        res.terminal = false;
         return;
     }
 

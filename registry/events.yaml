@@ -381,15 +381,33 @@
 - id: 20
   name: DESIGNER
   game_id: "Designer"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 2; Designer.ID (Designer.java:31)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 2; Designer.ID (Designer.java:31); body Designer.java:48-258 (read in full): ctor draws TWO miscRng.randomBoolean() -- adjustmentUpgradesOne, cleanUpRemovesCards -- which pick the wording AND the mechanic of options 0/1; costs 40/60/90 gold and 3 HP punch at ascension < 15, 50/75/110/5 at 15+ (:54-64); Adjustments = 1-pick upgrade grid or upgradeTwoRandomCards (Collections.shuffle(new Random(miscRng.randomLong())), :230-258); Clean Up = 1-pick unbottled purge grid or a TWO-pick transform (transformCard(c, false, miscRng) per pick, :109-141); Full Service = 1-pick purge + one random upgrade off a fresh miscRng.randomLong shuffle (:83-108); Punch = DamageInfo(null, hpLoss, HP_LOSS) (:210-216)."
   native: true
+  implemented: true
   conditions: {pool: SPECIAL, acts: [2, 3], draw: "gold >= 75 (AbstractDungeon.java:1894-1898)"}
+  options:
+    - [CONTINUE]
+    - [ADJUSTMENTS_UPGRADE, CLEAN_UP_REMOVE_OR_TRANSFORM, FULL_SERVICE, PUNCH_IT]
+    - [MASTER_DECK_GRID_PICKS]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: ADJUST_COST, base: 40, a15: 50}
+      - {field: CLEAN_UP_COST, base: 60, a15: 75}
+      - {field: FULL_SERVICE_COST, base: 90, a15: 110}
+      - {field: PUNCH_HP_LOSS, base: 3, a15: 5}
 - id: 21
   name: DUPLICATOR
   game_id: "Duplicator"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 3; Duplicator.ID (Duplicator.java:17)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 3; Duplicator.ID (Duplicator.java:17); body Duplicator.java:27-93 (read in full): option 0 opens a 1-pick grid over the WHOLE master deck (gridSelectScreen.open(masterDeck, 1, ...), :87 -- no purgeable/bottled filter), and the pick is obtained as makeStatEquivalentCopy with the three inBottle flags cleared (:42-47), i.e. same upgrade count, never bottled; option 1 leaves. No RNG anywhere in the body."
   native: true
+  implemented: true
   conditions: {pool: SPECIAL, acts: [2, 3], draw: ALWAYS}
+  options:
+    - [COPY_A_CARD, LEAVE]
+    - [MASTER_DECK_GRID_ANY_CARD]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 22
   name: FACE_TRADER
   game_id: "FaceTrader"
@@ -418,9 +436,15 @@
 - id: 24
   name: KNOWING_SKULL
   game_id: "Knowing Skull"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 6; KnowingSkull.ID (events/city/KnowingSkull.java:35) -- city/, not shrines/."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 6; KnowingSkull.ID (events/city/KnowingSkull.java:35) -- city/, not shrines/; body KnowingSkull.java:60-179 (read in full): every cost starts at 6 (:67-69) and each purchase pays DamageInfo(null, cost, HP_LOSS) FIRST, then ++cost for THAT option only (:124-166); potion = PotionHelper.getRandomPotion() into the belt unless Sozu (Sozu skips the draw entirely, :132-135); gold = flat +90 (:141-150); card = returnColorlessCard(UNCOMMON) obtain (:152-161); leave costs the never-incremented leaveCost 6 (:112-114)."
   native: true
+  implemented: true
   conditions: {pool: SPECIAL, acts: [2], draw: "currentHealth > 12 (AbstractDungeon.java:1909-1913)"}
+  options:
+    - [CONTINUE]
+    - [A_POTION_PAY_HP, GOLD_90_PAY_HP, A_COLORLESS_CARD_PAY_HP, LEAVE_PAY_6_HP]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 25
   name: LAB
   game_id: "Lab"
@@ -436,9 +460,14 @@
 - id: 26
   name: NLOTH
   game_id: "N'loth"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 8; Nloth.ID (Nloth.java:21)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 8; Nloth.ID (Nloth.java:21); body Nloth.java:34-114 (read in full): the ctor Collections.shuffle(copy of player.relics, new Random(miscRng.randomLong())) and offers shuffled[0] / shuffled[1] by name (:36-44); trading loseRelic(choice.relicId) and obtains Nloth's Gift (:59-89) -- UNLESS Nloth's Gift is already held, in which case the gift is a Circlet and the chosen relic is NOT lost (:61-64, the dead-in-practice re-entry arm, reproduced faithfully); option 2 leaves."
   native: true
+  implemented: true
   conditions: {pool: SPECIAL, acts: [2], draw: "player.relics.size() >= 2 (AbstractDungeon.java:1914-1918)"}
+  options:
+    - [TRADE_SHUFFLED_RELIC_0, TRADE_SHUFFLED_RELIC_1, LEAVE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 27
   name: NOTE_FOR_YOURSELF
   game_id: "NoteForYourself"
@@ -463,9 +492,17 @@
 - id: 29
   name: THE_JOUST
   game_id: "The Joust"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 11 with NoteForYourself present, 10 without; TheJoust.ID (events/city/TheJoust.java:22) -- city/, not shrines/."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 11 with NoteForYourself present, 10 without; TheJoust.ID (events/city/TheJoust.java:22) -- city/, not shrines/; body TheJoust.java:45-140 (read in full): both bets loseGold(50) at the EXPLANATION screen (:84-96); ownerWins = miscRng.randomBoolean(0.3f) rolled at the PRE_JOUST continue (:101), one screen AFTER the bet; payout at the JOUST continue -- bet-on-owner wins +250, bet-on-murderer wins +100, a lost bet pays nothing (:106-134)."
   native: true
+  implemented: true
   conditions: {pool: SPECIAL, acts: [2], draw: "gold >= 50 (AbstractDungeon.java:1919-1923)"}
+  options:
+    - [CONTINUE]
+    - [BET_50_ON_MURDERER_WIN_100, BET_50_ON_OWNER_WIN_250]
+    - [CONTINUE_ROLLS_THE_JOUST]
+    - [CONTINUE_REVEALS_THE_RESULT]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 30
   name: WE_MEET_AGAIN
   game_id: "WeMeetAgain"
@@ -527,9 +564,15 @@
 - id: 35
   name: COLOSSEUM
   game_id: "Colosseum"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 3; Colosseum.ID (events/city/Colosseum.java:23) is \"Colosseum\"; getEvent gate currMapNode != null AND currMapNode.y > map.size() / 2 (AbstractDungeon.java:1975-1979) -- the top half of the Act-2 map; combat-embedding (ProceedButton.java:115), Colosseum.java:53-76 fights Colosseum Slavers then Colosseum Nobs and rewards a RARE + an UNCOMMON pool relic (:72-73)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 3; Colosseum.ID (events/city/Colosseum.java:23) is \"Colosseum\"; getEvent gate currMapNode != null AND currMapNode.y > map.size() / 2 (AbstractDungeon.java:1975-1979) -- the top half of the Act-2 map; body Colosseum.java:30-110 (read in full): the TWO-FIGHT sequence. FIGHT screen enters \"Colosseum Slavers\" with rewards.clear() and rewardAllowed = FALSE (:50-58); on any survivor outcome the battle-over block still runs dropReward (empty for an EventRoom) + addPotionToRewards (one potionRng chance roll + the blizzard ratchet, AbstractRoom.java:330-341, 580-608) but opens NO screen, and EventRoom.update then calls reopen() (EventRoom.java:38-41), which resetPlayer + preBattlePrep (ONE shuffleRng.randomLong via drawPile.initializeDeck, plus the atPreBattle relic pass) and re-enters the dialog at POST_COMBAT (:100-110); POST_COMBAT sets rewardAllowed = TRUE before reading the button (:65), option 1 fights \"Colosseum Nobs\" with rewards.clear() + addRelicToRewards(RARE) + addRelicToRewards(UNCOMMON) + addGoldToRewards(100) + eliteTrigger = true (:67-78), option 0 flees to the map; after the Nobs win screen == LEAVE so reopen() is a no-op and the ordinary event-combat reward flow (potion roll + card reward on top of the pre-added items) runs."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: "currMapNode != null and currMapNode.y > map.size() / 2 (AbstractDungeon.java:1975-1979)"}
+  options:
+    - [CONTINUE]
+    - [FIGHT_THE_SLAVERS_NO_REWARD]
+    - [COWARDICE_LEAVE, VICTORY_FIGHT_THE_NOBS]
+  a15: {changes: []}
 - id: 36
   name: CURSED_TOME
   game_id: "Cursed Tome"
@@ -557,9 +600,16 @@
 - id: 40
   name: MASKED_BANDITS
   game_id: "Masked Bandits"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 8; MaskedBandits.ID (events/city/MaskedBandits.java:26) is \"Masked Bandits\"; no getEvent gate; combat-embedding (ProceedButton.java:115), MaskedBandits.java:43 enters the fight and :75-78 pays Red Mask on a win."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 8; MaskedBandits.ID (events/city/MaskedBandits.java:26) is \"Masked Bandits\"; no getEvent gate; body MaskedBandits.java:37-123 (read in full): the CTOR installs getEncounter(\"Masked Bandits\") on the room (:43) -- three monster_hp_rng ctor draws at EVENT ENTRY, see the engine body for the recorded pay-path counter deviation; option 0 (pay) is stealGold (pure VFX -- getRandomMonster() is unseeded MathUtils, MonsterGroup.java:148-150, 212) + loseGold(ALL gold) (:60-61) then three continue screens to the map (:87-108); option 1 (fight) addGoldToRewards(miscRng.random(25, 35)) + addRelicToRewards(Red Mask, or a Circlet when Red Mask is already held) + enterCombat (:68-82), a rewardAllowed combat whose win screen adds the potion roll + card reward on top."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [PAY_ALL_GOLD, FIGHT_THE_BANDITS]
+    - [CONTINUE_PAID_1]
+    - [CONTINUE_PAID_2]
+    - [PROCEED_PAID_3_OPENS_MAP]
+  a15: {changes: []}
 - id: 41
   name: NEST
   game_id: "Nest"
@@ -569,21 +619,41 @@
 - id: 42
   name: THE_LIBRARY
   game_id: "The Library"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 10; TheLibrary.ID (events/city/TheLibrary.java:24) is \"The Library\"; no getEvent gate; payouts TheLibrary.java:39-75 (1 of 20 random cards, or a rest heal)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 10; TheLibrary.ID (events/city/TheLibrary.java:24) is \"The Library\"; no getEvent gate; body TheLibrary.java:37-115 (read in full): healAmt = MathUtils.round(maxHealth * (ascension >= 15 ? 0.2f : 0.33f)) at the CTOR (:39); Read builds TWENTY unique-by-cardID cards via getCard(rollRarity()) -- each attempt one cardRng.random(99) + cardBlizzRandomizer rarity roll (NO blizzard mutation; that lives only in getRewardCards) against the room's 3/37 thresholds with the relic alternation pass (AbstractRoom.java:148-177, Nloth's Gift x3), then one cardRng pool index -- with a re-roll loop on duplicate cardIDs (:66-87), then a MANDATORY 1-pick grid (open(group, 1, ..., false), :91); Sleep heals healAmt (:95-97). getBook (:109-115) is unseeded MathUtils flavour text."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [READ_PICK_1_OF_20, SLEEP_HEAL]
+    - [BOARD_PICK_1_OF_20]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: HEAL_MAX_HP_PERCENT, base: 0.33, a15: 0.2}
 - id: 43
   name: THE_MAUSOLEUM
   game_id: "The Mausoleum"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 11; TheMausoleum.ID (events/city/TheMausoleum.java:23) is \"The Mausoleum\"; no getEvent gate; payouts TheMausoleum.java:39-74 (a returnRandomRelicTier relic with a Writhe chance)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 11; TheMausoleum.ID (events/city/TheMausoleum.java:23) is \"The Mausoleum\"; no getEvent gate; body TheMausoleum.java:37-97 (read in full): Open draws miscRng.randomBoolean() FIRST -- the draw is consumed even at ascension >= 15, where the result is then OVERWRITTEN true (:61-64) -- Writhe obtained on true (ShowCardAndObtainEffect, so an armed Omamori eats it, the Big Fish precedent), then ALWAYS returnRandomScreenlessRelic(returnRandomRelicTier()) obtained (:73-74); option 1 leaves with nothing."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [OPEN_THE_COFFIN_RELIC_MAYBE_WRITHE, LEAVE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: WRITHE_CHANCE_PERCENT, base: 50, a15: 100}
 - id: 44
   name: VAMPIRES
   game_id: "Vampires"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 12; Vampires.ID (events/city/Vampires.java:24) is \"Vampires\"; no getEvent gate; payouts Vampires.java:41-110 -- 5x Bite for a ceil(maxHealth * 0.3f) max-HP cost (Vampires.java:40-43), with an owned Blood Vial adding the free-trade option (:48-51)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 12; Vampires.ID (events/city/Vampires.java:24) is \"Vampires\"; no getEvent gate; body Vampires.java:38-115 (read in full): maxHpLoss = MathUtils.ceil(maxHealth * 0.3f) clamped to maxHealth - 1 at the CTOR (:41-44); accept = decreaseMaxHealth(maxHpLoss) + replaceAttacks (:60-69); the Blood Vial option exists only while the vial is held, costs the VIAL instead of max HP (:48-51, 71-82); replaceAttacks (:101-114) removes every STARTER_STRIKE-tagged master-deck card BACK TO FRONT -- in the Ironclad scope exactly Strike_R at any upgrade -- then obtains FIVE Bite copies; refuse leaves. NO ascension branch anywhere in the file."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [ACCEPT_BITES_FOR_MAX_HP, OFFER_BLOOD_VIAL_IF_HELD, REFUSE]
+    - [PROCEED]
+  a15: {changes: []}
 
 # TheBeyond.initializeEventList (TheBeyond.java:179-186) -- the Act-3 eventList,
 # 7 keys, in add() order. Identity + draw-gate metadata only, exactly as the

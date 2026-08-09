@@ -267,10 +267,10 @@ void resample_match_and_keep_board(EventDialogState& es,
     // pessimistic about its own memory, never optimistic about hidden cards.
     // Narrowing it is a KnowledgeState change (a per-slot seen bit) plus a
     // matching pin here, not a sampler-only fix.
-    std::array<EventBoardCard, kEventBoardCap> hidden{};
-    std::array<int, kEventBoardCap> hidden_slot{};
+    std::array<EventBoardCard, kMatchBoardSize> hidden{};
+    std::array<int, kMatchBoardSize> hidden_slot{};
     int hidden_count = 0;
-    for (int i = 0; i < kEventBoardCap; ++i) {
+    for (int i = 0; i < kMatchBoardSize; ++i) {
         if (es.board[i].taken != 0 || es.scratch1 == static_cast<int16_t>(i)) {
             continue;
         }

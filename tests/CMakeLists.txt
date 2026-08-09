@@ -547,6 +547,10 @@ sts_add_test(exordium_events_ii_test)
 # with the getShrine gate evidence for the six the filter excludes.
 sts_add_test(shrines_test)
 sts_add_test(one_time_specials_test)
+# S2.32 -- City events II (the five eventList bodies incl. both combat
+# embeds + the Bandit trio) and the five act-gated one-timer bodies.
+sts_add_test(city_events_ii_test)
+sts_add_test(city_one_timers_test)
 
 # S2.02: the Act-2/Act-3 eventList rows and the per-act membership / draw-gate
 # metadata every events.yaml row now carries -- the two new lists in Java add()

@@ -553,6 +553,16 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "TheCollector.java:88 -- this.type = EnemyType.BOSS"},
         {MonsterId::TORCH_HEAD,          MonsterEnemyType::NORMAL,
          "TorchHead.java -- no this.type assignment (ctor :43-55)"},
+        // S2.32's Masked Bandits event trio: none of the three assigns
+        // this.type, so the NORMAL default stands -- an event fight, not an
+        // elite one (Colosseum's Nobs get their elite-ness from the ROOM's
+        // eliteTrigger, never from a bandit).
+        {MonsterId::BANDIT_POINTY,       MonsterEnemyType::NORMAL,
+         "BanditPointy.java -- no this.type assignment (ctor :42-58)"},
+        {MonsterId::BANDIT_LEADER,       MonsterEnemyType::NORMAL,
+         "BanditLeader.java -- no this.type assignment (ctor :55-79)"},
+        {MonsterId::BANDIT_BEAR,         MonsterEnemyType::NORMAL,
+         "BanditBear.java -- no this.type assignment (ctor :55-77)"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

@@ -84,50 +84,15 @@ using sts::registry::event_card_rarity;
     }
 }
 
-// AbstractDungeon.returnColorlessCard(UNCOMMON) (AbstractDungeon.java:
-// 1100-1113): ONE shuffleRng.randomLong drives a JDK shuffle of
-// colorlessCardPool, then the FIRST entry of the requested rarity wins;
-// SwiftStrike is the never-taken fallback (the pool always holds uncommons).
-//
-// DELIBERATE, RECORDED DEVIATION: the game shuffles `colorlessCardPool.group`
-// IN PLACE, so the new order persists into the next reader of that same list.
-// This port shuffles a local copy. Nothing in Act 1 observes the persisted
-// order -- transformCard's COLORLESS branch reads the untouched
-// srcColorlessCardPool (AbstractDungeon.java:998-1014), and the shop's two
-// colorless slots (which EXIST now, shop.cpp -- this comment used to say
-// they did not) are NOT an observer either:
-// getColorlessCardFromPool reaches CardGroup.getRandomCard(true, rarity)
-// (CardGroup.java:509-524), which filters into a local tmp and
-// Collections.sort()s it before indexing, discarding the source order on
-// every read. The ledger's Deferred obligations row stays open only against
-// a future reader of the UNSORTED whole-pool view.
-//
-// THE INPUT ORDER IS LOAD-BEARING and it is the LIVE pool's, not the `src*`
-// twin's. `addColorlessCards` fills `colorlessCardPool` with `addToTop`, which
-// is `group.add(c)` -- an APPEND (AbstractDungeon.java:1203-1210,
-// CardGroup.java:455-457) -- so the live pool is plain CardLibrary library
-// order, while the emitted `kColorlessPool` models `srcColorlessCardPool`,
-// which `initializeCardPools` fills with the PREPENDING `addToBottom`
-// (:1185-1187, CardGroup.java:459-461) and which therefore holds the SAME
-// membership REVERSED. Reading it backwards here restores the live order, so
-// one emitted array serves both readings -- the same discipline the RED pools
-// use. It used to read a separately emitted `kEventTransformColorlessPool`
-// whose order was a plain walk of `cards.yaml` rows, i.e. neither.
-[[nodiscard]] CardId draw_colorless_uncommon(RngStream& shuffle_rng) noexcept {
-    std::array<CardId, static_cast<std::size_t>(kColorlessPoolCount)> pool{};
-    for (int i = 0; i < kColorlessPoolCount; ++i) {
-        pool[static_cast<std::size_t>(i)] = kColorlessPool[
-            static_cast<std::size_t>(kColorlessPoolCount - 1 - i)];
-    }
-    JdkRandom jdk(random_long(shuffle_rng));
-    jdk_shuffle(std::span<CardId>(pool), jdk);
-    for (CardId id : pool) {
-        if (event_card_rarity(id) == EventCardRarity::UNCOMMON) {
-            return id;
-        }
-    }
-    return CardId::SWIFT_STRIKE;
-}
+// AbstractDungeon.returnColorlessCard(UNCOMMON) is now the shared
+// event_draw_colorless_uncommon (event_framework.cpp): S2.32's Knowing Skull
+// became the SECOND consumer, and its repeatable CARD purchase is exactly the
+// "future reader of the UNSORTED whole-pool view" the old local-copy shuffle's
+// recorded deviation stayed open against -- the game shuffles the live pool IN
+// PLACE, so the second same-act draw reads the first draw's permutation. The
+// persistent order lives in RunController.colorless_order; the first draw of
+// an act is byte-identical to the old local-copy form (both start from live
+// library order), which is why this call site's goldens did not move.
 
 // --- Match and Keep! --------------------------------------------------------
 // GremlinMatchGame screens: 0 INTRO, 1 RULE_EXPLANATION, 2 PLAY (the twelve
@@ -152,7 +117,7 @@ void match_deal(RunController& rc, EventDialogState& es) noexcept {
         ids[3] = return_random_curse(rc.run.card_rng);
         ids[4] = return_random_curse(rc.run.card_rng);
     } else {
-        ids[3] = draw_colorless_uncommon(rc.combat.shuffle_rng);
+        ids[3] = event_draw_colorless_uncommon(rc);
         ids[4] = return_random_curse(rc.run.card_rng);
     }
     // player.getStartCardForEvent() -- Bash for the Ironclad, no stream.
@@ -174,7 +139,7 @@ void match_deal(RunController& rc, EventDialogState& es) noexcept {
     // Collections.shuffle(cards.group, new Random(miscRng.randomLong()))
     // (:58) -- one randomLong, then the exact JDK shuffle of all twelve.
     JdkRandom jdk(random_long(rc.combat.misc_rng));
-    jdk_shuffle(std::span<EventBoardCard>(es.board, kEventBoardCap), jdk);
+    jdk_shuffle(std::span<EventBoardCard>(es.board, kMatchBoardSize), jdk);
 
     es.scratch0 = static_cast<int16_t>(kMatchAttempts);
     es.scratch1 = kMatchNoneFlipped;
@@ -197,8 +162,8 @@ void match_menu(const RunController& /*rc*/, const EventDialogState& es,
     // updateMatchGameLogic (:179-214) accepts a click only on a card that is
     // still on the board AND still face down -- the already-flipped chosenCard
     // has isFlipped == false, so it cannot be picked twice.
-    out.count = static_cast<uint8_t>(kEventBoardCap);
-    for (int i = 0; i < kEventBoardCap; ++i) {
+    out.count = static_cast<uint8_t>(kMatchBoardSize);
+    for (int i = 0; i < kMatchBoardSize; ++i) {
         out.enabled[i] = es.board[i].taken == 0 && es.scratch1 != i;
     }
 }
@@ -216,7 +181,7 @@ EventDialogStatus match_choose(RunController& rc, EventDialogState& es,
     if (es.screen != kMatchPlay) {
         return EventDialogStatus::FINISHED;
     }
-    if (option >= kEventBoardCap || es.board[option].taken != 0 ||
+    if (option >= kMatchBoardSize || es.board[option].taken != 0 ||
         es.scratch1 == option) {
         return EventDialogStatus::CONTINUE;
     }

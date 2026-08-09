@@ -139,6 +139,7 @@
 
 #include "sts/engine/advance.hpp"       // ActionMask, StepResult, combat advance/legal_actions
 #include "sts/engine/boss_chest.hpp"    // BossChestState / the post-boss chest
+#include "sts/engine/cards.hpp"         // kColorlessPoolCount (colorless_order)
 #include "sts/engine/combat_rewards.hpp"  // RewardScreen + the claim flow
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"    // MonsterLists
@@ -286,6 +287,12 @@ inline constexpr int kShopItemCount = kChooseShopPurge; // 13 purchasable rows
 
 // --- RunController -----------------------------------------------------------
 
+// RunController.colorless_order's slot count: kColorlessPoolCount rounded up
+// to a multiple of four u16s (one 8-byte unit), so adding the field moves no
+// tail-padding arithmetic. The surplus slots stay 0 and are never read.
+inline constexpr int kColorlessOrderCap =
+    ((kColorlessPoolCount + 3) / 4) * 4;
+
 // The whole run-loop state: a RunState (persistent) + a CombatState (the live
 // combat / the canonical floor-stream holder) + the transient screen-flow
 // bookkeeping. Trivially copyable so a batch of runs steps with no allocation.
@@ -378,6 +385,24 @@ struct RunController {
     // above; the phase itself never changes while the overlay is up.
     uint8_t pending_bottle;
     uint8_t pad2[3];  // explicit padding (value-init zeroed, hash-stable).
+
+    // THE LIVE colorlessCardPool's ORDER (CardId as u16 per slot; slots at
+    // index >= kColorlessPoolCount are 0 and never read -- the cap is rounded
+    // up so the field is a whole number of 8-byte units and pad_tail's
+    // arithmetic is untouched). AbstractDungeon.returnColorlessCard(rarity)
+    // shuffles `colorlessCardPool.group` IN PLACE with a
+    // shuffleRng.randomLong-seeded JDK shuffle and reads the first match
+    // (AbstractDungeon.java:1100-1113), so the order PERSISTS into the next
+    // reader -- observable from the second same-act draw on (Knowing Skull can
+    // buy several colorless cards in one visit; Match and Keep's A<15 slot is
+    // the other consumer). It lives HERE, not in RunState, because the game
+    // itself rebuilds the pool to plain library order on save/load
+    // (initializeCardPools runs in every dungeon constructor, :294), i.e. it
+    // is genuinely session-transient, not save-parity -- the same argument as
+    // every screen field above. Initialized to live library order (the
+    // REVERSED emitted kColorlessPool -- see event_draw_colorless_uncommon's
+    // provenance) at run_begin and again at every act crossing.
+    uint16_t colorless_order[kColorlessOrderCap];
 
     // The player-information layer's in-combat knowledge (knowledge.hpp):
     // draw-order constraints + revealed monster construction rolls. It lives

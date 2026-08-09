@@ -19,6 +19,7 @@
 #include "sts/engine/monster_champ.hpp"    // the Champ: threshold latch + forge counter
 #include "sts/engine/monster_collector.hpp"  // The Collector: slot-recycling summons
 #include "sts/engine/monster_torch_head.hpp"  // the Torch Head: ctor telegraph, one draw
+#include "sts/engine/monster_bandits.hpp"     // S2.32: the Masked Bandits event trio
 #include "sts/engine/monster_centurion.hpp"  // the Centurion: aliveCount-driven tree
 #include "sts/engine/monster_chosen.hpp"   // the Chosen: Hex opener + roll tree
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
@@ -288,6 +289,15 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &collector_init;
         case MonsterId::TORCH_HEAD:
             return &torch_head_init;
+        // S2.32: the Masked Bandits event trio (encounters.yaml id 41) --
+        // reachable only through the MaskedBandits event body's
+        // enter_event_combat.
+        case MonsterId::BANDIT_POINTY:
+            return &bandit_pointy_init;
+        case MonsterId::BANDIT_LEADER:
+            return &bandit_leader_init;
+        case MonsterId::BANDIT_BEAR:
+            return &bandit_bear_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -416,6 +426,13 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &collector_take_turn;
         case MonsterId::TORCH_HEAD:
             return &torch_head_take_turn;
+        // S2.32: the Masked Bandits event trio.
+        case MonsterId::BANDIT_POINTY:
+            return &bandit_pointy_take_turn;
+        case MonsterId::BANDIT_LEADER:
+            return &bandit_leader_take_turn;
+        case MonsterId::BANDIT_BEAR:
+            return &bandit_bear_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -423,7 +440,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 59,
+    static_assert(sts::registry::manifest::kMonstersCount == 62,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
@@ -674,7 +691,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 59,
+    static_assert(sts::registry::manifest::kMonstersCount == 62,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -937,7 +954,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 59,
+    static_assert(sts::registry::manifest::kMonstersCount == 62,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -1188,7 +1205,7 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 59,
+    static_assert(sts::registry::manifest::kMonstersCount == 62,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -1256,6 +1273,16 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             return &spheric_guardian_use_pre_battle_action;
         case MonsterId::CHOSEN:
             return nullptr;  // no usePreBattleAction in the class at all
+
+        // S2.32. None of the three bandits declares usePreBattleAction --
+        // BanditPointy.java declares takeTurn/deathReact/changeState/damage/
+        // getMove, BanditLeader.java adds nothing beyond those, and
+        // BanditBear.java swaps deathReact for die -- so all three inherit the
+        // empty base body. Explicit nullptrs, the Chosen's precedent.
+        case MonsterId::BANDIT_POINTY:
+        case MonsterId::BANDIT_LEADER:
+        case MonsterId::BANDIT_BEAR:
+            return nullptr;
 
         // S2.25. FOUR of the five override usePreBattleAction with real combat
         // content; the Repulsor has no such method at all, which is why it gets
@@ -1490,7 +1517,7 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
 }
 
 MonsterDieFn monster_die_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 59,
+    static_assert(sts::registry::manifest::kMonstersCount == 62,
                   "new monster: does its Java class override die()? Read the "
                   "method. If everything before `super.die()` is presentation -- "
                   "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
@@ -1545,6 +1572,12 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
             // ITSELF, and it only does so because super.die() has already set
             // isDying. So the body registers in monster_die_after_fn below, and
             // this nullptr is the pre-super half being genuinely empty.
+            return nullptr;
+        case MonsterId::BANDIT_BEAR:
+            // die() (BanditBear.java:127-133) is `super.die()` first, so the
+            // pre-super half is genuinely empty; the post-super deathReact
+            // fan-out is presentation-only and its explicit nullptr -- with the
+            // discharge reasoning -- lives in monster_die_after_fn below.
             return nullptr;
         case MonsterId::DARKLING:
             // THE FIRST VETO USER. `if (!getCurrRoom().cannotLose) super.die();`
@@ -1659,7 +1692,7 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
 // three carry achievements and victory bookkeeping only. The slot exists because
 // the batches that need it run in parallel and must not each invent their own.
 MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 59,
+    static_assert(sts::registry::manifest::kMonstersCount == 62,
                   "new monster: does its Java die() override do anything AFTER "
                   "`super.die()`? Read the method. Content before super.die() "
                   "belongs in monster_die_fn; content after it belongs here, "
@@ -1727,6 +1760,21 @@ MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
             // Post-super content exists (:309-317) and none of it is
             // sim-visible: an UNSEEDED MathUtils sound coin, fadeInAmbiance,
             // onBossVictoryLogic, UnlockTracker. Explicit nullptr.
+            return nullptr;
+        case MonsterId::BANDIT_BEAR:
+            // The ONLY deathReact producer in the game: `super.die()`, then
+            // `for (m : monsters) { if (m.isDead || m.isDying) continue;
+            //  m.deathReact(); }` (BanditBear.java:127-133) -- strictly
+            // post-super, so it sits in THIS slot's namespace. But both
+            // reachable overrides (BanditLeader.java:82-86,
+            // BanditPointy.java:70-74) queue ONE TalkAction each behind
+            // !isDeadOrEscaped() and nothing else, and the base body is empty
+            // (AbstractMonster.java:912-913): pure presentation, no move/
+            // intent/stream effect. Explicit nullptr -- the re-pointed
+            // S2.23 deathReact obligation (docs/s2-tasks.md
+            // deferred-obligations table) discharged as a verified
+            // negative (monster_bandits.hpp; pinned by
+            // CityEventsII.BearDeathReactIsPresentationOnly).
             return nullptr;
         default:
             return nullptr;  // no post-super content (or no die() at all)

@@ -120,7 +120,17 @@ namespace sts::engine {
 //             must re-encode rather than reread. This is the case the audit's
 //             schema-evolution note calls breaking, and the version stamp is
 //             what makes it detectable rather than silent.
-inline constexpr uint32_t PUBLIC_VIEW_VERSION = 5;
+// v5: S2.28 -- `second_boss_reserved` populated (ADDITIVE, the audit's case 1:
+//             a declared-reserved field gaining its meaning; no offset moved).
+// v6: S2.32 -- kEventOptionCap and kEventBoardCap 12 -> 20, for The Library's
+//             twenty-card read board (TheLibrary.java:66-91: one option per
+//             rolled card, pick exactly one). BREAKING, the v4 shape again:
+//             PvEvent's board array sits mid-record and RunActionMask's
+//             can_choose_event_option is embedded in the mask channel, so
+//             offsets after each move. A v5 record cannot be reinterpreted as
+//             v6; consumers re-encode. Match and Keep's twelve slots keep
+//             their indices; board slots >= 12 are simply empty for it.
+inline constexpr uint32_t PUBLIC_VIEW_VERSION = 6;
 
 // --- PvCard -----------------------------------------------------------------
 
@@ -581,19 +591,23 @@ static_assert(std::is_trivially_copyable_v<PublicView>,
 // v4 (S2.2F): kMonsterCap 7 -> 23 moves this. The monster block grows
 // 7 -> 23 PvMonster (164 B each, +2624) and the two kMonsterCap-sized roll
 // arrays grow +32, so the fixed part goes 5656 -> 8312. Measured, not derived.
-inline constexpr std::size_t kPublicViewFixedBytes = 8312;
+// v6 (S2.32): kEventBoardCap 12 -> 20 grows PvEvent's board by 8 x 6 B, so the
+// fixed part goes 8312 -> 8360 (the mask channel's own growth is in PvMask).
+inline constexpr std::size_t kPublicViewFixedBytes = 8360;
 static_assert(sizeof(PublicView) ==
                   kPublicViewFixedBytes + sizeof(PvMask) + sizeof(uint32_t),
               "PublicView size changed -- bump PUBLIC_VIEW_VERSION, update the "
               "audit table (docs/public-view-audit.md) and its schema-evolution "
               "note, and re-check the layout-walk asserts");
-static_assert(sizeof(PublicView) == 8932,
+static_assert(sizeof(PublicView) == 8988,
               "PublicView size changed -- see the assert above. This literal is "
               "pinned deliberately: a RunActionMask that grows is a public-view "
               "schema change too, and must be reviewed like any other. It was "
               "6032 through v2; v3 tail-appended event_flags_hi (6036); v4 "
               "grew kMonsterCap 7 -> 23, which moves the monster block, the "
-              "roll arrays AND the mask channel's target grids (8932)");
+              "roll arrays AND the mask channel's target grids (8932); v6 grew "
+              "the two event caps 12 -> 20 for The Library's board (+48 fixed, "
+              "+8 mask -> 8988)");
 static_assert(offsetof(PublicView, action_mask) == kPublicViewFixedBytes,
               "the fixed part must end exactly where kPublicViewFixedBytes "
               "says. A TAIL APPEND may never move the mask channel; a "

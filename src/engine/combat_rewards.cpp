@@ -90,6 +90,43 @@ CardId draw_from_pool(RngStream& card_rng, RewardCardRarity rarity) noexcept {
     }
 }
 
+// addPotionToRewards' chance computation (AbstractRoom.java:580-599). The
+// escape clause guards only the `instanceof MonsterRoom` branch (plain +
+// boss), not the elite or event arms (:582-592).
+[[nodiscard]] int potion_drop_chance(const RunState& rs, RoomType room,
+                                     bool monsters_escaped,
+                                     uint8_t items_assembled) noexcept {
+    int chance = 0;
+    if (room == RoomType::Elite || room == RoomType::Event ||
+        ((room == RoomType::Monster || room == RoomType::Boss) &&
+         !monsters_escaped)) {
+        chance = kBasePotionDropChance + rs.blizzard_potion_mod;
+    }
+    if (run_has_relic(rs, RelicId::WHITE_BEAST_STATUE)) {
+        chance = 100;
+    }
+    if (items_assembled >= 4) {
+        chance = 0;
+    }
+    return chance;
+}
+
+// addPotionToRewards' roll + ratchet (AbstractRoom.java:601-607): one
+// potionRng chance draw, the identity draws on a hit, the +/-10 blizzard step
+// either way. Returns NONE on a miss.
+[[nodiscard]] PotionId roll_potion_drop(RunState& rs, int chance) noexcept {
+    if (static_cast<int>(random(rs.potion_rng, 0, 99)) < chance) {
+        const PotionId id = return_random_potion(rs.potion_rng,
+                                                 /*limited=*/false);
+        rs.blizzard_potion_mod = static_cast<int16_t>(
+            rs.blizzard_potion_mod - kBlizzardPotionModStep);
+        return id;
+    }
+    rs.blizzard_potion_mod = static_cast<int16_t>(rs.blizzard_potion_mod +
+                                                  kBlizzardPotionModStep);
+    return PotionId::NONE;
+}
+
 // AbstractDungeon.getRewardCards (AbstractDungeon.java:1423-1479), one CARD
 // reward item. Adds nothing when the relic-modified count is <= 0
 // (addCardToRewards only adds a non-empty RewardItem, AbstractRoom.java:573-578).
@@ -126,10 +163,12 @@ void roll_card_reward_item(RunState& rs, RoomType room,
     for (int i = 0; i < num; ++i) {
         // rollRarity: cardRng.random(99) + cardBlizzRandomizer
         // (AbstractDungeon.java:1597-1603; trap 13: ALWAYS cardRng), against
-        // the ROOM's thresholds.
+        // the ROOM's thresholds WITH the alternation pass (Nloth's Gift x3 on
+        // the rare threshold -- live since S2.32 made the relic obtainable).
         const int roll = static_cast<int>(random(rs.card_rng, 99)) +
                          static_cast<int>(rs.card_blizz_randomizer);
-        const RewardCardRarity rarity = reward_card_rarity(roll, room);
+        const RewardCardRarity rarity =
+            reward_card_rarity_with_relics(rs, roll, room);
 
         // The pity switch (AbstractDungeon.java:1435-1451): RARE resets to +5,
         // COMMON steps -1 with a -40 floor, UNCOMMON leaves it. Note the boss
@@ -197,6 +236,46 @@ void roll_card_reward_item(RunState& rs, RoomType room,
 
 CardId draw_card_from_pool(RngStream& rng, RewardCardRarity rarity) noexcept {
     return draw_from_pool(rng, rarity);
+}
+
+RewardCardRarity reward_card_rarity_with_relics(const RunState& rs, int roll,
+                                                RoomType room) noexcept {
+    if (room == RoomType::Boss) {
+        return RewardCardRarity::RARE;  // MonsterRoomBoss.java:40-42, no pass
+    }
+    // alterCardRarityProbabilities (AbstractRoom.java:179-186): a fan-out over
+    // the relic LIST, so each held Nloth's Gift multiplies again -- ordinary
+    // acquisition can hold one, but the fan-out shape is the spec. The
+    // uncommon loop has no binder in scope (changeUncommonCardRewardChance has
+    // no override among registered relics), so the base value stands.
+    int rare = room == RoomType::Elite ? kEliteRareCardChance
+                                       : kBaseRareCardChance;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::NLOTHS_GIFT)) {
+            rare *= 3;  // NlothsGift.changeRareCardRewardChance (:26-29)
+        }
+    }
+    const int uncommon = room == RoomType::Elite ? kEliteUncommonCardChance
+                                                 : kBaseUncommonCardChance;
+    if (roll < rare) {
+        return RewardCardRarity::RARE;
+    }
+    if (roll < rare + uncommon) {
+        return RewardCardRarity::UNCOMMON;
+    }
+    return RewardCardRarity::COMMON;
+}
+
+void roll_event_potion_drop_unopened(RunState& rs,
+                                     uint8_t items_assembled) noexcept {
+    // The Colosseum Slavers fight's battle-over tail: the drop rolls exactly
+    // as an opened screen's would (EventRoom arm), and the item -- when one is
+    // rolled -- is the object reopen()'s rewards.clear() discards. Stream
+    // movement and the blizzard ratchet are the state that survives.
+    (void)roll_potion_drop(
+        rs, potion_drop_chance(rs, RoomType::Event, /*monsters_escaped=*/false,
+                               items_assembled));
 }
 
 CardId draw_colorless_card_from_pool(RngStream& card_rng,
@@ -341,34 +420,15 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
     // White Beast Statue forces 100 (:594-596); >= 4 items already assembled
     // forces 0 (:597-599 -- unreachable in S1 without the key item, kept
     // faithful). The roll is UNCONDITIONAL and the +/-10 ratchet moves either
-    // way (:601-607).
+    // way (:601-607). The chance/roll pair is shared with the
+    // rewardAllowed=false Colosseum path (roll_event_potion_drop_unopened).
     {
-        int chance = 0;
-        if (room == RoomType::Elite || room == RoomType::Event ||
-            ((room == RoomType::Monster || room == RoomType::Boss) &&
-             !monsters_escaped)) {
-            // The escape clause guards only the `instanceof MonsterRoom`
-            // branch (plain + boss), not the elite one (:582-589).
-            chance = kBasePotionDropChance + rs.blizzard_potion_mod;
-        }
-        if (run_has_relic(rs, RelicId::WHITE_BEAST_STATUE)) {
-            chance = 100;
-        }
-        if (out.count >= 4) {
-            chance = 0;
-        }
-        if (static_cast<int>(random(rs.potion_rng, 0, 99)) < chance) {
+        const PotionId dropped = roll_potion_drop(
+            rs, potion_drop_chance(rs, room, monsters_escaped, out.count));
+        if (dropped != PotionId::NONE) {
             RunRewardItem& potion_item = push_item(out);
             potion_item.kind = static_cast<uint8_t>(RewardItemKind::POTION);
-            potion_item.id = static_cast<uint16_t>(
-                return_random_potion(rs.potion_rng, /*limited=*/false));
-            rs.blizzard_potion_mod =
-                static_cast<int16_t>(rs.blizzard_potion_mod -
-                                     kBlizzardPotionModStep);
-        } else {
-            rs.blizzard_potion_mod =
-                static_cast<int16_t>(rs.blizzard_potion_mod +
-                                     kBlizzardPotionModStep);
+            potion_item.id = static_cast<uint16_t>(dropped);
         }
     }
 

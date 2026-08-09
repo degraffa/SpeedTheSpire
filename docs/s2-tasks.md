@@ -70,7 +70,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| Gremlin move-99 escape (`EscapeAction` body + `deathReact`/`escapeNext` trigger) | B3.16 (stage-b table: "UNASSIGNED — Act-2 owner") | S2.23 | **DISCHARGED by S2.23 (2026-08-07) — as a FINDING on one half and a third PRODUCER on the other; re-derived, not inherited.** (a) The `EscapeAction` BODY was in fact already landed in Act 1, by S1's Looter, as `Opcode::ESCAPE` (40) + `kMonsterFlagEscaped` (bit 24); S2.23 adds a THIRD producer of it, `GremlinLeader.die()` (GremlinLeader.java:224-241), through the new `MonsterDieAfterFn` slot — one queued ESCAPE per non-dying record, the leader excluding ITSELF only because `super.die()` ran first. That is the escape the Gremlin Leader's minions actually experience. (b) The `deathReact`/`escapeNext` TRIGGER — and therefore gremlin move 99 — remains **UNREACHABLE IN EVERY ACT** and stays unmodelled. Evidence, from `grep -rn "deathReact()\|escapeNext()\|new EscapeAction" com/` with each hit read: `escapeNext()` has NO caller anywhere in the tree; the only `deathReact()` call is `BanditBear.java:131`, whose group is Bandits (BanditPointy/BanditLeader/BanditBear, MonsterHelper.java:513-515) and contains no gremlin; the leader's fan-out queues `new EscapeAction(m)` DIRECTLY and never enters `case 99` or telegraphs `Intent.ESCAPE`. **The `deathReact` obligation is RE-POINTED, not closed:** it is live for `BanditLeader` (:82) and `BanditPointy` (:70) in the Act-2 "Masked Bandits" event combat (encounters.yaml id 41), and its owner is the **S2.31/S2.32 event-combat owner**, not this batch. Consequence recorded at the code: `BLOCK_RANDOM_MONSTER`'s valid-list filter reads the TELEGRAPHED intent and `isDying`, never the escaped flag (GainBlockRandomMonsterAction.java:26-38), so a leader-fan-out escapee is still a legal block recipient — in the engine AND in the game. Checked and deliberately left exact rather than "improved" into `monster_dead_or_escaped`; pinned by `CityElites.AnEscapedGremlinNeverTelegraphsEscapeIntent`. Wording amended in place at `monster_gremlin.hpp` note (1) and `combat_state.hpp`'s `kMonsterFlagEscaped` comment, both of which said "unreachable in Act 1". The stage-b row (docs/stage-b-tasks.md) is marked DISCHARGED in the same commit and points here |
+| Gremlin move-99 escape (`EscapeAction` body + `deathReact`/`escapeNext` trigger) | B3.16 (stage-b table: "UNASSIGNED — Act-2 owner") | S2.23 | **DISCHARGED by S2.23 (2026-08-07) — as a FINDING on one half and a third PRODUCER on the other; re-derived, not inherited.** (a) The `EscapeAction` BODY was in fact already landed in Act 1, by S1's Looter, as `Opcode::ESCAPE` (40) + `kMonsterFlagEscaped` (bit 24); S2.23 adds a THIRD producer of it, `GremlinLeader.die()` (GremlinLeader.java:224-241), through the new `MonsterDieAfterFn` slot — one queued ESCAPE per non-dying record, the leader excluding ITSELF only because `super.die()` ran first. That is the escape the Gremlin Leader's minions actually experience. (b) The `deathReact`/`escapeNext` TRIGGER — and therefore gremlin move 99 — remains **UNREACHABLE IN EVERY ACT** and stays unmodelled. Evidence, from `grep -rn "deathReact()\|escapeNext()\|new EscapeAction" com/` with each hit read: `escapeNext()` has NO caller anywhere in the tree; the only `deathReact()` call is `BanditBear.java:131`, whose group is Bandits (BanditPointy/BanditLeader/BanditBear, MonsterHelper.java:513-515) and contains no gremlin; the leader's fan-out queues `new EscapeAction(m)` DIRECTLY and never enters `case 99` or telegraphs `Intent.ESCAPE`. **The `deathReact` obligation is RE-POINTED, not closed:** it is live for `BanditLeader` (:82) and `BanditPointy` (:70) in the Act-2 "Masked Bandits" event combat (encounters.yaml id 41), and its owner is the **S2.31/S2.32 event-combat owner**, not this batch. Consequence recorded at the code: `BLOCK_RANDOM_MONSTER`'s valid-list filter reads the TELEGRAPHED intent and `isDying`, never the escaped flag (GainBlockRandomMonsterAction.java:26-38), so a leader-fan-out escapee is still a legal block recipient — in the engine AND in the game. Checked and deliberately left exact rather than "improved" into `monster_dead_or_escaped`; pinned by `CityElites.AnEscapedGremlinNeverTelegraphsEscapeIntent`. Wording amended in place at `monster_gremlin.hpp` note (1) and `combat_state.hpp`'s `kMonsterFlagEscaped` comment, both of which said "unreachable in Act 1". The stage-b row (docs/stage-b-tasks.md) is marked DISCHARGED in the same commit and points here. **THE RE-POINTED HALF IS DISCHARGED by S2.32 (2026-08-09) — a verified negative at the only live trigger.** BanditBear.die() (BanditBear.java:127-133) is the tree's ONE deathReact caller; both overrides it can reach (BanditLeader.java:82-86, BanditPointy.java:70-74) queue ONE TalkAction each behind `!isDeadOrEscaped()` and nothing else, and the base body is empty (AbstractMonster.java:912-913) — pure presentation, so the Bear registers NO die fn on either edge (explicit nullptrs at monster_dispatch.cpp) and gremlin move 99 stays unreachable in every act. Pinned by `CityEventsII.BearDeathReactIsPresentationOnly`; the stage-b twin row carries the same discharge |
 | `JawWorm(..., true)` constructor variant semantics | TE.2 scope pass | S2.26 | **DISCHARGED — the boolean changes EXACTLY TWO things and NEITHER is a stat** (2026-08-09, S2.26). `JawWorm.java:71-110` read in full: the 2-arg ctor delegates with `hard = false` and the 3-arg one has exactly one caller in the game, MonsterHelper's Jaw Worm Horde, which builds three worms with `true` (MonsterHelper.java:549-550). It sets (a) `firstMove = false` (:77-79), which suppresses the forced opening CHOMP so the opening telegraph runs the full getMove num-tree against an EMPTY move history — and the DRAW COUNT is unchanged, because every arm's history predicate is false on an empty history, so no tiebreak `randomBoolean` is reached and the opening still costs exactly one `random(99)`; and (b) a non-empty `usePreBattleAction` (:112-118), `ApplyPowerAction` Strength(bellowStr) THEN `GainBlockAction`(bellowBlock) in that addToBottom order — +5 / 9 at A20, the same two numbers in the same order as the BELLOW move's own program. **Every `setHp` range and every tier column sits OUTSIDE the hardMode guard (:81-104)**, so the id-1 row's columns are trusted unchanged for both variants, which is exactly what this row asked. Modelled with NO new `MonsterId` and NO schema change (the Lagavulin awake-init precedent): `jaw_worm_init_hard` + a `pad0` latch + an encounter-key branch in `run_advance.cpp`; the registered pre-battle fn is a no-op without the latch, so the Exordium worm and its Stage-A fixtures are byte-identical. Pinned by `BeyondNormalsII.OrdinaryJawWormIsUnchangedByTheHardModeAddition`, `HardJawWormSpendsTheSameDrawsAndReadsTheRoll`, `HardJawWormOpensWithAnyOfTheThreeMoves`, `HardJawWormPreBattleGivesStrengthThenBlock` and `JawWormHordeSpawnsThreeHardWorms` |
 | Rest-site Recall option surface at Acts 2–3 (`isFinalActAvailable`, ruby key) | TE.2 scope pass (s2-design §4.5) | S2.13 | **DISCHARGED — YES, present; already modelled; zero engine work** (2026-08-07, S2.13). `CampfireUI.initializeButtons` (CampfireUI.java:94-96, read in full) appends the `RecallOption` under `Settings.isFinalActAvailable && !Settings.hasRubyKey` and **no act test whatsoever** — the only `id.equals` in that file is a flavour-text branch at :258 — so the row's real scope is *every* rest site in *every* act, Act 1 included, and this row's "Act-2/3" framing was wrong about the scope while right about the consequence. `Settings.isFinalActAvailable` (Settings.java:642) is profile state, constant for a run. The append lands **after** the relic veto sweep and **before** the `cannotProceed` auto-complete, so it can never be vetoed and a boss-relic-locked campfire stays open while the key is on offer. All of it has been live since S1 — `RestOptionKind::RECALL` (`rest_sites.hpp`), `kFinalActAvailable`, the post-sweep append (`rest_sites.cpp:193-205`) — and the grant is **not** "stubbed to S3": the RECALL arm sets `keys \|= kKeyRuby` (`CampfireRecallEffect.java:39-53` → `ObtainKeyEffect`). What is still S3 is only what the key is *for*. Pinned by `RestMenu.RecallIsOfferedInEveryActAndIsNeverVetoed`; s2-design §4.5 carries the withdrawal |
 | Translator's `event_flags` FIRED derivation is act-local | S2.13 | S2.43 | The translator reconstructs "fired" as "initially in the list and now absent" (`translate.cpp`, the `eventList`/`shrineList` blocks), which is complete only while a list is never refilled. From Act 2 on it is not: `dungeonTransitionSetup` clears both (AbstractDungeon.java:2576-2577) and the constructor rebuilds them (:291, :293), so an Act-2 dump **cannot witness an Act-1 event or shrine fire** while the simulator's `event_flags` rightly still carries it — a differ false-RED on the first Act-2/3 differential capture that draws a shrine. The one-time specials are unaffected (carried by identity, never rebuilt), and so is all of Act 1, which is why nothing is red today. Closing it needs cross-record accumulation over a capture that starts at floor 1 — the capture campaign's call; the alternative is a narrow differ recognizer in the `b14` RACE mould. Decide before the first Act-2 shrine capture is scored |
@@ -1471,11 +1471,125 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   **Deps:** S2.02, S2.13, S2.03 (payout rows) **Acceptance:** per-event
   option/gate/A15 audit against the source read in full; payout rows
   (relics/cards/curses) acquisition-tested; six presets green.
-- **S2.32** `[ ]` ∥ City events II: The Library, The Mausoleum, Vampires,
+- **S2.32** `[x]` ∥ City events II: The Library, The Mausoleum, Vampires,
   Colosseum + Masked Bandits (combat embeds), Knowing Skull, The Joust,
   N'loth, Designer, Duplicator (act-gated one-timer bodies).
   **Deps:** S2.02, S2.13, S2.01 (event encounter groups) **Acceptance:**
   as S2.31, plus combat-embed flow tests (two-fight Colosseum sequence).
+  **Log:** 2026-08-09 — landed. Ten bodies (five TheCity eventList rows +
+  five act-gated one-timers), each Java file read in full; all ten
+  `implemented: true` with options/a15 metadata in events.yaml, dispatch via
+  the generated macro (`events/city_events_ii.cpp`, `events/city_one_timers.cpp`).
+  **Ids spent:** `MonsterId` **45–47** (BanditPointy game_id "BanditChild",
+  BanditLeader, BanditBear — claimed in stage-b "S2 Wave-3 allocations" out of
+  the unissued 45–48; **48 stays unissued**). No new PowerId/opcode/intent/
+  RunPhase/MoveCat: the trio is DAMAGE/BLOCK/APPLY_POWER + SET_MOVE chains
+  (zero lifetime ai_rng draws past init — the Torch Head shape; the Leader's
+  A17 `lastTwoMoves(1)` re-slash and the Bear's 2→3→1→3 alternation are
+  queue-time native), and the Bear's negative-Dexterity BEAR_HUG rides the
+  existing `negative_stat_flip` Artifact predicate. `kMonstersCount` 59→62.
+  **The Colosseum is the reopen seam, and it is ONE event by proof:**
+  `grep -rn "public void reopen" com/megacrit/cardcrawl/events/` has exactly
+  two hits (the empty base + Colosseum.java:100-110), and Colosseum.java:55 is
+  the game's only `rewardAllowed` writer. finish_combat_after_action's
+  survivor path (victory, Smoke Bomb, mug alike) asks `event_combat_reopens`
+  — event kept alive across the Slavers fight, screen != LEAVE — and
+  `event_combat_reopen` replicates the battle-over tail the game runs with NO
+  screen: dropReward (EMPTY for an EventRoom, AbstractRoom.java:454-455),
+  addPotionToRewards' chance roll + blizzard ratchet with the rolled item
+  discarded (`roll_event_potion_drop_unopened`, factored out of
+  assemble_combat_rewards' block (3) so the two cannot drift), then reopen's
+  preBattlePrep: ONE unconditional shuffleRng.randomLong
+  (drawPile.initializeDeck) that the Nobs fight inherits through
+  preserve_floor_streams, the atPreBattle relic pass against the folded-back
+  mirror, and rewards.clear(). Fight 2 pre-stocks RARE + UNCOMMON relic pops
+  + 100 gold, sets eliteTrigger (the Dead Adventurer precedent), clears
+  rc.event (reopen is a no-op at LEAVE) and takes the ordinary event-combat
+  reward flow. Pinned by the Colosseum suite incl. the Smoke Bomb reopen.
+  **Masked Bandits' one recorded deviation is COUNTER-ONLY:** the event ctor
+  installs the encounter at ENTRY (MaskedBandits.java:43) so the game draws
+  the trio's three monster_hp_rng ctor rolls at the dialog, the sim at the
+  FIGHT button — same stream, same counter start, identical values, and
+  nothing else draws monster_hp_rng on an event floor, so only the PAY path's
+  end-of-floor counter differs (floor reseed erases it). Recorded at the body
+  head for S2.43's differ. stealGold is unseeded-MathUtils VFX + loseGold(all).
+  **deathReact — the re-pointed obligation — discharged as a verified
+  negative** (see the deferred-obligations row above; pinned by
+  `CityEventsII.BearDeathReactIsPresentationOnly`).
+  **PUBLIC_VIEW_VERSION 5→6 (breaking, the v4 shape):** The Library's read is
+  a twenty-card one-pick board (TheLibrary.java:66-91), so `kEventOptionCap`
+  and `kEventBoardCap` went 12→20 — PvEvent.board sits mid-record and
+  `can_choose_event_option` is embedded in the mask channel, 8932→8988 bytes;
+  audit version log + training-contract §1 updated, `twins_v1.bin`
+  regenerated by its generator. **Match and Keep got its own
+  `kMatchBoardSize` (12)** so the cap's spare slots can never enter its deal,
+  menu, pick bound, or the resampler's hidden-slot permutation — and the
+  committed 50-seed oracle corpus is what CAUGHT the one build where M&K
+  still shuffled over the widened cap (STS71011 diverged at its floor-2
+  board; `OracleCorpusReplay.FiftySeedCorpusReplaysZeroDiff` is the control
+  working as designed, and it is green again — verified against a
+  base-commit build of the replay tool to prove the divergence was
+  branch-introduced, then fixed at the source).
+  **The Library rolls are getCard(rollRarity()), not getRewardCards:** per
+  attempt one `cardRng.random(99) + cardBlizzRandomizer` against the
+  EventRoom 3/37 thresholds WITH the alternation pass and NO blizzard
+  mutation, then one pool index; duplicates re-roll both. The alternation
+  pass is **N'loth's Gift's body, landed at the reward-rarity seam**:
+  `reward_card_rarity_with_relics` (rare ×3 per held gift, elite 10→30, boss
+  rooms exempt — MonsterRoomBoss.getCardRarity returns RARE without
+  thresholds), consumed by roll_card_reward_item AND the Library loop; the
+  relic row stays hook-free by design. **Red Mask's body landed native**
+  (`relic_native_red_mask`): per-slot player-sourced Weak 1 with
+  isSourceMonster=false — the Gremlin Mask boolean fanned over the group;
+  ApplyPowerAction's own dead-target drop is op_apply_power's liveness
+  refusal, so no filter was added.
+  **Knowing Skull:** damage FIRST (HP_LOSS, null owner — no Torii, Tungsten
+  Rod applies, Fairy/Lizard revives inside apply_event_damage), then the
+  bought cost ++es; Sozu short-circuits BEFORE getRandomPotion (no draw); a
+  full belt loses the potion but spends the draw; a lethal buy still grants
+  (the game keeps executing). Its CARD buy forced the colorless question:
+  **the live colorlessCardPool order is now real state**
+  (`RunController.colorless_order`, HIDDEN in byte_class; init at run_begin +
+  act crossing = the game's own initializeCardPools reset; shared
+  `event_draw_colorless_uncommon` replaces shrines.cpp's local-copy shuffle,
+  whose recorded deviation row in stage-b is DISCHARGED — first-draw bytes
+  unchanged, so no golden moved).
+  **Vampires:** ceil(maxHP*0.3f) clamped to maxHP-1, STARTER_STRIKE = exactly
+  Strike_R in the Ironclad scope removed BACK TO FRONT, five Bites through
+  the obtain door; the Blood Vial option exists only while held and costs
+  the vial instead; NO ascension branch in the file (the S2.03 flag
+  confirmed). **Mausoleum:** the miscRng boolean is drawn even at A15 (then
+  overwritten true); Writhe goes through the Big Fish Omamori order —
+  ShowCardAndObtainEffect's ctor spends the charge before the relic obtain.
+  **Joust:** both bets pay 50 at EXPLANATION; ownerWins =
+  miscRng.randomBoolean(0.3f) rolled ONE SCREEN LATER (the PRE_JOUST
+  continue); 250/100/0 payout matrix. scratch1 is masked in PublicView (the
+  second Dead-Adventurer-shaped parked realization; the Joust moved out of
+  the 0x0F group to 0x01). **Designer:** two ctor randomBoolean draws pick
+  wording AND mechanic; costs 40/60/90/3 → 50/75/110/5 at A15; the option
+  gates read the UNBOTTLED WHOLE-DECK count (curses included) while the
+  grids filter to purgeable-unbottled — reproduced, with a DEFENSIVE
+  DEVIATION where the game would open a mandatory empty grid and soft-lock
+  (gold spent, dialog completes; noted at each arm). The two-pick transform
+  is the new `EventGridKind::TRANSFORM_PAIR_SECOND` (legality =
+  TRANSFORMABLE minus scratch3's first pick); both randomLong shuffles are
+  drawn even over an empty upgradable list, exactly as Collections.shuffle
+  is. **Duplicator:** the new `EventGridKind::DUPLICATE` — the WHOLE master
+  deck, no purge filter, no bottle exclusion; the copy is
+  makeStatEquivalentCopy (upgrade count kept, bottle flags cleared) through
+  the ordinary door, so a copied curse meets Omamori.
+  **Tests retired/reshaped as the S2.13 Log ordered:**
+  `ActOneUnreachableSpecialsAreExactlyTheUnimplementedOnes` →
+  `EverySpecialBodyIsLandedExceptTheSecretPortalPin`;
+  `AnActTwoQuestionMarkRoomSelectsACityRowAndParks` now checks dispatch
+  against the registry's implemented column; the FuzzGuard seed-116 pin
+  widened to "clean end at a named reason" (the ALWAYS_EVENT trajectory now
+  dies fighting in Act 2 instead of parking); the S2 relic inertness test
+  names Red Mask's binding. 44 new tests across
+  `city_events_ii_test.cpp` / `city_one_timers_test.cpp` (option/gate/A15
+  audits, payout acquisitions, the two-fight Colosseum flow, the bandit
+  move graphs, the deathReact pin, the colorless persistence pin). All six
+  presets green; `check_stale_counts` + `check_doc_links` clean.
 - **S2.33** `[ ]` ∥ Beyond events: Falling, Mind Bloom (boss re-fight +
   miscRng shuffle — trap 6), The Moai Head, Mysterious Sphere, Sensory
   Stone, Tomb of Lord Red Mask, Winding Halls; SecretPortal pinned per

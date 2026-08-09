@@ -267,11 +267,19 @@ TEST(ActEventLists, CityEventListIsThirteenRowsInJavaAddOrder) {
         EXPECT_TRUE(r::event_in_act(id, 2));
         EXPECT_FALSE(r::event_in_act(id, 1));
         EXPECT_FALSE(r::event_in_act(id, 3));
-        // Identity rows: native metadata, no linked body yet (S2.31/S2.32).
+        // Every row is native; whether it is IMPLEMENTED tracks which body
+        // batch has landed. S2.32's five (Colosseum, Masked Bandits, The
+        // Library, The Mausoleum, Vampires) have bodies; S2.31's eight are
+        // identity rows until their batch lands. The dispatch table is pinned
+        // against the same column, so the two cannot drift.
         EXPECT_TRUE(def->native) << kCityEventList[i];
-        EXPECT_FALSE(def->implemented) << kCityEventList[i];
-        EXPECT_EQ(def->screen_count, 0) << kCityEventList[i];
-        EXPECT_EQ(def->a15_change_count, 0) << kCityEventList[i];
+        const bool s232_row = id == r::EventId::COLOSSEUM ||
+                              id == r::EventId::MASKED_BANDITS ||
+                              id == r::EventId::THE_LIBRARY ||
+                              id == r::EventId::THE_MAUSOLEUM ||
+                              id == r::EventId::VAMPIRES;
+        EXPECT_EQ(def->implemented, s232_row) << kCityEventList[i];
+        EXPECT_EQ(def->screen_count > 0, s232_row) << kCityEventList[i];
     }
 }
 
@@ -435,16 +443,18 @@ TEST(ActEventLists, SpecialOneTimeRowsCarryTheirGetShrineActGate) {
     EXPECT_EQ(specials, 14);
 }
 
-// The six rows B4.13 left unimplemented because no Act-1 draw can reach them
-// are exactly the rows whose act mask excludes Act 1. That equivalence is the
-// reason the S1 registry could leave them bodiless, so it is worth pinning
-// rather than re-deriving.
-TEST(ActEventLists, ActOneUnreachableSpecialsAreExactlyTheUnimplementedOnes) {
+// RETIRED CLAIM, replaced (the S2.13 Log said S2.3x would retire it): through
+// S1 the unimplemented specials were exactly the Act-1-unreachable ones.
+// S2.32 landed the five act-gated one-timer bodies, so the residue is now
+// pinned by name: every SPECIAL row is implemented EXCEPT SECRET_PORTAL,
+// whose body stays out behind the playtime pin (s2-design section 5 trap 5,
+// owner S2.33).
+TEST(ActEventLists, EverySpecialBodyIsLandedExceptTheSecretPortalPin) {
     for (const SpecialActGate& g : kSpecialActGates) {
         const r::EventDef* def = r::event_def(g.id);
         ASSERT_NE(def, nullptr);
-        const bool act_one = (g.act_mask & r::kEventActMaskExordium) != 0u;
-        EXPECT_EQ(def->implemented, act_one)
+        const bool expected_implemented = g.id != r::EventId::SECRET_PORTAL;
+        EXPECT_EQ(def->implemented, expected_implemented)
             << r::event_game_id(g.id) << ": " << g.why;
     }
 }

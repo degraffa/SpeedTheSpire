@@ -1341,13 +1341,21 @@ TEST(FuzzGuard, Seed116AlwaysEventCrossesIntoActTwoAndEndsCleanly) {
     EXPECT_NE(r.end_reason, EndReason::NO_LEGAL_MOVES)
         << "the regression this case is named for: an empty mask in a "
            "non-terminal phase";
-    EXPECT_EQ(r.end_reason, EndReason::ROOM_UNIMPLEMENTED)
-        << "the boss chest's proceed now opens Act 2, whose room content is "
-           "S2.2x's -- so the run parks there rather than ending";
-    EXPECT_EQ(max_act, 2u) << "the act transition really ran";
-    EXPECT_EQ(cov.deaths, 0u) << "parking is not a death";
+    // WHERE THE TRAJECTORY ENDS MOVED AGAIN AT S2.32: the Act-2 ?-room bodies
+    // this policy steers into are landing batch by batch (S2.32's ten here,
+    // S2.31's eight still parking), so the specific terminal is content-
+    // dependent -- today the run fights on into Act 2 and DIES there rather
+    // than parking on the first bodiless room. The durable property stays
+    // exactly what the case is named for: a clean end at a NAMED reason with
+    // a legal move offered at every non-terminal step, having really crossed
+    // the act boundary.
+    EXPECT_TRUE(r.end_reason == EndReason::ROOM_UNIMPLEMENTED ||
+                r.end_reason == EndReason::RUN_OVER)
+        << "expected a park on unlanded content or a real terminal, got "
+        << static_cast<int>(r.end_reason);
+    EXPECT_GE(max_act, 2u) << "the act transition really ran";
     EXPECT_EQ(cov.victories, 0u)
-        << "and it is not a win either -- the terminal is the Act-3 boss";
+        << "not a win -- the terminal is the Act-3 boss";
 }
 
 TEST(FuzzDriver, RejectsZeroWorkMalformedAndPartialCaseCli) {
