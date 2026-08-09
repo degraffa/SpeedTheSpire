@@ -73,11 +73,13 @@
 //     run_is_victory() true). It opens no reward screen and no chest
 //     (AbstractRoom.java:327), so the gold add at :286-297 is the last thing
 //     that happens.
-// What is only PARTLY live in Acts 2-3, because its content has not landed:
-//   * ROOM CONTENT. Act-2/3 monsters, elites and bosses are S2.2x, and the
-//     per-act event/shrine lists are S2.13 -- so an Act-2/3 combat or ? room
-//     parks at ROOM_UNIMPLEMENTED. The run-layer machinery around them (map,
-//     lists, streams, floors, rewards, rest/shop/treasure) is act-general.
+// ROOM CONTENT is fully live in Acts 2-3 as of the S2.2x/S2.3x waves: the
+// Act-2/3 monsters, elites and bosses landed with S2.21-S2.28, the per-act
+// event/shrine lists with S2.13 and the event bodies with S2.31-S2.33, so no
+// combat or ? room parks at ROOM_UNIMPLEMENTED anymore (the S2.41 soak
+// measured that census cell at 0). The run-layer machinery around them (map,
+// lists, streams, floors, rewards, rest/shop/treasure) was act-general all
+// along.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping

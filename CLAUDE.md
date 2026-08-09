@@ -100,8 +100,21 @@ grep-enforced omniscient boundary. **The consumer-facing contract is
 headers, before writing training-repo code against the engine; gate evidence in
 [docs/verification/gt0-info-layer.md](docs/verification/gt0-info-layer.md).
 Open next: the **GT1** track (T1.x is unblocked on the sim side — the training
-repo itself is T1.1's deliverable), and **S2 wave 1** in flight under
+repo itself is T1.1's deliverable), and the S2 verification wave under
 [docs/s2-tasks.md](docs/s2-tasks.md).
+
+**S2-G1 complete** (tag `s2-g1-content`, 2026-08-09): Acts 2–3 rules are
+content-complete — all S2.0x registry waves, the S2.1x run layer (boss chest,
+act transitions, per-act event pools), every S2.2x monster/elite/boss batch,
+the S2.3x event bodies, and S2.34's payout relic/card bodies. The gate soak
+(55M actions, three-act A20, replay-twice) ran clean with zero
+nondeterminism and zero unimplemented parks; per-act reach is witnessed in
+the soak report rather than assumed, and `victories = 0` there is a measured
+*policy* ceiling (E0 heuristics lose ~×30 per act), not a content gap —
+depth verification belongs to the oracle driver (S2.42/S2.43). Open next in
+that ledger: **S2.43** oracle campaigns (needs the boss-relic storage row
+discharged first), **S2.44** tier-4, **S2.45** throughput re-baseline, then
+gate **S2-G2**, which unblocks training Phase T4.
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
 in [docs/stage-b-tasks.md](docs/stage-b-tasks.md) and

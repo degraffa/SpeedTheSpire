@@ -1930,14 +1930,41 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   Stage-A fixtures byte-identical; check_stale_counts + check_doc_links
   clean.
 
-### S2-G1 `[ ]` **Gate: S2 rules complete** — tag `s2-g1-content`
+### S2-G1 `[x]` **Gate: S2 rules complete** — tag `s2-g1-content`
 **Deps:** all S2.0x, S2.1x, S2.2x, S2.3x
 Checked literally per design §6 S2-G1: registry closure vs the §2
 inventory; 100 % tier-2 per the manifest; every §5 trap named-tested;
 a20 rows IMPLEMENTED; ≥ 10M-action three-act fuzz soak clean; six presets
 green; Stage-A fixtures byte-identical. Then: update CLAUDE.md "Current
 state".
-**Log:** —
+**Log:** 2026-08-09 — TAGGED, all five items checked literally on the
+final master (S2.34 + S2.41 + the A5/A12 status flips landed). (1)–(2)
+Registry closure and 100 % tier-2 are enforced inside the green suite
+(manifest + codegen-determinism tests; 2569 tests). (3) a20.yaml: 19 rows
+IMPLEMENTED, one N/A-FOR-S1 (A16 shop prices — shops outside S1 *and* S2
+scope, reason in-row; not in the gate's named set). The gate sweep itself
+flipped A5 and A12, whose S2.12-landed shares had deferred the one-row
+edit to successors that never carried it. (4) Gate soak
+(`s2g1-gate_20260809_144041`, release + 1 % asan sample, S2.41 tooling):
+600,000 cases (24,000 seeds × 5 policies × 5 reps, A20),
+**55,144,852 counted actions** (110.5M stepped incl. replay-twice),
+**failures 0** — zero nondeterminism, zero asserts, zero
+`room_unimplemented`, zero `no_legal_moves`/`livelock`/`no_progress`;
+per-act witness: Act 1 600,000 cases / 18,718 boss fights / 666 kills,
+Act 2 666 cases / 4 boss fights, Act 3 unentered. Read per S2.41's
+measured finding: the soak bar is BREADTH + DETERMINISM with per-act
+witnesses — `victories = 0` is a *policy* result (E0 heuristics lose
+~×30 per act; no practical soak volume witnesses a three-act win), and
+depth is the oracle driver's job (S2.42 §8, S2.43). The registry-row
+census reads 130/132 cards, 42/62 monsters, 146/150 relics, 33/33
+potions, 59/72 powers — the never-seen rows are exactly the deep-act and
+policy-shadowed ones, stated not inferred. (5) All six presets green at
+2569 on the final master; Stage-A 20 fixtures byte-identical (fixture
+hash suites green in every preset). Also in the gate commit: the stale
+`run_advance.hpp` "parks at ROOM_UNIMPLEMENTED" scope note rewritten to
+the landed truth (deferred from S2.41, which could not touch the engine
+while S2.34 held it). CLAUDE.md "Current state" updated. Soak artifacts
+uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
 
 ## Phase S2.4 — Verification campaigns + S2 exit
 
