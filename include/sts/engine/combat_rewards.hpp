@@ -92,15 +92,17 @@
 //     a mugged openCombat still calls setupItemReward
 //     (CombatRewardScreen.java:280-285); a smoked one never does (:286-288).
 //
-// COLORLESS IS UNREACHABLE FROM A COMBAT REWARD: the
+// COLORLESS IS UNREACHABLE FROM A *COMBAT* REWARD: the
 // combat reward pool is RED-only -- Ironclad.getCardPool calls only
-// CardLibrary.addRedCards (Ironclad.java:138-150; CardLibrary.java:1152-1161),
-// and the sole caller of AbstractDungeon.getColorlessRewardCards() is
+// CardLibrary.addRedCards (Ironclad.java:138-150; CardLibrary.java:1152-1161).
+// The sole caller of AbstractDungeon.getColorlessRewardCards() is
 // RewardItem(CardColor) (RewardItem.java:155), whose only constructor call site
-// is SensoryStone.java:121 -- an Act-3 event. (NeowReward's colorless options
-// use its OWN getColorlessRewardCards(boolean), NeowReward.java:309 -- a
-// different method on a different stream.) Colorless reaches an S1 player only
-// through the shop's two colorless slots and Neow.
+// is SensoryStone.java:121 -- the Act-3 Sensory Stone event, live since S2.33,
+// which is why roll_colorless_card_reward_item below exists. It is an EVENT
+// reward row, never a battle-over one: assemble_combat_rewards still never
+// emits colorless. (NeowReward's colorless options use its OWN
+// getColorlessRewardCards(boolean), NeowReward.java:309 -- a different method
+// on a different stream.)
 //
 // Deliberately NOT modelled here, each with the reason:
 //   * The EMERALD_KEY reward item -- the emerald-elite node flag itself is out
@@ -368,6 +370,30 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
 // into a RunState.
 [[nodiscard]] CardId draw_colorless_card_from_pool(
     RngStream& card_rng, RewardCardRarity rarity) noexcept;
+
+// Exordium.java:106 == TheCity.java:83 == TheBeyond.java:80 -- the
+// initializeLevelSpecificChances trio assigns the same value in every act.
+inline constexpr float kColorlessRareChance = 0.3f;
+
+// AbstractDungeon.getColorlessRewardCards (AbstractDungeon.java:1381-1421),
+// ONE RewardItem(CardColor.COLORLESS) row (RewardItem.java:152-158) -- i.e.
+// one Sensory Stone memory's card reward, rolled AT CONSTRUCTION exactly as
+// the Java rolls the cards in the RewardItem constructor. Per card:
+//   * rollRareOrUncommon(colorlessRareChance) (:1621-1626) -- ONE
+//     cardRng.randomBoolean(0.3f); there is NO random(99) + pity read here,
+//     unlike rollRarity.
+//   * a RARE result writes cardBlizzRandomizer = cardBlizzStartOffset
+//     (:1396) -- the colourless roll does not READ the red pity counter but a
+//     rare DOES RESET it, which shifts every later red reward rarity roll.
+//   * getColorlessCardFromPool via draw_colorless_card_from_pool above; the
+//     no-dupe loop (:1407-1412) redraws FROM THE SAME rarity, one cardRng
+//     draw per attempt, compared against everything already in this item.
+//   * NO upgrade pass: getColorlessRewardCards has no cardUpgradedChance
+//     block, so a colourless offer is never upgraded in any act.
+// numCards = 3 through every changeNumberOfCardsInReward (:1383-1386):
+// Question Card +1, Busted Crown -2, same overrides as the red roller.
+// Adds nothing when the relic-modified count is <= 0.
+void roll_colorless_card_reward_item(RunState& rs, RewardScreen& s) noexcept;
 
 // CombatRewardScreen.setupItemReward's UNCONDITIONAL card row
 // (CombatRewardScreen.java:72-96): every open() from a room that is not a

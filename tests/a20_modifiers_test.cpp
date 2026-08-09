@@ -574,7 +574,9 @@ TEST(A20S204, A13RecordsDoubleBossAndMindBloomCitations) {
     ASSERT_NE(it, rows.end());
     EXPECT_NE(it->provenance.find("MindBloom.java:73-77"), std::string::npos);
     EXPECT_NE(it->provenance.find("MonsterRoomBoss.java:27-36"), std::string::npos);
-    EXPECT_NE(it->notes.find("owned by S2.33"), std::string::npos);
+    // The Mind Bloom share flipped from "owned by S2.33" to LANDED when
+    // S2.33 delivered the event body; the note must keep the citation trail.
+    EXPECT_NE(it->notes.find("LANDED with S2.33"), std::string::npos);
     EXPECT_NE(it->notes.find("owned by S2.24"), std::string::npos);
     EXPECT_NE(it->notes.find("owned by S2.28"), std::string::npos);
 }

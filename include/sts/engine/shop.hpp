@@ -185,7 +185,9 @@ static_assert(sizeof(ShopSlot) == 8);
 // motion this file models (see the Courier rows in
 // tools/oracle_bridge/driver/wave2cap_capture_runbook.md).
 inline constexpr uint16_t kShopRestockedUnknownCard = 0xFFFF;
-inline constexpr float kColorlessRareChance = 0.3f;  // Exordium.java:106
+// kColorlessRareChance (Exordium.java:106) moved to combat_rewards.hpp
+// (included above) when Sensory Stone's colourless reward roll became its
+// second consumer (S2.33) -- one definition, one citation.
 
 enum class ShopScreenKind : uint8_t {
     NONE = 0,

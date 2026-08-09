@@ -586,47 +586,90 @@
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
 
 # TheBeyond.initializeEventList (TheBeyond.java:179-186) -- the Act-3 eventList,
-# 7 keys, in add() order. Identity + draw-gate metadata only, exactly as the
-# Act-2 block above; the bodies are S2.33's.
+# 7 keys, in add() order. Bodies landed by S2.33
+# (src/engine/events/beyond_events.cpp), each class re-read in full there.
 - id: 45
   name: FALLING
   game_id: "Falling"
-  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 0; Falling.ID (events/beyond/Falling.java:24) is \"Falling\"; no getEvent gate (AbstractDungeon.java:1944-1990 read in full); payouts Falling.java:52-90 (forced removal of a random Skill / Power / Attack)."
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 0; Falling.ID (events/beyond/Falling.java:24) is \"Falling\"; no getEvent gate (AbstractDungeon.java:1944-1990 read in full); payouts Falling.java:52-90 (forced removal of a random Skill / Power / Attack). Body (S2.33): setCards runs in the ctor -- one miscRng.random(size-1) per type PRESENT, attack/skill/power in that draw order (:56-64), over the master deck WITHOUT bottled cards (CardHelper.java:88-103); the choice screen lists skill/power/attack with absent types disabled, or one no-op button when all three are absent (:74-92); no ascension branch anywhere in the class."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+  options:
+    - [CONTINUE]
+    - [REMOVE_DRAWN_SKILL, REMOVE_DRAWN_POWER, REMOVE_DRAWN_ATTACK]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 46
   name: MIND_BLOOM
   game_id: "MindBloom"
-  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 1; MindBloom.ID (events/beyond/MindBloom.java:35) is \"MindBloom\"; no getEvent gate; combat-embedding (ProceedButton.java:115), MindBloom.java:66-81 shuffles {The Guardian, Hexaghost, Slime Boss} with new Random(miscRng.randomLong()), fights list.get(0), and rewards 50 gold (25 at A13+) plus a RARE pool relic; other branches MindBloom.java:50-126 (Mark of the Bloom, 2x Normality, full heal + Doubt)."
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 1; MindBloom.ID (events/beyond/MindBloom.java:35) is \"MindBloom\"; no getEvent gate; combat-embedding (ProceedButton.java:115), MindBloom.java:66-81 shuffles {The Guardian, Hexaghost, Slime Boss} with new Random(miscRng.randomLong()), fights list.get(0), and rewards 50 gold (25 at A13+ -- a20.yaml row 13's fixed-payout clause, NO miscRng draw) plus a RARE addRelicToRewards pool pop (AbstractRoom.java:541-543, returnRandomRelic NOT the screenless variant); other branches MindBloom.java:83-129 (I am Awake: upgrade every canUpgrade card then Mark of the Bloom; third option keyed on floorNum % 50 <= 40 -- 999 gold + 2x Normality, else full heal + Doubt). Body (S2.33): the re-fight is an EventRoom combat -- eliteTrigger false, room kind Event, so card rewards use base odds, not the boss RARE row, and no boss chest follows."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+  options:
+    - [FIGHT_RANDOM_ACT_ONE_BOSS, UPGRADE_ALL_AND_MARK_OF_THE_BLOOM, GOLD_999_AND_NORMALITY_OR_FULL_HEAL_AND_DOUBT_BY_FLOOR]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 47
   name: THE_MOAI_HEAD
   game_id: "The Moai Head"
-  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 2; MoaiHead.ID (events/beyond/MoaiHead.java:21) is \"The Moai Head\"; getEvent gate hasRelic(\"Golden Idol\") OR currentHealth / maxHealth <= 0.5f (AbstractDungeon.java:1960-1964, the skip test negated); payouts MoaiHead.java:35-74 (surrender Golden Idol for 333 gold -- MoaiHead.java:29, 69-74; or heal to full for max-HP loss, :61)."
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 2; MoaiHead.ID (events/beyond/MoaiHead.java:21) is \"The Moai Head\"; getEvent gate hasRelic(\"Golden Idol\") OR currentHealth / maxHealth <= 0.5f (AbstractDungeon.java:1960-1964, the skip test negated); payouts MoaiHead.java:35-74 (surrender Golden Idol for 333 gold -- MoaiHead.java:29, 69-74; or heal to full for max-HP loss, :61). Body (S2.33): hpAmt = MathUtils.round(maxHealth * (A15+ ? 0.18f : 0.125f)) frozen at entry (:35); the idol trade row is DISABLED without the idol (:37-41, the flag is literally !hasRelic); heal arm is maxHealth -= hpAmt, clamp, then heal(maxHealth) through the onPlayerHeal door (Mark of the Bloom zeroes it, the max-HP loss still lands)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [3], draw: "player.hasRelic(\"Golden Idol\") or currentHealth / maxHealth <= 0.5f (AbstractDungeon.java:1960-1964)"}
+  options:
+    - [FULL_HEAL_FOR_TIERED_MAX_HP_LOSS, GIVE_GOLDEN_IDOL_FOR_333_GOLD, LEAVE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: MAX_HP_LOSS_PERCENT, base: 0.125, a15: 0.18}
 - id: 48
   name: MYSTERIOUS_SPHERE
   game_id: "Mysterious Sphere"
-  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 3; MysteriousSphere.ID (events/beyond/MysteriousSphere.java:24) is \"Mysterious Sphere\"; no getEvent gate; combat-embedding (ProceedButton.java:115), MysteriousSphere.java:39 enters the fight and :80 pays a RARE pool relic on a win."
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 3; MysteriousSphere.ID (events/beyond/MysteriousSphere.java:24) is \"Mysterious Sphere\"; no getEvent gate; combat-embedding (ProceedButton.java:115), MysteriousSphere.java:39 enters the fight and :80 pays a RARE pool relic on a win. Body (S2.33): the CTOR builds the encounter (:39, getEncounter(\"2 Orb Walkers\") at event entry -- four monsterHpRng draws whichever way the dialog ends; the engine defers the fight path's construction to enter_event_combat and pays the leave path via burn_unspawned_ctor_rolls); the confirm press draws gold miscRng.random(45, 55) (:78, non-daily) then returnRandomScreenlessRelic(RARE) (:80 -- the SCREENLESS pop, unlike Mind Bloom); no ascension branch."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+  options:
+    - [OPEN_THE_SPHERE, LEAVE]
+    - [ENTER_EVENT_COMBAT]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 49
   name: SENSORY_STONE
   game_id: "SensoryStone"
-  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 4; SensoryStone.ID (events/beyond/SensoryStone.java:29) is \"SensoryStone\"; no getEvent gate; payouts SensoryStone.java:83-121 (1-3 colorless card rewards, each bought with HP)."
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 4; SensoryStone.ID (events/beyond/SensoryStone.java:29) is \"SensoryStone\"; no getEvent gate; payouts SensoryStone.java:83-121 (1-3 colorless card rewards, each bought with HP). Body (S2.33): every memory choice consumes ONE miscRng.randomLong (getRandomMemory :108-116 -- a cosmetic text shuffle whose DRAW is the state), then reward(n) constructs n RewardItem(COLORLESS) rows -- each a full getColorlessRewardCards roll on cardRng at construction (AbstractDungeon.java:1381-1421: rollRareOrUncommon(0.3f) per card, RARE resets cardBlizzRandomizer, no-dupe redraw, NO upgrade pass) -- and only THEN the 5/10 HP_LOSS lands (:83, :92), so a lethal memory still moved cardRng. The reward screen is the exit (room phase COMPLETE, the Lab/Wheel precedent)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+  options:
+    - [CONTINUE]
+    - [ONE_MEMORY_FREE, TWO_MEMORIES_FOR_5_HP, THREE_MEMORIES_FOR_10_HP]
+  a15: {changes: []}
 - id: 50
   name: TOMB_OF_LORD_RED_MASK
   game_id: "Tomb of Lord Red Mask"
-  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 5; TombRedMask.ID (events/beyond/TombRedMask.java:21) is \"Tomb of Lord Red Mask\"; no getEvent gate; payouts TombRedMask.java:34-56 (Red Mask for ALL the player's gold; the option is presented differently when Red Mask is already held, :34-38)."
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 5; TombRedMask.ID (events/beyond/TombRedMask.java:21) is \"Tomb of Lord Red Mask\"; no getEvent gate; payouts TombRedMask.java:34-56 (Red Mask for ALL the player's gold; the option is presented differently when Red Mask is already held, :34-38). Body (S2.33): WITH the mask the menu is [wear it -> +222 gold (:47-51), leave]; WITHOUT it it is [a DISABLED wear row (:37), buy for loseGold(player.gold) -- legal at 0 gold, no gate -- then spawnRelicAndObtain(Red Mask) (:52-57), leave]; leave calls openMap immediately (:58-63); no ascension branch."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+  options:
+    - [WEAR_RED_MASK_FOR_222_GOLD, BUY_RED_MASK_FOR_ALL_GOLD, LEAVE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 51
   name: WINDING_HALLS
   game_id: "Winding Halls"
-  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 6; WindingHalls.ID (events/beyond/WindingHalls.java:26) is \"Winding Halls\"; no getEvent gate; payouts WindingHalls.java:54-98 (Madness; or heal + Writhe; or max-HP loss)."
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 6; WindingHalls.ID (events/beyond/WindingHalls.java:26) is \"Winding Halls\"; no getEvent gate; payouts WindingHalls.java:54-98 (Madness; or heal + Writhe; or max-HP loss). Body (S2.33): three amounts frozen at entry from max HP (:47-54) -- hpAmt round(max * (A15+ ? 0.18 : 0.125)), healAmt round(max * (A15+ ? 0.2 : 0.25) -- A15 heals LESS), maxHPAmt round(max * 0.05) tier-free; arm 0 = DamageInfo(null, hpAmt) NORMAL then 2x Madness (:78-91); arm 1 = heal(healAmt) through the onPlayerHeal door then Writhe (:93-102); arm 2 = decreaseMaxHealth(maxHPAmt) (:104-112)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+  options:
+    - [CONTINUE]
+    - [MADNESS_X2_FOR_TIERED_DAMAGE, HEAL_TIERED_AND_WRITHE, LOSE_5_PERCENT_MAX_HP]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: DAMAGE_MAX_HP_PERCENT, base: 0.125, a15: 0.18}
+      - {field: HEAL_MAX_HP_PERCENT, base: 0.25, a15: 0.2}

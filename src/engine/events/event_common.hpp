@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cstdint>
 
+#include "../relics/relic_pickup.hpp"  // apply_on_player_heal_out_of_combat
 #include "sts/engine/event_framework.hpp"
 #include "sts/engine/relic_pools.hpp"
 #include "sts/engine/run_advance.hpp"
@@ -30,10 +31,24 @@
 namespace sts::engine::events {
 
 // AbstractCreature.heal: clamped at maxHealth, and a dying creature is skipped.
-// Magic Flower's onPlayerHeal is COMBAT-phase gated (MagicFlower.java:30-37),
-// so no relic modifies an event-room heal in S1.
+// The relics' onPlayerHeal pass runs INSIDE AbstractPlayer.heal
+// (AbstractCreature.java:386-421), so it applies to event-room heals too --
+// through S1 that was invisible (Magic Flower's branch is COMBAT-phase gated,
+// MagicFlower.java:30-37), but Mind Bloom's "I am Awake" branch grants Mark of
+// the Bloom (S2.33), whose onPlayerHeal is an unconditional `return 0`
+// (MarkOfTheBloom.java:25-29). Every event heal AFTER that grant -- Bonfire
+// Elementals, the Moai Head, Winding Halls, Mind Bloom's own heal branch, all
+// reachable in Act 3 -- must therefore hit the same suppressor the rest-site
+// heal hits, via the shared named predicate in relic_pickup.hpp. The
+// onNotBloodied cross is dispatch_relics_on_not_bloodied_out_of_combat, an
+// audited no-op out of combat (Red Skull's write is observationally inert --
+// relic_pickup.hpp), so it is not repeated here.
 inline void heal(RunState& rs, int amount) noexcept {
     if (amount <= 0 || rs.hp <= 0) {
+        return;
+    }
+    amount = apply_on_player_heal_out_of_combat(rs, amount);
+    if (amount <= 0) {
         return;
     }
     rs.hp = static_cast<int16_t>(std::min(static_cast<int>(rs.max_hp),

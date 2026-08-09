@@ -547,6 +547,11 @@ sts_add_test(exordium_events_ii_test)
 # with the getShrine gate evidence for the six the filter excludes.
 sts_add_test(shrines_test)
 sts_add_test(one_time_specials_test)
+# S2.33: the seven TheBeyond eventList bodies -- Mind Bloom's miscRng boss
+# shuffle + EventRoom boss re-fight (s2-design trap 6), Falling's bottled-blind
+# type draws, Mysterious Sphere's ctor-draw burn parity across both exits, and
+# Sensory Stone's colourless reward roll twin-replayed card by card.
+sts_add_test(beyond_events_test)
 
 # S2.02: the Act-2/Act-3 eventList rows and the per-act membership / draw-gate
 # metadata every events.yaml row now carries -- the two new lists in Java add()
