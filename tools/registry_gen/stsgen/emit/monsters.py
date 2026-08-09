@@ -134,10 +134,45 @@ def parse_monster(entry: dict, powers: dict[str, int],
             raise fail(f"{owner}: duplicate move name '{mname}'")
         seen_move_names.add(mname)
         mid = mv.get("move_id")
-        if not isinstance(mid, int) or isinstance(mid, bool) or mid < 1:
-            raise fail(f"{owner}: move {mname} 'move_id' must be an integer "
-                       f">= 1 (0 is the move_history empty-slot sentinel), "
-                       f"got {mid!r}")
+        # move_id is the GAME'S BYTE ID and >= 0 is the whole constraint.
+        #
+        # This check demanded >= 1 until S2.26, on the grounds that 0 is
+        # MonsterState.move_history's empty-slot sentinel (monster_dispatch.hpp:
+        # 29-31, where last_move_is is a bare `move_history[0] == move`). Then a
+        # monster with a 0 id arrived: WrithingMass.BIG_HIT (WrithingMass.java:48).
+        # The id is not negotiable -- monsters.yaml says move_id IS the game's
+        # byte id, and renumbering it to dodge a loader rule would make the row
+        # lie about the source -- so the rule was re-derived instead of worked
+        # around (conventions section 8: the prerequisite arrived, so amend rather
+        # than route around).
+        #
+        # WHAT THE SENTINEL ACTUALLY PROTECTS, and why 0 is admissible: an id-0
+        # move is indistinguishable from "no move decided yet" ONLY to a monster
+        # that reads its history while that history can still be empty. Whether
+        # that is possible is a per-monster property, not a per-id one, and it is
+        # checkable by reading the class's getMove -- which is what the Writhing
+        # Mass's monsters.yaml row does, arm by arm, to conclude the collision is
+        # unreachable there (its lastMove(0) sits behind a firstMove branch that
+        # returns unconditionally, and it never calls lastTwoMoves or
+        # lastMoveBefore at all).
+        #
+        # So this gate cannot decide the question and no longer pretends to. It
+        # rejects what is unconditionally wrong -- a non-integer, a bool, a
+        # NEGATIVE id (move ids are Java bytes used as array/switch keys and the
+        # engine stores them in a uint8_t, so a negative would silently wrap) --
+        # and leaves the 0-vs-empty-history reasoning to the row, where the
+        # evidence is. A negative id is still a hard error, and a generator test
+        # pins that.
+        if not isinstance(mid, int) or isinstance(mid, bool) or mid < 0:
+            raise fail(f"{owner}: move {mname} 'move_id' must be a non-negative "
+                       f"integer (the game's byte move id; 0 is admissible -- "
+                       f"WrithingMass.BIG_HIT is 0 -- but the row must argue "
+                       f"that its monster never reads move_history while it can "
+                       f"still be empty, since 0 is also the empty-slot "
+                       f"sentinel), got {mid!r}")
+        if mid > 255:
+            raise fail(f"{owner}: move {mname} 'move_id' {mid} does not fit the "
+                       f"uint8_t the engine stores move ids in")
         if mid in seen_move_ids:
             raise fail(f"{owner}: duplicate move_id {mid} ('{mname}' collides "
                        f"with '{seen_move_ids[mid]}') -- move ids are the "
@@ -328,7 +363,12 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("    TieredStat amount;")
     out.append("};\n")
     out.append("struct MonsterMove {")
-    out.append("    uint8_t move_id;     // the game's byte move id; never 0")
+    out.append("    uint8_t move_id;     // the game's byte move id. MAY BE 0 "
+               "(WrithingMass.BIG_HIT is),")
+    out.append("                         // which is ALSO move_history's "
+               "empty-slot sentinel -- see")
+    out.append("                         // the loader note in "
+               "emit/monsters.py.")
     out.append("    MonsterIntent intent;")
     out.append("    uint8_t effect_count;")
     out.append("    std::array<MonsterMoveEffect, kMaxMoveEffects> effects;  "

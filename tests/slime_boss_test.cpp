@@ -474,6 +474,18 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "Centurion.java -- no this.type assignment (ctor :55-79)"},
         {MonsterId::HEALER,             MonsterEnemyType::NORMAL,
          "Healer.java -- no this.type assignment (ctor :57-84)"},
+        {MonsterId::SPIRE_GROWTH,       MonsterEnemyType::NORMAL,
+         "SpireGrowth.java -- no this.type assignment (ctor :50-72)"},
+        {MonsterId::TRANSIENT,          MonsterEnemyType::NORMAL,
+         "Transient.java -- no this.type assignment (ctor :45-61). NORMAL "
+         "despite the 999 HP, which reads like a boss sheet: it is an ordinary "
+         "Act-3 strong-pool enemy, so SmokeBomb.canUse's BOSS scan must not veto "
+         "the potion against it and Pantograph must not see a boss fight"},
+        {MonsterId::MAW,                MonsterEnemyType::NORMAL,
+         "Maw.java -- no this.type assignment (ctor :62-82); 300 flat HP, and "
+         "still NORMAL"},
+        {MonsterId::WRITHING_MASS,      MonsterEnemyType::NORMAL,
+         "WrithingMass.java -- no this.type assignment (ctor :53-78)"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

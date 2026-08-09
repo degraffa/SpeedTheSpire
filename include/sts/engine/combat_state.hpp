@@ -720,6 +720,33 @@ inline constexpr uint32_t kMonsterFlagByrdFlying = 0x8000u;
 // which the init/roll split does not distinguish for free.
 inline constexpr uint32_t kMonsterFlagSphericSecondMove = 0x10000u;
 
+// Maw `roared` (Maw.java:58,90-95,119-122). SET == the ROAR has RESOLVED, which
+// is what releases getMove from forcing it. Note the Java sets the field in
+// takeTurn (:94), NOT in getMove, so the opening telegraph is always ROAR and
+// the flag is still clear while the roar's own turn is being decided.
+//
+// THE FIRST DELIBERATE REUSE UNDER THE TYPE-SCOPED POLICY, and the point of the
+// policy. It takes 0x0004, the value the large slimes' `splitTriggered` holds --
+// chosen over the two lower bits precisely because those two (RitualSkip,
+// CurlUpTriggered) are consumed by a POWER's native body and are therefore
+// scoped to every type that can OWN Ritual or Curl Up, a wider claim to have to
+// check. splitTriggered is read only by monster_slime_large.cpp, so the question
+// is the narrow one: can one record be both a large slime and a Maw? It cannot
+// -- nothing splits into, spawns or transforms a Maw; its only producer is the
+// solo Act-3 "Maw" group (encounters.yaml id 50). Extending upward instead would
+// have spent a fresh bit on a monster that can never co-occur with anything.
+//
+// Its sibling `turnCount` (:59) is NOT here: it is a counter, not a latch, and
+// it takes the WHOLE of MonsterState.pad0 -- see monster_maw.hpp.
+inline constexpr uint32_t kMonsterFlagMawRoared = 0x0004u;
+
+// Writhing Mass `firstMove` (WrithingMass.java:44,146-147) and `usedMegaDebuff`
+// (:45,116,169) need NO flag bits at all: both are one-bit latches read only by
+// monster_writhing_mass.cpp, which owns the whole of MonsterState.pad0 for that
+// monster type and subdivides it (the Slaver / Looter precedent). The same is
+// true of the Jaw Worm's hardMode marker. Recorded here so a reader looking for
+// this batch's flag spend finds the answer rather than an absence.
+
 // ESCAPED -- the FIRST global flag bit, bit 24, the bottom of the 24-31 global
 // region: the monster left the fight ALIVE. (HALF_DEAD, bit 25, is the second;
 // it is declared just below.)

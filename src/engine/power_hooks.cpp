@@ -315,6 +315,47 @@ void dispatch_on_attacked(CombatState& s, uint8_t victim, uint8_t attacker,
     dispatch_actor_powers(s, victim, Hook::ON_ATTACKED, ctx);
 }
 
+// The COMPLEMENT of the walk above -- see power_hooks.hpp for why the Java's one
+// unconditional loop is modelled here as two gated ones, and for the enumeration
+// that keeps the pair equivalent to it.
+void dispatch_on_attacked_type_tolerant(CombatState& s, uint8_t victim,
+                                        uint8_t attacker, int32_t amount,
+                                        uint8_t damage_type,
+                                        bool source_null) noexcept {
+    HookContext ctx{};
+    ctx.source = attacker;
+    ctx.amount = amount;
+    ctx.damage_type = damage_type;
+    ctx.source_null = source_null;
+    // Hand-rolled rather than dispatch_actor_powers, because the FILTER is the
+    // whole point: only a power that declares no damage-type and no non-null-
+    // owner guard of its own may fire from a path dispatch_on_attacked
+    // deliberately excludes. Routing this through the generic walk would fire
+    // Malleable off a Thorns tick -- exactly the bug this function exists to
+    // avoid creating.
+    const PowerListView pv = actor_power_list(s, victim);
+    for (uint8_t i = 0; i < pv.count; ++i) {
+        const PowerId pid = static_cast<PowerId>(pv.slots[i].power_id);
+        if (!power_is_on_attacked_type_tolerant(pid)) {
+            continue;
+        }
+        const PowerDef* def = power_def(pid);
+        if (def == nullptr || !def->native) {
+            continue;
+        }
+        if (def->hook_binding(static_cast<sts::registry::Hook>(
+                Hook::ON_ATTACKED)) == nullptr) {
+            continue;
+        }
+        HookContext one = ctx;
+        one.owner = victim;
+        one.power_amount = pv.slots[i].amount;
+        one.power_counter = pv.slots[i].counter;
+        one.power_slot = i;
+        dispatch_native_hook(s, Hook::ON_ATTACKED, pid, one);
+    }
+}
+
 void dispatch_was_hp_lost(CombatState& s, uint8_t victim, uint8_t source,
                           int32_t amount, uint8_t damage_type,
                           bool source_null) noexcept {

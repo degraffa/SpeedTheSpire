@@ -23,6 +23,7 @@
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_lagavulin.hpp" // Lagavulin sleep/wake machine
 #include "sts/engine/monster_looter.hpp"   // the Looter: steal + escape machine
+#include "sts/engine/monster_maw.hpp"      // the Maw: roared latch + turnCount bites
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
 #include "sts/engine/monster_mugger.hpp"   // the Mugger: seeded sfx + steal + escape
 #include "sts/engine/monster_sentry.hpp"   // sentry_* init / take_turn / pre_battle
@@ -34,6 +35,9 @@
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
 #include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split
 #include "sts/engine/monster_spheric_guardian.hpp"  // the zero-HP-draw Barricade sphere
+#include "sts/engine/monster_spire_growth.hpp"  // the Spire Growth: a PLAYER-power query
+#include "sts/engine/monster_transient.hpp"  // the Transient: Fading ramp, one ai draw
+#include "sts/engine/monster_writhing_mass.hpp"  // the Writhing Mass: recursive getMove
 #include "sts/registry/manifest.hpp"           // generated kMonstersCount
 
 namespace sts::engine {
@@ -176,6 +180,25 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &centurion_init;
         case MonsterId::HEALER:
             return &healer_init;
+        // S2.26 -- the four Act-3 "Beyond" normals of the second batch.
+        // Registering these un-parks "Spire Growth", "Transient", "Maw" and
+        // "Writhing Mass". THEY SPLIT TWO-TWO ON THE HP DRAW, which is the thing
+        // to check when reading them: the Spire Growth and the Writhing Mass call
+        // the ONE-ARG setHp, which is setHp(hp, hp) and still draws; the Transient
+        // and the Maw never call setHp at all and draw NOTHING, the Spheric
+        // Guardian shape above. The batch's fifth monster, the Jaw Worm Horde, is
+        // not here: it reuses JAW_WORM through a bespoke second init selected at
+        // the combat-start site (run_advance.cpp), the Lagavulin pattern.
+        case MonsterId::SPIRE_GROWTH:
+            return &spire_growth_init;
+        case MonsterId::TRANSIENT:
+            // No monster_hp_rng draw (monster_transient.hpp).
+            return &transient_init;
+        case MonsterId::MAW:
+            // No monster_hp_rng draw (monster_maw.hpp).
+            return &maw_init;
+        case MonsterId::WRITHING_MASS:
+            return &writhing_mass_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -253,6 +276,14 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &centurion_take_turn;
         case MonsterId::HEALER:
             return &healer_take_turn;
+        case MonsterId::SPIRE_GROWTH:
+            return &spire_growth_take_turn;
+        case MonsterId::TRANSIENT:
+            return &transient_take_turn;
+        case MonsterId::MAW:
+            return &maw_take_turn;
+        case MonsterId::WRITHING_MASS:
+            return &writhing_mass_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -260,7 +291,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
@@ -348,6 +379,31 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             // Likewise: needToHeal sums the group's missing HP
             // (Healer.java:157-160).
             return &healer_roll_move;
+        // S2.26: three of the four. The Spire Growth, the Maw and the Writhing
+        // Mass each end takeTurn in a RollMoveAction sitting AFTER the switch
+        // (SpireGrowth.java:97, Maw.java:114, WrithingMass.java:122).
+        //
+        // The TRANSIENT registers NONE, and its reason is unlike either of the
+        // two the Mugger and the Looter gave: takeTurn does not merely lack a
+        // RollMoveAction, it re-telegraphs the monster BY HAND with its own
+        // setMove (Transient.java:81). So the Transient decides its next move
+        // exactly once per turn, inside its turn body, and never through this
+        // seam at all -- one ai_rng draw for the whole combat, at init.
+        case MonsterId::SPIRE_GROWTH:
+            return &spire_growth_roll_move;
+        case MonsterId::MAW:
+            // Its roll has a SIDE EFFECT the others do not: getMove
+            // pre-increments turnCount (Maw.java:118) on every call, which is
+            // what grows the NOMNOMNOM bite count.
+            return &maw_roll_move;
+        case MonsterId::WRITHING_MASS:
+            // The heaviest roll fn in the engine: getMove is RECURSIVE and each
+            // level spends a fresh random(a, b), plus up to one randomBoolean
+            // tiebreak per level (WrithingMass.java:158-193). It is also the only
+            // roll fn a POWER queues -- ReactivePower fires one per real hit
+            // during the PLAYER's turn -- which is precisely why the Writhing
+            // Mass rolls through this seam instead of inline.
+            return &writhing_mass_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -366,7 +422,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -525,7 +581,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -638,13 +694,39 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         case MonsterId::CENTURION:
         case MonsterId::HEALER:
             return;
+
+        // S2.26. THREE of the four declare damage() and all three are empty
+        // here. SpireGrowth.damage (SpireGrowth.java:121-129) and
+        // Transient.damage (:88-96) run `super.damage(info)` and THEN the hurt
+        // animation; WrithingMass.damage (:125-132) runs the animation FIRST and
+        // then super.damage -- the reverse order, and presentation either way,
+        // so the difference costs nothing here. All three gate on a non-THORNS
+        // hit with output > 0 and touch no combat state and no RNG, so an empty
+        // hook is the COMPLETE translation and hp_lost is deliberately unread.
+        //
+        // The MAW does not override damage() at all (Maw.java declares takeTurn,
+        // getMove and die, and nothing else), so it would fall to the `default:`
+        // -- it is listed here anyway, with that said, because a reader checking
+        // this batch should not have to re-open the file to learn which of the
+        // four the absence belongs to.
+        //
+        // The WRITHING MASS is the one of the four that visibly REACTS to being
+        // attacked -- twice over, Malleable's block and Reactive's re-roll -- and
+        // both reactions are POWER hooks dispatched from op_damage, not damage()
+        // overrides. The TRANSIENT likewise reacts through Shifting. Worth
+        // stating so these empty cases are not read as holes.
+        case MonsterId::SPIRE_GROWTH:
+        case MonsterId::TRANSIENT:
+        case MonsterId::MAW:
+        case MonsterId::WRITHING_MASS:
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -722,23 +804,25 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         // as cases rather than left to the `default:` so the omission is a
         // recorded decision that a reader can check, not an invisible hole.
 
-        // JawWorm.usePreBattleAction (JawWorm.java:112-118) queues Strength
+        // JawWorm.usePreBattleAction (JawWorm.java:110-118) queues Strength
         // (bellowStr) + Block (bellowBlock) before turn 1, but ONLY when
-        // hardMode is set. hardMode comes solely from the 3-arg ctor
-        // (JawWorm.java:75-80), used only by the "Jaw Worm Horde" group
-        // (MonsterHelper.java:549-550), which only TheBeyond.generateStrongEnemies
-        // schedules (TheBeyond.java:109) -- Act 3. The 2-arg ctor the Exordium
-        // "Jaw Worm" encounter uses (MonsterHelper.java:397-398) delegates with
-        // hard=false (JawWorm.java:71-73). The registry is Exordium-only, so no
-        // reachable encounter sets hardMode and there is no divergence today.
+        // hardMode is set -- and the `if (this.hardMode)` IS the whole body.
         //
-        // Whoever adds Act 3 must implement BOTH halves: hardMode also clears
-        // firstMove (JawWorm.java:78-80), which skips the forced opening Chomp
-        // that getMove would otherwise play (JawWorm.java:150-151). The
-        // pre-battle powers are the visible half; the move-selection change is
-        // the one that silently shifts the ai_rng sequence.
+        // THIS CASE USED TO BE nullptr WITH A NOTE FOR WHOEVER ADDED ACT 3. That
+        // is S2.26, and BOTH halves the note demanded are implemented: the
+        // pre-battle powers here, and the `firstMove = false` half -- the one
+        // that silently shifts the opening decision -- in jaw_worm_init_hard.
+        // See monster_jaw_worm.hpp for the whole argument.
+        //
+        // REGISTERING IT IS SAFE FOR THE ORDINARY WORM, which is the property the
+        // Stage-A fixtures depend on: the body's first statement is the hardMode
+        // latch test, an Exordium worm's init writes pad0 = 0, and a pre-battle
+        // fn that queues nothing and draws nothing is indistinguishable from the
+        // nullptr it replaces. The alternative -- keying the dispatch itself off
+        // the variant -- would have needed a second MonsterId or a schema column
+        // for one caller.
         case MonsterId::JAW_WORM:
-            return nullptr;
+            return &jaw_worm_use_pre_battle_action;
 
         // SlimeBoss.usePreBattleAction (SlimeBoss.java:109-117) is entirely
         // presentation and meta-progression: unsilence BGM, fade ambiance, play
@@ -770,11 +854,37 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::LOOTER:
             return &looter_use_pre_battle_action;
 
+        // S2.26. TWO of the four declare the method, and they are the two whose
+        // whole character is set before turn 1.
+        //
+        // Transient.usePreBattleAction (Transient.java:65-73) applies FadingPower
+        // (6 at A17+, else 5) and THEN ShiftingPower -- order is load-bearing,
+        // because it is the power-list order every hook fan-out walks. Fading is
+        // what kills the monster; without this the 999 HP would be a real health
+        // bar. No RNG draw.
+        case MonsterId::TRANSIENT:
+            return &transient_use_pre_battle_action;
+        // WrithingMass.usePreBattleAction (WrithingMass.java:80-83) applies
+        // ReactivePower and THEN MalleablePower, again in that order. No RNG
+        // draw.
+        case MonsterId::WRITHING_MASS:
+            return &writhing_mass_use_pre_battle_action;
+        // NEITHER the Spire Growth NOR the Maw declares the method at all
+        // (SpireGrowth.java has takeTurn/getMove/damage/changeState; Maw.java has
+        // takeTurn/getMove/die), so both inherit AbstractMonster's empty body
+        // (AbstractMonster.java:953-954). Explicit nullptr, the Chosen's
+        // precedent -- an omission a reader can check rather than infer.
+        case MonsterId::SPIRE_GROWTH:
+        case MonsterId::MAW:
+            return nullptr;
+
         default:
-            // Checked, not assumed: of the 25 registry monsters only JawWorm,
+            // Checked, not assumed: outside the cases above, the only registry
+            // monsters that declare the method at all are JawWorm,
             // LouseNormal, LouseDefensive, SlimeBoss, Sentry, Lagavulin,
             // GremlinWarrior, TheGuardian, Hexaghost, FungiBeast and the Looter
-            // declare the method at all. The other fourteen (Cultist, GremlinNob, the four
+            // (plus S2.21/S2.22's Chosen-batch entries and S2.26's Transient and
+            // Writhing Mass, all named above). The Act-1 remainder (Cultist, GremlinNob, the four
             // small/medium slimes, the two large slimes, the Thief / Fat /
             // Tsundere / Wizard gremlins, and the two slavers) inherit
             // AbstractMonster's empty body (AbstractMonster.java:953-954), so
@@ -790,7 +900,7 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
 }
 
 MonsterDieFn monster_die_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does its Java class override die()? Read the "
                   "method. If everything before `super.die()` is presentation -- "
                   "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
@@ -822,6 +932,25 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
             // playDeathSfx' aiRng.random(2) (Mugger.java:147-154, called at
             // :158). SEEDED, unconditional, once per death.
             return &mugger_die;
+        // S2.26. TWO of the four declare die() and NEITHER carries combat
+        // content, so both are explicit nullptrs rather than `default:` --
+        // the reading is then checkable.
+        //
+        // Transient.die (Transient.java:106-110) is `super.die()` followed by
+        // UnlockTracker.unlockAchievement("TRANSIENT"): meta-progression, no
+        // combat state, no seeded draw. Note it runs AFTER super.die(), so even
+        // if it had content it would belong in monster_die_after_fn.
+        //
+        // Maw.die (Maw.java:138-142) is `super.die()` plus
+        // CardCrawlGame.sound.play("MAW_DEATH") -- one UNSEEDED sound. This is
+        // the Looter/Snecko side of the Mugger split, not the Mugger side: the
+        // Mugger's playDeathSfx picks its sound with a SEEDED aiRng.random(2)
+        // and therefore moves the shared stream; a bare sound.play does not.
+        //
+        // The Spire Growth and the Writhing Mass declare no die() at all.
+        case MonsterId::TRANSIENT:
+        case MonsterId::MAW:
+            return nullptr;
         default:
             return nullptr;  // die() is presentation only, or absent
     }
@@ -834,7 +963,7 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
 // slot exists now because the four batches that need it run in parallel and
 // must not each invent their own.
 MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 34,
+    static_assert(sts::registry::manifest::kMonstersCount == 38,
                   "new monster: does its Java die() override do anything AFTER "
                   "`super.die()`? Read the method. Content before super.die() "
                   "belongs in monster_die_fn; content after it belongs here, "

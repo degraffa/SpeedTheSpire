@@ -28,6 +28,11 @@ add_library(sts_engine
     monster_snecko.cpp
     monster_centurion.cpp
     monster_healer.cpp
+    # S2.26 -- Act-3 "Beyond" normals II.
+    monster_spire_growth.cpp
+    monster_transient.cpp
+    monster_maw.cpp
+    monster_writhing_mass.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -49,6 +54,7 @@ add_library(sts_engine
     powers/power_artifact.cpp
     powers/power_combust.cpp
     powers/power_confusion.cpp
+    powers/power_constricted.cpp
     powers/power_corruption.cpp
     powers/power_curl_up.cpp
     powers/power_dark_embrace.cpp
@@ -58,6 +64,7 @@ add_library(sts_engine
     # their application-time justApplied predicate (powers/power_duration_debuff.hpp).
     powers/power_duration_debuff.cpp
     powers/power_evolve.cpp
+    powers/power_fading.cpp
     powers/power_fire_breathing.cpp
     powers/power_flight.cpp
     powers/power_flame_barrier.cpp
@@ -73,12 +80,14 @@ add_library(sts_engine
     powers/power_pen_nib.cpp
     powers/power_plated_armor.cpp
     powers/power_rage.cpp
+    powers/power_reactive.cpp
     powers/power_regen.cpp
     powers/power_regenerate_monster.cpp
     powers/power_ritual.cpp
     powers/power_rupture.cpp
     powers/power_sadistic.cpp
     powers/power_sharp_hide.cpp
+    powers/power_shifting.cpp
     powers/power_spore_cloud.cpp
     powers/power_the_bomb.cpp
     powers/power_thorns.cpp

@@ -734,10 +734,20 @@
   pool: STRONG
   weight: 1.0
   program:
-    # NOTE (deferred obligation, ledger row owned by S2.26): all three are
-    # constructed as JawWorm(x, y, TRUE) -- a constructor variant S1's row never
-    # exercised. The composition (three JawWorm actors, 0 miscRng draws) is
-    # settled here; what the boolean changes is that row's business.
+    # All three are constructed as JawWorm(x, y, TRUE) -- the hardMode
+    # constructor variant S1's row never exercised. The composition (three
+    # JawWorm actors, 0 miscRng draws) is settled here, and the deferred
+    # obligation this comment used to carry is DISCHARGED by S2.26: the boolean
+    # changes exactly two things, NEITHER of them a stat, so the id-1 monster
+    # row's tier columns are trusted unchanged for both variants. It (a) clears
+    # `firstMove`, so the opening telegraph is decided by the full getMove
+    # num-tree against an EMPTY move history instead of being a forced Chomp --
+    # still exactly ONE aiRng.random(99) and no tiebreak, because every history
+    # predicate is false on an empty history, so THIS ROW'S DRAW ACCOUNTING IS
+    # UNCHANGED; and (b) makes usePreBattleAction non-empty, giving each worm
+    # bellowStr Strength then bellowBlock block (+5 / 9 at A20). The full
+    # argument lives in the monsters.yaml id-1 provenance; the engine side is
+    # jaw_worm_init_hard plus the encounter-keyed branch in run_advance.cpp.
     - {emit: "JawWorm"}
     - {emit: "JawWorm"}
     - {emit: "JawWorm"}

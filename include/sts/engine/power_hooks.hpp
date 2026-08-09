@@ -223,6 +223,74 @@ void dispatch_on_gained_block(CombatState& state, uint8_t actor,
 void dispatch_on_attacked(CombatState& state, uint8_t victim, uint8_t attacker,
                           int32_t amount, bool source_null = false) noexcept;
 
+// --- The other half of onAttacked (S2.26) ------------------------------------
+//
+// THE JAVA HAS ONE UNCONDITIONAL LOOP; THIS ENGINE HAS TWO GATED ONES, AND THIS
+// COMMENT IS WHY THAT IS EQUIVALENT RATHER THAN A SHORTCUT.
+//
+// AbstractMonster.damage / AbstractPlayer.damage run
+//
+//     for (AbstractPower p : this.powers) damageAmount = p.onAttacked(info, damageAmount);
+//
+// with NO type test and NO owner test and NO `info.owner != this` test
+// (AbstractMonster.java:665-667). Every guard lives in the individual bodies.
+// dispatch_on_attacked above hoists the common guards to the CALL SITE, which
+// was correct while every binder had them: Thorns, Sharp Hide, Angry, Flight,
+// Malleable and (this batch's) Reactive each spell `info.type != THORNS &&
+// != HP_LOSS` -- or the equivalent `== NORMAL` -- plus `info.owner != null`, so
+// firing only for NORMAL src != tgt damage produced the same answers with less
+// work.
+//
+// ShiftingPower (powers.yaml 104) is the first binder with NEITHER guard. Its
+// whole condition is `damageAmount > 0` (ShiftingPower.java:33), so in the real
+// game a THORNS reflect (Flame Barrier, a Thorns tick, a Constricted tick) or an
+// HP_LOSS onto a Transient DOES swing its Strength. Under the hoisted gate alone
+// it would not -- a reachable, playable divergence.
+//
+// The fix is NOT to widen dispatch_on_attacked. Widening it would push every
+// existing binder onto a call path it currently gets excluded from for free,
+// changing six landed powers to fix one, and each would then need the guard
+// re-added by hand -- six chances to get it wrong, in a batch that is not the
+// owner of any of them. Instead this function walks the COMPLEMENT of the gate
+// (non-NORMAL damage, and self-sourced damage) and admits ONLY the powers that
+// declare no guard of their own. The union of the two walks is exactly the
+// Java's single loop.
+//
+// THE ADMITTED SET IS A CLOSED, ENUMERATED LIST -- power_is_on_attacked_type_
+// tolerant below -- and it is native code rather than a registry column
+// deliberately: it is a claim about what a BODY does not check, which only the
+// body's author can make, and a new hook value would be a scarce id spent on a
+// one-member set. When a second member arrives, the list grows and this comment
+// is the checklist for admitting it.
+//
+// No-op unless the victim holds an admitted power, so every landed fixture and
+// every corpus replay is byte-identical.
+void dispatch_on_attacked_type_tolerant(CombatState& state, uint8_t victim,
+                                        uint8_t attacker, int32_t amount,
+                                        uint8_t damage_type,
+                                        bool source_null = false) noexcept;
+
+// Does `id`'s onAttacked body declare NO damage-type guard and NO
+// `info.owner != null` guard, so that the Java would fire it on damage the
+// NORMAL-only dispatch gate excludes?
+//
+// Checked against every landed ON_ATTACKED binder, one at a time -- this is the
+// enumeration the comment above promises, and the reason each is OUT is the
+// line of Java that guards it:
+//
+//   THORNS       ThornsPower.java:44        `info.type != THORNS`, `owner != null`
+//   NEXT_TURN_BLOCK / the one-shot guard    `info.type == NORMAL`
+//   SHARP_HIDE   SharpHidePower.java:47     `info.type == NORMAL`, `owner != null`
+//   ANGRY        AngryPower.java:35         `!= HP_LOSS && != THORNS`, `owner != null`
+//   FLIGHT       FlightPower.java:67        `!= HP_LOSS && != THORNS`, `owner != null`
+//   MALLEABLE    MalleablePower.java:63     `== NORMAL`, `owner != null`
+//   REACTIVE     ReactivePower.java:40      `!= HP_LOSS && != THORNS`, `owner != null`
+//   SHIFTING     ShiftingPower.java:33      -- NOTHING. The only member.
+[[nodiscard]] constexpr bool power_is_on_attacked_type_tolerant(
+    PowerId id) noexcept {
+    return id == PowerId::SHIFTING;
+}
+
 // wasHPLost: the victim's powers, after an HP write of `amount` (>0). `source` is
 // the actor that caused the loss (self for LOSE_HP / a card; the attacker for
 // unblocked DAMAGE). `damage_type` is the incoming DamageInfo.DamageType (interp.hpp

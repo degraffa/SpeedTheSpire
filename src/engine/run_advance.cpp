@@ -32,6 +32,7 @@
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
 #include "sts/engine/map_rooms.hpp"        // assign_room_types / encode_rooms_into_run_state / RoomType
 #include "sts/engine/monster_dispatch.hpp" // spawn_group / dispatch_monster_turn / monster_init_fn
+#include "sts/engine/monster_jaw_worm.hpp"  // jaw_worm_init_hard (the Horde variant)
 #include "sts/engine/monster_lagavulin.hpp" // event ctor's awake variant
 #include "sts/engine/monster_looter.hpp"   // looter_stolen_gold (settlement)
 #include "sts/engine/neow.hpp"             // the floor-0 blessing + its screens
@@ -729,6 +730,11 @@ void drain_pending_obtains(RunController& rc) noexcept {
 // (DeadAdventurer.java:116). RoomType::Elite implies it on its own
 // (MonsterRoomElite.java:33); RoomType::Boss deliberately does NOT
 // (MonsterRoomBoss.java:22-24 never touches the field).
+// The one encounter key that constructs its members through a behavioural
+// ctor variant (MonsterHelper.java:549-550). Named rather than inlined so
+// the branch below reads as a rule and the string has one home.
+inline constexpr std::string_view kJawWormHordeKey = "Jaw Worm Horde";
+
 bool enter_combat(RunController& rc, std::string_view enc_key,
                   RoomType room, bool preserve_floor_streams = false,
                   EventCombatVariant variant = EventCombatVariant::NONE,
@@ -893,6 +899,35 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
         grp.count == 1 && ids[0] == MonsterId::LAGAVULIN) {
         s.monster_count = 1;
         lagavulin_init_awake(s, 0);
+    } else if (enc_key == kJawWormHordeKey && grp.count == 3 &&
+               ids[0] == MonsterId::JAW_WORM && ids[1] == MonsterId::JAW_WORM &&
+               ids[2] == MonsterId::JAW_WORM) {
+        // The Act-3 "Jaw Worm Horde" builds its three worms with the 3-arg
+        // hardMode constructor -- `new JawWorm(x, y, true)` x3
+        // (MonsterHelper.java:549-550) -- which the ordinary Exordium "Jaw Worm"
+        // encounter does not. The SAME SHAPE as the Lagavulin branch directly
+        // above: a bespoke second init selected by a named branch here, rather
+        // than a second MonsterId (which would make monster_from_game_id
+        // ambiguous) or a per-emit variant column threaded through ResolvedGroup
+        // and both spawn signatures for one caller. See monster_jaw_worm.hpp for
+        // what the boolean changes and why this is the right size of answer.
+        //
+        // ONE DIFFERENCE FROM THE LAGAVULIN BRANCH, and it is the one to
+        // re-examine if a second such variant ever lands: that one keys off an
+        // EVENT variant enum threaded in as a parameter, this one keys off the
+        // ENCOUNTER KEY. The key is the honest discriminator here because the
+        // variant is a property of the encounter, not of how the encounter was
+        // entered.
+        //
+        // DRAW ACCOUNTING IS IDENTICAL TO spawn_group_trace's for this group:
+        // three HP draws (setHp sits outside the hardMode guard) and three
+        // ai_rng rollMoves, in spawn order. The composition has no PICK node, so
+        // there is no discarded candidate to burn -- which is why this branch can
+        // spawn directly instead of replaying the trace.
+        s.monster_count = 3;
+        for (uint8_t i = 0; i < 3; ++i) {
+            jaw_worm_init_hard(s, i);
+        }
     } else {
         spawn_group_trace(
             s, std::span<const MonsterId>(trace_ids, grp.constructed_count),
