@@ -94,7 +94,12 @@ namespace {
     // block pass: MINION overrides only updateDescription (MinionPower.java:
     // 30-33) and PAINFUL_STABS only updateDescription and onInflictDamage
     // (PainfulStabsPower.java:34-44) -- neither touches block at all.
-    static_assert(sts::registry::manifest::kPowersCount == 58,
+    // Checked for S2.25's three powers, none of which needs a case: REGROW
+    // overrides only updateDescription (RegrowPower.java:30-33), EXPLOSIVE only
+    // updateDescription + duringTurn (ExplosivePower.java:41-57) and
+    // GENERIC_STRENGTH_UP only updateDescription + atEndOfRound
+    // (GenericStrengthUpPower.java:29-39) -- none touches block.
+    static_assert(sts::registry::manifest::kPowersCount == 61,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

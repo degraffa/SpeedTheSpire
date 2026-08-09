@@ -209,6 +209,22 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
                            bool apply_minion = false,
                            int16_t draw_x = 0) noexcept;
 
+// The `relics.onSpawnMonster` fan-out, in acquisition order (per SLOT, matching
+// the Java's `for (AbstractRelic r : player.relics)`). Philosopher's Stone is the
+// whole of it -- `grep -rn onSpawnMonster com/` finds AbstractRelic's empty base
+// and exactly one override -- and it applies its +1 Strength DIRECTLY
+// (`monster.addPower(...)`, PhilosopherStone.java:50-54) rather than queueing an
+// ApplyPowerAction, so this function applies rather than queues.
+//
+// PROMOTED out of monster_dispatch.cpp's anonymous namespace (rule of two,
+// conventions section 7): spawn_monster_at_slot was the only caller until the
+// Darkling's REINCARNATE, which runs the SAME loop inline in takeTurn
+// (Darkling.java:134-136) -- a revival is not a spawn (no record is inserted, no
+// slot moves, no child roll), but the game fires the same relic hook for it, and
+// every revival re-grants the Strength with no cap.
+void dispatch_on_spawn_monster_relics(CombatState& state,
+                                      uint8_t monster_index) noexcept;
+
 // SpawnMonsterAction's SMART POSITIONING (SpawnMonsterAction.java:50-56), and
 // GremlinLeader's identical getSmartPosition (SummonGremlinAction.java):
 //

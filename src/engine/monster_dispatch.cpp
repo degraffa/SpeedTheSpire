@@ -16,6 +16,8 @@
 #include "sts/engine/monster_centurion.hpp"  // the Centurion: aliveCount-driven tree
 #include "sts/engine/monster_chosen.hpp"   // the Chosen: Hex opener + roll tree
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
+#include "sts/engine/monster_darkling.hpp"  // the Darkling: half-death + revival
+#include "sts/engine/monster_exploder.hpp"  // the Exploder: a fuse, not a move
 #include "sts/engine/monster_fungi_beast.hpp"  // Fungi Beast + its Spore Cloud
 #include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
 #include "sts/engine/monster_gremlin_leader.hpp"  // the summoning Act-2 elite
@@ -28,6 +30,9 @@
 #include "sts/engine/monster_looter.hpp"   // the Looter: steal + escape machine
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
 #include "sts/engine/monster_mugger.hpp"   // the Mugger: seeded sfx + steal + escape
+#include "sts/engine/monster_orb_walker.hpp"  // the Orb Walker: the discarded HP draw
+#include "sts/engine/monster_repulsor.hpp" // the Repulsor: two Dazed per DAZE
+#include "sts/engine/monster_spiker.hpp"   // the Spiker: the composing Thorns opener
 #include "sts/engine/monster_sentry.hpp"   // sentry_* init / take_turn / pre_battle
 #include "sts/engine/monster_shelled_parasite.hpp"  // Plated Armor + the recursive roll
 #include "sts/engine/monster_slaver.hpp"   // the Blue and Red slavers
@@ -189,6 +194,24 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &taskmaster_init;
         case MonsterId::BOOK_OF_STABBING:
             return &book_of_stabbing_init;
+        // S2.25 -- the five Act-3 beyond normals of the first batch. Registering
+        // these init fns is what un-parks "3 Darklings" (BOTH pool rows, ids 44
+        // and 53), "Orb Walker", "3 Shapes", "4 Shapes", the event group
+        // "2 Orb Walkers", and -- because its SphericGuardian third member landed
+        // with S2.21 -- "Sphere and 2 Shapes".
+        case MonsterId::DARKLING:
+            return &darkling_init;
+        case MonsterId::ORB_WALKER:
+            // The only init here that makes TWO monster_hp_rng draws, the first
+            // of them DISCARDED: the super-argument roll evaluates before the
+            // ctor body (monster_orb_walker.hpp).
+            return &orb_walker_init;
+        case MonsterId::REPULSOR:
+            return &repulsor_init;
+        case MonsterId::EXPLODER:
+            return &exploder_init;
+        case MonsterId::SPIKER:
+            return &spiker_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -272,6 +295,16 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &taskmaster_take_turn;
         case MonsterId::BOOK_OF_STABBING:
             return &book_of_stabbing_take_turn;
+        case MonsterId::DARKLING:
+            return &darkling_take_turn;
+        case MonsterId::ORB_WALKER:
+            return &orb_walker_take_turn;
+        case MonsterId::REPULSOR:
+            return &repulsor_take_turn;
+        case MonsterId::EXPLODER:
+            return &exploder_take_turn;
+        case MonsterId::SPIKER:
+            return &spiker_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -279,7 +312,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 37,
+    static_assert(sts::registry::manifest::kMonstersCount == 42,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
@@ -389,6 +422,30 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             // ++stabCount's on three of four paths, and on all four at A18+
             // (BookOfStabbing.java:129-150).
             return &book_of_stabbing_roll_move;
+        // S2.25: ALL FIVE end takeTurn in a RollMoveAction that sits AFTER the
+        // switch, so every move body reaches it (Darkling.java:140,
+        // OrbWalker.java:97, Repulsor.java:72, Exploder.java:82, Spiker.java:93)
+        // -- including the Darkling's COUNT and the Exploder's empty move 2,
+        // which is how a half-dead Darkling ever reaches REINCARNATE. Four of
+        // the five getMove overrides READ the rolled num; the EXPLODER's does
+        // NOT (it is a bare turnCount test) and still registers, because the
+        // draw itself moves the shared stream -- the Spheric Guardian precedent.
+        case MonsterId::DARKLING:
+            // The one roll fn with UNBOUNDED recursion: getMove re-enters on a
+            // fresh draw at TWO sites with DIFFERENT bounds -- random(40, 99) at
+            // Darkling.java:166 and random(0, 99) at :181 -- so a single decision
+            // can spend one, two or more ai_rng values. It also carries the
+            // REINCARNATE turn's ChangeState("REVIVE") halfDead clear
+            // (monster_darkling.hpp).
+            return &darkling_roll_move;
+        case MonsterId::ORB_WALKER:
+            return &orb_walker_roll_move;
+        case MonsterId::REPULSOR:
+            return &repulsor_roll_move;
+        case MonsterId::EXPLODER:
+            return &exploder_roll_move;
+        case MonsterId::SPIKER:
+            return &spiker_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -407,7 +464,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 37,
+    static_assert(sts::registry::manifest::kMonstersCount == 42,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -485,8 +542,6 @@ MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
     }
 }
 
-namespace {
-
 // The onSpawnMonster relic fan-out, in acquisition order. Philosopher's Stone is
 // the whole of it: PhilosopherStone.onSpawnMonster (PhilosopherStone.java:50-54)
 // is
@@ -511,8 +566,6 @@ void dispatch_on_spawn_monster_relics(CombatState& state,
         }
     }
 }
-
-}  // namespace
 
 uint8_t smart_position_for(const CombatState& state, int16_t draw_x) noexcept {
     uint8_t position = 0;
@@ -623,7 +676,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 37,
+    static_assert(sts::registry::manifest::kMonstersCount == 42,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -754,13 +807,43 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         case MonsterId::GREMLIN_LEADER:
         case MonsterId::BOOK_OF_STABBING:
             return;
+
+        // S2.25. THE DARKLING IS THE FIRST damage() OVERRIDE SINCE THE SLIME
+        // SPLITS WITH REAL CONTENT, and it is the largest one in the roster:
+        // Darkling.damage (Darkling.java:200-236) is the whole half-death
+        // machine -- the halfDead latch, the by-hand power/relic fan-outs that
+        // its VETOED die() did not run, the power-list clear, the group-wide
+        // "are all the Darklings down" test, and either the COUNT telegraph or a
+        // synchronous group kill. hp_lost is deliberately unread: the override's
+        // own `else if` arm (:232-235) is the hit animation, and the half-death
+        // arm reads only resulting state.
+        case MonsterId::DARKLING:
+            darkling_on_damaged(state, monster_index, hp_lost);
+            return;
+
+        // The ORB WALKER overrides damage() (OrbWalker.java:115-122) and is
+        // empty here for the Sentry's reason: `super.damage(info)` followed ONLY
+        // by the "Hit" spine animation, gated on a non-THORNS hit with output
+        // > 0. The REPULSOR, the EXPLODER and the SPIKER do NOT override
+        // damage() at all -- Repulsor.java declares takeTurn and getMove;
+        // Exploder.java adds usePreBattleAction; Spiker.java the same -- and
+        // they are spelled out with the Orb Walker so the whole batch is
+        // checkable in one place. The SPIKER is the one that visibly REACTS to
+        // being attacked, and, like the Byrd and the Snake Plant, that reaction
+        // is a POWER hook (ThornsPower.onAttacked, dispatched from op_damage),
+        // not a damage() override.
+        case MonsterId::ORB_WALKER:
+        case MonsterId::REPULSOR:
+        case MonsterId::EXPLODER:
+        case MonsterId::SPIKER:
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 37,
+    static_assert(sts::registry::manifest::kMonstersCount == 42,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -828,6 +911,37 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             return &spheric_guardian_use_pre_battle_action;
         case MonsterId::CHOSEN:
             return nullptr;  // no usePreBattleAction in the class at all
+
+        // S2.25. FOUR of the five override usePreBattleAction with real combat
+        // content; the Repulsor has no such method at all, which is why it gets
+        // an explicit nullptr case rather than the `default:`.
+        case MonsterId::DARKLING:
+            // The ONLY pre-battle in the roster that writes COMBAT-WIDE state:
+            // `getCurrRoom().cannotLose = true` is a bare field assignment
+            // (Darkling.java:96), not a queued CannotLoseAction, and it is what
+            // vetoes every Darkling's die() for the rest of the fight. Then
+            // ApplyPowerAction(self, self, RegrowPower) at amount 1 (:97). No RNG.
+            return &darkling_use_pre_battle_action;
+        case MonsterId::ORB_WALKER:
+            // ApplyPowerAction(self, self, GenericStrengthUpPower(MOVES[0],
+            // A17 ? 5 : 3)) -- 5 at A20 (OrbWalker.java:73-80). No RNG.
+            return &orb_walker_use_pre_battle_action;
+        case MonsterId::EXPLODER:
+            // ApplyPowerAction(self, self, ExplosivePower(3))
+            // (Exploder.java:64-67) -- the fuse, not a buff. No RNG.
+            return &exploder_use_pre_battle_action;
+        case MonsterId::SPIKER:
+            // ApplyPowerAction(self, self, ThornsPower(A17 ? startingThorns + 3
+            // : startingThorns)) -- SEVEN at A20, because the A17 arm composes
+            // with the already-tiered A2 value rather than restating a literal
+            // (Spiker.java:72-79, :62-68). No RNG.
+            return &spiker_use_pre_battle_action;
+        case MonsterId::REPULSOR:
+            // Repulsor.java declares only takeTurn and getMove, so it inherits
+            // AbstractMonster's empty body (AbstractMonster.java:953-954).
+            // Explicit nullptr, the Chosen's precedent.
+            return nullptr;
+
         case MonsterId::LOUSE_NORMAL:
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_use_pre_battle_action;  // curl-up roll (monster_hp_rng)
@@ -929,7 +1043,7 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
 }
 
 MonsterDieFn monster_die_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 37,
+    static_assert(sts::registry::manifest::kMonstersCount == 42,
                   "new monster: does its Java class override die()? Read the "
                   "method. If everything before `super.die()` is presentation -- "
                   "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
@@ -985,6 +1099,20 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
             // isDying. So the body registers in monster_die_after_fn below, and
             // this nullptr is the pre-super half being genuinely empty.
             return nullptr;
+        case MonsterId::DARKLING:
+            // THE FIRST VETO USER. `if (!getCurrRoom().cannotLose) super.die();`
+            // (Darkling.java:239-243): while the room latch its own pre-battle
+            // set is up, a Darkling at 0 HP does not die at all -- no isDying,
+            // no power onDeath, no relic onMonsterDeath. Its damage() override
+            // re-fires those two by hand exactly once, which is the whole reason
+            // the veto exists. Draws no RNG.
+            return &darkling_die;
+        // The other four of S2.25 declare NO die() override at all -- OrbWalker,
+        // Repulsor, Exploder and Spiker each declare (at most)
+        // usePreBattleAction / takeTurn / getMove / damage / changeState and
+        // nothing else -- so they stay with the `default:`. The Exploder's
+        // self-kill goes through SuicideAction (triggerRelics TRUE), which runs
+        // the ordinary death edge, not a die() body of its own.
         default:
             return nullptr;  // die() is presentation only, or absent
     }
@@ -996,7 +1124,7 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
 // -- is still ahead. The slot exists because the batches that need it run in
 // parallel and must not each invent their own.
 MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 37,
+    static_assert(sts::registry::manifest::kMonstersCount == 42,
                   "new monster: does its Java die() override do anything AFTER "
                   "`super.die()`? Read the method. Content before super.die() "
                   "belongs in monster_die_fn; content after it belongs here, "

@@ -49,11 +49,23 @@ void relic_native_gremlin_horn(CombatState& s, RelicHook hook,
                                const RelicHookContext& ctx) noexcept {
     // GremlinHorn.onMonsterDeath (GremlinHorn.java:50-57): +1 energy and
     // draw 1 -- but NOT for the last monster (!areMonstersBasicallyDead():
-    // some OTHER monster must still be alive).
+    // some OTHER monster must still be IN THE FIGHT).
+    //
+    // THE GUARD IS areMonstersBasicallyDead, NOT `hp > 0`, and S2.25 is where
+    // the difference became reachable. MonsterGroup.areMonstersBasicallyDead
+    // (:90-95) is `isDying || isEscaping` per member -- which is exactly
+    // monster_basically_dead (combat_state.hpp), and it disagrees with a bare HP
+    // test in BOTH directions: an ESCAPED Looter keeps positive HP and is NOT in
+    // the fight, while a HALF-DEAD Darkling sits at 0 HP and IS. The old bare
+    // `hp > 0` got the escaped case backwards (a pre-existing, unreachable-in-
+    // practice divergence: no Act-1 group pairs an escapee with a surviving
+    // sibling whose death matters) and would have got the Darkling case
+    // backwards too, which is very much reachable -- a "3 Darklings" fight is
+    // three half-deaths and then a three-member die() sweep.
     if (hook == RelicHook::ON_MONSTER_DEATH) {
         bool other_alive = false;
         for (uint8_t m = 0; m < s.monster_count; ++m) {
-            if (m != ctx.dead_monster && s.monsters[m].hp > 0) {
+            if (m != ctx.dead_monster && !monster_basically_dead(s.monsters[m])) {
                 other_alive = true;
                 break;
             }

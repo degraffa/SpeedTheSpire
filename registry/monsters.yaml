@@ -1878,3 +1878,270 @@
                # fourth does too, so at the engine's fixed A20 EVERY decision --
                # including the init rollMove -- grows the next STAB by one hit.
                # No ai table has a write side. See monster_book_of_stabbing.cpp.
+
+# --- S2.25 (Act-3 beyond normals I): Darkling, Orb Walker, Repulsor, ---------
+# --- Exploder, Spiker. MonsterId 49-53 are this task's grant ------------------
+# --- (stage-b-tasks.md "S2 Wave-3 allocations"); all five are spent, so the ---
+# --- block leaves no gap. 45-48 stay UNISSUED, not this batch's to backfill. --
+#
+# All five are NORMAL (none assigns this.type, so AbstractMonster.java:99's field
+# initializer stands) and all five are `ai: native`: the Darkling recurses into
+# getMove with two different aiRng bounds AND reads its own group index, the Orb
+# Walker and the Repulsor read move history, the Exploder never reads `num` at
+# all (but still draws), and the Spiker carries a per-instance counter. No ai
+# table expresses any of those.
+#
+# The encounters they unpark were all landed by S2.01 and are unchanged here:
+# "3 Darklings" weak (44) and strong (53) -- the s2-design section 5 trap-8
+# same-key-in-both-pools row -- "Orb Walker" (45), "3 Shapes" (46), "4 Shapes"
+# (49), "Sphere and 2 Shapes" (51, whose SphericGuardian third member landed with
+# S2.21) and the event group "2 Orb Walkers" (61).
+
+- id: 49
+  name: DARKLING
+  game_id: "Darkling"
+  provenance: "Darkling (Darkling.java, read in full, 244 lines). ID \"Darkling\" (:45). ctor (:71-92): super passes the LITERAL 56 (:72) -- no draw -- then setHp(50,59) at ascension >= 7 else (48,56) (:77-81), then a SECOND monster_hp_rng draw inside the >= 2 branch for nipDmg (:82-88). NOTE THE SPLIT GATE: HP is gated on >= 7 while the damage block is gated on >= 2, even though the class constants are named A_2_HP_MIN/MAX (:52-53) -- the BRANCH is transcribed, not the constant name. chompDmg 8, or 9 from A2 (:83,86); BITE_DMG / A_2_BITE_DMG (:58-59) are those same two numbers under a third name and are unused by the ctor. damage = [chompDmg, nipDmg] (:90-91), so CHOMP is index 0 and NIP index 1. BLOCK_AMT 12 and CHOMP_AMT 2 are flat at every ascension (:62-63). Move ids CHOMP=1, HARDEN=2, NIP=3, COUNT=4, REINCARNATE=5 (:64-68). usePreBattleAction (:94-98) sets getCurrRoom().cannotLose by DIRECT ASSIGNMENT -- not a CannotLoseAction -- and then ApplyPowerAction(this, this, new RegrowPower(this)) at the 3-arg default stack amount 1. takeTurn (:100-141): every case falls through to the trailing RollMoveAction (:140). getMove (:143-183) recurses TWICE with DIFFERENT bounds -- aiRng.random(40,99) at :166 and aiRng.random(0,99) at :181 -- and reads AbstractDungeon.getMonsters().monsters.lastIndexOf(this) % 2 == 0 (:163), the monster's own SLOT INDEX in the group list, which the game never compacts (MonsterGroup.java:35-45). changeState(REVIVE) (:193-196) is the only state key with combat content: halfDead = false. damage() (:200-236) and die() (:238-243) are the batch's hard part -- see monster_darkling.hpp. RegrowPower's POWER_ID is \"Life Link\" (RegrowPower.java:16), NOT \"Regrow\"; powers.yaml id 99."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 48, max: 56}    # Darkling.java:80 (ascension < 7)
+    a7:   {min: 50, max: 59}    # Darkling.java:78 (ascension >= 7)
+  rolls:
+    - name: NIP_DAMAGE
+      stream: MONSTER_HP
+      timing: CONSTRUCTOR_AFTER_HP
+      range:
+        base: {min: 7, max: 11}   # Darkling.java:87 (ascension < 2)
+        a2:   {min: 9, max: 13}   # Darkling.java:84 (ascension >= 2)
+  moves:
+    - name: CHOMP
+      move_id: 1               # Darkling.java:64
+      intent: ATTACK           # setMove(1, ATTACK, dmg[0].base, 2, true) (:164) --
+                               # the "2, true" is the multi-hit TELEGRAPH
+                               # (CHOMP_AMT, :63); the two hits are the two steps.
+      effects:
+        # TWO SEPARATE DamageActions on damage.get(0) (:106-107). chompDmg 8, or 9
+        # from A2 (:83,86). ChangeState + Wait (:104-105) are presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 8, a2: 9}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 8, a2: 9}}
+    - name: HARDEN
+      move_id: 2               # Darkling.java:65
+      intent: DEFEND_BUFF      # THE INTENT IS ASCENSION-SWITCHED: DEFEND_BUFF at
+                               # A17+ (:152,171), plain DEFEND below (:154,173).
+                               # This column carries the value at the engine's
+                               # kMonsterAscension 20; monster_darkling.cpp spells
+                               # the branch out, so the module stays exact if a
+                               # real ascension is ever threaded through.
+      effects:
+        # STEP 2 IS A17-ONLY AND THE SCHEMA CANNOT SAY SO. GainBlockAction(this,
+        # this, 12) is unconditional (:111), but the StrengthPower(this, 2) at
+        # :112-113 sits behind "if (ascensionLevel < 17) break;". An effect list
+        # expresses per-tier AMOUNTS and not per-tier PRESENCE -- the Snecko TAIL
+        # precedent (S2.22) -- so both steps are authored with their exact amounts
+        # and monster_darkling.cpp queues them one at a time through
+        # queue_monster_move_effect, skipping step 1 below A17.
+        - {op: BLOCK, target: SELF, amount: 12}
+        - {op: APPLY_POWER, target: SELF, amount: 2, power: STRENGTH}
+    - name: NIP
+      move_id: 3               # Darkling.java:66
+      intent: ATTACK
+      effects:
+        # nipDmg is a PER-INSTANCE monsterHpRng roll in the ctor (A2 ? random(9,13)
+        # : random(7,11), Darkling.java:84,87), NOT a static column -- the native
+        # module substitutes the rolled value (stored in MonsterState.pad0) for
+        # this placeholder amount, exactly as the Louse BITE row does.
+        # AnimateFastAttack (:117) is presentation.
+        - {op: DAMAGE, target: PLAYER, amount: 0}
+    - name: COUNT
+      move_id: 4               # Darkling.java:67
+      intent: UNKNOWN          # setMove(4, UNKNOWN) from the half-death telegraph
+                               # (:221) and from the queued SetMoveAction (:223)
+      effects:
+        # A LITERAL COMBAT NO-OP: case 4 is one TextAboveCreatureAction (:122) and
+        # nothing else. The turn still reaches the trailing RollMoveAction, which
+        # is how a half-dead Darkling gets from COUNT to REINCARNATE. NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: REINCARNATE
+      move_id: 5               # Darkling.java:68
+      intent: BUFF             # setMove(5, BUFF) (:146)
+      effects:
+        # HealAction(this, this, this.maxHealth / 2) (:131) -- INTEGER division, and
+        # NOT a roll: there is no HP re-roll on revival. maxHealth is per-instance,
+        # so the amount is a placeholder the module computes, the NIP precedent.
+        # Then ChangeStateAction(REVIVE) (:132), whose whole content is
+        # halfDead = false (:193-196) and which is therefore not an effect step --
+        # see monster_darkling.cpp for where the clear lands. Then ApplyPowerAction(
+        # this, this, new RegrowPower(this), 1) (:133). The relic onSpawnMonster
+        # fan-out at :134-136 is SYNCHRONOUS inside takeTurn, so it is not a queued
+        # step either.
+        - {op: HEAL, target: SELF, amount: 0}
+        - {op: APPLY_POWER, target: SELF, amount: 1, power: REGROW}
+  ai: native   # getMove (Darkling.java:143-183) needs native code for FOUR
+               # reasons, any one of which would be enough. (1) It RECURSES on a
+               # fresh aiRng draw, and the two recursion sites use DIFFERENT
+               # bounds -- random(40,99) at :166, random(0,99) at :181 -- so the
+               # draw COUNT is input-dependent. (2) It reads the monster's own
+               # SLOT PARITY, monsters.lastIndexOf(this) % 2 == 0 (:163): slots
+               # 0 and 2 can CHOMP and slot 1 structurally never can, so the
+               # middle Darkling of a group of three is a different monster from
+               # its siblings. (3) The halfDead arm (:145-148) short-circuits to
+               # REINCARNATE. (4) firstMove (:69,149-161) is consumed on the init
+               # rollMove -- the Snecko / Chosen / Red-Slaver precedent -- and is
+               # NOT reset by revival. See monster_darkling.cpp.
+
+- id: 50
+  name: ORB_WALKER
+  game_id: "Orb Walker"
+  provenance: "OrbWalker (OrbWalker.java, read in full, 135 lines). ID \"Orb Walker\" (:32) -- WITH A SPACE, and textually identical to the encounters.yaml weak-pool key at id 45; the two domains do not clash and encounters.yaml records that at its own row. DOUBLE_ENCOUNTER \"Double Orb Walker\" (:33) is DEAD CONTENT: grep finds no MonsterHelper case and no encounter key for it, so it is deliberately unregistered -- the event group is \"2 Orb Walkers\" (MysteriousSphere.java:39,87), encounters.yaml id 61. ctor (:52-70): the super ARGUMENT is AbstractDungeon.monsterHpRng.random(90, 96) (:53), evaluated BEFORE the ctor body, then setHp(92,102) at ascension >= 7 else (90,96) (:54-58) -- TWO draws, the first thrown away by the second; see the rolls block. clawDmg 15 / laserDmg 10, or 16 / 11 from A2 (:59-65); damage = [laserDmg, clawDmg] (:66-67), so LASER is index 0 and CLAW index 1. Move ids LASER=1, CLAW=2 (:48-49). usePreBattleAction (:73-80): ApplyPowerAction(this, this, new GenericStrengthUpPower(this, MOVES[0], ascension >= 17 ? 5 : 3)) -- powers.yaml id 101, at the 3-arg default stack amount, i.e. the same number. takeTurn (:82-97): case 1 has NO break (:95), which is BEHAVIOURALLY INERT because it is the last case and the fall-through reaches only the trailing RollMoveAction (:97) that case 2 reaches too. getMove (:100-113) has no ascension branch and draws nothing extra. damage() (:115-122) and changeState (:124-131) are presentation only."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 90, max: 96}    # OrbWalker.java:57 (ascension < 7)
+    a7:   {min: 92, max: 102}   # OrbWalker.java:55 (ascension >= 7)
+  rolls:
+    - name: SUPER_ARG_HP
+      stream: MONSTER_HP
+      timing: CONSTRUCTOR_BEFORE_HP
+      range:
+        # ONE COLUMN ONLY, AND THAT IS THE POINT: the super-argument draw is
+        # TIER-INDEPENDENT (OrbWalker.java:53 is a bare random(90, 96) with no
+        # ascension branch anywhere near it), while the setHp draw that
+        # IMMEDIATELY OVERWRITES its value is tiered. So an A20 Orb Walker still
+        # draws 90..96 first and 92..102 second. The first value is discarded --
+        # but it MOVED THE STREAM, so "Orb Walker" costs TWO monster_hp_rng draws
+        # and the event group "2 Orb Walkers" costs FOUR, and every later roll on
+        # that floor is offset accordingly.
+        base: {min: 90, max: 96}  # OrbWalker.java:53 (the super(...) argument)
+  moves:
+    - name: LASER
+      move_id: 1               # OrbWalker.java:48
+      intent: ATTACK_DEBUFF    # setMove(1, ATTACK_DEBUFF, dmg[0].base) (:106,109)
+      effects:
+        # damage.get(0) == laserDmg: 10, or 11 from A2 (:59-65). Then ONE
+        # MakeTempCardInDiscardAndDeckAction(new Burn()) (:94), which is TWO
+        # INDEPENDENT COPIES and not one card in two places
+        # (MakeTempCardInDiscardAndDeckAction.java:30-36, read in full): a
+        # ShowCardAndAddToDrawPileEffect with randomSpot = true (so
+        # CardGroup.addToRandomSpot -> ONE card_random_rng draw, or zero on an
+        # empty draw pile) and THEN a ShowCardAndAddToDiscardEffect (no draw), in
+        # that order. Two steps, because DRAW_RANDOM and DISCARD are two piles.
+        # ChangeState + Wait (:92-93) are presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 11}}
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: BURN, pile: DRAW_RANDOM}
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: BURN, pile: DISCARD}
+    - name: CLAW
+      move_id: 2               # OrbWalker.java:49
+      intent: ATTACK           # setMove(2, ATTACK, dmg[1].base) (:104,112)
+      effects:
+        # damage.get(1) == clawDmg: 15, or 16 from A2 (:59-65). AnimateSlowAttack
+        # (:85) is presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 15, a2: 16}}
+  ai: native   # getMove (OrbWalker.java:100-113) is a pure move-history tree --
+               # num < 40 ? (!lastTwoMoves(CLAW) ? CLAW : LASER)
+               #          : (!lastTwoMoves(LASER) ? LASER : CLAW) --
+               # and lastTwoMoves is not an ai-table shape. No ascension branch,
+               # no extra draws. See monster_orb_walker.cpp.
+
+- id: 51
+  name: REPULSOR
+  game_id: "Repulsor"
+  provenance: "Repulsor (Repulsor.java, read in full, 84 lines). ID \"Repulsor\" (:28). ENCOUNTER_NAME_W \"Ancient Shapes Weak\" and ENCOUNTER_NAME \"Ancient Shapes\" (:33-34) are DEAD CONTENT -- MonsterHelper's keys are \"3 Shapes\" / \"4 Shapes\" / \"Sphere and 2 Shapes\" and grep finds no case for either string, so neither is registered. ctor (:44-57): super passes the LITERAL 35 (:45) -- no draw -- dazeAmt = 2 flat (:49), then setHp(31,38) at ascension >= 7 else (29,35) (:50-54), then attackDmg = ascension >= 2 ? 13 : 11 (:55) as a plain ternary with no draw. ONE monster_hp_rng draw total. NO usePreBattleAction -- the class does not declare one, so AbstractMonster's empty body stands (AbstractMonster.java:953-954). Move ids DAZE=1, ATTACK=2 (:39-40). takeTurn (:59-73): both cases reach the trailing RollMoveAction (:72). getMove (:75-82): if (num < 20 && !lastMove(ATTACK)) ATTACK; else DAZE -- no ascension branch and no extra draw, and note that DAZE is the DEFAULT arm, so a Repulsor dazes on roughly four turns in five."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 29, max: 35}    # Repulsor.java:53 (ascension < 7)
+    a7:   {min: 31, max: 38}    # Repulsor.java:51 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: DAZE
+      move_id: 1               # Repulsor.java:39
+      intent: DEBUFF           # setMove((byte)1, Intent.DEBUFF) (:81)
+      effects:
+        # MakeTempCardInDrawPileAction(new Dazed(), dazeAmt = 2, randomSpot = true,
+        # autoPosition = true) (:67). ONE step of amount 2, not two of amount 1:
+        # op_make_card's DRAW_RANDOM branch loops per COPY and draws one
+        # card_random_rng value each time (interp/interp_cards.cpp), which is
+        # exactly MakeTempCardInDrawPileAction's own per-copy
+        # ShowCardAndAddToDrawPileEffect -> CardGroup.addToRandomSpot. So DAZE
+        # costs TWO sequential card_random_rng draws, and ZERO on an empty draw
+        # pile (both branches already exist and are pinned by a test in this batch).
+        - {op: MAKE_CARD, target: PLAYER, amount: 2, card: DAZED, pile: DRAW_RANDOM}
+    - name: ATTACK
+      move_id: 2               # Repulsor.java:40
+      intent: ATTACK           # setMove(2, ATTACK, dmg[0].base) (:77)
+      effects:
+        # damage.get(0) == attackDmg: 11, or 13 from A2 (:55). AnimateSlowAttack
+        # (:62) is presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 11, a2: 13}}
+  ai: native   # getMove (Repulsor.java:75-82) reads lastMove, which is not an
+               # ai-table shape, and its num gate is a plain < 20. See
+               # monster_repulsor.cpp.
+
+- id: 52
+  name: EXPLODER
+  game_id: "Exploder"
+  provenance: "Exploder (Exploder.java, read in full, 94 lines). ID \"Exploder\" (:28). ENCOUNTER_NAME \"Ancient Shapes\" (:33) is DEAD CONTENT, as on the Repulsor. ctor (:50-62): super passes the LITERAL 30 (:51) -- no draw -- then setHp(30,35) at ascension >= 7 else setHp(30,30) (:56-60). setHp(30,30) STILL DRAWS: Random.random(int,int) is start + nextInt(end - start + 1) and ++counter is unconditional (random/Random.java:58-61), so nextInt(1) consumes a value. This is the OPPOSITE of the SphericGuardian (monsters.yaml id 30), which skips the draw because setHp is never CALLED -- the two must not be conflated, and the degenerate {30,30} column below is spelled out rather than omitted so the difference stays visible. attackDmg = ascension >= 2 ? 11 : 9 (:61), a plain ternary. usePreBattleAction (:64-67): ApplyPowerAction(this, this, new ExplosivePower(this, 3)) -- powers.yaml id 100, at the 3-arg default stack amount 3. Move ids ATTACK=1, BLOCK=2 (:44,48); EXPLODE_BASE 3 (:49) is the power's starting fuse, passed at :66. takeTurn (:69-84) opens with ++turnCount (:71); case 2 is a LITERAL EMPTY CASE (:78-80) -- the Exploder's move 2 does nothing at all, and the self-destruct is the POWER's duringTurn, not the move. Both cases reach the trailing RollMoveAction (:82). getMove (:86-92) NEVER READS num -- the aiRng draw still happens and still moves the shared stream (the Guardian / Spheric Guardian precedent)."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    # {30,30} IS A REAL COLUMN AND IT DRAWS -- see the provenance. At the engine's
+    # kMonsterAscension 20 the live column is the a7 one, so this only bites the
+    # tier-2 column table and any sub-A7 fixture; it is authored exactly because
+    # getting it wrong would be invisible until one existed.
+    base: {min: 30, max: 30}    # Exploder.java:59 (ascension < 7) -- setHp(30, 30)
+    a7:   {min: 30, max: 35}    # Exploder.java:57 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: ATTACK
+      move_id: 1               # Exploder.java:44
+      intent: ATTACK           # setMove(1, ATTACK, dmg[0].base) (:88)
+      effects:
+        # damage.get(0) == attackDmg: 9, or 11 from A2 (:61). AnimateSlowAttack
+        # (:73) is presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 9, a2: 11}}
+    - name: BLOCK
+      move_id: 2               # Exploder.java:48 -- the Java constant is named
+                               # BLOCK and the move GAINS NO BLOCK. The name is
+                               # transcribed, not corrected.
+      intent: UNKNOWN          # setMove((byte)2, Intent.UNKNOWN) (:90)
+      effects:
+        # A LITERAL EMPTY CASE (Exploder.java:78-80): case 2 is a bare break. The
+        # turn still reaches the trailing RollMoveAction, and the 30-damage
+        # self-destruct belongs to ExplosivePower.duringTurn (powers.yaml id 100),
+        # which fires AFTER takeTurn from applyTurnPowers. NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+  ai: native   # getMove (Exploder.java:86-92) IGNORES num entirely -- it is a bare
+               # turnCount < 2 ? ATTACK : move 2 -- but rollMove still draws one
+               # aiRng.random(99) every time (AbstractMonster.java:712-714), and
+               # that draw moves the stream its groupmates share. That is the whole
+               # reason this is native and not an empty table. turnCount needs NO
+               # STORAGE: see monster_exploder.hpp for the exact move-history
+               # predicate it is derived from.
+
+- id: 53
+  name: SPIKER
+  game_id: "Spiker"
+  provenance: "Spiker (Spiker.java, read in full, 111 lines). ID \"Spiker\" (:28). ENCOUNTER_NAME \"Ancient Shapes\" (:33) is DEAD CONTENT, as on the Repulsor and the Exploder. ctor (:52-70): super passes the LITERAL 56 (:53) -- no draw -- then setHp(44,60) at ascension >= 7 else (42,56) (:57-61), then the >= 2 branch (:62-68) gives startingThorns 4 / attackDmg 9 (3 / 7 below). ONE monster_hp_rng draw. usePreBattleAction (:72-79): ApplyPowerAction(this, this, new ThornsPower(this, ascension >= 17 ? startingThorns + 3 : startingThorns)). THE A17 ARM STACKS ON TOP OF THE A2 ARM -- it is startingThorns + 3, reading the already-tiered field, not a restated literal -- so at the engine's kMonsterAscension 20 the opening Thorns is 4 + 3 = 7, not 6 and not 4. The ApplyPowerAction is 3-arg, so the stack amount is powerToApply.amount, the same number. ThornsPower is ALREADY REGISTERED (powers.yaml id 16, native, on_attacked) and needs no new row; this is simply its first MONSTER owner, reflecting into the player. Move ids ATTACK=1, BUFF_THORNS=2 (:45,49); BUFF_AMT 2 (:50). takeTurn (:81-95): case 2 does ++thornsCount and then ApplyPowerAction(this, this, new ThornsPower(this, 2), 2) (:87-89); it has no break (:89) but is the last case, so the fall-through is inert. Both cases reach the trailing RollMoveAction (:93). getMove (:97-110): thornsCount > 5 is a PERMANENT latch into ATTACK -- from the SEVENTH decision after six BUFF turns, the Spiker never buffs again and its Thorns sits at 7 + 12 = 19 at A20."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 42, max: 56}    # Spiker.java:60 (ascension < 7)
+    a7:   {min: 44, max: 60}    # Spiker.java:58 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: ATTACK
+      move_id: 1               # Spiker.java:45
+      intent: ATTACK           # setMove(1, ATTACK, dmg[0].base) (:100,105)
+      effects:
+        # damage.get(0) == attackDmg: 7, or 9 from A2 (:62-68). AnimateSlowAttack
+        # (:84) is presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 9}}
+    - name: BUFF_THORNS
+      move_id: 2               # Spiker.java:49
+      intent: BUFF             # setMove((byte)2, Intent.BUFF) (:109)
+      effects:
+        # ApplyPowerAction(this, this, new ThornsPower(this, 2), 2) (:88) --
+        # BUFF_AMT 2 (:50), flat at every ascension. The ++thornsCount at :87 is
+        # the module's own bookkeeping and is not an effect step.
+        - {op: APPLY_POWER, target: SELF, amount: 2, power: THORNS}
+  ai: native   # getMove (Spiker.java:97-110) reads a PER-INSTANCE COUNTER that no
+               # move-history ring can carry: BUFF turns are not contiguous, so
+               # thornsCount > 5 cannot be recovered from the 3-slot history. The
+               # rest is num < 50 && !lastMove(ATTACK). See monster_spiker.cpp for
+               # where the counter lives (MonsterState.pad0, saturating -- the
+               # Mugger/Looter precedent; NO new flag bit).

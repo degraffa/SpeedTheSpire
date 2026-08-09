@@ -518,13 +518,17 @@ TEST(RegistryGen, ManifestCounts) {
                                       // joins any generated pool.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 58u);  // + S2.23's MINION (96) and PAINFUL_STABS
+    EXPECT_EQ(m::kPowersCount, 61u);  // + S2.23's MINION (96) and PAINFUL_STABS
                                       // (97) -- the Gremlin Leader's minion
                                       // marker (which un-parks the Feed and
                                       // Hand of Greed gates) and the Book of
                                       // Stabbing's per-hit Wound generator, the
-                                      // first binder of ON_INFLICT_DAMAGE. The
-                                      // 96-97 block is spent exactly.
+                                      // first binder of ON_INFLICT_DAMAGE --
+                                      // and S2.25's REGROW (99, game_id "Life
+                                      // Link" -- NOT "Regrow"), EXPLOSIVE (100)
+                                      // and GENERIC_STRENGTH_UP (101). Both
+                                      // blocks spent exactly; 98 is S2.24's
+                                      // row, not a gap.
                                       // + S2.22's MALLEABLE (95), the Snake
                                       // Plant's escalating retaliation shield;
                                       // that batch's whole PowerId grant, spent
@@ -588,12 +592,16 @@ TEST(RegistryGen, ManifestCounts) {
                                       // The block 93-94 is spent exactly; 95
                                       // (Malleable) is the NEXT city batch's row,
                                       // not this one's
-    EXPECT_EQ(m::kMonstersCount, 37u); // + S2.23's three Act-2 city ELITES:
+    EXPECT_EQ(m::kMonstersCount, 42u); // + S2.23's three Act-2 city ELITES:
                                        // Gremlin Leader (37), Taskmaster (38,
                                        // game_id "SlaverBoss") and Book of
-                                       // Stabbing (39) -- the 37-39 block spent
-                                       // exactly. 40-44 are S2.24's and 45-48
-                                       // stay unissued.
+                                       // Stabbing (39), the 37-39 block spent
+                                       // exactly -- and S2.25's five Act-3
+                                       // beyond normals: Darkling (49), Orb
+                                       // Walker (50), Repulsor (51), Exploder
+                                       // (52), Spiker (53), the 49-53 block
+                                       // spent exactly. 40-44 are S2.24's and
+                                       // 45-48 stay UNISSUED.
                                        // + S2.22's five Act-2 city normals:
                                        // Mugger (32), Snake Plant (33), Snecko
                                        // (34), Centurion (35), Healer (36) --
@@ -655,7 +663,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 542u);  // 132 + 58 + 37 + 150 + 33 + 51 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 550u);  // 132 + 61 + 42 + 150 + 33 + 51 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
