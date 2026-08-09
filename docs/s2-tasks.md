@@ -82,6 +82,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | `generateStrongEnemies(12)` regeneration on an exhausted `monsterList` | S2.11 (the boss-exit pop it added) | S2.12 | **DISCHARGED — UNREACHABLE, no body written** (2026-08-07, S2.12). Re-derived for Acts 2–3, which call `generateWeakEnemies(2)`: SUPPLY is weak + 1 first-strong + 12 strong = **15** (Act 1 = 16); DEMAND is at most **14** — one walked path visits 15 rooms, one per map row, of which the act-independent generator forces row 8 Treasure and row 14 Rest, leaving 13 `monsterList`-consuming rooms (a ? room that rolls MONSTER is one of those 13, not an extra) plus the one pop that leaving the boss room performs. Margin 2 in Act 1, **1** in Acts 2–3. The loud `assert` in `next_room_transition_impl` stays and now carries that arithmetic in full; writing untestable machinery for an unreachable arm would be worse than an assert that names why it cannot fire |
 | Fork redeploy + bottle-taking capture (stage-b table row, "next capture-campaign owner") | wave-runlayer S3 (stage-b) | S2.43 | S2.43 is the next capture campaign; validate the `in_bottle_*` boundary end-to-end and mark the stage-b row DISCHARGED there |
 | `BOSS_REWARD.screen_state.relics` — schema **storage** for the boss-relic offers | S2.42 (which promoted the disposition but not the storage) | S2.43 | **Evidence:** PROTOCOL.md §3.8 dispositioned this `I (S2 scope)` because "the run terminates at act-1 boss combat rewards, before the boss chest" — no longer true at capture driver `b1.7.0`, which plays through the chest. An `I` field is **never diffed**, so design §6 S2-G2 item 2 (a *zero-diff* boss-chest boss-relic pick) was unachievable while the row said `I`, and **no S2 ledger row owned changing it**. S2.42 took the contained half: the row now reads `S`, the offers are registry-**joined** (an unknown boss relic fails translation loudly), and the field is `fr.defer`red — pinned by `Translator.BossRewardRelicsAreDeferredNotIgnored` and `Translator.BossRewardRelicsStillJoinTheRegistryAndFailLoud`. What remains is **storage**, which is not contained: the three offers live in `RunController.boss_chest` (`BossChestState`, `boss_chest.hpp`), which is transient, while the translator emits `RunState`/`CombatState` and the differ compares those — so landing it needs new `RunState` storage **plus** a `SCHEMA_VERSION` bump, a trace-container change and an oracle-adapter change. A `SCHEMA_VERSION` bump outside the places the ledger plans for it is stop-the-line (conventions §5), so S2.42 declined it rather than improvising. **S2.43 needs this before it can claim G2-2 item 2.** |
+| S2.31 payout relics/cards are now REACHABLE with their bodies still deferred | S2.03 (landed them acquisition-only, naming S2.31 as body owner) / S2.31 (granted the acquisition, declined the bodies) | **S2-G1 — needs a body task opened before the gate** | S2.31's acceptance is the ledger's: *option/gate/A15 audit + payout rows **acquisition**-tested*. It grants six relics and three cards whose non-acquisition bodies S2.03 had pencilled onto S2.31, and it deliberately does **not** write them — but they stop being unreachable the moment these events land, so the deferral is recorded here rather than left implied. Open, each with the event that now grants it: **Bloody Idol** `onGainGold` heal 5 (Forgotten Altar) — the only RUN-layer one, and the reason it is not a one-liner is that `AbstractPlayer.gainGold`'s fan-out fires in combat too, where `heal` takes the Magic Flower / phase-gated path that `gain_gold` (relics/relic_pickup.hpp) does not model; **Enchiridion** `atPreBattle`, **Nilry's Codex** `onPlayerEndTurn`/`CodexAction`, **Necronomicon** `onUseCard`/`atTurnStart` (its `onEquip` was already live) and **Necronomicurse** `triggerOnExhaust` (all four from Cursed Tome's book reward); **Mutagenic Strength** `atBattleStart` (Drug Dealer); **Ritual Dagger**'s effect program, still deliberately EMPTY pending its bespoke `misc`-growth opcode (Nest). Every one of those registry rows had its `owner S2.31` string amended in place to point here, so no row now claims a landed task will write it. Each is pinned inert by the existing tier-2 suite, which is what makes this a loud deferral: the cards visibly do nothing and the relics bind no hook |
 | Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). **The Act-2 gate is now OPEN** — S2.24 landed the last Act-2 batch (2026-08-09), so the Act-2 cells are measurable the next time S2.41/S2.43 re-runs the scan; Act 3 still waits on S2.27. [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
 
 ---
@@ -1466,11 +1467,145 @@ are the "first registry authoring wave" the TE.2 acceptance names.
 
 ## Phase S2.3 — Events closure (B4.11–B4.13 pattern; ∥ across disjoint batches once S2.02 + S2.13 land)
 
-- **S2.31** `[ ]` ∥ City events I (non-combat): Addict, Back to Basics,
+- **S2.31** `[x]` ∥ City events I (non-combat): Addict, Back to Basics,
   Beggar, Cursed Tome, Drug Dealer, Forgotten Altar, Ghosts, Nest.
   **Deps:** S2.02, S2.13, S2.03 (payout rows) **Acceptance:** per-event
   option/gate/A15 audit against the source read in full; payout rows
   (relics/cards/curses) acquisition-tested; six presets green.
+  **Log:** 2026-08-09 — landed. Eight `implemented: true` rows (events.yaml
+  ids 32, 33, 34, 36, 37, 38, 39, 41) with audited `options`/`a15` blocks
+  and a per-row body citation, one new engine TU
+  (`src/engine/events/city_events_i.cpp`) and 29 tier-2 tests
+  (`tests/city_events_i_test.cpp`). Exactly as S2.13 promised, no
+  `build_event_pool` / `build_shrine_pool` / membership-mask line was
+  touched: an Act-2 `?` already selected the right id, and the bodies only
+  filled `event_dialog_impl`. **Ids spent: none new** — the eight EventId
+  rows and every payout row (relics BLOODY_IDOL / ENCHIRIDION /
+  NILRYS_CODEX / NECRONOMICON / MUTAGENIC_STRENGTH / CIRCLET, cards
+  APPARITION / JAX / RITUAL_DAGGER, curses SHAME / DECAY) were already
+  issued by S2.02 and S2.03. One enum value: `EventGridKind` gains
+  `TRANSFORMABLE_ANY` (4).
+
+  **THE A15 AUDIT IS THE HEADLINE, and it is four-of-eight, not
+  eight-of-eight.** Addict (the 85-gold price is a compile-time constant,
+  Addict.java:24), Back to Basics, Beggar (GOLD_COST 75, Beggar.java:27 —
+  what ascension moves for this event is its *draw* gate, which is
+  `getEvent`'s and not the body's) and Drug Dealer contain **no
+  `ascensionLevel` read at all**, and each is pinned with an explicit
+  same-behaviour-at-A0-and-A15 test rather than left unasserted, so a
+  future ascension branch appearing in any of them is a red test.
+  The four that do branch: Cursed Tome's finish cost 10 → 15
+  (CursedTome.java:58 — the three page damages 1/2/3 and the stop-reading 3
+  do **not** move), Forgotten Altar's HP-loss percent 0.25 → 0.35 (:50, the
+  +5 max HP does not move), Nest's gold 99 → 50 (:35, the dagger's 6 damage
+  does not move), and **Ghosts, which is the trap**: its ctor's ascension
+  read only picks which OPTION STRING is drawn (Ghosts.java:37-41), while
+  the actual branch is in `becomeGhost` (:86-89, `amount = 5; if
+  (ascensionLevel >= 15) amount -= 2`) — so A15 moves the APPARITION COUNT
+  5 → 3 and the max-HP price stays `ceil(maxHealth * 0.5f)` at every
+  ascension. S2.03 had flagged exactly this for S2.31 and it is confirmed
+  from source, not inherited.
+
+  **Option-tree findings, each of which would have been wrong if guessed
+  from the payout manifest:**
+  * **Beggar has THREE screens, not two.** Paying 75 does not open the
+    purge grid; it opens a page whose single button opens it (:63-70,
+    :79-85), and `update()` then removes the card and calls `openMap()`
+    ITSELF (:46-57) — there is no post-purge page. That last half exposed a
+    framework fact worth recording: **`run_advance` discards
+    `choose`'s return value on a GRID pick** (it only honours `FINISHED`
+    on a MENU pick), so a body that ends the event from inside a grid must
+    install the transition itself and report `TRANSITIONED`. Beggar is the
+    batch's one such body; the shared `finish_to_map` helper names it.
+  * **Nest's entry screen has exactly ONE button** (:34) and the offer pair
+    is BUILT by pressing it: `setDialogOption` appends the Ritual Dagger at
+    index 1 and `updateDialogOption(0, ...)` then rewrites index 0 into the
+    gold offer (:43-45). Index 0 is gold, index 1 is the dagger — the
+    reverse of the order the two payouts are usually listed in.
+  * **Forgotten Altar's Bloody-Idol arm is the opposite of the obvious
+    guess.** `gainChalice` (:99-115) swaps the Golden Idol for a Bloody
+    Idol *in its own relic slot* — but only when a Bloody Idol is NOT
+    already held; when one is, the payout is a plain Circlet **and the
+    Golden Idol stays** (:106-109).
+  * **Addict/Beggar/Forgotten Altar's "two options" are one greyed-out
+    option.** Each ctor has two `setDialogOption` arms that differ only in
+    TEXT and pass the identical `isDisabled` expression
+    (`gold < 85` / `gold < 75` / `!hasRelic("Golden Idol")`), so the menu
+    width never changes with the gate. Addict's `if (gold < 85) break`
+    (:45) is the dead defensive twin of its grey-out.
+  * **Cursed Tome does not instant-obtain its book.** `randomBook` clears
+    the room rewards, adds ONE relic row and opens the combat reward screen
+    (:158-161) — the screen IS the exit, the Lab / Woman in Blue shape. Its
+    page damages are taken on LEAVING each page and are all
+    `DamageInfo(null, n, HP_LOSS)`: a NULL owner, so Torii's `onAttacked`
+    never runs (AbstractPlayer.java:1427-1434 gates the whole `onAttacked`
+    block on `info.owner != null`) while Tungsten Rod's owner-independent
+    `onLoseHpLast` still does. Nest's dagger cost is `DamageInfo(null, 6)`
+    — NORMAL, not HP_LOSS — and takes the same two relics the same way;
+    both are pinned with a Torii and a Tungsten Rod witness.
+
+  **Two engine surfaces the batch had to add, both narrow and both named at
+  the door rather than special-cased in the body:**
+  1. `EventGridKind::TRANSFORMABLE_ANY` — **Drug Dealer is the ONE event
+     grid in the game that does not exclude bottled cards**
+     (`gridSelectScreen.open(player.masterDeck.getPurgeableCards(), 2, ...)`,
+     DrugDealer.java:128, with no `getGroupWithoutBottledCards` wrapper,
+     unlike Living Wall's Change and Transmogrifier). The
+     `event_grid_card_legal` comment that predicted this exact need is now
+     discharged. Its TWO picks stay the body's business: the single-pick
+     `event_grid_transform_card` door is deliberately NOT extended to the
+     new kind, because `DrugDealer.update` (:104-122) fires only at
+     `selectedCards.size() == 2` and then does both removals and both
+     `transformCard` draws before both appends — a door that transforms and
+     closes in one call would silently halve it.
+  2. `swap_relic_in_place` (relic_pools) — `AbstractRelic.instantObtain(p,
+     slot, callOnEquip=false)` applied to an OCCUPIED slot, the
+     `p.relics.set(slot, this)` arm (AbstractRelic.java:230-249). It is not
+     `lose_relic` + `acquire_relic`: the incoming relic's `onEquip` is
+     skipped and the outgoing relic's index is preserved, so trap 8's
+     trigger order survives the swap (pinned with a Tiny Chest sitting
+     after the idol and keeping both its index and its counter). Written
+     narrowly on purpose — no Circlet-stacking arm (Forgotten Altar's
+     Circlet takes the ordinary obtain door) and an empty `onUnequip`
+     fan-out, which is a fact about Golden Idol (GoldenIdol.java:12-30 has
+     no override) rather than a shortcut; the note `lose_relic` already
+     carries about the Bottled trio is repeated at the new door.
+
+  **One documented defensive deviation, new:** Beggar's GAVE_MONEY screen
+  opens its grid unconditionally (:80, `canCancel` false) with no emptiness
+  test, unlike Back to Basics (:70). A deck with nothing removable would
+  strand the Java on a grid it cannot satisfy; this port falls through to
+  the leave page instead of emitting a phase with no legal action. Reaching
+  it needs 75 spent gold and a deck of nothing but Ascender's Bane / bottled
+  cards — barely reachable, not impossible, and recorded at the code.
+
+  **Test-ownership move:** the `ActEventLists` City-list test asserted "no
+  Act-2 row is implemented", which this task necessarily falsifies.
+  Rather than editing a snapshot into it, that loop
+  now asserts the INVARIANT (`native` always; `implemented ⇒ screen_count >
+  0`; `!implemented ⇒ both counts zero`) and the by-name roster moved to
+  `CityEventsI.RegistryMarksExactlyTheEightNonCombatRowsImplemented`, which
+  lists all thirteen City rows with their expected flags — so S2.32
+  flipping one of its five without updating the roster is a failing test.
+  **S2.33 will hit the identical assertion in the Beyond loop; it is left
+  untouched here so the edit lands with the batch that needs it.**
+
+  **One deferral opened rather than inherited.** S2.03 had pencilled the
+  non-acquisition BODIES of six relics and three cards onto S2.31 (Bloody
+  Idol's `onGainGold`, Enchiridion / Nilry's Codex / Necronomicon /
+  Necronomicurse, Mutagenic Strength, Ritual Dagger's `misc`-growth
+  program). This task's acceptance is acquisition-only and it declines
+  them — but the events make them REACHABLE, so leaving the pencil mark on
+  a `[x]` row would have been drift. Every one of those registry rows had
+  its `owner S2.31` string amended in place, and a Deferred-obligations
+  row now carries the set with the granting event named per entry. The one
+  that looks like a one-liner and is not: Bloody Idol's heal sits on
+  `AbstractPlayer.gainGold`'s fan-out, which also fires IN combat, where
+  the heal takes the phase-gated Magic Flower path `gain_gold` does not
+  model.
+
+  Six presets green (`ctest -N | tail -1` for the current suite size);
+  `check_stale_counts` + `check_doc_links` clean.
 - **S2.32** `[ ]` ∥ City events II: The Library, The Mausoleum, Vampires,
   Colosseum + Masked Bandits (combat embeds), Knowing Skull, The Joust,
   N'loth, Designer, Duplicator (act-gated one-timer bodies).

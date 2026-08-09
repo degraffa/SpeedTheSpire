@@ -503,11 +503,21 @@ static_assert(sizeof(EventDialogState) == 12 + 4 * kEventBoardCap);
 // transition; this enum supplies the common legality predicate and mutation
 // door. Cleric/Golden Wing exercise PURGE now; UPGRADE/TRANSFORMABLE reserve
 // the same non-overlapping screen shape for Living Wall and shrine bodies.
+// TRANSFORMABLE_ANY is TRANSFORMABLE's Act-2 sibling and exists because Drug
+// Dealer is the ONE event grid in the game that does not exclude bottled cards:
+// `gridSelectScreen.open(player.masterDeck.getPurgeableCards(), 2, ...)`
+// (DrugDealer.java:128) has no getGroupWithoutBottledCards wrapper, unlike
+// Living Wall's Change (LivingWall.java:102-103) and Transmogrifier
+// (Transmogrifier.java:65). The two kinds differ ONLY in that clause; the
+// mutation is the same transform_card door. It also takes TWO picks, which is
+// the body's business (it keeps the grid open across the first), not this
+// enum's.
 enum class EventGridKind : uint8_t {
     NONE = 0,
     PURGE = 1,
     UPGRADE = 2,
     TRANSFORMABLE = 3,
+    TRANSFORMABLE_ANY = 4,
 };
 
 void open_event_grid(EventDialogState& es, EventGridKind kind) noexcept;

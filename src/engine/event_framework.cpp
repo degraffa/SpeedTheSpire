@@ -589,6 +589,12 @@ bool event_grid_card_legal(const RunState& rs, const EventDialogState& es,
             // Living Wall's Change (:102-103) and Transmogrifier (:65) both
             // open getGroupWithoutBottledCards(getPurgeableCards()).
             return master_card_purgeable_unbottled(rs.master_deck[deck_index]);
+        case EventGridKind::TRANSFORMABLE_ANY:
+            // Drug Dealer (DrugDealer.java:128) opens the RAW
+            // getPurgeableCards() -- the header note on the enum spells out
+            // why this one grid keeps bottled cards. rest_card_purgeable IS
+            // getPurgeableCards' predicate (CardGroup.java:978-985).
+            return rest_card_purgeable(rs.master_deck[deck_index]);
         case EventGridKind::NONE:
         default:
             return false;
@@ -620,6 +626,11 @@ bool event_grid_upgrade_card(RunState& rs, EventDialogState& es,
 bool event_grid_transform_card(RunState& rs, EventDialogState& es,
                                RngStream& misc_rng,
                                uint16_t deck_index) noexcept {
+    // TRANSFORMABLE only, deliberately NOT TRANSFORMABLE_ANY: this door is the
+    // ONE-pick shape (it transforms and closes in the same call), and Drug
+    // Dealer's grid takes TWO picks whose removals and transforms all happen
+    // after the SECOND (DrugDealer.update, :104-122). That body therefore owns
+    // its own mutation and this door would silently halve it.
     if (static_cast<EventGridKind>(es.grid_kind) !=
             EventGridKind::TRANSFORMABLE ||
         !event_grid_card_legal(rs, es, deck_index)) {

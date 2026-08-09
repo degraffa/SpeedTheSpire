@@ -315,4 +315,33 @@ void initialize_relic_pools(RunState& rs) noexcept;
 // bottles' flag-clear as its first S1-relic body.
 [[nodiscard]] bool lose_relic(RunState& rs, RelicId id) noexcept;
 
+// AbstractRelic.instantObtain(player, slot, callOnEquip=false)
+// (AbstractRelic.java:219-249) applied to an ALREADY-OCCUPIED slot -- the
+// `p.relics.set(slot, this)` arm, an in-place REPLACEMENT that keeps every
+// other relic's index and therefore trap 8's trigger order. Its one caller is
+// Forgotten Altar's gainChalice (ForgottenAltar.java:99-115), which first runs
+// `relics.get(relicAtIndex).onUnequip()` on the outgoing relic and then seats
+// the incoming one with callOnEquip FALSE.
+//
+// Three deliberate narrownesses, each because the one call site is narrow:
+//   * NO onEquip. `callOnEquip` is false at the call site, so the incoming
+//     relic's equip body is skipped -- which is why this cannot be expressed as
+//     lose_relic + acquire_relic even ignoring the ordering. (Bloody Idol has
+//     no onEquip anyway, BloodyIdol.java:14-39; the point is the contract.)
+//   * NO Circlet stacking. instantObtain's first arm redirects a Circlet into
+//     an owned Circlet's counter; Forgotten Altar's Circlet payout does NOT
+//     come through here (it takes the ordinary spawnRelicAndObtain door at
+//     :107) and Bloody Idol is not a Circlet, so the arm is unreachable from
+//     the only caller and is asserted away rather than half-written.
+//   * THE onUnequip FAN-OUT IS EMPTY, and that is a fact about the outgoing
+//     relic rather than a shortcut: the only relics with an onUnequip body are
+//     the three Bottled ones (BottledFlame.java:55-61) and Golden Idol has
+//     none (GoldenIdol.java:12-30, read in full). A future caller that can
+//     evict a bottle adds the fan-out here -- the same note lose_relic carries.
+//
+// Returns false, changing nothing, when `old_id` is not owned, when `new_id`
+// is not a registry row, or when `new_id` is Circlet.
+[[nodiscard]] bool swap_relic_in_place(RunState& rs, RelicId old_id,
+                                       RelicId new_id) noexcept;
+
 }  // namespace sts::engine

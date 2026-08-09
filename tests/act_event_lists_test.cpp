@@ -10,8 +10,11 @@
 //   * the two per-act eventLists as ORDERED lists, against the Java
 //   * the ORDER DIVERGENCE between Exordium's shrineList and the Act-2/3 one
 //   * the generator's refusal of every malformed conditions block
-// It pins no BODY behaviour: ids 32-51 are identity rows with `implemented`
-// absent, and their option trees / A15 branches belong to S2.31-S2.33. The
+// It pins no BODY behaviour: ids 32-51 were authored as identity rows, and
+// their option trees / A15 branches belong to S2.31-S2.33 -- which is why the
+// Act-2 loop below now asserts the native/implemented/screen_count INVARIANT
+// instead of "nothing is implemented yet" (S2.31 landed eight of the thirteen
+// bodies; the by-name pin moved to city_events_i_test.cpp with them). The
 // per-act list REBUILD and the draw itself belong to S2.13; nothing here calls
 // build_event_pool or generate_event, because in this commit those still know
 // only Act 1 and saying otherwise would be a test of a plan, not of the engine.
@@ -267,11 +270,20 @@ TEST(ActEventLists, CityEventListIsThirteenRowsInJavaAddOrder) {
         EXPECT_TRUE(r::event_in_act(id, 2));
         EXPECT_FALSE(r::event_in_act(id, 1));
         EXPECT_FALSE(r::event_in_act(id, 3));
-        // Identity rows: native metadata, no linked body yet (S2.31/S2.32).
+        // Every Act-2 row is native; S2.31 landed the eight non-combat BODIES
+        // and S2.32 owns the rest, so this list-shape test asserts the
+        // INVARIANT that ties the two columns together rather than a snapshot
+        // of how far the batches have got. WHICH eight are implemented is
+        // pinned by name in city_events_i_test.cpp
+        // (CityEventsI.RegistryMarksExactlyTheEightNonCombatRowsImplemented) --
+        // the place a future batch has to edit, deliberately not here.
         EXPECT_TRUE(def->native) << kCityEventList[i];
-        EXPECT_FALSE(def->implemented) << kCityEventList[i];
-        EXPECT_EQ(def->screen_count, 0) << kCityEventList[i];
-        EXPECT_EQ(def->a15_change_count, 0) << kCityEventList[i];
+        if (def->implemented) {
+            EXPECT_GT(def->screen_count, 0) << kCityEventList[i];
+        } else {
+            EXPECT_EQ(def->screen_count, 0) << kCityEventList[i];
+            EXPECT_EQ(def->a15_change_count, 0) << kCityEventList[i];
+        }
     }
 }
 

@@ -542,6 +542,33 @@ RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng, RelicId id,
     return acquire_relic_impl(rs, misc_rng, id, &ctx);
 }
 
+bool swap_relic_in_place(RunState& rs, RelicId old_id,
+                         RelicId new_id) noexcept {
+    // ForgottenAltar.gainChalice (:99-115): find the FIRST slot holding
+    // `old_id` (the Java's `break` on the first match, :102-104), run its
+    // onUnequip (empty for every relic reachable here -- header), then
+    // instantObtain(player, thatSlot, callOnEquip=false), which is the
+    // `p.relics.set(slot, this)` arm of AbstractRelic.java:230-249.
+    const RelicDef* def = relic_def(new_id);
+    if (def == nullptr || new_id == RelicId::CIRCLET) {
+        return false;
+    }
+    const auto raw = static_cast<uint16_t>(old_id);
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id != raw) {
+            continue;
+        }
+        RelicSlot& slot = rs.relics[i];
+        slot.relic_id = static_cast<uint16_t>(new_id);
+        // The seat is a fresh relic object, so its counter is the incoming
+        // row's initial_counter and NOT the evicted relic's leftover value --
+        // the same seeding acquire_relic_impl does on an appended slot.
+        slot.counter = def->initial_counter;
+        return true;
+    }
+    return false;
+}
+
 bool lose_relic(RunState& rs, RelicId id) noexcept {
     // AbstractPlayer.loseRelic (AbstractPlayer.java:2014-2031). The Java loop
     // calls onUnequip on every matching copy and keeps the LAST match as the

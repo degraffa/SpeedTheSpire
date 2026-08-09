@@ -167,6 +167,7 @@ add_library(sts_engine
     events/exordium_events_ii.cpp
     events/shrines.cpp
     events/one_time_specials.cpp
+    events/city_events_i.cpp
     # The floor-0 Neow blessing: category tables, payouts, sub-screens.
     neow.cpp
     run_advance.cpp

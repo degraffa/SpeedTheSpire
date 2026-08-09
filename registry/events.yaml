@@ -492,10 +492,12 @@
       - {field: REFUSAL_HP_LOSS_MAX_HP_PERCENT, base: 0.0, a15: 0.05}
 
 # TheCity.initializeEventList (TheCity.java:185-198) -- the Act-2 eventList,
-# 13 keys, in add() order. S2.02 lands these as IDENTITY + draw-gate metadata
-# only: no `implemented`, no `options`/`a15`. The bodies are S2.31 (the eight
-# non-combat rows) and S2.32 (the rest); the per-act list rebuild that makes
-# them drawable is S2.13's.
+# 13 keys, in add() order. S2.02 landed these as IDENTITY + draw-gate metadata
+# only; the per-act list rebuild that makes them drawable is S2.13's. S2.31
+# then landed the EIGHT non-combat bodies (Addict, Back to Basics, Beggar,
+# Cursed Tome, Drug Dealer, Forgotten Altar, Ghosts, Nest) with their audited
+# `options`/`a15` blocks; Colosseum, Masked Bandits, The Library, The
+# Mausoleum and Vampires remain identity-only and are S2.32's.
 #
 # THE ACT-2 LIST SHARES NO KEY WITH ACT 1 OR ACT 3 -- every row here is
 # acts: [2]. getEvent's per-key switch (AbstractDungeon.java:1950-1979) gates
@@ -509,21 +511,39 @@
 - id: 32
   name: ADDICT
   game_id: "Addict"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 0; Addict.ID (events/city/Addict.java:19) is \"Addict\"; no getEvent gate (AbstractDungeon.java:1944-1990 read in full); payouts Addict.java:40-62 (85g for a returnRandomRelicTier relic, or steal -> relic + Shame)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 0; Addict.ID (events/city/Addict.java:19) is \"Addict\"; no getEvent gate (AbstractDungeon.java:1944-1990 read in full); payouts Addict.java:40-62 (85g for a returnRandomRelicTier relic, or steal -> relic + Shame). Body Addict.java:27-78 read in full (S2.31): the ctor's TWO setDialogOption calls for option 0 differ only in TEXT -- both pass `isDisabled = gold < 85` (:30, :32) -- so there is one option that is greyed out under 85 gold, not two options. Option 0 rolls the relic FIRST and calls loseGold(85) SECOND (:46-49)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [BUY_SCREENLESS_RELIC_FOR_85_GOLD, STEAL_RELIC_AND_GAIN_SHAME, LEAVE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 33
   name: BACK_TO_BASICS
   game_id: "Back to Basics"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 1; BackToBasics.ID (events/city/BackToBasics.java:28) is \"Back to Basics\"; no getEvent gate; payouts are master-deck only (upgrade Strikes/Defends, or purge)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 1; BackToBasics.ID (events/city/BackToBasics.java:28) is \"Back to Basics\"; no getEvent gate; payouts are master-deck only (upgrade Strikes/Defends, or purge). Body BackToBasics.java:39-100 read in full (S2.31): option 0 (Elegance) opens getGroupWithoutBottledCards(getPurgeableCards()) for ONE card and, when that group is EMPTY, silently advances with no removal (:70-73); option 1 (Simplicity) upgrades every master-deck card carrying CardTags.STARTER_STRIKE or STARTER_DEFEND that canUpgrade() (:91-100)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [ELEGANCE_PURGE_ONE, SIMPLICITY_UPGRADE_EVERY_STARTER_STRIKE_AND_DEFEND]
+    - [PURGE_GRID_ONE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 34
   name: BEGGAR
   game_id: "Beggar"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 2; Beggar.ID (events/city/Beggar.java:21) is \"Beggar\"; getEvent gate gold >= 75 (AbstractDungeon.java:1970-1974); payouts are gold-for-purge only."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 2; Beggar.ID (events/city/Beggar.java:21) is \"Beggar\"; getEvent gate gold >= 75 (AbstractDungeon.java:1970-1974); payouts are gold-for-purge only. Body Beggar.java:33-94 read in full (S2.31): THREE screens, not two -- paying (:63-70) advances to GAVE_MONEY, whose single button OPENS the grid (:79-85) and moves to LEAVE, and update() (:46-57) removes the picked card and calls openMap() ITSELF, so the purge pick ends the event with no further page. The grid is opened canCancel=false (:80, the 7-arg open, GridCardSelectScreen.java:437)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: "gold >= 75 (AbstractDungeon.java:1970-1974)"}
+  options:
+    - [GIVE_75_GOLD, LEAVE]
+    - [ASK_FOR_THE_REMOVAL]
+    - [PURGE_GRID_ONE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 35
   name: COLOSSEUM
   game_id: "Colosseum"
@@ -533,27 +553,58 @@
 - id: 36
   name: CURSED_TOME
   game_id: "Cursed Tome"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 4; CursedTome.ID (events/city/CursedTome.java:25) is \"Cursed Tome\"; no getEvent gate; payouts CursedTome.randomBook (CursedTome.java:143-161): Necronomicon / Enchiridion / Nilry's Codex filtered by hasRelic, with a Circlet fallback when all three are owned, drawn on miscRng."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 4; CursedTome.ID (events/city/CursedTome.java:25) is \"Cursed Tome\"; no getEvent gate; payouts CursedTome.randomBook (CursedTome.java:143-161): Necronomicon / Enchiridion / Nilry's Codex filtered by hasRelic, with a Circlet fallback when all three are owned, drawn on miscRng. Body CursedTome.java:54-163 read in full (S2.31): SIX screens; the page damages are 1 / 2 / 3 (:85, :95, :105) and are taken on LEAVING each page, the last page pays finalDmg (:116) or 3 to stop (:124), and every one is DamageInfo(null, n, HP_LOSS) -- a null owner, so Torii never sees it. The book is NOT instant-obtained: randomBook clears the room rewards, adds ONE relic row and opens the combat reward screen (:158-161), which is the exit."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [READ_THE_BOOK, LEAVE]
+    - [CONTINUE_LOSING_1_HP]
+    - [CONTINUE_LOSING_2_HP]
+    - [CONTINUE_LOSING_3_HP]
+    - [FINISH_FOR_TIERED_HP_AND_A_BOOK, STOP_LOSING_3_HP]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: OBTAIN_BOOK_HP_LOSS, base: 10, a15: 15}
 - id: 37
   name: DRUG_DEALER
   game_id: "Drug Dealer"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 5; DrugDealer.ID (events/city/DrugDealer.java:30) is \"Drug Dealer\"; no getEvent gate; payouts DrugDealer.java:40-77 (Mutagenic Strength, or J.A.X.)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 5; DrugDealer.ID (events/city/DrugDealer.java:30) is \"Drug Dealer\"; no getEvent gate; payouts DrugDealer.java:40-77 (Mutagenic Strength, or J.A.X.). Body DrugDealer.java:38-134 read in full (S2.31): option 1's grid is opened over getPurgeableCards() with NO getGroupWithoutBottledCards wrapper (:128) -- the ONE event grid in the game that can eat a bottled card -- for TWO cards, and its greyed-out replacement (:44) is a permanently disabled button when fewer than two purgeable cards exist (:41). Option 2 pays MutagenicStrength, or a Circlet when it is already owned (:73-79)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [TAKE_JAX, BECOME_TEST_SUBJECT_TRANSFORM_TWO, INJECT_MUTAGENS_FOR_RELIC]
+    - [TRANSFORMABLE_ANY_GRID_TWO]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 38
   name: FORGOTTEN_ALTAR
   game_id: "Forgotten Altar"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 6; ForgottenAltar.ID (events/city/ForgottenAltar.java:29) is \"Forgotten Altar\"; no getEvent gate; payouts ForgottenAltar.java:46-113 (Bloody Idol for a held Golden Idol, or Decay)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 6; ForgottenAltar.ID (events/city/ForgottenAltar.java:29) is \"Forgotten Altar\"; no getEvent gate; payouts ForgottenAltar.java:46-113 (Bloody Idol for a held Golden Idol, or Decay). Body ForgottenAltar.java:43-115 read in full (S2.31): option 0 is present but DISABLED without a Golden Idol (:46-49, isDisabled = !hasRelic). gainChalice (:99-115) REPLACES the Golden Idol IN ITS OWN SLOT via instantObtain(player, relicAtIndex, false) -- order-preserving, onEquip NOT called -- but pays a plain Circlet, leaving the Golden Idol in place, when a Bloody Idol is already held (:106-109). Option 1 raises max HP FIRST and takes the damage second (:74-75), and its hpLoss is MathUtils.round of the ENTRY-time max HP (:50)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [GIVE_GOLDEN_IDOL_FOR_BLOODY_IDOL, GAIN_5_MAX_HP_FOR_TIERED_DAMAGE, SMASH_THE_ALTAR_FOR_DECAY]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: HP_LOSS_PERCENT, base: 0.25, a15: 0.35}
 - id: 39
   name: GHOSTS
   game_id: "Ghosts"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 7; Ghosts.ID (events/city/Ghosts.java:18) is \"Ghosts\"; no getEvent gate; payouts Ghosts.java:33-91 -- 5x Apparition for a ceil(maxHealth * 0.5f) max-HP cost, clamped to maxHealth - 1 (Ghosts.java:26, 33-36)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 7; Ghosts.ID (events/city/Ghosts.java:18) is \"Ghosts\"; no getEvent gate; payouts Ghosts.java:33-91 -- 5x Apparition for a ceil(maxHealth * 0.5f) max-HP cost, clamped to maxHealth - 1 (Ghosts.java:26, 33-36). Body Ghosts.java:30-96 read in full (S2.31): A15 moves the COUNT (becomeGhost :86-89, `amount = 5; if (ascensionLevel >= 15) amount -= 2`) and nothing else -- the max-HP cost is the same ceil(maxHealth * 0.5f) at every ascension, and only the option's TEXT changes (:37-41). buttonEffect's switch has ONE case (:56-65), so every button that is not 0 falls through to the leave arm."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [BECOME_A_GHOST_FOR_HALF_MAX_HP, LEAVE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: APPARITION_COUNT, base: 5, a15: 3}
 - id: 40
   name: MASKED_BANDITS
   game_id: "Masked Bandits"
@@ -563,9 +614,17 @@
 - id: 41
   name: NEST
   game_id: "Nest"
-  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 9; Nest.ID (events/city/Nest.java:19) is \"Nest\"; no getEvent gate; payouts Nest.java:35-62 (Ritual Dagger, or gold -- 99 base / 50 at A15+, Nest.java:35)."
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 9; Nest.ID (events/city/Nest.java:19) is \"Nest\"; no getEvent gate; payouts Nest.java:35-62 (Ritual Dagger, or gold -- 99 base / 50 at A15+, Nest.java:35). Body Nest.java:32-83 read in full (S2.31): the ENTRY screen has exactly ONE button (:34) and pressing it BUILDS the two-option screen -- setDialogOption appends the Ritual Dagger button at index 1 and updateDialogOption then rewrites index 0 into the gold offer (:43-45), so index 0 is gold and index 1 is the dagger. The dagger costs `new DamageInfo(null, 6)`, a NORMAL null-owner hit, not an HP_LOSS (:65)."
   native: true
+  implemented: true
   conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+  options:
+    - [INVESTIGATE]
+    - [STEAL_TIERED_GOLD, JOIN_THE_CULT_FOR_RITUAL_DAGGER_AND_6_DAMAGE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: GOLD_GAIN, base: 99, a15: 50}
 - id: 42
   name: THE_LIBRARY
   game_id: "The Library"

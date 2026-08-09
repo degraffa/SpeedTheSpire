@@ -547,6 +547,10 @@ sts_add_test(exordium_events_ii_test)
 # with the getShrine gate evidence for the six the filter excludes.
 sts_add_test(shrines_test)
 sts_add_test(one_time_specials_test)
+# S2.31: the eight non-combat Act-2 (TheCity) event bodies -- option trees,
+# every greyed-out button's predicate, each event's A15 branch (including the
+# four that HAVE none), and an acquisition test per relic/card/curse payout.
+sts_add_test(city_events_i_test)
 
 # S2.02: the Act-2/Act-3 eventList rows and the per-act membership / draw-gate
 # metadata every events.yaml row now carries -- the two new lists in Java add()
