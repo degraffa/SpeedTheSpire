@@ -296,6 +296,46 @@ inline constexpr int kShopItemCount = kChooseShopPurge; // 13 purchasable rows
 inline constexpr int kColorlessOrderCap =
     ((kColorlessPoolCount + 3) / 4) * 4;
 
+// THE LIVE-PURSE GOLD TRACKER (S2.48). The game moves the purse DURING combat:
+// each thief steal deducts min(goldAmt, player.gold) the instant its queued
+// accrual + 3-arg DamageAction resolve (Looter$1/Mugger$1 + DamageAction.
+// stealGold, DamageAction.java:98-114), and a Hand of Greed kill pays
+// player.gainGold at the kill (GreedAction.java:37-38). The combat layer has no
+// RunState (combat_gold's boundary), so the RUN layer applies both to
+// RunState.gold at the first command boundary after they happen --
+// sync_live_gold, called after every in-combat step and again inside
+// fold_back_combat. This struct is that sync's bookkeeping: what has already
+// been applied, so a second look applies nothing twice.
+//
+// Combat-scoped TRANSIENT state on the KnowledgeState precedent: it lives
+// HERE, not in CombatState/RunState (whose byte layouts are hashed against
+// committed fixtures / are save-parity), is reset by enter_combat, and is
+// stale-but-unread outside COMBAT. A memcpy of the controller snapshots it
+// like every other member, so mid-combat snapshot/resume replays identically.
+struct StolenGoldLive {
+    // Per monster SLOT: the gold this thief has actually taken, each steal
+    // clamped against the live purse at its own boundary -- the engine's copy
+    // of the Java's private per-thief `stolenGold` accrual (Looter.java:57 /
+    // Mugger.java:55). Non-thief slots stay 0.
+    int32_t taken[kMonsterCap];
+    // How much of CombatState.combat_gold has already been banked into
+    // RunState.gold. combat_gold only grows while a combat is live (the one
+    // producer is op_damage_greed), so `combat_gold - banked` is exactly the
+    // not-yet-applied gain; fold_back_combat zeroes both together.
+    uint16_t banked;
+    // Per monster SLOT: the steal count (MonsterState.pad0) as of the last
+    // sync -- counts above this are steals not yet charged to the purse.
+    uint8_t prev_steals[kMonsterCap];
+    uint8_t pad[3];  // explicit padding: the controller is byte-hashed.
+};
+static_assert(static_cast<int>(sizeof(StolenGoldLive)) ==
+                  kMonsterCap * 4 + 2 + kMonsterCap + 3,
+              "StolenGoldLive layout: kMonsterCap*i32 + u16 + kMonsterCap*u8 "
+              "+ 3 pad, no implicit padding");
+static_assert(sizeof(StolenGoldLive) % 8 == 0,
+              "StolenGoldLive is a whole number of 8-byte units, so placed "
+              "8-aligned at RunController's tail it adds no implicit padding");
+
 // The whole run-loop state: a RunState (persistent) + a CombatState (the live
 // combat / the canonical floor-stream holder) + the transient screen-flow
 // bookkeeping. Trivially copyable so a batch of runs steps with no allocation.
@@ -393,7 +433,7 @@ struct RunController {
 
     // THE LIVE colorlessCardPool's ORDER (CardId as u16 per slot; slots at
     // index >= kColorlessPoolCount are 0 and never read -- the cap is rounded
-    // up so the field is a whole number of 8-byte units and pad_tail's
+    // up so the field is a whole number of 8-byte units and the tail-padding
     // arithmetic is untouched). AbstractDungeon.returnColorlessCard(rarity)
     // shuffles `colorlessCardPool.group` IN PLACE with a
     // shuffleRng.randomLong-seeded JDK shuffle and reads the first match
@@ -420,14 +460,23 @@ struct RunController {
     // and enter_combat set (knowledge.hpp's attachment contract).
     KnowledgeState knowledge;
 
-    // The 2 bytes the struct's own 8-byte alignment (MonsterLists holds
-    // std::string_view) inserts at the tail. DECLARED for the same reason
-    // CombatState.pad_monsters is: RunController is memcpy'd and memcmp'd (the
-    // resample/twin suites compare whole controllers), and conventions §8's
-    // incident is precisely an undeclared gap in a byte-compared struct. Adding
-    // it changes no offset and no size. Found by the T0.5 classification
-    // tripwire (byte_class.hpp).
-    uint8_t pad_tail[2];
+    // The 2 bytes stolen_live's 4-alignment inserts after knowledge (which
+    // ends 2 mod 4). DECLARED for the same reason CombatState.pad_monsters is:
+    // RunController is memcpy'd and memcmp'd (the resample/twin suites compare
+    // whole controllers), and conventions §8's incident is precisely an
+    // undeclared gap in a byte-compared struct. These are the SAME two bytes
+    // the pre-S2.48 layout declared as `pad_tail` (T0.5): stolen_live ends
+    // 8-aligned, so the tail pad moved here rather than being joined by a new
+    // gap, and sizeof(RunController) grew by exactly sizeof(StolenGoldLive).
+    uint8_t pad_live_align[2];
+
+    // The live-purse gold tracker (see StolenGoldLive above): combat-scoped
+    // transient bookkeeping for the steal-time / greed-kill-time RunState.gold
+    // updates, on the KnowledgeState placement precedent. 4-aligned and a
+    // whole number of 8-byte units (both static_asserted at the struct), so
+    // the struct ends flush -- no implicit tail padding (the T0.5 tripwire
+    // and the tiling static_assert in byte_class.hpp keep that true).
+    StolenGoldLive stolen_live;
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,
@@ -814,19 +863,35 @@ static_assert(act_floor_base(3) == 34);
 void on_boss_chest_proceed(RunController& rc, RunState& rs,
                            StepResult& res) noexcept;
 
-// Settle every thief's stolen gold against the run purse at combat end, with a
-// FAITHFUL PER-STEAL CLAMP, and return the portion carried by DEAD thieves (the
-// claimable STOLEN_GOLD amount). Deducts what was actually taken from
-// `rc.run.gold`. See the definition in run_advance.cpp for why the per-steal
-// ORDER is reconstructible from the steal counts alone, and monster_looter.hpp
-// for the thief interface it walks.
+// Apply the live combat's not-yet-charged gold movements to RunState.gold
+// (S2.48): NEW STEALS first -- each thief steal beyond stolen_live.prev_steals,
+// replayed round-by-round in slot order, takes min(goldAmt, rc.run.gold) and
+// deducts exactly that (DamageAction.stealGold's clamp against the live purse,
+// DamageAction.java:98-114, recorded per thief in stolen_live.taken) -- THEN
+// the unbanked Hand-of-Greed remainder (combat_gold - banked) is added.
 //
-// PUBLISHED FOR TESTING. Its two real callers are internal (the reward entry and
-// the defeat path), and both reach it only from a combat the run layer built.
-// The case that must be pinned -- two thieves, a purse smaller than their
-// combined take, and exactly one of them killed -- lives in the Act-2 "2 Thieves"
-// group, which the run layer cannot reach until the act transition lands, so the
-// pin is a direct call on a hand-built controller rather than a scripted run.
+// That in-call order is the GAME's order for any single step: within one
+// END_TURN advance the only way combat_gold can move is a start-of-NEXT-turn
+// card play (Mayhem), which resolves after the monster phase's steals; a
+// player-phase Greed kill is its own PLAY_CARD step and was banked at that
+// step's boundary, before any later steal. Called after every in-combat step
+// (the run advance's COMBAT case and step_potion's pump path) and again inside
+// fold_back_combat; idempotent between events, so the repeat is free.
+void sync_live_gold(RunController& rc) noexcept;
+
+// Return the portion of the stolen gold carried by DEAD thieves -- the
+// claimable STOLEN_GOLD reward amount (die() -> addStolenGoldToRewards,
+// Looter.java:170-172 / Mugger.java:161-163). The purse deduction itself
+// happened at the steal boundaries (sync_live_gold above); this reads
+// stolen_live.taken, after a catch-up sync so a hand-built controller that
+// never stepped still settles. An ESCAPED thief's share is simply gone, and a
+// dead player's purse stays short -- the game deducted at steal time.
+//
+// PUBLISHED FOR TESTING. Its real callers are internal (the reward entry, the
+// defeat path, the Act-3 terminal and the Colosseum reopen), and all reach it
+// only from a combat the run layer built. The attribution case that must stay
+// pinned -- two thieves, a purse smaller than their combined take, exactly one
+// of them killed -- is a direct call on a hand-built controller.
 [[nodiscard]] int32_t settle_stolen_gold(RunController& rc) noexcept;
 
 // The current grid row for a controller on the map, or -1 when it is standing

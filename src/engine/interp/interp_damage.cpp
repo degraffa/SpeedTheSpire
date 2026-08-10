@@ -1100,24 +1100,25 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 // for the identical Java condition -- the two share monster_has_minion_power.
 //
 // gainGold itself is NOT called here: the combat layer has no purse. The gold
-// accrues in CombatState.combat_gold and reaches RunState at the combat
-// fold-back (run_advance.cpp fold_back_combat) -- a combat-only replay simply
-// carries the number. But the SEAM is gainGold's, and its two relic reads
-// happen HERE, at the Java's moment (GreedAction.java:38 calls
-// player.gainGold the instant the kill lands):
+// accrues in CombatState.combat_gold and reaches RunState at the first run
+// step boundary after the kill (run_advance.cpp sync_live_gold, S2.48; the
+// closing sync inside fold_back_combat catches a terminal step's) -- a
+// combat-only replay simply carries the number. But the SEAM is gainGold's,
+// and its two relic reads happen HERE, at the Java's moment
+// (GreedAction.java:38 calls player.gainGold the instant the kill lands):
 //   * ECTOPLASM returns BEFORE the += and before the fan-out
 //     (AbstractPlayer.gainGold, AbstractPlayer.java:721-724), so an Ectoplasm
-//     owner accrues NOTHING here -- which is also what keeps the fold-back's
-//     raw settle exact: nothing to settle.
+//     owner accrues NOTHING here -- which is also what keeps the run layer's
+//     raw bank exact: nothing to settle.
 //   * the onGainGold fan-out (:730-732) runs over the relic list in
 //     acquisition order once the gold is in. Bloody Idol is its only override
 //     in Acts 1-3 scope (BloodyIdol.onGainGold, BloodyIdol.java:28-33):
 //     heal(5, true), SYNCHRONOUS, at combat time -- routed through
 //     heal_player_with_relics so Magic Flower's x1.5 and Mark of the Bloom's
 //     zero apply, exactly the in-combat onPlayerHeal path the Java takes.
-//     Firing it here (not at the fold-back settle) is load-bearing: the heal
+//     Firing it here (not at the run layer's bank) is load-bearing: the heal
 //     can save a player who would die to a Combust tick later this turn, and
-//     the run-layer settle deliberately does NOT re-run the fan-out.
+//     the run-layer bank deliberately does NOT re-run the fan-out.
 void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
                      int gold) noexcept {
     if (tgt >= kMonsterCap) {

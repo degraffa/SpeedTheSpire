@@ -1963,8 +1963,10 @@ TEST(RunEscape, LooterEscapeSettlesGoldAndOpensTheMuggedScreen) {
     EXPECT_TRUE(monster_escaped(rc.combat.monsters[0]));
     EXPECT_GT(rc.combat.monsters[0].hp, 0);
 
-    // Gold settlement: min(count * goldAmt, gold). Both machine paths steal
-    // before escaping -- 2 mugs, or 2 mugs + a lunge.
+    // Gold settlement: every steal deducted live, min(goldAmt, purse) at its
+    // own step boundary (sync_live_gold, S2.48) -- with 99 covering all three
+    // possible steals the total is steals * goldAmt either way. Both machine
+    // paths steal before escaping -- 2 mugs, or 2 mugs + a lunge.
     const int steals = static_cast<int>(looter_steal_count(rc.combat.monsters[0]));
     ASSERT_GE(steals, 2);
     ASSERT_LE(steals, 3);
@@ -2001,13 +2003,15 @@ TEST(RunEscape, LooterEscapeSettlesGoldAndOpensTheMuggedScreen) {
 // like the game.
 TEST(RunEscape, KilledLooterReturnsStolenGoldThroughTheScreen) {
     RunController rc = enter_looter_combat();
-    // Two END_TURNs: Mug, Mug -- steal count 2, gold still untouched (the
-    // engine settles at combat end, provenance on settle_stolen_gold).
+    // Two END_TURNs: Mug, Mug -- steal count 2, and the purse is LIVE (S2.48):
+    // each steal leaves RunState.gold at its own step boundary, exactly as
+    // DamageAction.stealGold deducts at resolve (DamageAction.java:98-114).
     step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.run.gold, 99 - kLooterGoldAmt) << "first Mug deducts at once";
     step(rc, make_action(ActionVerb::END_TURN));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     ASSERT_EQ(looter_steal_count(rc.combat.monsters[0]), 2);
-    ASSERT_EQ(rc.run.gold, 99);
+    ASSERT_EQ(rc.run.gold, 99 - 2 * kLooterGoldAmt);
 
     // Kill the thief (the record shape a lethal hit leaves: hp 0, the steal
     // count surviving on the dead record) and let the pump see it.
@@ -3150,6 +3154,286 @@ TEST(RunCombatGold, EctoplasmSuppressesTheAccrualAtTheKill) {
     play_out_combat(rc);
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
     EXPECT_EQ(rc.run.gold, 99) << "nothing accrued, nothing settled";
+}
+
+// =============================================================================
+// S2.48 -- the LIVE purse: steal-time clamp vs Hand-of-Greed gain ordering
+// =============================================================================
+//
+// The game's purse moves DURING combat: DamageAction.stealGold clamps and
+// deducts at each steal's resolve (DamageAction.java:98-114, one queue slot
+// behind the thief's own `stolenGold += min(goldAmt, player.gold)` accrual,
+// Looter$1/Mugger$1), and GreedAction runs player.gainGold the instant its
+// damage kills (GreedAction.java:37-38). The engine now applies both at step
+// boundaries (sync_live_gold). These tests pin the four orderings -- steal
+// before/after the Greed kill x purse below/above the steal amount -- on BOTH
+// combat-end paths (the victory reward entry and the defeat settlement), each
+// through the real run flow, plus the same-step ordering rule directly.
+//
+// The old model (fold-back banks ALL greed gold, then one combat-end replay)
+// agreed with the game on three quadrants and OVER-CREDITED the thieves on
+// steal-first-purse-below: the replay read a purse already inflated by greed
+// gold the game gained only AFTER the steal. That was the standing
+// ~110-disposition class the owner directed S2.48 to close.
+
+// Put a playable card into the LIVE run combat's hand (the card-batch tests'
+// AddHand shape, applied to rc.combat). Returns the HAND slot for PLAY_CARD.
+uint8_t AddRunHand(RunController& rc, CardId id) {
+    CombatState& s = rc.combat;
+    uint8_t pi = 0;
+    while (pi < kCardPoolCap &&
+           s.card_pool[pi].card_id != static_cast<uint16_t>(CardId::NONE)) {
+        ++pi;
+    }
+    const CardDef* d = card_def(id);
+    EXPECT_NE(d, nullptr);
+    s.card_pool[pi].card_id = static_cast<uint16_t>(id);
+    s.card_pool[pi].upgrade = 0;
+    s.card_pool[pi].cost_now = card_cost(*d, 0);
+    s.card_pool[pi].flags = card_flags(*d, 0);
+    const uint8_t hand_slot = s.hand_count;
+    s.hand[s.hand_count++] = pi;
+    return hand_slot;
+}
+
+RunController enter_two_thieves_combat() {
+    RunController rc = run_begin(kSeed, kA20);
+    rc.lists.monster_list[0] = "2 Thieves";  // Looter slot 0, Mugger slot 1
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.combat.monster_count, 2);
+    EXPECT_EQ(rc.combat.monsters[0].monster_id,
+              static_cast<uint16_t>(MonsterId::LOOTER));
+    EXPECT_EQ(rc.combat.monsters[1].monster_id,
+              static_cast<uint16_t>(MonsterId::MUGGER));
+    return rc;
+}
+
+// VICTORY x steal-first x purse BELOW -- the quadrant the old model got wrong.
+// Turn 1: the Mug takes min(20, 10) = 10, emptying the purse. Turn 2: Hand of
+// Greed kills the Looter; its 20 banks at the kill. The thief died holding the
+// CLAMPED 10 (Looter.java:57's accrual), so die() returns 10 through the
+// screen (addStolenGoldToRewards, :170-172) -- where the old fold-first
+// settlement read a purse of 30 and returned 20.
+TEST(RunStolenGoldOrdering, VictoryStealBeforeGreedKillPurseBelow) {
+    RunController rc = enter_looter_combat();
+    rc.run.gold = 10;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(looter_steal_count(rc.combat.monsters[0]), 1);
+    EXPECT_EQ(rc.run.gold, 0) << "the steal is clamped by the live 10";
+
+    rc.combat.monsters[0].hp = 5;  // in Hand of Greed's kill range
+    const uint8_t slot = AddRunHand(rc, CardId::HAND_OF_GREED);
+    step(rc, make_action(ActionVerb::PLAY_CARD, slot, 0));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.combat_outcome,
+              static_cast<uint8_t>(RunCombatOutcome::KILLED));
+    EXPECT_EQ(rc.run.gold, 20)
+        << "the greed 20 banked at the kill; the steal took only 10";
+    ASSERT_GE(rc.rewards.count, 1);
+    ASSERT_EQ(rc.rewards.items[0].kind,
+              static_cast<uint8_t>(RewardItemKind::STOLEN_GOLD));
+    EXPECT_EQ(rc.rewards.items[0].gold, 10)
+        << "the dead thief returns its CLAMPED take -- the old ordering "
+           "over-credited this to 20";
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(rc.run.gold, 30);
+}
+
+// VICTORY x steal-first x purse ABOVE -- the regression quadrant: with the
+// purse covering the steal, the clamp never bites and the two orderings agree.
+TEST(RunStolenGoldOrdering, VictoryStealBeforeGreedKillPurseAbove) {
+    RunController rc = enter_looter_combat();
+    rc.run.gold = 100;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(looter_steal_count(rc.combat.monsters[0]), 1);
+    EXPECT_EQ(rc.run.gold, 80);
+
+    rc.combat.monsters[0].hp = 5;
+    const uint8_t slot = AddRunHand(rc, CardId::HAND_OF_GREED);
+    step(rc, make_action(ActionVerb::PLAY_CARD, slot, 0));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.run.gold, 100);
+    ASSERT_EQ(rc.rewards.items[0].kind,
+              static_cast<uint8_t>(RewardItemKind::STOLEN_GOLD));
+    EXPECT_EQ(rc.rewards.items[0].gold, kLooterGoldAmt);
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(rc.run.gold, 120);
+}
+
+// VICTORY x greed-first x purse BELOW. The Greed kill lands on turn 1's player
+// phase (gainGold immediate), so the turn-1 steal clamps against a purse the
+// greed gold already entered -- the ordering the old model happened to match.
+TEST(RunStolenGoldOrdering, VictoryGreedKillBeforeStealPurseBelow) {
+    RunController rc = enter_two_thieves_combat();
+    rc.run.gold = 0;
+    rc.combat.monsters[1].hp = 5;  // the Mugger dies to Hand of Greed
+    const uint8_t slot = AddRunHand(rc, CardId::HAND_OF_GREED);
+    step(rc, make_action(ActionVerb::PLAY_CARD, slot, 1));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.run.gold, 20) << "banked at the PLAY_CARD boundary";
+
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(looter_steal_count(rc.combat.monsters[0]), 1);
+    ASSERT_EQ(mugger_steal_count(rc.combat.monsters[1]), 0)
+        << "the Mugger died before its first steal";
+    EXPECT_EQ(rc.run.gold, 0)
+        << "the Looter's steal reads the greed-inflated purse: min(20, 20)";
+
+    rc.combat.monsters[0].hp = 0;  // kill the Looter -> full-kill victory
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.run.gold, 0);
+    ASSERT_EQ(rc.rewards.items[0].kind,
+              static_cast<uint8_t>(RewardItemKind::STOLEN_GOLD));
+    EXPECT_EQ(rc.rewards.items[0].gold, 20)
+        << "the dead Looter returns its full take; the dead Mugger holds 0";
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(rc.run.gold, 20);
+}
+
+// VICTORY x greed-first x purse ABOVE.
+TEST(RunStolenGoldOrdering, VictoryGreedKillBeforeStealPurseAbove) {
+    RunController rc = enter_two_thieves_combat();
+    rc.run.gold = 100;
+    rc.combat.monsters[1].hp = 5;
+    const uint8_t slot = AddRunHand(rc, CardId::HAND_OF_GREED);
+    step(rc, make_action(ActionVerb::PLAY_CARD, slot, 1));
+    EXPECT_EQ(rc.run.gold, 120);
+    step(rc, make_action(ActionVerb::END_TURN));
+    EXPECT_EQ(rc.run.gold, 100);
+    rc.combat.monsters[0].hp = 0;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    ASSERT_EQ(rc.rewards.items[0].kind,
+              static_cast<uint8_t>(RewardItemKind::STOLEN_GOLD));
+    EXPECT_EQ(rc.rewards.items[0].gold, kLooterGoldAmt);
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(rc.run.gold, 120);
+}
+
+// DEFEAT x steal-first x purse BELOW. The dead player's purse walks the same
+// live trajectory -- 10 stolen (clamped), +20 greed, then the Mugger's
+// round-2 steal soaks the greed gold -- and no return is reachable past a
+// defeat (the game deducted at steal time; there is no reward screen).
+TEST(RunStolenGoldOrdering, DefeatStealBeforeGreedKillPurseBelow) {
+    RunController rc = enter_two_thieves_combat();
+    rc.run.gold = 10;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(looter_steal_count(rc.combat.monsters[0]), 1);
+    ASSERT_EQ(mugger_steal_count(rc.combat.monsters[1]), 1);
+    EXPECT_EQ(rc.run.gold, 0)
+        << "slot order: the Looter takes 10, the Mugger's steal finds 0";
+
+    rc.combat.monsters[0].hp = 5;  // Hand of Greed kills the Looter
+    const uint8_t slot = AddRunHand(rc, CardId::HAND_OF_GREED);
+    step(rc, make_action(ActionVerb::PLAY_CARD, slot, 0));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.run.gold, 20);
+
+    rc.combat.player_hp = 1;  // the Mugger's next Mug is lethal
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_EQ(rc.combat_outcome,
+              static_cast<uint8_t>(RunCombatOutcome::DEFEAT));
+    ASSERT_EQ(mugger_steal_count(rc.combat.monsters[1]), 2)
+        << "the lethal Mug's steal resolved one slot ahead of its damage";
+    EXPECT_EQ(rc.run.gold, 0)
+        << "the round-2 steal soaked the greed gold before the death";
+}
+
+// DEFEAT x steal-first x purse ABOVE.
+TEST(RunStolenGoldOrdering, DefeatStealBeforeGreedKillPurseAbove) {
+    RunController rc = enter_two_thieves_combat();
+    rc.run.gold = 100;
+    step(rc, make_action(ActionVerb::END_TURN));
+    EXPECT_EQ(rc.run.gold, 60) << "both turn-1 steals paid in full";
+    rc.combat.monsters[0].hp = 5;
+    const uint8_t slot = AddRunHand(rc, CardId::HAND_OF_GREED);
+    step(rc, make_action(ActionVerb::PLAY_CARD, slot, 0));
+    EXPECT_EQ(rc.run.gold, 80);
+    rc.combat.player_hp = 1;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_EQ(rc.run.gold, 60)
+        << "the Mugger's round-2 steal took its full 20 before the kill";
+}
+
+// DEFEAT x greed-first x purse BELOW.
+TEST(RunStolenGoldOrdering, DefeatGreedKillBeforeStealPurseBelow) {
+    RunController rc = enter_two_thieves_combat();
+    rc.run.gold = 0;
+    rc.combat.monsters[1].hp = 5;  // the Mugger dies to Hand of Greed, turn 1
+    const uint8_t slot = AddRunHand(rc, CardId::HAND_OF_GREED);
+    step(rc, make_action(ActionVerb::PLAY_CARD, slot, 1));
+    EXPECT_EQ(rc.run.gold, 20);
+    step(rc, make_action(ActionVerb::END_TURN));
+    EXPECT_EQ(rc.run.gold, 0) << "the Looter's turn-1 steal reads the 20";
+    rc.combat.player_hp = 1;  // the Looter's second Mug is lethal
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    ASSERT_EQ(looter_steal_count(rc.combat.monsters[0]), 2);
+    EXPECT_EQ(rc.run.gold, 0) << "the round-2 steal found an empty purse";
+}
+
+// DEFEAT x greed-first x purse ABOVE.
+TEST(RunStolenGoldOrdering, DefeatGreedKillBeforeStealPurseAbove) {
+    RunController rc = enter_two_thieves_combat();
+    rc.run.gold = 100;
+    rc.combat.monsters[1].hp = 5;
+    const uint8_t slot = AddRunHand(rc, CardId::HAND_OF_GREED);
+    step(rc, make_action(ActionVerb::PLAY_CARD, slot, 1));
+    EXPECT_EQ(rc.run.gold, 120);
+    step(rc, make_action(ActionVerb::END_TURN));
+    EXPECT_EQ(rc.run.gold, 100);
+    rc.combat.player_hp = 1;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_EQ(rc.run.gold, 80);
+}
+
+// THE SAME-STEP ORDER, pinned directly on sync_live_gold. One END_TURN advance
+// can carry BOTH a monster-phase steal and a greed gain that resolved after it
+// (Mayhem's turn-start Hand of Greed): one sync call must charge the steal
+// against the PRE-greed purse and only then bank the greed remainder.
+TEST(RunStolenGoldOrdering, SyncChargesSameStepStealsBeforeSameStepGreed) {
+    RunController rc{};
+    rc.run.gold = 10;
+    rc.combat.monster_count = 1;
+    rc.combat.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::LOOTER);
+    rc.combat.monsters[0].hp = 40;
+    rc.combat.monsters[0].max_hp = 40;
+    rc.combat.monsters[0].pad0 = 1;  // one uncharged steal ...
+    rc.combat.combat_gold = 20;      // ... and unbanked greed, one step
+    sync_live_gold(rc);
+    EXPECT_EQ(rc.stolen_live.taken[0], 10)
+        << "the steal is clamped by the pre-greed 10";
+    EXPECT_EQ(rc.run.gold, 20) << "10 - 10 + 20";
+    sync_live_gold(rc);  // idempotent between events
+    EXPECT_EQ(rc.stolen_live.taken[0], 10);
+    EXPECT_EQ(rc.run.gold, 20);
+}
+
+// The converse boundaries: greed banked at its OWN earlier step makes a later
+// steal read the inflated purse -- gainGold is live the moment the kill lands
+// (GreedAction.java:37-38).
+TEST(RunStolenGoldOrdering, SyncBanksEarlierGreedBeforeALaterStealBoundary) {
+    RunController rc{};
+    rc.run.gold = 10;
+    rc.combat.monster_count = 1;
+    rc.combat.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::LOOTER);
+    rc.combat.monsters[0].hp = 40;
+    rc.combat.monsters[0].max_hp = 40;
+    rc.combat.combat_gold = 20;
+    sync_live_gold(rc);  // the greed kill's own PLAY_CARD boundary
+    EXPECT_EQ(rc.run.gold, 30);
+    rc.combat.monsters[0].pad0 = 1;
+    sync_live_gold(rc);  // the steal's END_TURN boundary
+    EXPECT_EQ(rc.stolen_live.taken[0], 20) << "the full 20 was available";
+    EXPECT_EQ(rc.run.gold, 10);
 }
 
 // The run-persistent misc fold-back (S2.34): a Ritual Dagger kill grows the

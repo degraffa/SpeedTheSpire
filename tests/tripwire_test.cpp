@@ -146,7 +146,7 @@ TEST(TripwireNegative, FiresOnAScratchFieldAddedToRunController) {
         << "the reported range must start where the classified bytes end";
     EXPECT_EQ(f.to, sizeof(RunControllerPlusScratch));
     EXPECT_STREQ(f.after, "<end>");
-    EXPECT_STREQ(f.before, "pad_tail")
+    EXPECT_STREQ(f.before, "stolen_live")
         << "the message must name the last classified member so the reader "
            "knows where the new field landed";
     GTEST_LOG_(INFO) << "negative control fired: " << describe(f);

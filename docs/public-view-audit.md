@@ -206,7 +206,8 @@ does.
 | `pending_bottle` | public | → `pending_bottle` | The modal overlay is on screen. |
 | `pad2[3]` | padding | excluded | |
 | `knowledge` (KnowledgeState) | public (a record OF public reveals) | → projection (§10) | Never carried raw — its chain holds pool indices, which are engine bookkeeping. Projected as per-draw-slot order-constraint annotations plus the revealed monster construction rolls. |
-| `pad_tail[2]` | padding | excluded | Declared by T0.5. The struct's own 8-byte alignment (`MonsterLists` holds `std::string_view`) inserted it implicitly; `RunController` is memcpy'd and memcmp'd by the resample/twin suites, so conventions §8's rule applies. No offset and no size moved. |
+| `pad_live_align[2]` | padding | excluded | The two bytes T0.5 declared as `pad_tail`; since S2.48 they are the alignment gap `stolen_live`'s 4-alignment inserts after `knowledge` (which ends 2 mod 4). `RunController` is memcpy'd and memcmp'd by the resample/twin suites, so conventions §8's rule applies. |
+| `stolen_live` (StolenGoldLive) | derived | excluded | S2.48 live-purse bookkeeping — which steals / Hand-of-Greed gains the run layer has already charged to `RunState.gold`, a deterministic function of public state (steal counts, `combat_gold`, the purse). The purse itself is already public through `RunState.gold`; this member carries no realization of its own. Combat-scoped transient on the `knowledge` precedent. |
 
 ## 6. RunState → PublicView
 

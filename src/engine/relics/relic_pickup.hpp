@@ -215,8 +215,9 @@ inline void heal_out_of_combat(RunState& rs, int32_t amount_in) noexcept {
 // seam's Ectoplasm gate and onGainGold fan-out AT COMBAT TIME in
 // op_damage_greed (interp_damage.cpp -- the heal must take the in-combat
 // onPlayerHeal path, and can be lethality-relevant before the combat ends);
-// the accrued combat_gold then settles through a RAW += at fold_back_combat,
-// deliberately NOT through this door, so the fan-out cannot fire twice.
+// the accrued combat_gold then banks through a RAW += at the run layer's step
+// boundaries (sync_live_gold, S2.48), deliberately NOT through this door, so
+// the fan-out cannot fire twice.
 //
 // Non-positive amounts are NOT added, matching the Java's else-branch.
 inline void gain_gold(RunState& rs, int32_t amount) noexcept {

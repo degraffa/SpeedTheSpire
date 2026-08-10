@@ -1031,9 +1031,10 @@ struct CombatState {
     uint8_t exhaust_count;
     uint8_t limbo_count;
     uint8_t monster_count;            // live length of monsters[]
-    // Gold EARNED INSIDE this combat, held here until the run layer's single
-    // combat fold-back settles it (run_advance.cpp fold_back_combat -> the one
-    // gain_gold door). The game has no such field: AbstractPlayer.gainGold writes
+    // Gold EARNED INSIDE this combat. The run layer banks it into RunState.gold
+    // at each step boundary (run_advance.cpp sync_live_gold, S2.48 -- a raw +=,
+    // the relic reads paid at the kill) and the combat fold-back zeroes it with
+    // the bank marker. The game has no such field: AbstractPlayer.gainGold writes
     // the run purse the instant GreedAction sees a kill (GreedAction.java:38), and
     // CombatState deliberately keeps no duplicate of RunState.gold, so an in-combat
     // producer needs somewhere to accrue. uint16 is ample -- Hand of Greed pays

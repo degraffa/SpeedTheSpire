@@ -2454,7 +2454,7 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   I→S→stored-and-diffed. Six presets green; counts re-derived by
   `ctest -N | tail -1` at land time, not restated here.
 
-- **S2.48** `[ ]` **Stolen-gold settlement ordering vs in-combat gold gains
+- **S2.48** `[x]` **Stolen-gold settlement ordering vs in-combat gold gains
   (owner-directed fix).** Close the standing-deviation class the G7 campaign
   carries as ~110 of its 150 dispositions: `fold_back_combat` banks in-combat
   gold (Hand of Greed's `GreedAction` is the one in-scope producer) before
@@ -2476,6 +2476,43 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   Java re-read in full; the stage-b obligation row and the dispositions
   carrier note updated; fixtures regenerated only if actually moved; six
   presets green.
+
+  **Log:** the purse is LIVE, and the fix needed NO schema change — the
+  brief's stop-the-line and the old row's "CombatState layout change"
+  premise both dissolved on the KnowledgeState precedent: bookkeeping for
+  what is already charged lives in a new combat-scoped transient
+  `RunController.stolen_live` (`StolenGoldLive`), not in either frozen
+  schema. `sync_live_gold` (run_advance.cpp, published) runs after every
+  in-combat step and again inside `fold_back_combat` (all four end sites:
+  reward entry, defeat, Act-3 terminal, Colosseum reopen): new steals
+  charge `min(goldAmt, RunState.gold)` round-robin in slot order FIRST,
+  then the unbanked `combat_gold` remainder banks — the game's in-step
+  order, since a same-step greed gain can only be a start-of-next-turn
+  play (Mayhem) resolving after the monster phase (Looter$1/Mugger$1 +
+  `DamageAction.stealGold` :98-114; `GreedAction.java:37-38`).
+  `settle_stolen_gold` no longer moves the purse: it catch-up-syncs and
+  sums the dead thieves' `stolen_live.taken` — the direct-call attribution
+  suite (`CityNormalsII.TwoThieves*`) passed unchanged. One landed Act-1
+  pin moved as intended
+  (`RunEscape.KilledLooterReturnsStolenGoldThroughTheScreen` now asserts
+  the live mid-combat purse). Layout: `stolen_live`
+  sits at the controller tail; the former `pad_tail[2]` bytes became
+  `pad_live_align[2]` ahead of it (tripwire rows + audit §5 updated), and
+  the struct now ends flush. Fixtures: the 20 Stage-A combat fixtures
+  stand (CombatState untouched — full suite replay green with no
+  regeneration); `twins_v1.bin` regenerated once via its checked-in
+  generator (meaning-diff: the header's `run_controller_size` stamp
+  11480→11600; payloads re-verified by replay, 18 cases). Named tests:
+  the eight `RunStolenGoldOrdering.Victory*`/`.Defeat*` quadrants —
+  {StealBeforeGreedKill, GreedKillBeforeSteal} × Purse{Below, Above} on
+  both end paths; steal-first×below is the quadrant the old model
+  over-credited (return 10 where it said 20) —
+  `RunStolenGoldOrdering.SyncChargesSameStepStealsBeforeSameStepGreed`,
+  `RunStolenGoldOrdering.SyncBanksEarlierGreedBeforeALaterStealBoundary`.
+  Stage-b obligation row DISCHARGED in place; the ~110 stolen-gold
+  disposition carrier notes re-pointed at this fix (retestable for
+  S2.43's re-triage, rows preserved). Six presets green; counts re-derived
+  by `ctest -N | tail -1` at land time.
 - **S2.49** `[ ]` **Attacker-side cancel of queued multi-hit attacks
   (owner-directed fix).** `DamageAction.update` (DamageAction.java:69-73)
   cancels a queued hit whose owner is dying or half-dead, so a monster

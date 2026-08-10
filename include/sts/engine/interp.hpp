@@ -469,9 +469,10 @@ enum class Opcode : uint16_t {
                               // GreedAction.increaseGold, :24-27), the same
                               // second-operand shape DAMAGE_FEED (35) uses for
                               // its max-HP number. The gold lands in
-                              // CombatState.combat_gold and reaches RunState only
-                              // at the run layer's combat fold-back, through the
-                              // single gain_gold door.
+                              // CombatState.combat_gold and reaches RunState at
+                              // the run layer's next step boundary
+                              // (sync_live_gold, S2.48) -- a raw bank, the
+                              // relic reads already paid here.
                               //
                               // The Java gate is
                               //   !(!isDying && currentHealth > 0 || halfDead ||

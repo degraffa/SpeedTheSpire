@@ -469,9 +469,14 @@ inline constexpr ClassRow kRunControllerRows[] = {
                "audit 10: a record OF public reveals. Never carried raw (its "
                "chain holds pool indices); projected as per-slot order "
                "constraints"),
-    STS_BC_ROW(RunController, pad_tail, ByteClass::PADDING,
-               "declared by T0.5 after this tripwire found it implicit -- see "
-               "run_advance.hpp and conventions section 8"),
+    STS_BC_ROW(RunController, pad_live_align, ByteClass::PADDING,
+               "the former pad_tail bytes (declared by T0.5), now the "
+               "alignment gap ahead of stolen_live -- see run_advance.hpp "
+               "and conventions section 8"),
+    STS_BC_ROW(RunController, stolen_live, ByteClass::DERIVED,
+               "S2.48 live-purse bookkeeping: a deterministic function of "
+               "public state (steal counts, combat_gold, the purse) -- which "
+               "steals/greed the run layer has already charged to gold"),
 };
 STS_BC_TABLE(kRunControllerTable, RunController, kRunControllerRows);
 

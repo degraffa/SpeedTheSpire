@@ -49,9 +49,11 @@
 //     the DamageAction whose stealGold (DamageAction.java:98-114) clamps to
 //     the player's gold and deducts it. Both read the SAME purse at the same
 //     instant, which is what makes the per-steal clamp well-defined. The engine
-//     stores the COUNT and settles at combat end -- see thief_stolen_gold and
-//     settle_stolen_gold below, which reconstruct the per-steal clamping rather
-//     than approximating it.
+//     stores the COUNT; the RUN layer charges each new steal against the live
+//     RunState.gold at the first step boundary after it resolves
+//     (sync_live_gold, run_advance.cpp, S2.48) and records the clamped take
+//     per thief (StolenGoldLive.taken -- the engine's copy of the Java's
+//     stolenGold field).
 //
 //     HISTORY: this used to be a sum-then-clamp, min(count * goldAmt, gold),
 //     and that was a recorded deviation naming an Act-2-adjacent task as its
@@ -143,8 +145,9 @@ inline constexpr int32_t kLooterGoldAmt = 20;
 
 // The gold this thief has REQUESTED so far: steals x goldAmt, UNCLAMPED. The
 // clamp is not a property of the thief -- it is a property of the purse at each
-// steal -- so it is applied by settle_stolen_gold (run_advance.cpp), which knows
-// both the purse and the interleaving of every thief's steals.
+// steal -- so it is applied by sync_live_gold (run_advance.cpp), which charges
+// each steal against the live purse at its own step boundary; the clamped
+// per-thief total lives in RunController.stolen_live.taken.
 [[nodiscard]] inline int32_t thief_stolen_gold(const MonsterState& m) noexcept {
     return static_cast<int32_t>(thief_steal_count(m)) *
            thief_gold_amount(static_cast<MonsterId>(m.monster_id));
