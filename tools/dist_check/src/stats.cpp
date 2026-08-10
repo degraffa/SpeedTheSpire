@@ -141,4 +141,30 @@ std::vector<HolmDecision> holm_bonferroni(
     return out;
 }
 
+std::vector<ReplicateDecision> confirm_by_replicate(
+    const std::vector<HolmDecision>& stage_one,
+    const std::function<double(const std::string&)>& replicate_p_value) {
+    if (!replicate_p_value) {
+        throw std::invalid_argument("confirm_by_replicate: no replicate source");
+    }
+    std::vector<ReplicateDecision> out;
+    out.reserve(stage_one.size());
+    for (const HolmDecision& decision : stage_one) {
+        ReplicateDecision r;
+        r.name = decision.name;
+        r.stage_one_p = decision.p_value;
+        r.threshold = decision.threshold;
+        if (!decision.rejected) {
+            // Retained at stage one: final, and the replicate is not consulted.
+            out.push_back(std::move(r));
+            continue;
+        }
+        r.replicated = true;
+        r.replicate_p = replicate_p_value(decision.name);
+        r.rejected = r.replicate_p <= decision.threshold;
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
 }  // namespace sts::dist_check

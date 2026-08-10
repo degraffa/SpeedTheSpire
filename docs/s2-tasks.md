@@ -2221,12 +2221,149 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   **Deps:** S2-G1, S2.42, S2.47 **Acceptance:** deterministic dashboard
   reopening every artifact; per-bar numbers meeting design §6 S2-G2
   items 1–4; dispositions exact, no wildcards.
-- **S2.44** `[ ]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
+- **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool
   depletion, canSpawn-gate pool-cursor effects), Holm-corrected family.
   **Deps:** S2-G1 **Acceptance:** suite green at B5.3 scale with α
   discipline unchanged; negative-control mutant rejected.
+
+  **Log:** `tools/dist_check/dist_check_s2` — a **new family alongside**
+  B5.3's sixteen, not an extension of them: that set was registered,
+  corrected and reported as closed, and reopening it would retroactively
+  move every threshold it was judged against. 13 hypotheses, family-wise
+  α **0.01**, Holm-Bonferroni — B5.3's numbers and B5.3's justification
+  (strong control under arbitrary dependence), which this family needs
+  more, since six of its rows read one `generate_monster_lists` call per
+  seed. Scale is B5.3's: `--seeds` refuses below 10,000, the acceptance
+  run is 20,000. Registration lives in the tool README; `s2_run.sh` is
+  the entry point beside `run.sh`.
+
+  Every row is a **joint** law wherever one exists, because that is what
+  turns an exclusion into an EXACT support assertion instead of a soft
+  frequency claim: an impossible cell has probability 0 and one
+  observation in it returns p = 0. So the act-2 first-strong row forbids
+  the game's only two-key exclusion (Chosen → Chosen and Byrds + Cultist
+  and Chosen), the act-3 row forbids 3 Darklings' self-exclusion **while
+  requiring Orb Walker's self-exclusion to remove nothing** (it is
+  weak-only; the first-strong loop can never roll it), the pair rows
+  forbid the immediate repeat, and the boss rows forbid a repeated boss.
+
+  The **analytic half is a library with its own tests**
+  (`dist_check_s2_expect`, `DistCheckS2Expect.*` — seven tests pinning
+  the laws against hand-derived numbers) because a wrong expectation and
+  an engine defect are indistinguishable on a campaign report line.
+
+  **Two harness defects found during bring-up, both real, both fixed.**
+  (1) The event chain's second draw replayed the first draw's split roll
+  verbatim: `generate_event` reads a THROWAWAY copy and leaves
+  `event_rng` byte-identical (the run layer's +1 comes from
+  EventHelper.roll in `nextRoomTransition`, not from generateEvent), so a
+  chain conditioned on an act-1 shrine could only ever take the shrine
+  branch again. It presented as χ² ≈ 3.8e4 on BOTH event rows — the
+  harness, not the engine. (2) The two canSpawn strata were seeded 12,079
+  apart while each consumed 20,000 seeds, so at the acceptance scale 40 %
+  of the "independent" swapped stratum replayed the held stratum's pool
+  shuffle; the correlation was inflating that row's fit (p 0.176 → 0.060
+  once disjoint).
+
+  **The canSpawn row is stratified, and the brief's premise needed
+  correcting.** Black Blood's gate is `hasRelic("Burning Blood")` — the
+  starter is what LETS it spawn, so a fresh Ironclad has exactly ONE
+  gated act-2 boss row (Ectoplasm's `actNum <= 1`, §5 trap 9), not two.
+  Both act-2 bodies are covered by sampling two independent strata (fresh
+  Ironclad, and the Neow boss-swap line that traded Burning Blood away →
+  two gated rows) as one 5-cell mixture. The law is the front-scan
+  negative-hypergeometric, which is the right shape only because BOTH the
+  pop and the rejection reroute are `remove(0)` for BOSS tier.
+
+  **Double-boss conditioning is read off the PUBLIC surface**, not the
+  list: `encode_public_view` at `act == kFinalAct, boss_cursor == 1`
+  publishes `boss_prefix[0]` beside `second_boss_reserved`, so the
+  sampled pair is what a player standing in the second room can see, and
+  design §4.4's "bossList[1] of the same shuffle, not a re-draw" is the
+  hypothesis. The Act-2 negative is an exact check. Driving real A20
+  three-act runs to two boss kills was **not** attempted — S2-G1's soak
+  measured `victories = 0` under E0 heuristics, so a run-driven cohort is
+  S2.43's oracle problem, not a distributional one.
+
+  **The first acceptance run flagged, and the flag was triaged to a
+  FALSE POSITIVE rather than re-seeded away.**
+  `s2.encounter.act3_weak_pair` came in at **p = 6.750359e-04** against
+  its **7.692308e-04** Holm threshold — the α tail a 13-row family at
+  α 0.01 is built to produce about one run in a hundred. Three
+  independent lines close it, none of them a re-seed:
+
+  - the registered law is uniform 1/6 over the six off-diagonal cells,
+    and at **2,000,000 seeds** the same sampler scores **χ² = 3.61 on
+    df 5** against it — the null is true, and a real bias would have
+    grown with n instead of shrinking (χ² 21.42 → 7.71 → 5.67 → 3.61 at
+    20k / 100k / 500k / 2M on the *same* seed base);
+  - the pool roll's band edges are uniform to one grid point in 2^24
+    (0.33333334f / 0.6666667f land on exact 24-bit boundaries), and
+    populateMonsterList's rejection is a re-roll, so the conditional is
+    exactly 1/2 — there is no mechanism that could bias the second weak
+    entry;
+  - ten independent 20,000-seed blocks at other bases score χ² 1.7–8.8,
+    all retained.
+
+  The registered seed base, sample size, α, correction and expectations
+  were **left exactly as written** — re-seeding until green is the
+  discipline violation this instrument exists to prevent.
+
+  **The principled fix, adopted as a permanent protocol change:
+  REPLICATE BEFORE FLAGGING.** A row Holm-retained at stage one is final
+  and its replicate is **never run** (a contract `confirm_by_replicate`
+  enforces, not an optimisation). A row rejected at stage one triggers
+  exactly ONE confirmatory replicate at the **same per-row threshold**;
+  it is finally flagged only if BOTH stages reject, else it reports
+  `RETAINED-AFTER-REPLICATE` with both p-values. The replicate block is
+  each sweep's own block **XOR `kReplicateSeedSalt`** — the ASCII bytes
+  `'S' '2' '4' '4'` in the high word, derived rather than picked and
+  fixed before any replicate was run; every stage-one base is below 2³²
+  and no sweep carries into bit 32, so the two stages are disjoint by
+  construction. The rule applies to the controls too, so the power claim
+  is tested *under* the rule. Family-wise consequence, registered in the
+  README: a true null must land in its own α tail **twice on independent
+  blocks**, so the false-flag rate is **~α² per row** instead of α, while
+  power is essentially unchanged — a true bias rejects both stages. **No
+  other threshold, seed, α, sample size or expectation moved.** Logic is
+  `sts::dist_check::confirm_by_replicate` (stats.hpp), pinned by five
+  `HolmReplicate.*` tests.
+
+  **Family verdict under the rule — `RESULT PASS` at both scales.** At
+  20,000: 12 rows PASS at stage one; `s2.encounter.act3_weak_pair` is
+  `RETAINED-AFTER-REPLICATE` (stage-one p 6.750359e-04, **replicate
+  p = 7.098214e-01** — a non-replication by three orders of magnitude).
+  Smallest p among the other twelve 9.098567e-03. At the registered
+  minimum 10,000 all thirteen PASS at stage one outright
+  (`act3_weak_pair` p = 1.105656e-03) and no family row replicates. Both
+  runs are reported rather than the greener one.
+
+  **Power is asserted, not assumed** (the T0.6 precedent). Four
+  deliberately-wrong samplers run through the identical machinery on
+  every campaign run and must clear the family's strictest Holm threshold
+  **in both stages**: `mutant.first_strong_ignores_exclusions`,
+  `mutant.double_boss_repeats_first_boss`,
+  `mutant.special_one_time_returns_next_act` (the crossing rebuilds the
+  one-time pool too) and `mutant.can_spawn_rejection_returns_relic`. All
+  four two-stage rejected at p = 0 **and** replicate p = 0, at both
+  scales — the first three by landing on impossible cells, the fourth at
+  χ² = 1.02e4 on df 4. A survivor fails the run. Because the controls
+  reject by construction, the replicate stage runs on every campaign;
+  the per-row contract is what keeps a retained row from being
+  re-examined.
+
+  **Green:** all six presets (`debug`/`asan`/`release` under WSL-GCC,
+  `win-debug`/`win-asan`/`win-release` under clang-cl), zero failures;
+  `win-debug`'s cache carries `/EHsc`. The family runs clean under ASan +
+  UBSan, `encode_public_view` path included, and the clang-cl release
+  build reproduces **every p-value byte-identically** to WSL-GCC. B5.3's
+  own 16-hypothesis family re-run unchanged at 20,000 seeds (RESULT PASS,
+  smallest p 2.185602e-01 — its landed number).
+  `check_stale_counts.sh` and `check_doc_links.sh` clean. New tests:
+  `DistCheckS2Expect.*` (7) and `HolmReplicate.*` (5). Re-derive counts
+  with `ctest -N | tail -1`.
 - **S2.45** `[ ]` ∥ **Throughput re-baseline.** B5.5 methodology over
   three-act runs: per-step and per-combat floors must hold unchanged; new
   whole-machine three-act run rate recorded with methodology as the S3

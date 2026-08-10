@@ -66,6 +66,164 @@ tools/wsl_run.sh --script tools/dist_check/run.sh release --seeds 20000
 
 `--seeds` rejects values below 10,000.
 
+## Pre-registered S2 act-2/3 family
+
+The S2.44 family (s2-design §6, S2-G2 item 6) is a **separate family alongside
+the one above, not an extension of it** — the B5.3 sixteen were registered,
+corrected and reported as a closed set, and reopening them to add rows would
+retroactively change every threshold that set was judged against. It is
+`dist_check_s2`, and it is fixed at these **13 hypotheses**:
+
+1. `s2.encounter.act2_weak_pair`
+2. `s2.encounter.act2_first_strong_given_last_weak`
+3. `s2.encounter.act2_elite_pair`
+4. `s2.encounter.act3_weak_pair`
+5. `s2.encounter.act3_first_strong_given_last_weak`
+6. `s2.encounter.act3_elite_pair`
+7. `s2.boss.act2_shuffle_pair`
+8. `s2.boss.act3_double_boss_public_pair`
+9. `s2.reward.card_upgraded_act2`
+10. `s2.reward.card_upgraded_act3`
+11. `s2.event.shrine_returns_after_act_crossing`
+12. `s2.event.special_one_time_depletes_run_wide`
+13. `s2.relic.boss_chest_can_spawn_front_scan`
+
+The family-wise alpha is **0.01** and p-values are corrected with
+**Holm-Bonferroni** — the same discipline, the same numbers and the same reason
+as B5.3's: strong family-wise control under arbitrary dependence, which this
+family needs even more than B5.3 did, because rows 1–3 (and 4–6, and 7) read one
+`generate_monster_lists` call per seed and are therefore correlated by
+construction. Nothing about the registration is adjusted after seeing a result.
+
+### Replicate before flagging (the two-stage rule)
+
+A row **retained** by Holm at stage one is final, and its replicate is **never
+run**. A row **rejected** at stage one triggers exactly **one** confirmatory
+replicate of the campaign on a pre-registered second seed block, judged at the
+**same per-row Holm threshold**; the row is finally `FLAG`ged only if that
+replicate rejects too, and otherwise reports `RETAINED-AFTER-REPLICATE` with
+**both** p-values printed. The rule applies uniformly to all 13 rows **and to
+the four negative controls** — a control must be rejected in *both* stages, so
+the power claim is tested under the rule rather than beside it.
+
+The replicate seed block is each sweep's own block **XOR `kReplicateSeedSalt`**
+(`s2_main.cpp`), a constant fixed and documented before any replicate was ever
+run and *derived* rather than picked: the ASCII bytes `'S' '2' '4' '4'` in the
+high word. Every stage-one base is below 2³² and no sweep carries into bit 32,
+so the two stages' blocks are disjoint by construction. The decision logic is
+`confirm_by_replicate` in `stats.hpp`, pinned by `HolmReplicate.*` in
+`tests/dist_check_test.cpp` — including that a stage-one retention does not so
+much as consult the replicate.
+
+**Why it was adopted, honestly.** The rule was **not** part of the original
+registration. It was added on **2026-08-10** in response to this family's first
+acceptance run, in which `s2.encounter.act3_weak_pair` rejected at
+**p = 6.750359e-04** against its **7.692308e-04** threshold — an α-tail false
+positive, not a divergence. The triage that established that, before the rule
+existed and without re-seeding anything: the registered law is uniform 1/6 over
+the six off-diagonal cells, and on the *same* seed base the χ² **shrinks** as n
+grows — **21.42 → 7.71 → 5.67 → 3.61** (df 5) at 20k → 100k → 500k → 2,000,000
+seeds, whereas a real bias grows linearly with n; the pool roll's band edges
+(`0.33333334f` / `0.6666667f`) land on exact 24-bit boundaries so the roll is
+uniform to one grid point in 2²⁴, and `populateMonsterList`'s rejection is a
+re-roll, making the conditional exactly 1/2 — there is no mechanism that could
+bias the second weak entry; and ten independent 20,000-seed blocks scored χ²
+1.7–8.8, all retained. Under the rule the replicate retains that row at
+**p = 7.098214e-01**.
+
+**The family-wise consequence**, stated where the rule lives: under a true null
+a row must land in its own α tail **twice, on independent seed blocks**, so the
+false-flag rate falls from ~α to **~α² per row** — the price of a 13-row family
+at α = 0.01 flagging roughly one clean run in a hundred is paid once. Power
+against a real effect is **essentially unchanged**, because a true bias rejects
+both stages; the four controls demonstrate exactly that, rejecting at p = 0 in
+both. No other threshold, seed block, α, sample size or expectation moved.
+
+Every hypothesis is a JOINT law wherever a joint one exists, because that is
+what makes an exclusion an **exact support assertion** rather than a soft
+frequency claim: an impossible cell has probability 0, and one observation in it
+returns p = 0 outright. Rows 1/3/4/6 forbid the immediate repeat
+(populateMonsterList, AbstractDungeon.java:1064-1095); row 2 forbids the four
+TheCity exclusion pairs including **the game's only two-key exclusion**
+(Chosen → Chosen and Byrds + Cultist and Chosen, TheCity.java:144-148); row 5
+forbids TheBeyond's **self-exclusion** (3 Darklings, a key in both pools) while
+requiring "Orb Walker"'s **inert** self-exclusion to remove nothing; rows 7/8
+forbid a repeated boss.
+
+What each row samples, and through which engine entry point:
+
+- **1–7** `generate_monster_lists(act, …)` per seed, one call serving the weak
+  pair, the first-strong-given-last-weak joint, the elite pair and the boss head
+  pair. Acts 2 and 3 draw **two** weak entries, so index 1 is the entry
+  `generateExclusions` keys on.
+- **8** the A20 double boss read off the **public** surface:
+  `encode_public_view` at `act == kFinalAct, boss_cursor == 1` publishes
+  `boss_prefix[0]` and `second_boss_reserved`, which is s2-design §4.4's claim
+  that the second fight is `bossList[1]` of the same shuffle rather than a
+  re-draw. The Act-2 negative (no reserved second boss outside TheBeyond) is an
+  exact check, not a frequency one.
+- **9/10** `assemble_combat_rewards` at both ascension bands
+  `card_upgraded_chance` keys on (A11 / A20). The bands are **exactly**
+  equal-sized samples rather than random margins, because the upgrade
+  `randomBoolean` is drawn for every non-RARE offer in every act and only its
+  outcome changes (AbstractDungeon.java:1469-1477) — so the non-RARE count and
+  the cardRng advance are identical across acts and ascensions for one seed.
+  Act 1's 0.0f chance is an exact check on both facts, not a hypothesis.
+- **11/12** the act-crossing asymmetry, `init_event_pools` →
+  `generate_event` → `reinit_act_event_pools` → `generate_event`, over a context
+  that pins every getShrine/getEvent gate so both acts' filtered pool sizes are
+  constants (asserted exactly: 12 / 13 / 17 / 16). A **shrine** drawn in Act 1
+  is drawable again in Act 2; a **special one-time** event is not, ever — that
+  cell's probability is 0.
+- **13** `roll_boss_chest` at the Act-2 chest, stratified over the two act-2
+  canSpawn bodies: the fresh Ironclad (Ectoplasm gated by `actNum <= 1`; Black
+  Blood *not* gated, because holding Burning Blood is what lets it spawn) and
+  the Neow boss-swap line (both gated). Because BOTH the pop and the rejection
+  reroute are `remove(0)` for BOSS tier, the pool consumption is a front scan
+  and a rejection costs a permanent extra entry.
+
+Expectation sources, all read in full from the decompiled tree:
+`MonsterInfo.normalizeWeights`/`roll`; `AbstractDungeon.populateMonsterList` /
+`populateFirstStrongEnemy`; `TheCity.generateMonsters`…`initializeBoss`
+(:87-182) and `TheBeyond`'s counterparts (:84-176); `ProceedButton.update` /
+`goToDoubleBoss` (:99-113, :210-220) with `MonsterRoomBoss.onPlayerEntry`
+(:27-36); `AbstractDungeon.getRewardCards` upgrade pass (:1469-1477) with the
+per-act `cardUpgradedChance` constants (Exordium.java:107, TheCity.java:84,
+TheBeyond.java:81); `AbstractDungeon.dungeonTransitionSetup` (:2576-2577),
+`generateEvent` (:1864-1880), `getShrine` (:1882-1942), `getEvent` (:1944-1990);
+`AbstractDungeon.returnRandomRelicKey` / `returnEndRandomRelicKey` (:704-819)
+with `BossChest.<init>` (:35-39).
+
+The **analytic half is a library with its own tests** —
+`include/sts/dist_check/s2_expect.hpp` and `DistCheckS2Expect.*` in
+`tests/dist_check_test.cpp` — because a wrong expectation and an engine defect
+are indistinguishable on a campaign report line. The laws are pinned there
+against hand-derived numbers.
+
+**Power is asserted, not assumed** (the T0.6 sampler-family precedent). Four
+deliberately-wrong samplers run through the identical chi-square machinery on
+every campaign run and must be rejected — **in both stages of the replicate
+rule** — at the family's **strictest** Holm threshold (α/13); a survivor fails
+the run:
+
+- `mutant.first_strong_ignores_exclusions` — the first strong rolled without the
+  rejection loop;
+- `mutant.double_boss_repeats_first_boss` — the second Act-3 boss re-draws
+  `bossList[0]`;
+- `mutant.special_one_time_returns_next_act` — the act crossing rebuilds the
+  one-time pool too (`init_event_pools` where the engine calls
+  `reinit_act_event_pools`);
+- `mutant.can_spawn_rejection_returns_relic` — a canSpawn rejection puts the
+  relic back instead of consuming it.
+
+Run it at the B5.3 scale through the sanctioned WSL entry point; `--seeds`
+rejects values below 10,000, exactly as `run.sh` does:
+
+```bash
+tools/wsl_run.sh release
+tools/wsl_run.sh --script tools/dist_check/s2_run.sh release --seeds 20000
+```
+
 ## Pre-registered oracle spot family
 
 `oracle_spot.py` consumes one completed, distinct campaign of at least 200

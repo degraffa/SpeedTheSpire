@@ -927,7 +927,12 @@ sts_add_test(seed_scan_test LIBS seed_scan_core)
 # handling, and the pre-registered Holm-Bonferroni step-down procedure. The
 # >=10k-seed analytic sweep itself is tools/dist_check/dist_check and remains a
 # campaign rather than a per-commit ctest.
-sts_add_test(dist_check_test LIBS dist_check_stats)
+# S2.44 adds the tier-4 S2 family's ANALYTIC expectations (dist_check_s2_expect)
+# to the same target: the >=10k-seed S2 sweep is likewise a campaign
+# (tools/dist_check/dist_check_s2), but the laws it scores against are pinned
+# here against hand-derived numbers so a wrong expectation cannot masquerade as
+# an engine divergence.
+sts_add_test(dist_check_test LIBS dist_check_stats dist_check_s2_expect)
 
 # T0.6: the belief sampler's DISTRIBUTIONAL suite. Same split as dist_check
 # above -- the per-commit ctest runs it in SMOKE mode (the pre-registered
