@@ -534,6 +534,10 @@ Each becomes a named test, continuing stage-b-design §10:
    this is a real behavioural deviation on a reachable state, not an act
    exclusion — pinned by `SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond`
    so that anyone who "fixes" the act gate alone fails loudly.*
+   *Owner-ratified 2026-08-10: the project owner reviewed the deviation
+   inventory and confirmed the exclusion (the event is avoidable and
+   essentially never optimal); the pin is settled policy, not a pending
+   question.*
 6. **Mind Bloom consumes `miscRng.randomLong()`** for its boss shuffle
    (MindBloom.java:66-80) — floor-scoped stream, event-order-sensitive.
 7. **`specialOneTimeEventList` is cross-act state** (§2.3): a draw in Act 1

@@ -85,6 +85,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | S2.31 payout relics/cards are now REACHABLE with their bodies still deferred | S2.03 (landed them acquisition-only, naming S2.31 as body owner) / S2.31 (granted the acquisition, declined the bodies) | **S2.34** (opened 2026-08-09, satisfying this row's "body task before the gate" demand) | **DISCHARGED by S2.34 (2026-08-09) — all seven bodies landed, each pinned tier-2 against its cited Java re-read in full; see the S2.34 Log.** The seven: **Bloody Idol** `onGainGold` heal 5 at BOTH gainGold doors — the run-layer `gain_gold` fan-out (heal through the out-of-combat onPlayerHeal door) AND the in-combat producer the row's own framing under-counted: Hand of Greed's `GreedAction` calls `player.gainGold` at the kill (GreedAction.java:38, the ONLY in-combat gainGold in Acts 1–3 scope), so `op_damage_greed` now runs Ectoplasm's early return and the fan-out at combat time, healing through `heal_player_with_relics` (Magic Flower ×1.5, Mark of the Bloom → 0); **Enchiridion** `atPreBattle` (native, rides RANDOM_ATTACK_TO_HAND's new pool selector over the pre-existing `kIroncladPowerPool`); **Nilry's Codex** `onPlayerEndTurn` → `Opcode::CODEX` (the DISCOVERY choice surface, RED-combat-pool sampler, always-skippable, zero wasted regens, random-spot draw-pile insert); **Necronomicon** `onUseCard` once-per-turn replay + `atTurnStart` re-arm (Double Tap's replay machinery; latch = `CombatState.flags` bit 6, counter stays −1); **Necronomicurse** `triggerOnExhaust` — NO new CardTrigger was needed (the S2.31-era premise was stale: the `on_exhaust:` program column, live since Sentinel, IS the triggerOnExhaust seam) — authored as an addToBot MAKE_CARD via the new `on_exhaust_bottom` column; **Mutagenic Strength** `atBattleStart` native (addToTop reversal → resolution cosmetic/LoseStrength/Strength, slot order pinned); **Ritual Dagger** `Opcode::RITUAL_DAGGER` (73) — misc-based damage, DAMAGE_GREED kill gate, `initial_misc: 15` seeded at the obtain door, master-deck propagation at the combat fold-back (documented deviation: a same-uuid replay-copy kill grows only the transient copy). Also closed in passing: **Mark of the Bloom's in-combat onPlayerHeal half** (the S2.33 acquisition made it reachable while `heal_player_with_relics` knew only Magic Flower) |
 | Mind Bloom boss re-fight **directed capture** (the oracle half of S2.33's acceptance) | S2.33 (sim half landed + pinned; no capture seat) | S2.43 | S2.33's acceptance reads "Mind Bloom's Act-1-boss re-fight replays zero-diff in a directed capture". The SIM half is landed and pinned against the decompile (beyond_events_test.cpp: the one-randomLong JDK shuffle twin, the fixed 25/50 gold row, the RARE `returnRandomRelic` pop, the EventRoom-not-boss combat flags, and the victory→reward→map walk), but the bridge never runs from a task worktree and two sibling event batches held the game install concurrently, so **no live capture was run** — deferred, not skipped. S2.43 (the next capture campaign) owes: a directed Act-3 capture that draws MindBloom, takes "I am War", plays the re-fight to the reward claim, and scores zero-diff through the differ; the seed/policy triple can come from `seed_scan --need-boss-id` once Act-3 reach is live (see the reach row above). Watch two rows while scoring it: the translator's act-local FIRED derivation (row above — an Act-2/3 event capture is exactly where it false-REDs) and trap-5's requirement that the driver record playtime |
 | Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). **RE-RUN HALF DISCHARGED by S2.41 (2026-08-09)**: with every S2.2x/S2.3x batch landed, §1's command was re-run verbatim (50,000 rows, release, `determinism_mismatches=0`) and the Act-2/3 cells are now **measured, at 0** — Act-1 reproduced to the row, `room_unimplemented` went 8 → 0, and the fuzz soak's new per-act coverage agrees over 100,000 independent cases (act 2 entered by 0.11 % of cases, act-2 boss fought 0 times, act 3 never). What is left of this row is therefore **not a content obligation**: sim-side depth is bounded by the E0 policies (~×30 loss per act), so a three-act sim number needs a different policy or the driver, not a later re-run. S2.43's live driver numbers are the remaining half. [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
+| Keys as obtainable content — emerald-elite node flag + EMERALD_KEY reward row; SAPPHIRE_KEY linked-row claim semantics | stage-b design §1.1 "Out" / s2-design §1 (S1/S2 scope) | **S3 planning** (owner-directed 2026-08-10) | The owner reviewed the deviation/exclusion inventory and directs that emerald-key rewards be implemented in the Act-4 wave: store `setEmeraldElite`'s chosen node (the mapRng draw is already modelled — combat_rewards.hpp:107-112 records that only the node flag is missing), surface the burning-elite combat's EMERALD_KEY reward row, and give the sapphire chest append its real claim semantics (today it is modelled as an ignored linked row that costs no RNG or state parity, per stage-b-design §1.1). Ruby is already live (the Recall arm grants it). This row exists so S3 planning inherits an explicit obligation instead of rediscovering the S1/S2 scope decision |
 
 ---
 
@@ -2218,7 +2219,7 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   triage per the Stage B process, zero untriaged/open.
   **Inherited:** the stage-b "fork redeploy + bottle-taking capture" row
   (see Deferred obligations).
-  **Deps:** S2-G1, S2.42, S2.47 **Acceptance:** deterministic dashboard
+  **Deps:** S2-G1, S2.42, S2.47, S2.48, S2.49 **Acceptance:** deterministic dashboard
   reopening every artifact; per-bar numbers meeting design §6 S2-G2
   items 1–4; dispositions exact, no wildcards.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
@@ -2453,8 +2454,54 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   I→S→stored-and-diffed. Six presets green; counts re-derived by
   `ctest -N | tail -1` at land time, not restated here.
 
+- **S2.48** `[ ]` **Stolen-gold settlement ordering vs in-combat gold gains
+  (owner-directed fix).** Close the standing-deviation class the G7 campaign
+  carries as ~110 of its 150 dispositions: `fold_back_combat` banks in-combat
+  gold (Hand of Greed's `GreedAction` is the one in-scope producer) before
+  `settle_stolen_gold` on both combat-end paths, which matches the game only
+  when the Greed kill preceded the steal — a steal-first line with the purse
+  below the steal amount over-credits the thieves (recorded at
+  `run_advance.cpp` beside `settle_stolen_gold` and in stage-b-tasks.md's
+  obligation row). Owner decision 2026-08-10: cover the ordering, don't
+  carry it. Model the game's purse semantics at steal time against the live
+  purse, keeping the fold-back layering for everything else; both
+  combat-end paths covered. This intentionally changes landed Act-1
+  behavior on the affected lines — owner-authorized; regenerate any moved
+  fixture via its checked-in generator with the meaning-diff stated.
+  **Deps:** — (must land BEFORE S2.43 scores its campaign, so the ~110
+  standing-deviation dispositions become retestable exact matches instead
+  of accumulating further) **Acceptance:** directed tests for the four
+  orderings (steal before/after the Greed kill × purse above/below the
+  steal amount) on both combat-end paths, each pinned against the cited
+  Java re-read in full; the stage-b obligation row and the dispositions
+  carrier note updated; fixtures regenerated only if actually moved; six
+  presets green.
+- **S2.49** `[ ]` **Attacker-side cancel of queued multi-hit attacks
+  (owner-directed fix).** `DamageAction.update` (DamageAction.java:69-73)
+  cancels a queued hit whose owner is dying or half-dead, so a monster
+  killed (or half-killed) partway through its own multi-hit attack loses
+  the remaining hits; the engine has no attacker guard at all and lands
+  every queued DAMAGE item. Named at `interp_damage.cpp`'s KNOWN GAP block
+  as residue for "whichever batch lands the first halfDead producer" —
+  those batches (S2.25/S2.28) landed without it and the gap was in no
+  deferred table until now; this row is that accounting made good. Owner
+  decision 2026-08-10: fix both halves (`isDying` and `halfDead`) together,
+  per the code comment's own terms. Changes landed Act-1 behavior (any
+  monster killed mid-multi-hit, e.g. by thorns) — owner-authorized; Stage-A
+  fixtures move only if a fixture trace actually contains such a line —
+  prove which, regenerate via `tools/fixture_gen` with zero-diff-in-meaning
+  shown for the rest.
+  **Deps:** — (land BEFORE S2.43 for the same disposition-hygiene reason as
+  S2.48; ∥ with S2.48 only if their edits stay disjoint — both touch the
+  combat-end/damage seams, so serialize if in doubt) **Acceptance:**
+  directed tests: a monster killed mid-multi-hit loses its remaining hits;
+  a halfDead transition (Darkling / Awakened One) cancels identically; the
+  guard reads the OWNER of the queued hit, not the current actor; negative:
+  already-resolved hits stay resolved; fixtures accounted as above; six
+  presets green.
+
 ### S2-G2 `[ ]` **Gate: S2 verified (unblocks training Phase T4)** — tag `s2-g2-verified`
-**Deps:** S2.41–S2.47, S2-G1
+**Deps:** S2.41–S2.49, S2-G1
 The design §6 S2-G2 bar, checked literally, every item with linked
 evidence. Then: update CLAUDE.md "Current state"; notify the training
 ledger (T4.1's `Deps: S2` is this tag); S3 planning opens as its own fresh
@@ -2471,8 +2518,9 @@ S2.02 + S2.13 ─▶ S2.31 ∥ S2.32 ∥ S2.33 ; S2.31 ─▶ S2.34
 all S2.0x/1x/2x/3x ─▶ S2-G1
 S2.12 ─▶ S2.42 ; S2.11+S2.12 ─▶ S2.41
 S2-G1 ─▶ S2.47 ∥ S2.44 ∥ S2.45 ; S2.47 ─▶ S2.43 (needs S2.42)
+S2.48 ∥ S2.49 (owner-directed 2026-08-10) ─▶ S2.43
 S2.43+S2.44 ─▶ S2.46
-S2.41–S2.47 ─▶ S2-G2
+S2.41–S2.49 ─▶ S2-G2
 ```
 
 ## Change log
@@ -2483,3 +2531,11 @@ S2.41–S2.47 ─▶ S2-G2
 - 2026-08-10 — orchestrator opened S2.47 (boss-relic offer storage), the
   planned `SCHEMA_VERSION` site the S2.42 deferral row demands; deferred
   row re-pointed, S2.43's Deps extended, gate Deps now S2.41–S2.47.
+- 2026-08-10 — owner dispositions on the deviation inventory: the
+  SecretPortal pin (s2-design §5 trap 5, ratification recorded there), the
+  Neow mini-blessing absence, and Prismatic Shard's inert reward
+  (implement at S4 with the other characters) are ratified as settled;
+  emerald-key rewards assigned to S3 planning (new deferred-obligations
+  row); **S2.48** (stolen-gold settlement ordering) and **S2.49**
+  (attacker-side multi-hit cancel) opened as owner-directed behavior
+  fixes, both Deps of S2.43; gate Deps extended to S2.41–S2.49.
