@@ -338,7 +338,7 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
             // the SAME NeowState fields the Neow arm above reads
             // (boss_chest.hpp), so the grid liveness test is the same one; what
             // says the grid belongs to this room is BossChestScreen.
-            return rc.boss_chest.screen ==
+            return rc.run.boss_chest.screen ==
                    static_cast<uint8_t>(BossChestScreen::EQUIP_GRID);
         default:
             return false;
@@ -349,7 +349,7 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
     const RunController& rc) noexcept {
     const bool boss_chest_grid =
         rc.phase == static_cast<uint8_t>(RunPhase::BOSS_TREASURE) &&
-        rc.boss_chest.screen ==
+        rc.run.boss_chest.screen ==
             static_cast<uint8_t>(BossChestScreen::EQUIP_GRID);
     if (!boss_chest_grid &&
         (rc.phase != static_cast<uint8_t>(RunPhase::NEOW) ||

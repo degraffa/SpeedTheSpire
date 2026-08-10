@@ -1311,7 +1311,7 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
             rc.rewards.open_card_item = kNoOpenCardReward;
             rc.rest = RestSiteState{};
             rc.treasure_chest = TreasureChest{};
-            rc.boss_chest = roll_boss_chest(rc.run);
+            rc.run.boss_chest = roll_boss_chest(rc.run);
             rc.phase = static_cast<uint8_t>(RunPhase::BOSS_TREASURE);
             break;
         case RoomType::Event: {
@@ -2123,7 +2123,7 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
             // phase -- the same per-phase convention NEOW and REST_SITE use --
             // so the hashed public serialization (PvMask) keeps its size and
             // PUBLIC_VIEW_VERSION does not move.
-            const BossChestState& chest = rc.boss_chest;
+            const BossChestState& chest = rc.run.boss_chest;
             switch (static_cast<BossChestScreen>(chest.screen)) {
                 case BossChestScreen::CLOSED:
                     // The chest is clickable (AbstractChest.update:104-110) and
@@ -2884,7 +2884,7 @@ void open_boss_chest_grid(RunController& rc, NeowGridMode mode,
     for (int i = 0; i < kNeowGridPickCap; ++i) {
         n.grid_picked[i] = 0;
     }
-    rc.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::EQUIP_GRID);
+    rc.run.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::EQUIP_GRID);
 }
 
 // Translate an on_equip_screen request made by a relic picked AT THE BOSS CHEST.
@@ -2897,7 +2897,7 @@ void apply_boss_chest_equip_request(RunController& rc,
     switch (ctx.screen) {
         case RelicEquipScreen::NONE:
             // Synchronous body (or none at all): the room is finished.
-            rc.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::DONE);
+            rc.run.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::DONE);
             break;
         case RelicEquipScreen::GRID_REMOVE:
             open_boss_chest_grid(rc, NeowGridMode::REMOVE, ctx.grid_picks);
@@ -2914,7 +2914,7 @@ void apply_boss_chest_equip_request(RunController& rc,
             break;
         case RelicEquipScreen::ITEM_REWARD:
             // Tiny House / Calling Bell assembled ctx.rewards (== rc.rewards).
-            rc.boss_chest.screen =
+            rc.run.boss_chest.screen =
                 static_cast<uint8_t>(BossChestScreen::EQUIP_ITEM_REWARD);
             break;
         case RelicEquipScreen::GRID_BOTTLE:
@@ -2922,7 +2922,7 @@ void apply_boss_chest_equip_request(RunController& rc,
             // chest draws BOSS. Loud rather than a silent overlay, exactly as
             // the symmetric case is at the Neow boss swap (neow.cpp:99-107).
             assert(false && "a bottle grid request from the boss chest");
-            rc.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::DONE);
+            rc.run.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::DONE);
             break;
     }
 }
@@ -2949,9 +2949,9 @@ void open_boss_chest(RunController& rc) noexcept {
                                                         /*boss_chest=*/true);
     assert(hooks_ok && "the boss-chest hook pass is a no-op and cannot fail");
     (void)hooks_ok;
-    rc.boss_chest.screen =
+    rc.run.boss_chest.screen =
         static_cast<uint8_t>(BossChestScreen::RELIC_SELECT);
-    rc.boss_chest.seen = 1;
+    rc.run.boss_chest.seen = 1;
 }
 
 // ProceedButton.update's TreasureRoomBoss branch (:159-164) -> goToNextDungeon
@@ -2966,7 +2966,7 @@ void open_boss_chest(RunController& rc) noexcept {
 //      hand the run to the act transition instead. That is the seam.
 void leave_boss_chest(RunController& rc, StepResult& res) noexcept {
     // (1) noPick -- metrics only. Recorded, deliberately inert.
-    (void)rc.boss_chest.chose_relic;
+    (void)rc.run.boss_chest.chose_relic;
 
     // (2) the ACT TRANSITION (the seam S2.12 filled).
     on_boss_chest_proceed(rc, rc.run, res);
@@ -2976,7 +2976,7 @@ void leave_boss_chest(RunController& rc, StepResult& res) noexcept {
     // follows. rc.room_type is rewritten by the seam for Act 2 (TheCity installs
     // an EmptyRoom currMapNode) and deliberately LEFT at TreasureBoss for Act 3
     // (TheBeyond never replaces currMapNode) -- see act_transition step (15).
-    rc.boss_chest = BossChestState{};
+    rc.run.boss_chest = BossChestState{};
     rc.rewards = RewardScreen{};
     rc.rewards.open_card_item = kNoOpenCardReward;
 }
@@ -3357,7 +3357,7 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 fill_run_result(rc, res);
                 break;
             }
-            BossChestState& chest = rc.boss_chest;
+            BossChestState& chest = rc.run.boss_chest;
             const uint8_t a0 = action_arg0(a);
             switch (static_cast<BossChestScreen>(chest.screen)) {
                 case BossChestScreen::CLOSED:

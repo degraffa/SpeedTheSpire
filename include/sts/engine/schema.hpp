@@ -161,6 +161,29 @@ namespace sts::engine {
 //   PUBLIC_VIEW_VERSION 3 -> 4, twin fixtures regenerated. That is a MID-RECORD
 //   move, not a tail append, so v3 records are NOT readable as v4 -- see the
 //   schema-evolution note in docs/public-view-audit.md.
-inline constexpr uint32_t SCHEMA_VERSION = 7;
+// v8 (=8): the boss-chest boss-relic offer storage (S2.47 -- the ledger row is
+//   the conventions-§5 planned site for this bump). `BossChestState` (16 bytes:
+//   relics[3] u16, screen/seen/chose_relic u8, pad[7]) moves from transient
+//   RunController storage into RunState as a PURE TAIL APPEND after neow_rng,
+//   so the three offers the boss chest pops at room entry become visible to the
+//   oracle translator (BOSS_REWARD.screen_state.relics now emits) and to
+//   diff_run_states -- the storage prerequisite of design §6 S2-G2 item 2's
+//   zero-diff boss-relic pick. Every pre-v8 RunState byte keeps its offset
+//   (static_asserts at run_state.hpp prove append + no tail padding); a pad
+//   carve was checked and rejected -- the remaining declared pads are scattered
+//   1-2 byte holes that cannot legally hold 3×uint16. sizeof(RunState)
+//   2184 -> 2200, so per §8 this is a schema bump. sizeof(CombatState) is
+//   UNCHANGED, so the 20 frozen v1 combat fixtures are NOT regenerated (their
+//   loader checks only the combat state size); no v2/RUN trace goldens are
+//   committed, so nothing else on disk moves. kTraceFormatV2 follows this
+//   constant to 8. PublicView is UNCHANGED (the offers already reach it through
+//   the v1-reserved boss_relic_choice_reserved fields, gated on `seen`), so
+//   PUBLIC_VIEW_VERSION stays 4; the twin fixture file is regenerated only
+//   because its header stamps engine_schema_version -- its cases and view
+//   payloads are byte-identical. RunController's sizeof is net unchanged (the
+//   16-byte member left the controller as its RunState grew by 16), and
+//   BossChestState's byte classification (offers hidden until `seen`) carries
+//   over verbatim into the RunState table in byte_class.hpp.
+inline constexpr uint32_t SCHEMA_VERSION = 8;
 
 }  // namespace sts::engine

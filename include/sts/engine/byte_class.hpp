@@ -306,6 +306,11 @@ inline constexpr ClassRow kRunStateRows[] = {
     STS_BC_ROW(RunState, potion_rng, ByteClass::HIDDEN, "as above"),
     STS_BC_ROW(RunState, map_rng, ByteClass::HIDDEN, "as above"),
     STS_BC_ROW(RunState, neow_rng, ByteClass::HIDDEN, "as above"),
+    STS_BC_SUB(RunState, boss_chest, kBossChestTable,
+               "audit 8.4 -- moved from RunController by the schema-v8 tail "
+               "append (the offers must be diffable, so they must be schema "
+               "state); the offers-hidden-until-`seen` gating carries over "
+               "verbatim with the sub-table"),
 };
 STS_BC_TABLE(kRunStateTable, RunState, kRunStateRows);
 
@@ -446,10 +451,9 @@ inline constexpr ClassRow kRunControllerRows[] = {
     STS_BC_ROW(RunController, shop, ByteClass::PUBLIC,
                "audit 8.3: the whole current-visit stock is drawn with prices"),
     STS_BC_SUB(RunController, treasure_chest, kTreasureChestTable,
-               "audit 8.4 -- the one masking trap plan 2.1 names"),
-    STS_BC_SUB(RunController, boss_chest, kBossChestTable,
-               "audit 8.4 -- the boss chest is the SECOND instance of the same "
-               "trap: contents drawn at entry, revealed by the open action"),
+               "audit 8.4 -- the one masking trap plan 2.1 names. Its SECOND "
+               "instance, the boss chest, is no longer a controller member: "
+               "schema v8 moved BossChestState into RunState (see that table)"),
     STS_BC_SUB(RunController, event, kEventDialogTable, "audit 8.5"),
     STS_BC_ROW(RunController, neow, ByteClass::PUBLIC,
                "audit 8.6: the four rolled blessings ARE the screen"),

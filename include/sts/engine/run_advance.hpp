@@ -11,8 +11,9 @@
 // RunState-owned slot inventory into the combat potion interpreter.
 //
 // WHY A SEPARATE CONTROLLER STRUCT (not RunState). RunState is the SAVE-PARITY
-// persistent state (schema-versioned, hashed, traced -- 2184 B, and its layout
-// is FROZEN). The transient "where am I in the screen/room flow"
+// persistent state (schema-versioned, hashed, traced -- re-derive its size with
+// sizeof, never from a doc; its layout moves only at a planned schema bump).
+// The transient "where am I in the screen/room flow"
 // bookkeeping (current map column, run phase, the live combat, the generated
 // encounter lists + their consumption cursors) is NOT save state -- the game
 // derives it -- so it lives here in RunController, which embeds a RunState by
@@ -353,12 +354,14 @@ struct RunController {
     // RewardScreen; never added to the frozen RunState schema.
     TreasureChest treasure_chest;
 
-    // The post-boss chest while phase == BOSS_TREASURE: the three relics popped
-    // at room entry, which screen is up, and TreasureRoomBoss.choseRelic
-    // (boss_chest.hpp). Transient for the same reason as everything around it --
-    // the game rebuilds the chest from (seed, relic-pool state) on reload, and
-    // the pool state IS in RunState -- so the frozen schema stays untouched.
-    BossChestState boss_chest;
+    // The post-boss chest state -- the three relics popped at room entry, which
+    // screen is up, and TreasureRoomBoss.choseRelic -- is NOT here: it lives in
+    // `run.boss_chest` (run_state.hpp, schema v8 / S2.47). It used to be a
+    // transient member beside treasure_chest, but the three offers are what
+    // design §6 S2-G2 item 2 diffs, and the translator/differ see only
+    // RunState/CombatState -- so the storage moved rather than being mirrored,
+    // keeping exactly ONE source of truth. The room-flow functions are still
+    // boss_chest.hpp's.
 
     // The live event dialog while phase == EVENT_DIALOG; also carries the
     // selected EventId while parked at ROOM_UNIMPLEMENTED for a
@@ -464,7 +467,7 @@ enum class EventCombatVariant : uint8_t {
 //                          DONE offers can_proceed, which opens the map.
 //   TREASURE_ROOM        : can_open_chest (CHOOSE kChooseOpenChest) and
 //                          can_proceed (CHOOSE kChooseProceed) to skip it.
-//   BOSS_TREASURE        : depends on rc.boss_chest.screen (boss_chest.hpp) --
+//   BOSS_TREASURE        : depends on rc.run.boss_chest.screen (boss_chest.hpp) --
 //                          CLOSED offers can_open_chest (CHOOSE
 //                          kChooseOpenChest) + can_proceed (leave without
 //                          picking, the noPick path); RELIC_SELECT offers
@@ -795,12 +798,12 @@ static_assert(act_floor_base(3) == 34);
 // where the game calls ProceedButton.goToNextDungeon (ProceedButton.java:159-164,
 // :231-252). On entry:
 //   * rc.phase is BOSS_TREASURE and rc.room_type is RoomType::TreasureBoss;
-//   * rc.boss_chest still holds the three offers and `chose_relic`, and the
+//   * rc.run.boss_chest still holds the three offers and `chose_relic`, and the
 //     caller has ALREADY run the noPick bookkeeping (metrics-only in the game,
 //     :232-234) -- so this function must not re-read it for state;
 //   * `rs` is rc.run, passed explicitly because the body is RunState-heavy;
 //   * `res` has NOT been filled yet.
-// On return it has set rc.phase and filled `res`, and rc.boss_chest is cleared
+// On return it has set rc.phase and filled `res`, and rc.run.boss_chest is cleared
 // by the caller afterwards.
 //
 // WHAT IT NOW DOES: the whole act transition -- dungeonTransitionSetup plus the

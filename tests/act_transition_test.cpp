@@ -1023,7 +1023,7 @@ TEST(RunTerminal, TheActOneChestProceedIsNoLongerTerminal) {
     EXPECT_FALSE(res.terminal);
     EXPECT_EQ(res.reward, 0.0f);
     EXPECT_FALSE(run_is_victory(rc));
-    EXPECT_EQ(rc.boss_chest.relics[0], 0) << "the room's state was cleared";
+    EXPECT_EQ(rc.run.boss_chest.relics[0], 0) << "the room's state was cleared";
 }
 
 TEST(RunTerminal, VictoryIsTheActThreeBossAndOnlyThat) {

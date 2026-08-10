@@ -81,7 +81,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | Exact Act-2/3 entry floors (17/34 assumption) | TE.2 scope pass (s2-design §4.2) | S2.12 | **DISCHARGED** (2026-08-07, S2.12). The answer is a PAIR per act, and conflating its halves was the whole risk: **17/34 are the CONSTRUCTION floors** — what `dungeonTransitionSetup`, the constructor chain, `generateMap`, `setEmeraldElite` and the BGM draw observe, and what the un-reseeded floor-scoped five still carry (`seed+17` / `seed+34`) — while **18/35 are the first PLAYABLE rooms**. Span = 17 = 15 map rows + boss + boss chest; the crossing itself adds **no** floor, because `isDungeonBeaten = true` (ProceedButton.java:249-250) is exactly what makes `updateFading` skip `nextRoomTransition` (:2317-2326). Table in s2-design §4.2; engine constants `kActFloorSpan` / `act_floor_base`, with `run_cur_row = floor − base − 1` replacing the Act-1-only `floor − 1` |
 | `generateStrongEnemies(12)` regeneration on an exhausted `monsterList` | S2.11 (the boss-exit pop it added) | S2.12 | **DISCHARGED — UNREACHABLE, no body written** (2026-08-07, S2.12). Re-derived for Acts 2–3, which call `generateWeakEnemies(2)`: SUPPLY is weak + 1 first-strong + 12 strong = **15** (Act 1 = 16); DEMAND is at most **14** — one walked path visits 15 rooms, one per map row, of which the act-independent generator forces row 8 Treasure and row 14 Rest, leaving 13 `monsterList`-consuming rooms (a ? room that rolls MONSTER is one of those 13, not an extra) plus the one pop that leaving the boss room performs. Margin 2 in Act 1, **1** in Acts 2–3. The loud `assert` in `next_room_transition_impl` stays and now carries that arithmetic in full; writing untestable machinery for an unreachable arm would be worse than an assert that names why it cannot fire |
 | Fork redeploy + bottle-taking capture (stage-b table row, "next capture-campaign owner") | wave-runlayer S3 (stage-b) | S2.43 | S2.43 is the next capture campaign; validate the `in_bottle_*` boundary end-to-end and mark the stage-b row DISCHARGED there |
-| `BOSS_REWARD.screen_state.relics` — schema **storage** for the boss-relic offers | S2.42 (which promoted the disposition but not the storage) | **S2.47** (opened 2026-08-10, the pre-S2.43 storage task this row demands; S2.43 consumes) | **Evidence:** PROTOCOL.md §3.8 dispositioned this `I (S2 scope)` because "the run terminates at act-1 boss combat rewards, before the boss chest" — no longer true at capture driver `b1.7.0`, which plays through the chest. An `I` field is **never diffed**, so design §6 S2-G2 item 2 (a *zero-diff* boss-chest boss-relic pick) was unachievable while the row said `I`, and **no S2 ledger row owned changing it**. S2.42 took the contained half: the row now reads `S`, the offers are registry-**joined** (an unknown boss relic fails translation loudly), and the field is `fr.defer`red — pinned by `Translator.BossRewardRelicsAreDeferredNotIgnored` and `Translator.BossRewardRelicsStillJoinTheRegistryAndFailLoud`. What remains is **storage**, which is not contained: the three offers live in `RunController.boss_chest` (`BossChestState`, `boss_chest.hpp`), which is transient, while the translator emits `RunState`/`CombatState` and the differ compares those — so landing it needs new `RunState` storage **plus** a `SCHEMA_VERSION` bump, a trace-container change and an oracle-adapter change. A `SCHEMA_VERSION` bump outside the places the ledger plans for it is stop-the-line (conventions §5), so S2.42 declined it rather than improvising. **S2.43 needs this before it can claim G2-2 item 2.** |
+| `BOSS_REWARD.screen_state.relics` — schema **storage** for the boss-relic offers | S2.42 (which promoted the disposition but not the storage) | **S2.47** (opened 2026-08-10, the pre-S2.43 storage task this row demands; S2.43 consumes) | **STORAGE HALF DISCHARGED by S2.47 (2026-08-10, schema v8) — see the S2.47 Log for the full landing.** Evidence trail: PROTOCOL.md §3.8 dispositioned this `I (S2 scope)` because "the run terminates at act-1 boss combat rewards, before the boss chest" — no longer true at capture driver `b1.7.0`. An `I` field is **never diffed**, so design §6 S2-G2 item 2 (a *zero-diff* boss-chest boss-relic pick) was unachievable while the row said `I`. S2.42 took the contained half (row → `S`, registry join fail-loud, field `fr.defer`red). S2.47 took the rest: `BossChestState` moved out of the transient controller into `RunState.boss_chest` (pure tail append, `SCHEMA_VERSION` 7→8 at this row's planned site — the pad-carve alternative measured 3 contiguous bytes max and was rejected), `kTraceFormatV2` follows to 8, the translator **emits** the three joined offers with the reveal bits a live BOSS_REWARD screen implies, `diff_run_states` compares the group by name (`boss_chest.relics[i]`/`.screen`/`.seen`/`.chose_relic`), and the replay differ gates the comparison on capture-side attestation (`neutralize_unattested_boss_chest`). Pinned by `Translator.BossRewardRelicsAreEmittedIntoBossChestStorage`, `Translator.BossRewardOffersRoundTripThroughTheDifferBothWays` (both directions), `Translator.BossRewardRelicsRejectAnyCountButThree`, `Translator.BossRewardRelicsStillJoinTheRegistryAndFailLoud` (kept — the join survived the emit) and `RunDifferBossChest.EveryMemberNamedSeparately`. **What S2.43 still owes this row: the live campaign scoring itself** — a captured boss-chest pick through the differ, zero-diff, which is G2-2 item 2's evidence, not storage. |
 | S2.31 payout relics/cards are now REACHABLE with their bodies still deferred | S2.03 (landed them acquisition-only, naming S2.31 as body owner) / S2.31 (granted the acquisition, declined the bodies) | **S2.34** (opened 2026-08-09, satisfying this row's "body task before the gate" demand) | **DISCHARGED by S2.34 (2026-08-09) — all seven bodies landed, each pinned tier-2 against its cited Java re-read in full; see the S2.34 Log.** The seven: **Bloody Idol** `onGainGold` heal 5 at BOTH gainGold doors — the run-layer `gain_gold` fan-out (heal through the out-of-combat onPlayerHeal door) AND the in-combat producer the row's own framing under-counted: Hand of Greed's `GreedAction` calls `player.gainGold` at the kill (GreedAction.java:38, the ONLY in-combat gainGold in Acts 1–3 scope), so `op_damage_greed` now runs Ectoplasm's early return and the fan-out at combat time, healing through `heal_player_with_relics` (Magic Flower ×1.5, Mark of the Bloom → 0); **Enchiridion** `atPreBattle` (native, rides RANDOM_ATTACK_TO_HAND's new pool selector over the pre-existing `kIroncladPowerPool`); **Nilry's Codex** `onPlayerEndTurn` → `Opcode::CODEX` (the DISCOVERY choice surface, RED-combat-pool sampler, always-skippable, zero wasted regens, random-spot draw-pile insert); **Necronomicon** `onUseCard` once-per-turn replay + `atTurnStart` re-arm (Double Tap's replay machinery; latch = `CombatState.flags` bit 6, counter stays −1); **Necronomicurse** `triggerOnExhaust` — NO new CardTrigger was needed (the S2.31-era premise was stale: the `on_exhaust:` program column, live since Sentinel, IS the triggerOnExhaust seam) — authored as an addToBot MAKE_CARD via the new `on_exhaust_bottom` column; **Mutagenic Strength** `atBattleStart` native (addToTop reversal → resolution cosmetic/LoseStrength/Strength, slot order pinned); **Ritual Dagger** `Opcode::RITUAL_DAGGER` (73) — misc-based damage, DAMAGE_GREED kill gate, `initial_misc: 15` seeded at the obtain door, master-deck propagation at the combat fold-back (documented deviation: a same-uuid replay-copy kill grows only the transient copy). Also closed in passing: **Mark of the Bloom's in-combat onPlayerHeal half** (the S2.33 acquisition made it reachable while `heal_player_with_relics` knew only Magic Flower) |
 | Mind Bloom boss re-fight **directed capture** (the oracle half of S2.33's acceptance) | S2.33 (sim half landed + pinned; no capture seat) | S2.43 | S2.33's acceptance reads "Mind Bloom's Act-1-boss re-fight replays zero-diff in a directed capture". The SIM half is landed and pinned against the decompile (beyond_events_test.cpp: the one-randomLong JDK shuffle twin, the fixed 25/50 gold row, the RARE `returnRandomRelic` pop, the EventRoom-not-boss combat flags, and the victory→reward→map walk), but the bridge never runs from a task worktree and two sibling event batches held the game install concurrently, so **no live capture was run** — deferred, not skipped. S2.43 (the next capture campaign) owes: a directed Act-3 capture that draws MindBloom, takes "I am War", plays the re-fight to the reward claim, and scores zero-diff through the differ; the seed/policy triple can come from `seed_scan --need-boss-id` once Act-3 reach is live (see the reach row above). Watch two rows while scoring it: the translator's act-local FIRED derivation (row above — an Act-2/3 event capture is exactly where it false-REDs) and trap-5's requirement that the driver record playtime |
 | Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). **RE-RUN HALF DISCHARGED by S2.41 (2026-08-09)**: with every S2.2x/S2.3x batch landed, §1's command was re-run verbatim (50,000 rows, release, `determinism_mismatches=0`) and the Act-2/3 cells are now **measured, at 0** — Act-1 reproduced to the row, `room_unimplemented` went 8 → 0, and the fuzz soak's new per-act coverage agrees over 100,000 independent cases (act 2 entered by 0.11 % of cases, act-2 boss fought 0 times, act 3 never). What is left of this row is therefore **not a content obligation**: sim-side depth is bounded by the E0 policies (~×30 loss per act), so a three-act sim number needs a different policy or the driver, not a later re-run. S2.43's live driver numbers are the remaining half. [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
@@ -2241,7 +2241,7 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   **Deps:** S2.43, S2.44 **Acceptance:** report committed under
   `docs/verification/`; CI replay of the extended corpus green in every
   preset; audit green.
-- **S2.47** `[ ]` **Boss-relic offer storage (the S2.43 unblock).** Discharge
+- **S2.47** `[x]` **Boss-relic offer storage (the S2.43 unblock).** Discharge
   the "BOSS_REWARD.screen_state.relics — schema storage" deferred row: durable
   `RunState` storage for the three boss-chest offers plus the reveal bits
   (`seen`/`chose_relic`), so the translator can emit a BOSS_REWARD dump's
@@ -2265,7 +2265,56 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   leak gates green (hidden-twin equality unchanged before `seen`); Stage-A
   fixtures + `twins_v1.bin` regenerated exactly once with the bump
   accounted; six presets green.
-  **Log:** —
+  **Log:** 2026-08-10 — landed, schema **v8**. The MOVE was taken, not the
+  mirror: `BossChestState` (16 B, unchanged layout) left `RunController` and
+  became `RunState.boss_chest`, a pure TAIL APPEND after `neow_rng` —
+  `sizeof(RunState)` 2184→2200, every pre-v8 offset held (two new
+  `static_assert`s in run_state.hpp prove append + no tail padding;
+  `sizeof(RunController)` is net unchanged), so there is exactly ONE source of
+  truth and no sync point to pin. The pad-carve alternative was checked and
+  rejected as the row predicted (largest legal contiguous declared pad is 3
+  bytes; 3×u16+3 flags need 9+). Struct/enum definitions moved to
+  run_state.hpp; boss_chest.hpp keeps provenance + room-flow functions.
+  Translator: `BOSS_REWARD.screen_state.relics` now EMITS (seen=1,
+  screen=RELIC_SELECT, chose_relic=0 — what a live screen attests per
+  BossRelicSelectScreen.java:353/:101-108), registry join kept fail-loud, and
+  a count ≠ 3 aborts as drift (BossChest.java:37). Differ:
+  `diff_run_states` compares the group by name. Replay tool: new paired
+  `neutralize_unattested_boss_chest` — only a BOSS_REWARD dump attests the
+  offers, so records whose capture side has `seen == 0` neutralize the group
+  on both sides (the `keys` shape, made conditional); applied at all four
+  translated-vs-sim pair sites. Byte class: `kBossChestTable` sub-row moved
+  RunController→RunState verbatim (offers HIDDEN until `seen`); fuzz
+  `hash_controller` dropped its separate boss-chest update (the bytes are in
+  `hash_state(rc.run)` now) and `h.treasure` is the ordinary chest alone.
+  kTraceFormatV2 →8. Fixtures: `twins_v1.bin` regenerated ONCE via
+  `gen_twin_fixtures` (win-debug per its header) — old vs new differ at
+  EXACTLY ONE byte, header offset 12 = `engine_schema_version` 7→8; all 18
+  cases + view payloads byte-identical (PublicView unchanged, v4 stays). The
+  20 Stage-A combat fixtures are NOT regenerated — `sizeof(CombatState)` is
+  untouched and the v1 loader checks only that size and the v1 tag, so they
+  were never invalidated (the brief's "regenerate if invalidated" resolved to
+  NO). Found against the brief: docs/public-view-audit.md had S2.11-era
+  drift — `boss_relic_choice_reserved` still said "reserved / still zero in
+  v2" though S2.11 populated it, and §5's RunController table never carried a
+  `boss_chest` row at all; both fixed in place (conventions §4). The S2.42
+  fail-loud pin had to be re-tamped from a 1-element to a 3-with-one-fake
+  list so the new count check cannot mask the join check. Two boss-chest
+  no-op pins (`SkipClosesTheChestWithoutBurningAnything`,
+  `FiresNoRelicChestHooks`) now normalize the two legitimately-moved bytes
+  (`screen`/`seen`) before their whole-struct memcmp. Named tests:
+  `Translator.BossRewardRelicsAreEmittedIntoBossChestStorage`,
+  `Translator.BossRewardOffersRoundTripThroughTheDifferBothWays` (match →
+  empty; mismatch → names `boss_chest.relics[1]`),
+  `Translator.BossRewardRelicsRejectAnyCountButThree`,
+  `Translator.BossRewardRelicsStillJoinTheRegistryAndFailLoud` (kept),
+  `RunDifferBossChest.EveryMemberNamedSeparately`,
+  `StateLayout.RunStateHasNoImplicitPadding` (walk extended),
+  `MonsterFramework.SchemaVersionAndCap…` (pin follows to 8), the `Tripwire.*`
+  and `TwinFixture.*` suites, and the whole `BossChest.*` reveal-timing/twin
+  block re-seated on `rc.run.boss_chest`. PROTOCOL.md §3.8 row updated
+  I→S→stored-and-diffed. Six presets green; counts re-derived by
+  `ctest -N | tail -1` at land time, not restated here.
 
 ### S2-G2 `[ ]` **Gate: S2 verified (unblocks training Phase T4)** — tag `s2-g2-verified`
 **Deps:** S2.41–S2.47, S2-G1

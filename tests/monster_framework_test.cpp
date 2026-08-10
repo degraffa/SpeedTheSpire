@@ -68,9 +68,11 @@ ActionQueueItem op(Opcode o) {
 
 TEST(MonsterFramework, SchemaVersionAndCapAreTheOnesTheLayoutWasProvedAt) {
     // The version and the cap travel together: the fixtures were regenerated at
-    // exactly this pair, so a change to either without the other is the
-    // stop-the-line case schema.hpp's version log describes.
-    EXPECT_EQ(SCHEMA_VERSION, 7u);
+    // v7 == (cap 23), so a cap change without a version change is the
+    // stop-the-line case schema.hpp's version log describes. Later bumps that
+    // leave CombatState alone ride on top -- v8 (S2.47) grew only RunState, so
+    // the cap stays proved at its v7 layout and this pin follows the constant.
+    EXPECT_EQ(SCHEMA_VERSION, 8u);
     EXPECT_EQ(kMonsterCap, 23);
     // 23 is the largest cap the 8192 B ceiling admits -- 24 measures 8304.
     // Pinned as an inequality on the NEXT slot so the reason survives, not just

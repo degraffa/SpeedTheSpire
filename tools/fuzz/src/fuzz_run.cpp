@@ -153,15 +153,12 @@ uint64_t hash_controller(const RunController& rc, uint64_t* run_h,
     XXH3_64bits_update(&st, &rc.rewards, sizeof(rc.rewards));
     XXH3_64bits_update(&st, &rc.treasure_chest,
                        sizeof(rc.treasure_chest));
-    // The boss chest: the three entry-popped offers, which of its screens is up,
-    // whether it has been opened, and choseRelic. It MUST be hashed for exactly
-    // the reason `neow` and `shop` are, and the soak proved it the hard way --
-    // opening the boss chest moves no RunState byte (the pops happened at room
-    // entry, and open() only shows a screen), so without this the soak reported
-    // every single open as a NO_PROGRESS failure and ENDED the run there, which
-    // also made the pick and skip moves permanently unreachable. POD with
-    // explicit padding, so the byte hash is stable.
-    XXH3_64bits_update(&st, &rc.boss_chest, sizeof(rc.boss_chest));
+    // The boss chest needs no separate update any more: schema v8 moved
+    // BossChestState into RunState (run.boss_chest), so its bytes are inside
+    // hash_state(rc.run) above. The property the soak once proved the hard way
+    // -- opening the chest must move the whole-controller hash, or every open
+    // reads as NO_PROGRESS -- still holds, now via the `seen`/`screen` bytes
+    // that the open writes INTO RunState.
     update_lists(&st, rc.lists);
     return static_cast<uint64_t>(XXH3_64bits_digest(&st));
 }
@@ -173,12 +170,13 @@ ControllerHashes hash_controller_parts(const RunController& rc) noexcept {
     h.combat = engine::hash_state(rc.combat);
     h.lists = lists_hash(rc.lists);
     h.rewards = static_cast<uint64_t>(XXH3_64bits(&rc.rewards, sizeof(rc.rewards)));
-    // Both chests share the `treasure` region: they are the same triage
-    // question ("did a chest screen move?") and only one of them is ever live.
+    // The `treasure` region is the ordinary chest alone since schema v8: the
+    // boss chest's bytes moved into RunState, so a boss-chest change now shows
+    // up in h.run -- which is the truer triage answer anyway ("a schema field
+    // moved"), and the per-region breakdown stays a partition of the hash
+    // inputs instead of double-counting.
     h.treasure = static_cast<uint64_t>(
-        XXH3_64bits(&rc.treasure_chest, sizeof(rc.treasure_chest))) ^
-                 static_cast<uint64_t>(
-                     XXH3_64bits(&rc.boss_chest, sizeof(rc.boss_chest)));
+        XXH3_64bits(&rc.treasure_chest, sizeof(rc.treasure_chest)));
     h.scalars = scalars_hash(rc);
     return h;
 }

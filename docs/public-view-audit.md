@@ -241,6 +241,7 @@ does.
 | `relic_pool_count[5]` | derived | excluded | Initial tier size (public rule) minus observed pops. T0.2 declined the convenience copy: it is exactly re-derivable, and every carried byte is one the twin suite and the tripwire must keep honest. Surfacing it later remains an additive change. |
 | `pad_relic_pools[3]` / `pad_rng_align_lo[2]` | padding | excluded | `pad_rng_align` was 6 bytes through v2; S2.13 carved four of them into `event_flags_hi` (row above), which is why no `RunState` offset moved and `SCHEMA_VERSION` did not bump. |
 | `monster_rng` … `neow_rng` (9 streams) | hidden | excluded | Run-/act-/event-scoped stream states are realizations. Resampled fresh by T0.4. |
+| `boss_chest` (BossChestState) | **offers hidden until `seen`** / screen bits public | → `boss_relic_choice_reserved[3]` + `chest_opened` (§7) | **S2.47 (schema v8):** moved here from `RunController` as a tail append, so the oracle translator and `diff_run_states` can see the offers (design §6 S2-G2 item 2). Same masking trap as `treasure_chest`, one room later: `BossChest`'s constructor pops all three at ROOM ENTRY (BossChest.java:35-39) and the player sees them only by opening; a SKIP closes the chest but cannot unsee them, so `seen` — not `screen` — gates the encode. `screen` / `seen` / `chose_relic` are public (the player is looking at / performed them); `pad[7]` excluded. The `BossChest.*` tests pin the reveal timing, the unopened-twin byte-equality, and the sampler's coherent offers+pool redraw. |
 
 ## 7. PublicView-only fields (no CombatState/RunController source)
 
@@ -249,7 +250,7 @@ does.
 | `public_view_version` | constant | `PUBLIC_VIEW_VERSION` at encode time. |
 | `combat_active` | derived | `rc.phase == COMBAT`. |
 | `monsters[i].occupied` | derived | `i < monster_count`. |
-| `boss_relic_choice_reserved[3]` | reserved | S2 boss-chest relic screen (still zero in v2). |
+| `boss_relic_choice_reserved[3]` | populated (was reserved) | Additive case 1, populated by the S2.11 boss chest: the three offered boss-relic ids while `phase == BOSS_TREASURE`, and ONLY once the chest has been opened (`boss_chest.seen`) — before that they are drawn-but-unseen and the field stays zero. Source moved to `run.boss_chest` at S2.47 (schema v8) with no PublicView change. This row said "still zero in v2" until S2.47 — S2.11 populated the field without updating it. |
 | `second_boss_reserved` | derived | **v5 (S2.28):** the `EncounterDef` id of the SECOND Act-3 boss of an A20 double-boss run (`boss_list[1]`), carried from the moment the double-boss transition reveals it (`act == kFinalAct && boss_cursor >= 1`); 0 otherwise. Public because the player is looking at those monsters; the sampler preserves the same boss-list prefix, so the hidden twin agrees. Unlike `current_encounter_id` it survives into `RUN_OVER`, which is the state a finished run is observed in. |
 | `pad_tail[3]` | padding | Always zero. Retained as a member at its v1 offset — the v2 tail appends *after* it, so no v1 offset moves. |
 | `current_encounter_id` | derived | The encounter of the room being occupied, resolved from `lists` + the matching cursor while in COMBAT / COMBAT_REWARD. 0 for event combats (their monsters are on screen in the combat section) and outside such a room. |

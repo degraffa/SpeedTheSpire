@@ -76,6 +76,62 @@ static_assert(std::is_trivially_copyable_v<RelicSlot>);
 static_assert(sizeof(RelicSlot) == 4,
               "RelicSlot must be 4 bytes (design doc §4.3: u16+i16)");
 
+// --- BossChestState (S2.47: the boss-chest boss-relic offers) ----------------
+//
+// MOVED HERE FROM RunController (schema v8). The full provenance block -- every
+// cited BossChest.java / BossRelicSelectScreen.java method, the entry-pop trap,
+// the skip-is-reversible note -- stays in boss_chest.hpp with the functions that
+// operate on this struct; this comment carries only what the STORAGE needs.
+//
+// WHY IT IS RUN STATE AND NOT CONTROLLER STATE. The three offers are popped
+// from rs.relic_pools[4] at room entry (BossChest.java:35-39) and are the
+// evidence design §6 S2-G2 item 2 scores: a ZERO-DIFF boss-relic pick. The
+// oracle translator emits RunState/CombatState and the differ compares those,
+// so offers held only in transient controller state were invisible to
+// differential verification -- the exact gap the s2-tasks.md deferred row
+// "`BOSS_REWARD.screen_state.relics` -- schema storage" records. Storage here
+// is the ONE source of truth: RunController has no copy of its own.
+
+// BossChest.java:37 -- `for (int i = 0; i < 3; ++i)`.
+inline constexpr int kBossChestOfferCount = 3;
+
+// Which screen the boss-chest room is showing. The controller's phase stays
+// RunPhase::BOSS_TREASURE for all of them (the NeowScreen precedent). See
+// boss_chest.hpp for the per-value provenance.
+enum class BossChestScreen : uint8_t {
+    CLOSED = 0,            // chest on the floor (also what a SKIP returns to)
+    RELIC_SELECT = 1,      // BOSS_REWARD screen up, three offers shown
+    EQUIP_GRID = 2,        // picked relic's onEquip master-deck grid
+    EQUIP_ITEM_REWARD = 3, // picked relic's onEquip claimable reward screen
+    DONE = 4,              // pick resolved; proceed is the act terminal
+};
+
+struct BossChestState {
+    // The three relics popped at room entry, in pop order. RelicId; 0 (NONE)
+    // means "no live chest". Public only once `seen` -- see byte_class.hpp.
+    uint16_t relics[kBossChestOfferCount];
+    uint8_t screen;       // BossChestScreen
+    // 1 once the chest has EVER been opened. Distinct from `screen == CLOSED`,
+    // which a skip returns to: the player has still SEEN the three relics, so
+    // this -- not the screen -- is the information-layer reveal flag.
+    uint8_t seen;
+    // TreasureRoomBoss.choseRelic (TreasureRoomBoss.java:29, set at
+    // BossRelicSelectScreen.java:186). One bit of room state, kept here rather
+    // than in a shared flags word so it cannot collide with anything.
+    uint8_t chose_relic;
+    // Explicit padding (byte-compared struct; conventions §8). SEVEN bytes:
+    // rounding the struct to 16 keeps its size a multiple of RunState's own
+    // 8-byte alignment, so the tail append below adds NO undeclared padding --
+    // which is exactly what the byte_class.hpp tiling tripwire checks.
+    uint8_t pad[7];
+};
+
+static_assert(std::is_trivially_copyable_v<BossChestState>);
+static_assert(sizeof(BossChestState) == 16);
+static_assert(sizeof(BossChestState) % 8 == 0,
+              "keep BossChestState a multiple of RunState's alignment -- "
+              "see the pad member's comment");
+
 // --- MapNode (design doc §4.3: 15×7 node grid -- 15 floors × 7 columns) ------
 
 // One node of the act map. `room_type` is the room-kind id (monster/elite/rest/
@@ -269,6 +325,24 @@ struct RunState {
                                       // fresh Random(seed) at run start
                                       // (§2.5 #2). Only meaningful at floor 0; other
                                       // dumps carry a value-init (zero) stream.
+
+    // ========================================================================
+    // schema-v8 tail append (S2.47): the boss-chest boss-relic offers
+    // ========================================================================
+    // A PURE TAIL APPEND: every pre-existing offset is unchanged, and the two
+    // static_asserts below prove both halves of that (no gap ahead of it, no
+    // undeclared tail padding behind it). sizeof(RunState) grows 2184 -> 2200,
+    // so per design §8 this is the SCHEMA_VERSION 7 -> 8 bump -- the s2-tasks.md
+    // S2.47 row is the conventions-§5 planned site for it; the scattered 1-2
+    // byte declared pads above cannot legally hold 3×uint16 + 3 flags, so the
+    // carve alternative was checked and rejected rather than skipped.
+    //
+    // Populated by roll_boss_chest at boss-chest room entry, mutated by the
+    // open/pick/skip flow (run_advance.cpp), cleared when the room is left at
+    // the act transition. Zero everywhere else, which is also what the
+    // translator leaves for every non-BOSS_REWARD dump -- the replay differ
+    // gates the comparison on the capture attesting the offers (`seen`).
+    BossChestState boss_chest;
 };
 
 static_assert(std::is_trivially_copyable_v<RunState>,
@@ -292,6 +366,22 @@ static_assert(offsetof(RunState, event_flags_hi) + sizeof(uint32_t) ==
 static_assert(offsetof(RunState, pad_rng_align_lo) ==
                   offsetof(RunState, pad_relic_pools) + 3,
               "the carve must start where pad_relic_pools ended");
+
+// THE S2.47 TAIL-APPEND PROOF. boss_chest must start exactly where neow_rng
+// ends (no compiler gap ahead of it -- RngStream is 8-aligned and
+// BossChestState needs only 2, so none is possible, but the layout asserts it
+// rather than trusting the argument) and must itself end the struct (its
+// sizeof is a multiple of 8 == alignof(RunState), so no undeclared tail
+// padding). Together these are what make the schema-v8 change a pure append:
+// every pre-v8 byte keeps its offset.
+static_assert(offsetof(RunState, boss_chest) ==
+                  offsetof(RunState, neow_rng) + sizeof(RngStream),
+              "boss_chest must start exactly where the RNG block ends -- the "
+              "schema-v8 tail append may not move or gap");
+static_assert(sizeof(RunState) ==
+                  offsetof(RunState, boss_chest) + sizeof(BossChestState),
+              "boss_chest must be the final member with no tail padding -- "
+              "see the pad member inside BossChestState");
 
 // Bit assignment for RunState::keys. The game stores three independent
 // booleans (Settings.hasEmeraldKey / hasRubyKey / hasSapphireKey); the packing

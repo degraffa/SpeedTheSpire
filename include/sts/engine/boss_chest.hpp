@@ -71,36 +71,38 @@
 
 namespace sts::engine {
 
-// BossChest.java:37 -- `for (int i = 0; i < 3; ++i)`.
-inline constexpr int kBossChestOfferCount = 3;
-
-// Which screen the boss-chest room is showing. The controller's phase stays
-// RunPhase::BOSS_TREASURE for all of them (the NeowScreen precedent).
-enum class BossChestScreen : uint8_t {
-    // The chest is on the floor and unopened. AbstractRoom.update's COMPLETE
-    // arm has already shown the proceed button (TreasureRoomBoss.java:33), so
-    // BOTH "open the chest" and "leave" are live. Also the state a SKIP returns
-    // to -- chest.close() sets isOpen = false and the chest is clickable again.
-    CLOSED = 0,
-    // AbstractDungeon.bossRelicScreen is up (screen = BOSS_REWARD,
-    // BossRelicSelectScreen.java:353) with the three relics offered. The proceed
-    // button is HIDDEN while it is (:354), so leaving is not legal here; the
-    // cancel button (:349) is the skip.
-    RELIC_SELECT = 1,
-    // The picked relic's onEquip asked for a master-deck grid
-    // (RelicEquipScreen::GRID_REMOVE / GRID_TRANSFORM_UPGRADE /
-    // GRID_CONFIRM_*). The grid itself lives in the controller's NeowState --
-    // see the re-homing note below.
-    EQUIP_GRID = 2,
-    // The picked relic's onEquip assembled a claimable reward screen
-    // (RelicEquipScreen::ITEM_REWARD -- Tiny House / Calling Bell). The items
-    // live in the controller's RewardScreen.
-    EQUIP_ITEM_REWARD = 3,
-    // A relic was picked and its onEquip screens (if any) are resolved. The
-    // proceed button is back (AbstractRelic.java:345-347) and it is the only
-    // action: this is the act terminal.
-    DONE = 4,
-};
+// THE STRUCT ITSELF LIVES IN run_state.hpp (S2.47 / schema v8): the three
+// offers are the evidence design §6 S2-G2 item 2 scores through the oracle
+// translator and the differ, both of which see RunState -- so BossChestState
+// moved out of the transient controller into durable RunState storage
+// (rs.boss_chest, a pure tail append). This header keeps the provenance above
+// and the room-flow functions below; there is no second copy of the state.
+//
+// PER-VALUE PROVENANCE for BossChestScreen (run_state.hpp declares the enum):
+//   CLOSED            -- chest on the floor, unopened. AbstractRoom.update's
+//                        COMPLETE arm has already shown the proceed button
+//                        (TreasureRoomBoss.java:33), so BOTH "open" and "leave"
+//                        are live. Also the state a SKIP returns to --
+//                        chest.close() sets isOpen = false and the chest is
+//                        clickable again.
+//   RELIC_SELECT      -- AbstractDungeon.bossRelicScreen is up (screen =
+//                        BOSS_REWARD, BossRelicSelectScreen.java:353) with the
+//                        three relics offered. The proceed button is HIDDEN
+//                        while it is (:354), so leaving is not legal here; the
+//                        cancel button (:349) is the skip.
+//   EQUIP_GRID        -- the picked relic's onEquip asked for a master-deck
+//                        grid (RelicEquipScreen::GRID_REMOVE /
+//                        GRID_TRANSFORM_UPGRADE / GRID_CONFIRM_*). The grid
+//                        itself lives in the controller's NeowState -- see the
+//                        re-homing note below.
+//   EQUIP_ITEM_REWARD -- the picked relic's onEquip assembled a claimable
+//                        reward screen (RelicEquipScreen::ITEM_REWARD -- Tiny
+//                        House / Calling Bell). The items live in the
+//                        controller's RewardScreen.
+//   DONE              -- a relic was picked and its onEquip screens (if any)
+//                        are resolved. The proceed button is back
+//                        (AbstractRelic.java:345-347) and it is the only
+//                        action: this is the act terminal.
 
 // THE RE-HOMED EQUIP SCREENS. Five BOSS-tier relics have `on_equip_screen`
 // bodies -- Pandora's Box, Tiny House, Astrolabe, Empty Cage, Calling Bell --
@@ -116,37 +118,9 @@ enum class BossChestScreen : uint8_t {
 // relic_confirm_pandoras_box / relic_confirm_calling_bell handlers the Neow boss
 // swap uses (neow.cpp:65-115). Nothing is duplicated and NO namespace value is
 // spent: no new NeowGridMode, no new NeowScreen, no new ChoiceKind, no new
-// RunActionMask field. `screen` above is what says which of the two screens is
-// up, because NeowState's own `screen` field means the NEOW phase's flow and is
-// left alone here.
-struct BossChestState {
-    // The three relics popped at room entry, in pop order. RelicId; 0 (NONE)
-    // means "no live chest". Public only once `seen` -- see byte_class.hpp.
-    uint16_t relics[kBossChestOfferCount];
-    uint8_t screen;       // BossChestScreen
-    // 1 once the chest has EVER been opened. Distinct from `screen == CLOSED`,
-    // which a skip returns to: the player has still SEEN the three relics, so
-    // this -- not the screen -- is the information-layer reveal flag.
-    uint8_t seen;
-    // TreasureRoomBoss.choseRelic (TreasureRoomBoss.java:29, set at
-    // BossRelicSelectScreen.java:186). One bit of room state, kept here rather
-    // than in a shared flags word so it cannot collide with anything.
-    uint8_t chose_relic;
-    // Explicit padding (byte-compared struct; conventions §8). SEVEN bytes, not
-    // one: RunController is 8-byte aligned (MonsterLists holds std::string_view)
-    // and its declared tail pad is sized for the pre-S2.11 total, so a member
-    // whose size is not a multiple of 8 pushes the compiler into UNDECLARED tail
-    // padding -- which is exactly what the byte_class.hpp tiling tripwire fires
-    // on, and it did, before this was widened. Rounding here keeps every
-    // existing offset and the tail pad unchanged.
-    uint8_t pad[7];
-};
-
-static_assert(std::is_trivially_copyable_v<BossChestState>);
-static_assert(sizeof(BossChestState) == 16);
-static_assert(sizeof(BossChestState) % 8 == 0,
-              "keep BossChestState a multiple of RunController's alignment -- "
-              "see the pad member's comment");
+// RunActionMask field. `BossChestState.screen` is what says which of the two
+// screens is up, because NeowState's own `screen` field means the NEOW phase's
+// flow and is left alone here.
 
 // TreasureRoomBoss.onPlayerEntry -> new BossChest() (TreasureRoomBoss.java:63):
 // three front pops of the BOSS pool through return_random_relic_key, with the

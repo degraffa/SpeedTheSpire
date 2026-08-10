@@ -27,6 +27,7 @@
 
 #include <gtest/gtest.h>
 
+#include "sts/diff/differ.hpp"  // both differ directions over the v8 storage
 #include "sts/diff/trace.hpp"
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/event_framework.hpp"
@@ -638,46 +639,38 @@ std::string with_boss_reward_screen(const std::string& line,
     return out;
 }
 
-// --- S2.42: BOSS_REWARD.screen_state.relics, promoted I -> deferred ----------
+// --- BOSS_REWARD.screen_state.relics: S2.42 promoted I -> deferred; S2.47 ----
+// --- landed the storage (RunState.boss_chest, schema v8) and the emit --------
 //
 // PROTOCOL.md 3.8 dispositioned this `I (S2 scope)` on the grounds that the run
 // terminated at the act-1 boss combat reward, before the chest. Capture driver
 // b1.7.0 plays through the chest, and an `I` field is never diffed -- so design
 // 6's S2-G2 item 2 (a ZERO-DIFF boss-relic pick) was unachievable while the row
-// said `I`. The STORAGE is S2.43's (see the comment at the translation site);
-// what S2.42 owns is the classification, and these two tests are what stop it
-// silently reverting.
+// said `I`. S2.42 fixed the classification; S2.47 discharged the deferral row's
+// storage half. These tests pin the whole chain: the emit into the new storage,
+// both differ directions over it, and the fail-loud registry join that must
+// survive the emit.
 
-TEST(Translator, BossRewardRelicsAreDeferredNotIgnored) {
+TEST(Translator, BossRewardRelicsAreEmittedIntoBossChestStorage) {
     std::vector<std::string> lines = read_lines(sample_path());
     ASSERT_GE(lines.size(), 2u);
 
+    // Control: a record with no BOSS_REWARD screen leaves the schema-v8 storage
+    // value-init zero -- the "unattested" state the replay differ gates on.
     const tr::TranslatedRun baseline = tr::translate_lines(
         {lines[0], lines[1]}, "boss-reward-baseline");
+    ASSERT_EQ(baseline.records.size(), 1u);
+    {
+        const engine::BossChestState zero{};
+        EXPECT_EQ(std::memcmp(&baseline.records[0].run.boss_chest, &zero,
+                              sizeof zero),
+                  0)
+            << "a non-BOSS_REWARD dump must attest nothing";
+    }
 
-    // The control is a BOSS_REWARD screen with NO `relics` key, so the only
-    // thing between it and the case below is the key itself -- not the
-    // `screen_state` container, and not parse_relic's own per-relic accounting
-    // (each relic object ignores its localized `name`, so a POPULATED list
-    // moves `ignored` for a reason that has nothing to do with this row).
-    const tr::TranslatedRun no_key = tr::translate_lines(
-        {lines[0], with_boss_reward_screen(lines[1], "{}")},
-        "boss-reward-nokey");
-    const tr::TranslatedRun empty_list = tr::translate_lines(
-        {lines[0], with_boss_reward_screen(lines[1], "{\"relics\":[]}")},
-        "boss-reward-empty");
-
-    EXPECT_EQ(empty_list.stats.deferred, no_key.stats.deferred + 1u)
-        << "the `relics` key must count as a known S field awaiting storage "
-           "(S2.43) -- exactly one deferred key";
-    EXPECT_EQ(empty_list.stats.ignored, no_key.stats.ignored)
-        << "the `relics` key must NOT be ignored-with-reason: an `I` field is "
-           "never diffed, which is what made S2-G2 item 2 unachievable";
-    EXPECT_GE(no_key.stats.deferred, baseline.stats.deferred)
-        << "sanity: the tampered screen adds keys, never removes them";
-
-    // A populated list joins every offer, so the deferred count does not grow
-    // further with the list length -- one key, one deferral.
+    // The emit: three offers land in pop order with the reveal bits a live
+    // BOSS_REWARD screen implies (the screen up == the chest was opened and no
+    // pick has happened yet, BossRelicSelectScreen.java:353/:101-108).
     const tr::TranslatedRun populated = tr::translate_lines(
         {lines[0], with_boss_reward_screen(
                        lines[1],
@@ -687,19 +680,82 @@ TEST(Translator, BossRewardRelicsAreDeferredNotIgnored) {
                        "{\"id\":\"Runic Dome\",\"name\":\"Runic Dome\","
                        "\"counter\":-1}]}")},
         "boss-reward");
-    EXPECT_EQ(populated.stats.deferred, empty_list.stats.deferred);
+    ASSERT_EQ(populated.records.size(), 1u);
+    const engine::BossChestState& chest = populated.records[0].run.boss_chest;
+    EXPECT_EQ(chest.relics[0], static_cast<uint16_t>(engine::RelicId::ASTROLABE));
+    EXPECT_EQ(chest.relics[1], static_cast<uint16_t>(engine::RelicId::SOZU));
+    EXPECT_EQ(chest.relics[2],
+              static_cast<uint16_t>(engine::RelicId::RUNIC_DOME));
+    EXPECT_EQ(chest.screen,
+              static_cast<uint8_t>(engine::BossChestScreen::RELIC_SELECT));
+    EXPECT_EQ(chest.seen, 1);
+    EXPECT_EQ(chest.chose_relic, 0);
+
+    // The disposition: the key is MAPPED now, not deferred and not ignored.
+    // The control is a BOSS_REWARD screen with NO `relics` key, so the only
+    // delta between it and `populated` is the key itself (the `screen_state`
+    // container's own deferral is present in both and absent from `baseline`,
+    // which is why `baseline` is not the right control here).
+    const tr::TranslatedRun no_key = tr::translate_lines(
+        {lines[0], with_boss_reward_screen(lines[1], "{}")},
+        "boss-reward-nokey");
+    EXPECT_EQ(populated.stats.deferred, no_key.stats.deferred)
+        << "the `relics` key no longer defers -- it has storage";
+    EXPECT_EQ(populated.stats.ignored, no_key.stats.ignored + 3u)
+        << "each relic object still ignores only its localized `name`";
+    EXPECT_GT(populated.stats.mapped, no_key.stats.mapped);
+}
+
+TEST(Translator, BossRewardOffersRoundTripThroughTheDifferBothWays) {
+    // The S2.47 acceptance, both directions. MATCH: a translated BOSS_REWARD
+    // record diffed against a RunState carrying the same three offers is clean.
+    // MISMATCH: one substituted offer REDs, and the report NAMES the field.
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const tr::TranslatedRun run = tr::translate_lines(
+        {lines[0], with_boss_reward_screen(
+                       lines[1],
+                       "{\"relics\":[{\"id\":\"Astrolabe\","
+                       "\"name\":\"Astrolabe\",\"counter\":-1},"
+                       "{\"id\":\"Sozu\",\"name\":\"Sozu\",\"counter\":-1},"
+                       "{\"id\":\"Runic Dome\",\"name\":\"Runic Dome\","
+                       "\"counter\":-1}]}")},
+        "boss-reward-diff");
+    ASSERT_EQ(run.records.size(), 1u);
+    const engine::RunState& expected = run.records[0].run;
+
+    engine::RunState actual = expected;  // the sim agreeing with the capture
+    EXPECT_TRUE(sts::diff::diff_run_states(expected, actual).empty())
+        << "matching offers must produce no diff";
+
+    actual.boss_chest.relics[1] =
+        static_cast<uint16_t>(engine::RelicId::CURSED_KEY);
+    const sts::diff::DiffReport rep =
+        sts::diff::diff_run_states(expected, actual);
+    ASSERT_FALSE(rep.empty()) << "a mismatched offer must RED";
+    EXPECT_TRUE(rep.mentions("boss_chest.relics[1]")) << rep.to_string();
+    EXPECT_NE(rep.to_string().find("Sozu"), std::string::npos)
+        << "the repr should name the relic (mentions() searches field names, "
+           "so the game-id is looked for in the rendered report): "
+        << rep.to_string();
+    EXPECT_EQ(rep.size(), 1u)
+        << "exactly the substituted offer, nothing else: " << rep.to_string();
 }
 
 TEST(Translator, BossRewardRelicsStillJoinTheRegistryAndFailLoud) {
-    // The half that already worked and must keep working: an unknown boss relic
-    // on this screen is schema drift, not a shrug -- so the gap S2.43 inherits
-    // is STORAGE only, never validation.
+    // The half S2.42 pinned and the emit must not regress: an unknown boss
+    // relic on this screen is schema drift, not a shrug. The tampered list
+    // keeps the legal count of three so what trips is the JOIN, not the count
+    // check below.
     std::vector<std::string> lines = read_lines(sample_path());
     ASSERT_GE(lines.size(), 2u);
     const std::string tampered = with_boss_reward_screen(
         lines[1],
-        "{\"relics\":[{\"id\":\"TotallyFakeBossRelic\","
-        "\"name\":\"TotallyFakeBossRelic\",\"counter\":-1}]}");
+        "{\"relics\":[{\"id\":\"Astrolabe\",\"name\":\"Astrolabe\","
+        "\"counter\":-1},"
+        "{\"id\":\"TotallyFakeBossRelic\","
+        "\"name\":\"TotallyFakeBossRelic\",\"counter\":-1},"
+        "{\"id\":\"Sozu\",\"name\":\"Sozu\",\"counter\":-1}]}");
     try {
         (void)tr::translate_lines({lines[0], tampered}, "boss-reward-bogus");
         FAIL() << "expected TranslateError for an unknown boss relic id";
@@ -707,6 +763,29 @@ TEST(Translator, BossRewardRelicsStillJoinTheRegistryAndFailLoud) {
         EXPECT_NE(std::string(e.what()).find("TotallyFakeBossRelic"),
                   std::string::npos)
             << e.what();
+    }
+}
+
+TEST(Translator, BossRewardRelicsRejectAnyCountButThree) {
+    // BossChest offers exactly three (BossChest.java:37) and the screen re-adds
+    // from that same list on every open (BossRelicSelectScreen.open:342-373),
+    // so a shorter or longer list is schema drift and must abort loudly rather
+    // than half-fill the storage.
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    for (const char* screen :
+         {"{\"relics\":[]}",
+          "{\"relics\":[{\"id\":\"Astrolabe\",\"name\":\"Astrolabe\","
+          "\"counter\":-1}]}"}) {
+        try {
+            (void)tr::translate_lines(
+                {lines[0], with_boss_reward_screen(lines[1], screen)},
+                "boss-reward-count");
+            FAIL() << "expected TranslateError for a non-3 offer count";
+        } catch (const tr::TranslateError& e) {
+            EXPECT_NE(std::string(e.what()).find("exactly"), std::string::npos)
+                << e.what();
+        }
     }
 }
 

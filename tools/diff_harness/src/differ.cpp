@@ -543,6 +543,22 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
         }
     }
 
+    // -- the boss-chest offers (schema v8 / S2.47): the three entry-popped BOSS
+    //    relics plus the reveal bits. Compared UNCONDITIONALLY, like every other
+    //    field -- comparability policy (the capture attests the offers only on a
+    //    BOSS_REWARD dump) lives in the replay tool's neutralization layer, not
+    //    here. The offers render as relic names so a divergence line greps
+    //    straight against a capture. This group is what scores design §6 S2-G2
+    //    item 2's zero-diff boss-relic pick. --
+    for (int i = 0; i < engine::kBossChestOfferCount; ++i) {
+        cmp_relic_id(r, "boss_chest.relics[" + std::to_string(i) + "]",
+                     e.boss_chest.relics[i], a.boss_chest.relics[i]);
+    }
+    cmp_u(r, "boss_chest.screen", e.boss_chest.screen, a.boss_chest.screen);
+    cmp_u(r, "boss_chest.seen", e.boss_chest.seen, a.boss_chest.seen);
+    cmp_u(r, "boss_chest.chose_relic", e.boss_chest.chose_relic,
+          a.boss_chest.chose_relic);
+
     // -- the 9 run-level RNG streams (7 run-scoped + act-scoped map_rng + the
     //    event-scoped neow_rng, B4.3), each named individually so a divergence is
     //    attributable to the stream --

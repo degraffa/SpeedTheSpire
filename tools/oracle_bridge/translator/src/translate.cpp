@@ -968,12 +968,16 @@ int parse_combat_state(const json& j, const std::string& path, Ctx& ctx,
 
 // ---- screen_state variants (PROTOCOL §3.3-3.9, §3.19) --------------------
 //
-// No screen_state content has schema storage (map / events / shop are B4.x;
-// the B4.5 REWARD screens are deliberately storage-less -- the sim derives its
-// reward screen and the acceptance diffs the post-claim RunState). Each
-// variant's key-set is enumerated so a KNOWN field never trips the drift
-// error, while a genuinely new key still does. Nested objects (cards, relics,
-// potions, options, nodes) are structurally validated; the B4.5 reward slice
+// Almost no screen_state content has schema storage (map / events / shop are
+// B4.x; the B4.5 REWARD screens are deliberately storage-less -- the sim
+// derives its reward screen and the acceptance diffs the post-claim RunState).
+// The two exceptions: HAND_SELECT (CombatState's limbo/hand storage) and, since
+// schema v8 (S2.47), BOSS_REWARD -- its three offered relics land in
+// RunState.boss_chest, because a *zero-diff boss-relic pick* (design §6 S2-G2
+// item 2) needs the offers in the struct the differ compares. Each variant's
+// key-set is enumerated so a KNOWN field never trips the drift error, while a
+// genuinely new key still does. Nested objects (cards, relics, potions,
+// options, nodes) are structurally validated; the B4.5 reward slice
 // (CARD_REWARD / COMBAT_REWARD) is additionally content-validated: enumerated
 // reward_type, typed gold/booleans, and id-joined potions/relics/cards.
 
@@ -1151,7 +1155,8 @@ void parse_hand_select_state(FieldReader& fr, const std::string& path, Ctx& ctx,
 void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
                         const std::string& screen_type,
                         eng::CombatState* cs = nullptr,
-                        int* pool_used = nullptr) {
+                        int* pool_used = nullptr,
+                        eng::RunState* rs = nullptr) {
     FieldReader fr(j, path, ctx);
     if (screen_type == "EVENT") {
         fr.ignore("body_text");
@@ -1290,34 +1295,52 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
         fr.defer("first_node_chosen");
         fr.defer("boss_available");
     } else if (screen_type == "BOSS_REWARD") {
-        // S2.42 promoted this from `I` (ignored-with-reason, "S2 scope") to
-        // DEFERRED -- a known S field with no schema storage yet.
+        // EMITTED since schema v8 (S2.47; S2.42 had promoted it I -> deferred).
+        // The three offers land in RunState.boss_chest -- the storage the
+        // s2-tasks.md deferred row demanded, because an offer held only in
+        // transient controller state was invisible to diff_run_states and made
+        // design 6's S2-G2 item 2 (a ZERO-DIFF boss-relic pick) unscorable.
         //
-        // WHY THE PROMOTION IS NOT COSMETIC. An `I` field is never diffed by
-        // construction, so design 6's S2-G2 item 2 -- a ZERO-DIFF boss-chest
-        // boss-relic pick -- was unachievable while this said `I`, and no S2
-        // ledger row owned changing it. `I` was also the wrong CATEGORY: its
-        // stated reason ("the run terminates at act-1 boss combat rewards,
-        // before the boss chest") stopped being true when driver b1.7.0 played
-        // on through the chest. Deferred is the honest classification, and it
-        // puts the gap in the drift stats where its owner will meet it.
+        // What this dump ATTESTS, and only this dump: the BOSS_REWARD screen is
+        // AbstractDungeon.bossRelicScreen, up (BossRelicSelectScreen.java:353),
+        // so the player has opened the chest (`seen` = 1, screen = RELIC_SELECT)
+        // and has not yet picked (the isDone block closes the screen at the
+        // pick, :101-108, so `chose_relic` = 0). Every non-BOSS_REWARD dump
+        // leaves boss_chest value-init zero -- the replay differ gates the
+        // comparison on the capture-side `seen`, the `keys` precedent made
+        // conditional.
         //
-        // WHY THE STORAGE IS NOT HERE. The three offers live in
-        // `RunController.boss_chest` (BossChestState, boss_chest.hpp), which is
-        // TRANSIENT -- this translator emits RunState/CombatState and the differ
-        // compares those, so landing this field means new RunState storage, a
-        // SCHEMA_VERSION bump, a trace-container change and an oracle-adapter
-        // change. A SCHEMA_VERSION bump outside the places the ledger plans for
-        // it is stop-the-line (conventions 5), so S2.42 does not take it; the
-        // ledger's Deferred obligations table names S2.43 as the owner.
-        //
-        // The relic ids are still JOINED through the registry here, so an
-        // unknown boss relic on this screen fails the translation loudly rather
-        // than waiting for the storage to exist.
+        // The relic ids stay JOINED through the registry (fail-loud on an
+        // unknown boss relic), exactly as the S2.42 pin requires; the join and
+        // the emit are the same call now.
         if (const json* rl = fr.take("relics")) {
-            for (std::size_t i = 0; i < rl->size(); ++i)
-                parse_relic((*rl)[i], path + ".relics[" + std::to_string(i) + "]", ctx, nullptr);
-            fr.defer("relics");
+            // BossChest offers EXACTLY three (BossChest.java:37) and the screen
+            // re-adds from that same list on every open
+            // (BossRelicSelectScreen.open:342-373), so any other count is
+            // schema drift, not a short offer.
+            if (rl->size() != static_cast<std::size_t>(eng::kBossChestOfferCount)) {
+                throw TranslateError(loc(ctx) + " " + path + ".relics has " +
+                                     std::to_string(rl->size()) +
+                                     " entries; a boss chest offers exactly " +
+                                     std::to_string(eng::kBossChestOfferCount) +
+                                     " (schema drift, translation aborted)");
+            }
+            for (std::size_t i = 0; i < rl->size(); ++i) {
+                const std::string rp =
+                    path + ".relics[" + std::to_string(i) + "]";
+                eng::RelicSlot slot{};
+                parse_relic((*rl)[i], rp, ctx, &slot);
+                if (rs != nullptr) {
+                    rs->boss_chest.relics[i] = slot.relic_id;
+                }
+            }
+            if (rs != nullptr) {
+                rs->boss_chest.screen =
+                    static_cast<uint8_t>(eng::BossChestScreen::RELIC_SELECT);
+                rs->boss_chest.seen = 1;
+                rs->boss_chest.chose_relic = 0;
+            }
+            fr.mapped();
         }
     } else if (screen_type == "SHOP_SCREEN") {
         // The shop slice, content-validated on the same terms as the reward
@@ -1577,11 +1600,14 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
         fr.defer("screen_type");
     }
     if (const json* screen = fr.take("screen_state")) {
-        // HAND_SELECT is the one variant with schema storage, so it needs the
-        // combat it belongs to and the pool cursor combat_state left off at.
+        // HAND_SELECT has combat-side schema storage, so it needs the combat it
+        // belongs to and the pool cursor combat_state left off at; BOSS_REWARD
+        // has run-side storage (RunState.boss_chest, schema v8), so the record's
+        // RunState rides along too.
         parse_screen_state(*screen, path + ".screen_state", ctx, screen_type,
                            has_combat ? &out.combat : nullptr,
-                           has_combat ? &combat_pool_used : nullptr);
+                           has_combat ? &combat_pool_used : nullptr,
+                           &out.run);
         fr.defer("screen_state");
     }
     fr.finish();

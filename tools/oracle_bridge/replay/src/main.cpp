@@ -269,6 +269,27 @@ void neutralize_incomparable(RunState& s) noexcept {
     s.keys = 0;
 }
 
+// RunState.boss_chest (schema v8) is the CONDITIONAL version of the `keys`
+// shape above, so it takes the PAIR: the capture attests the offers only on a
+// BOSS_REWARD dump -- the translator sets `seen` there and nowhere else --
+// while the sim rightly holds the entry-popped offers for the whole room
+// (BossChest.java:35-39 pops at entry; a skip closes the screen without
+// clearing them). On every other record the capture side is structurally
+// value-init zero, so the group is neutralized on both sides; on an attested
+// record it is compared in full, which is exactly the zero-diff boss-relic
+// pick S2-G2 item 2 scores. Gating on the EXPECTED (capture) side keeps a sim
+// that wrongly shows the screen from hiding: its own `seen` would then face a
+// zeroed expected... which this gate erases too -- but such a sim also
+// advertises the wrong legal actions and desyncs on the very next command, so
+// the walk itself is the guard there.
+void neutralize_unattested_boss_chest(RunState& expected,
+                                      RunState& actual) noexcept {
+    if (expected.boss_chest.seen == 0) {
+        expected.boss_chest = sts::engine::BossChestState{};
+        actual.boss_chest = sts::engine::BossChestState{};
+    }
+}
+
 // The floor-0 / merchant subset of the above. `map[]` is still unavailable from
 // a capture, and a master-deck row's display cost is still not a schema field,
 // but neither the Neow nor the shop read-out has any reason to drop purge_cost
@@ -609,6 +630,7 @@ void print_pool_evidence(const std::string& seed_string, int floor,
         project_live_combat_sheet(rc, actual);
         neutralize_incomparable(expected);
         neutralize_incomparable(actual);
+        neutralize_unattested_boss_chest(expected, actual);
         const sts::diff::DiffReport rep = sts::diff::diff_run_states(expected, actual);
         ++v.records_compared;
         if (is_reward) ++v.reward_records_compared;
@@ -1106,6 +1128,7 @@ void diff_assembly_fields(const RunState& expected, const RunState& actual,
             RunState actual = rc.run;
             neutralize_incomparable(expected);
             neutralize_incomparable(actual);
+            neutralize_unattested_boss_chest(expected, actual);
             const sts::diff::DiffReport rep = sts::diff::diff_run_states(expected, actual);
             std::size_t deck_only = 0;
             for (const auto& d : rep.diffs)
@@ -1623,6 +1646,7 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
             // neowRng is floor-0 only; a shop record carries no value for it.
             e.neow_rng = RngStream{};
             a.neow_rng = RngStream{};
+            neutralize_unattested_boss_chest(e, a);
             const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
             ++compared;
             if (!rep.empty()) {
@@ -2744,6 +2768,7 @@ struct EventVerdict {
         neutralize_presentation_only(a);
         e.neow_rng = RngStream{};
         a.neow_rng = RngStream{};
+        neutralize_unattested_boss_chest(e, a);
         const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
         if (is_obtain_race(rep, /*ahead=*/e, /*behind=*/a)) {
             row.obtain_race = true;

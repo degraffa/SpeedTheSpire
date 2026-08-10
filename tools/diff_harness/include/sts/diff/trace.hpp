@@ -66,14 +66,18 @@ namespace sts::diff {
 // (a `counter` second number, 4 -> 8 bytes per slot) grows sizeof(CombatState)
 // once more and kTraceFormatV2 follows to 6. The schema-v7 Act-2/3 monster
 // framework (kMonsterCap 7 -> 23) grows sizeof(CombatState) again and
-// kTraceFormatV2 follows to 7. The v2 CONTAINER format
+// kTraceFormatV2 follows to 7. The schema-v8 boss-chest offer storage (S2.47)
+// grows sizeof(RunState) (2184 -> 2200, a pure tail append of BossChestState)
+// and kTraceFormatV2 follows to 8 -- the FIRST bump carried by the run size
+// alone: sizeof(CombatState) is unchanged, so the 20 v1 combat fixtures are NOT
+// regenerated this time (the v1 reader checks only the combat state size and
+// the v1 tag, both untouched). The v2 CONTAINER format
 // (state_kind + both struct sizes in the header) is unchanged; a stale-sized
 // CombatState/RunState trace is refused both by the stamped version and by the
 // header's size checks. No v2/RUN goldens are committed, so nothing on disk
-// needs regeneration; the 20 v1 combat fixtures ARE regenerated (they stamp
-// kTraceFormatV1, unaffected by this tag, but carry the new state_size).
+// needs regeneration.
 inline constexpr uint32_t kTraceFormatV1 = 1;
-inline constexpr uint32_t kTraceFormatV2 = 7;
+inline constexpr uint32_t kTraceFormatV2 = 8;
 static_assert(kTraceFormatV2 == engine::SCHEMA_VERSION,
               "v2 trace format tag must equal the current engine::SCHEMA_VERSION");
 

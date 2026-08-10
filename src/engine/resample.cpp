@@ -423,17 +423,17 @@ void resample_hidden(RunController& rc, SamplerRng& rng) noexcept {
     // the whole T0.5 suite is built on.
     const bool boss_chest_hidden =
         rc.phase == static_cast<uint8_t>(RunPhase::BOSS_TREASURE) &&
-        rc.boss_chest.seen == 0 &&
-        rc.boss_chest.relics[0] != static_cast<uint16_t>(RelicId::NONE);
+        rc.run.boss_chest.seen == 0 &&
+        rc.run.boss_chest.relics[0] != static_cast<uint16_t>(RelicId::NONE);
     if (boss_chest_hidden) {
-        restore_boss_chest_offers(rs, rc.boss_chest);
+        restore_boss_chest_offers(rs, rc.run.boss_chest);
     }
 
     // Row "Relic-pool remainders".
     resample_relic_pool_remainders(rs, rng);
 
     if (boss_chest_hidden) {
-        redraw_boss_chest_offers(rs, rc.boss_chest);
+        redraw_boss_chest_offers(rs, rc.run.boss_chest);
     }
 
     // Rows that are PURE COPIES, listed so the table is visibly complete:

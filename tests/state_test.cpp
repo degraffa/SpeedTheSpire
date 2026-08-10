@@ -258,6 +258,11 @@ TEST(StateLayout, RunStateHasNoImplicitPadding) {
         STS_MEMBER_SPAN(RunState, potion_rng),
         STS_MEMBER_SPAN(RunState, map_rng),
         STS_MEMBER_SPAN(RunState, neow_rng),
+        // The schema-v8 tail append (S2.47). BossChestState declares its own
+        // pad, and its sizeof is a multiple of alignof(RunState), so the walk
+        // below proves the append left no hole ahead of it and no tail hole
+        // behind it.
+        STS_MEMBER_SPAN(RunState, boss_chest),
     };
 
     // Report EVERY hole in one run. Stopping at the first one costs a rebuild

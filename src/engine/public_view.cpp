@@ -574,9 +574,9 @@ void encode_screens(const RunController& rc, PublicView& out) noexcept {
     // are public floor-0 data, so carrying them leaks nothing).
     const bool boss_chest_equip_screen =
         phase == RunPhase::BOSS_TREASURE &&
-        (rc.boss_chest.screen ==
+        (rc.run.boss_chest.screen ==
              static_cast<uint8_t>(BossChestScreen::EQUIP_GRID) ||
-         rc.boss_chest.screen ==
+         rc.run.boss_chest.screen ==
              static_cast<uint8_t>(BossChestScreen::EQUIP_ITEM_REWARD));
     if (phase == RunPhase::NEOW || boss_chest_equip_screen) {
         encode_neow(rc.neow, out);
@@ -592,10 +592,10 @@ void encode_screens(const RunController& rc, PublicView& out) noexcept {
     //       a SKIP closes the chest again but the player has still seen inside.
     // chest_size stays 0: a BossChest has no size roll (no getRandomChest call).
     if (phase == RunPhase::BOSS_TREASURE) {
-        out.chest_opened = rc.boss_chest.seen;
-        if (rc.boss_chest.seen != 0) {
+        out.chest_opened = rc.run.boss_chest.seen;
+        if (rc.run.boss_chest.seen != 0) {
             for (int i = 0; i < kBossChestOfferCount; ++i) {
-                out.boss_relic_choice_reserved[i] = rc.boss_chest.relics[i];
+                out.boss_relic_choice_reserved[i] = rc.run.boss_chest.relics[i];
             }
         }
     }

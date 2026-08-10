@@ -124,19 +124,19 @@ TEST(BossChest, PopsThreeFromTheFrontOfTheBossPoolAtRoomEntry) {
 TEST(BossChest, PopsHappenAtEntryNotAtOpen) {
     RunController rc = at_boss_chest();
     const uint8_t after_entry = rc.run.relic_pool_count[kBossPool];
-    const BossChestState offered = rc.boss_chest;
-    ASSERT_EQ(rc.boss_chest.screen,
+    const BossChestState offered = rc.run.boss_chest;
+    ASSERT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::CLOSED));
-    ASSERT_EQ(rc.boss_chest.seen, 0);
+    ASSERT_EQ(rc.run.boss_chest.seen, 0);
 
     step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
-    ASSERT_EQ(rc.boss_chest.screen,
+    ASSERT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::RELIC_SELECT));
 
     EXPECT_EQ(rc.run.relic_pool_count[kBossPool], after_entry)
         << "opening the chest pops nothing -- BossChest's constructor already "
            "did (TreasureRoomBoss.java:63)";
-    EXPECT_EQ(std::memcmp(rc.boss_chest.relics, offered.relics,
+    EXPECT_EQ(std::memcmp(rc.run.boss_chest.relics, offered.relics,
                           sizeof offered.relics),
               0);
 }
@@ -289,7 +289,7 @@ TEST(BossChest, NeowBossSwapThenBossChestShareOnePoolCursor) {
     EXPECT_LE(rc.run.relic_pool_count[kBossPool], before_chest - 3)
         << "three more pops, at least (a canSpawn rejection consumes extra)";
     for (int i = 0; i < kBossChestOfferCount; ++i) {
-        EXPECT_NE(rc.boss_chest.relics[i], initial[0])
+        EXPECT_NE(rc.run.boss_chest.relics[i], initial[0])
             << "offer " << i << " re-served the relic the Neow swap took";
     }
 }
@@ -297,11 +297,11 @@ TEST(BossChest, NeowBossSwapThenBossChestShareOnePoolCursor) {
 TEST(BossChest, SkippedRelicsAreNeverReturnedToThePool) {
     RunController rc = at_boss_chest();
     const std::vector<uint16_t> pool_at_entry = boss_pool(rc.run);
-    const BossChestState offered = rc.boss_chest;
+    const BossChestState offered = rc.run.boss_chest;
 
     step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
     step(rc, make_action(ActionVerb::CHOOSE, kChooseCancelGrid));  // skip
-    ASSERT_EQ(rc.boss_chest.screen,
+    ASSERT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::CLOSED));
 
     EXPECT_EQ(boss_pool(rc.run), pool_at_entry)
@@ -373,14 +373,24 @@ TEST(BossChest, SkipClosesTheChestWithoutBurningAnything) {
         << "bossRelicScreen.open hides the proceed button (:354)";
 
     step(rc, make_action(ActionVerb::CHOOSE, kChooseCancelGrid));
-    EXPECT_EQ(std::memcmp(&before, &rc.run, sizeof before), 0);
-    EXPECT_EQ(rc.boss_chest.chose_relic, 0);
+    // The ONLY RunState byte a skip moves is the screen bit itself (schema v8
+    // seated BossChestState inside RunState): chest.close() sets isOpen = false
+    // and nothing else -- no pool write, no relic, no deck -- and `seen` stays,
+    // because closing the chest cannot unsee it.
+    EXPECT_EQ(rc.run.boss_chest.screen,
+              static_cast<uint8_t>(BossChestScreen::CLOSED));
+    EXPECT_EQ(rc.run.boss_chest.seen, 1);
+    RunState after = rc.run;
+    after.boss_chest.screen = before.boss_chest.screen;
+    EXPECT_EQ(std::memcmp(&before, &after, sizeof before), 0)
+        << "a skip may move no RunState byte besides the chest screen";
+    EXPECT_EQ(rc.run.boss_chest.chose_relic, 0);
 }
 
 TEST(BossChest, ReopensAfterSkipWithTheSameThreeRelics) {
     RunController rc = at_boss_chest();
     step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
-    const BossChestState offered = rc.boss_chest;
+    const BossChestState offered = rc.run.boss_chest;
     step(rc, make_action(ActionVerb::CHOOSE, kChooseCancelGrid));
 
     RunActionMask m = mask_of(rc);
@@ -390,9 +400,9 @@ TEST(BossChest, ReopensAfterSkipWithTheSameThreeRelics) {
     EXPECT_TRUE(m.can_proceed) << "and the room is COMPLETE, so leaving is too";
 
     step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
-    EXPECT_EQ(rc.boss_chest.screen,
+    EXPECT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::RELIC_SELECT));
-    EXPECT_EQ(std::memcmp(rc.boss_chest.relics, offered.relics,
+    EXPECT_EQ(std::memcmp(rc.run.boss_chest.relics, offered.relics,
                           sizeof offered.relics),
               0)
         << "BossChest.relics was never cleared, so open() re-offers the SAME "
@@ -406,7 +416,7 @@ TEST(BossChest, ReopensAfterSkipWithTheSameThreeRelics) {
 TEST(BossChest, PickingTakesOneAndDropsTheOtherTwoForGood) {
     RunController rc = at_boss_chest();
     step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
-    const BossChestState offered = rc.boss_chest;
+    const BossChestState offered = rc.run.boss_chest;
     const std::vector<uint16_t> pool_before = boss_pool(rc.run);
 
     const RunActionMask m = mask_of(rc);
@@ -417,7 +427,7 @@ TEST(BossChest, PickingTakesOneAndDropsTheOtherTwoForGood) {
 
     step(rc, make_action(ActionVerb::CHOOSE, 1));
 
-    EXPECT_EQ(rc.boss_chest.chose_relic, 1);
+    EXPECT_EQ(rc.run.boss_chest.chose_relic, 1);
     EXPECT_TRUE(owns(rc.run, static_cast<RelicId>(offered.relics[1])));
     EXPECT_EQ(boss_pool(rc.run), pool_before)
         << "the two unpicked relics are dropped, not returned";
@@ -436,7 +446,7 @@ TEST(BossChest, PickingEndsTheRoomAtProceedOnly) {
     // screen leaves an equip screen up. Either way the chest can never be
     // reopened, and once resolved the only move is Proceed.
     for (int guard = 0; guard < 20 &&
-                        rc.boss_chest.screen !=
+                        rc.run.boss_chest.screen !=
                             static_cast<uint8_t>(BossChestScreen::DONE);
          ++guard) {
         const RunActionMask m = mask_of(rc);
@@ -457,7 +467,7 @@ TEST(BossChest, PickingEndsTheRoomAtProceedOnly) {
             << "an equip screen's proceed must not fall through to the "
                "terminal";
     }
-    ASSERT_EQ(rc.boss_chest.screen,
+    ASSERT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::DONE));
 
     const RunActionMask m = mask_of(rc);
@@ -474,11 +484,11 @@ TEST(BossChest, PickingEndsTheRoomAtProceedOnly) {
 // only at Neow -- the pick has to run the body, not refuse it.
 TEST(BossChest, PickingAnEquipScreenRelicOpensItsGridAtThisSite) {
     RunController rc = at_boss_chest();
-    rc.boss_chest.relics[0] = static_cast<uint16_t>(RelicId::ASTROLABE);
+    rc.run.boss_chest.relics[0] = static_cast<uint16_t>(RelicId::ASTROLABE);
     step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
     step(rc, make_action(ActionVerb::CHOOSE, 0));
 
-    ASSERT_EQ(rc.boss_chest.screen,
+    ASSERT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::EQUIP_GRID))
         << "Astrolabe's onEquip asks for a transform+upgrade grid; the plain "
            "acquire door would have REFUSED it (NEEDS_EQUIP_CONTEXT), which is "
@@ -509,18 +519,18 @@ TEST(BossChest, PickingAnEquipScreenRelicOpensItsGridAtThisSite) {
         }
         ASSERT_TRUE(acted);
     }
-    EXPECT_EQ(rc.boss_chest.screen,
+    EXPECT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::DONE));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE));
 }
 
 TEST(BossChest, PickingCallingBellRunsItsConfirmAndRewardScreensHere) {
     RunController rc = at_boss_chest();
-    rc.boss_chest.relics[2] = static_cast<uint16_t>(RelicId::CALLING_BELL);
+    rc.run.boss_chest.relics[2] = static_cast<uint16_t>(RelicId::CALLING_BELL);
     step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
     step(rc, make_action(ActionVerb::CHOOSE, 2));
 
-    ASSERT_EQ(rc.boss_chest.screen,
+    ASSERT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::EQUIP_GRID));
     ASSERT_EQ(rc.neow.grid_mode,
               static_cast<uint8_t>(NeowGridMode::CONFIRM_CALLING_BELL));
@@ -528,7 +538,7 @@ TEST(BossChest, PickingCallingBellRunsItsConfirmAndRewardScreensHere) {
     ASSERT_TRUE(m.can_proceed) << "a choice-free confirmation grid";
 
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
-    EXPECT_EQ(rc.boss_chest.screen,
+    EXPECT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::EQUIP_ITEM_REWARD));
     EXPECT_EQ(rc.rewards.count, 3) << "three fixed-tier relic rows";
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE))
@@ -538,7 +548,7 @@ TEST(BossChest, PickingCallingBellRunsItsConfirmAndRewardScreensHere) {
     EXPECT_TRUE(m.can_claim_reward[0]);
     step(rc, make_action(ActionVerb::CHOOSE, 0));
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
-    EXPECT_EQ(rc.boss_chest.screen,
+    EXPECT_EQ(rc.run.boss_chest.screen,
               static_cast<uint8_t>(BossChestScreen::DONE));
 }
 
@@ -669,7 +679,14 @@ TEST(BossChest, FiresNoRelicChestHooks) {
     EXPECT_EQ(rc.run.master_deck_count, deck_before)
         << "Cursed Key's curse would have joined the deck; its own body guards "
            "!bossChest";
-    EXPECT_EQ(std::memcmp(&before, &rc.run, sizeof before), 0)
+    // Since schema v8 the open ITSELF legitimately writes two RunState bytes --
+    // the chest screen and the `seen` reveal flag now live in rs.boss_chest --
+    // so the no-op claim is everything BUT those two: normalize them and the
+    // whole struct must byte-compare clean.
+    RunState after = rc.run;
+    after.boss_chest.screen = before.boss_chest.screen;
+    after.boss_chest.seen = before.boss_chest.seen;
+    EXPECT_EQ(std::memcmp(&before, &after, sizeof before), 0)
         << "the whole boss-chest hook pass is a no-op";
 }
 
@@ -693,7 +710,7 @@ TEST(BossChest, UnopenedOffersAreHiddenAndOpenedOnesArePublic) {
     encode_public_view(rc, pv);
     EXPECT_EQ(pv.chest_opened, 1);
     for (int i = 0; i < kBossChestOfferCount; ++i) {
-        EXPECT_EQ(pv.boss_relic_choice_reserved[i], rc.boss_chest.relics[i]);
+        EXPECT_EQ(pv.boss_relic_choice_reserved[i], rc.run.boss_chest.relics[i]);
     }
 
     // A skip closes the chest but cannot unsee it.
@@ -701,7 +718,7 @@ TEST(BossChest, UnopenedOffersAreHiddenAndOpenedOnesArePublic) {
     encode_public_view(rc, pv);
     EXPECT_EQ(pv.chest_opened, 1)
         << "`seen`, not `screen`, is the reveal flag";
-    EXPECT_EQ(pv.boss_relic_choice_reserved[0], rc.boss_chest.relics[0]);
+    EXPECT_EQ(pv.boss_relic_choice_reserved[0], rc.run.boss_chest.relics[0]);
 }
 
 TEST(BossChest, AnUnopenedChestsTwinEncodesIdentically) {
@@ -724,8 +741,8 @@ TEST(BossChest, AnOpenedChestsTwinKeepsTheOffers) {
     RunController twin = truth;
     make_hidden_twin(twin, /*sampler_seed=*/99);
 
-    EXPECT_EQ(std::memcmp(twin.boss_chest.relics, truth.boss_chest.relics,
-                          sizeof truth.boss_chest.relics),
+    EXPECT_EQ(std::memcmp(twin.run.boss_chest.relics, truth.run.boss_chest.relics,
+                          sizeof truth.run.boss_chest.relics),
               0)
         << "an opened chest's offers are on screen -- a pure copy";
     PublicView a{};
@@ -744,7 +761,7 @@ TEST(BossChest, ProceedIsTheActTerminalSeam) {
     step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
     step(rc, make_action(ActionVerb::CHOOSE, 0));
     for (int guard = 0; guard < 20 &&
-                        rc.boss_chest.screen !=
+                        rc.run.boss_chest.screen !=
                             static_cast<uint8_t>(BossChestScreen::DONE);
          ++guard) {
         const RunActionMask m = mask_of(rc);
@@ -777,7 +794,7 @@ TEST(BossChest, ProceedIsTheActTerminalSeam) {
     EXPECT_FALSE(run_is_victory(rc));
     EXPECT_FALSE(res.terminal);
     EXPECT_EQ(res.reward, 0.0f);
-    EXPECT_EQ(rc.boss_chest.relics[0], 0) << "the room's state was cleared";
+    EXPECT_EQ(rc.run.boss_chest.relics[0], 0) << "the room's state was cleared";
     EXPECT_EQ(rc.rewards.count, 0) << "and so was any equip reward screen";
 }
 
@@ -801,7 +818,7 @@ TEST(BossChest, TheProceedOpensTheNextActsMapRatherThanAnEmptyMask) {
 TEST(BossChest, IllegalChoicesAreNonCorruptingNoOps) {
     RunController rc = at_boss_chest();
     const RunState before = rc.run;
-    const BossChestState chest_before = rc.boss_chest;
+    const BossChestState chest_before = rc.run.boss_chest;
 
     for (uint8_t a0 : {uint8_t{7}, uint8_t{40}, uint8_t{200},
                        kChooseCancelGrid, kChooseSing}) {
@@ -810,7 +827,7 @@ TEST(BossChest, IllegalChoicesAreNonCorruptingNoOps) {
     step(rc, make_action(ActionVerb::END_TURN));
 
     EXPECT_EQ(std::memcmp(&before, &rc.run, sizeof before), 0);
-    EXPECT_EQ(std::memcmp(&chest_before, &rc.boss_chest, sizeof chest_before), 0);
+    EXPECT_EQ(std::memcmp(&chest_before, &rc.run.boss_chest, sizeof chest_before), 0);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE));
 }
 

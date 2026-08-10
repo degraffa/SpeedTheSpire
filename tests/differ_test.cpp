@@ -760,6 +760,16 @@ RunState MakeBaseRun() {
     s.map_rng = RngStream{9, 8, 7, 0};
     s.neow_rng = RngStream{44, 55, 66, 0};
 
+    // the schema-v8 boss-chest offers (S2.47): a live, opened chest so every
+    // member is individually testable.
+    s.boss_chest.relics[0] = 41;
+    s.boss_chest.relics[1] = 42;
+    s.boss_chest.relics[2] = 43;
+    s.boss_chest.screen =
+        static_cast<uint8_t>(engine::BossChestScreen::RELIC_SELECT);
+    s.boss_chest.seen = 1;
+    s.boss_chest.chose_relic = 0;
+
     return s;
 }
 
@@ -1039,6 +1049,43 @@ TEST(RunDifferRng, EachStreamNamedSeparately) {
             << c.name << ": " << r2.to_string();
         EXPECT_EQ(r2.size(), 1u) << c.name << ": " << r2.to_string();
     }
+}
+
+TEST(RunDifferBossChest, EveryMemberNamedSeparately) {
+    // The schema-v8 group (S2.47): each offer slot and each reveal bit yields
+    // exactly one diff, named so a campaign divergence line greps straight
+    // against the capture. This is the differ half of the zero-diff boss-relic
+    // pick bar (design §6 S2-G2 item 2).
+    for (int i = 0; i < engine::kBossChestOfferCount; ++i) {
+        RunState base = MakeBaseRun();
+        RunState mut = base;
+        mut.boss_chest.relics[i] =
+            static_cast<uint16_t>(base.boss_chest.relics[i] + 100);
+        DiffReport r = diff_run_states(base, mut);
+        EXPECT_TRUE(
+            r.mentions("boss_chest.relics[" + std::to_string(i) + "]"))
+            << r.to_string();
+        EXPECT_EQ(r.size(), 1u) << r.to_string();
+    }
+
+    RunState base = MakeBaseRun();
+    RunState m1 = base;
+    m1.boss_chest.screen = static_cast<uint8_t>(engine::BossChestScreen::CLOSED);
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("boss_chest.screen")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.boss_chest.seen = 0;
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("boss_chest.seen")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+
+    RunState m3 = base;
+    m3.boss_chest.chose_relic = 1;
+    DiffReport r3 = diff_run_states(base, m3);
+    EXPECT_TRUE(r3.mentions("boss_chest.chose_relic")) << r3.to_string();
+    EXPECT_EQ(r3.size(), 1u) << r3.to_string();
 }
 
 // =============================================================================
