@@ -73,6 +73,22 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // reflected damage) plus the pure-matrix / null-source bits 8..9
             // (Explosive Potion's createDamageMatrix(amount, true) with a
             // null owner, ExplosivePotion.java:52).
+            //
+            // DamageAction.update's attacker guard (DamageAction.java:69-73),
+            // read against the QUEUED item's owner at resolve time: a dying or
+            // half-dead owner's hit is dropped whole -- no pipeline, no block
+            // decrement, no fan-outs. Plain DAMAGE only: the opcode models a
+            // queued DamageAction, and the actions behind the other damage
+            // opcodes carry no such guard (derivation at the predicate's
+            // definition, interp_damage.cpp). The AoE fan-out above re-enters
+            // this case per monster with src == the player, for which the
+            // predicate reads false -- so DamageAllEnemiesAction (guardless in
+            // the Java) is not narrowed by this line.
+            if (damage_attacker_cancelled(s, item.src,
+                                          damage_type_from_flags(item.flags),
+                                          damage_source_is_null(item.flags))) {
+                return;
+            }
             op_damage(s, item.src, item.tgt, item.amount, /*strength_mult=*/1,
                       damage_type_from_flags(item.flags),
                       damage_is_pure(item.flags),

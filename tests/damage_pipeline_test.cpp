@@ -665,6 +665,133 @@ TEST(DamagePure, UnflaggedNormalDamageStillScalesAndDispatches) {
     EXPECT_EQ(s.monsters[0].block, 7);  // Curl Up fired
 }
 
+// --- Attacker-side cancel (S2.49) -------------------------------------------
+//
+// DamageAction.update (DamageAction.java:69-73) drops a queued hit whose OWNER
+// is dying or half-dead, behind an `info.type != THORNS` gate; the every-tick
+// shouldCancelAction preamble (:65-68, AbstractGameAction.java:81-83) re-tests
+// the owner's isDying under the same gate. The engine's resolve-time encoding
+// and the full derivation (what the guard contains, what it deliberately does
+// NOT -- isEscaping -- and why THORNS is exempt) live at
+// damage_attacker_cancelled, interp_damage.cpp. These tests pin every term.
+
+void drain_queue(CombatState& s) {
+    ActionQueueItem it{};
+    while (pop_action_front(s, it)) {
+        execute_opcode(s, it);
+    }
+}
+
+TEST(DamageAttackerCancel, MonsterKilledMidMultiHitLosesRemainingHits) {
+    // A 3-hit attacker into player Thorns that kills it on hit 1: hits 2 and 3
+    // resolve with the owner dying and are dropped whole. Before the guard the
+    // player read 80 - 15 = 65 here.
+    CombatState s = make_combat();
+    s.monsters[0].hp = 3;
+    add_power(s.player_powers, s.player_power_count, PowerId::THORNS, 5);
+    for (int i = 0; i < 3; ++i) {
+        add_to_bottom(s, op(Opcode::DAMAGE, /*src=*/0, kActorPlayer, 5));
+    }
+    drain_queue(s);
+    EXPECT_EQ(s.monsters[0].hp, 0) << "hit 1's Thorns reflection killed it";
+    EXPECT_EQ(s.player_hp, 75) << "only hit 1 landed (isDying term)";
+}
+
+TEST(DamageAttackerCancel, HalfDeadTransitionCancelsIdentically) {
+    // The halfDead term, through the REAL producer path: an Awakened One under
+    // the room's cannotLose latch drops to 0 mid-"multi-hit", its die() is
+    // vetoed, and awakened_one_on_damaged latches halfDead -- so isDying never
+    // reads true in the Java and only the guard's SECOND term cancels the
+    // remaining hits (AwakenedOne.java:281-320; the same shape as the
+    // Darkling's REINCARNATE latch).
+    CombatState s = make_combat();
+    s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::AWAKENED_ONE);
+    s.monsters[0].hp = 5;
+    s.monsters[0].max_hp = 300;
+    s.flags |= kCombatFlagCannotLose;
+    add_power(s.player_powers, s.player_power_count, PowerId::THORNS, 20);
+    for (int i = 0; i < 4; ++i) {  // Soul Strike's 4-hit shape
+        add_to_bottom(s, op(Opcode::DAMAGE, /*src=*/0, kActorPlayer, 6));
+    }
+    drain_queue(s);
+    const MonsterState& m = s.monsters[0];
+    EXPECT_EQ(m.hp, 0);
+    EXPECT_TRUE(monster_half_dead(m));
+    // The state that separates the terms: half-dead is NOT basically dead --
+    // a guard written against monster_basically_dead would let these hits
+    // land. (The escape test below rules out monster_dead_or_escaped from the
+    // other side; together they force exactly `hp <= 0 || halfDead`.)
+    EXPECT_FALSE(monster_basically_dead(m));
+    EXPECT_EQ(s.player_hp, 74) << "only hit 1 landed (halfDead term)";
+}
+
+TEST(DamageAttackerCancel, GuardReadsTheQueuedHitsOwnerNotTheCurrentActor) {
+    // Interleaved owners: monster 0 dies to Thorns on its first hit; its
+    // second hit cancels, but monster 1's LATER hit -- behind the death in the
+    // same queue -- still lands, because the guard reads each item's own src
+    // record, not "the actor that just died" or any blanket monster state.
+    CombatState s = make_combat();
+    s.monsters[0].hp = 3;
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 40;
+    s.monsters[1].max_hp = 40;
+    add_power(s.player_powers, s.player_power_count, PowerId::THORNS, 5);
+    add_to_bottom(s, op(Opcode::DAMAGE, /*src=*/0, kActorPlayer, 5));
+    add_to_bottom(s, op(Opcode::DAMAGE, /*src=*/0, kActorPlayer, 5));
+    add_to_bottom(s, op(Opcode::DAMAGE, /*src=*/1, kActorPlayer, 7));
+    drain_queue(s);
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.player_hp, 68) << "hit 1 (5) + monster 1's hit (7); monster "
+                                  "0's second hit cancelled";
+    EXPECT_EQ(s.monsters[1].hp, 35) << "monster 1's hit still drew Thorns";
+}
+
+TEST(DamageAttackerCancel, AlreadyResolvedHitsStayResolved) {
+    // NEGATIVE: the attacker dies on its LAST hit -- every hit had a live
+    // owner at its own resolve step, so all of them stand; nothing is undone
+    // retroactively.
+    CombatState s = make_combat();
+    s.monsters[0].hp = 8;
+    add_power(s.player_powers, s.player_power_count, PowerId::THORNS, 5);
+    add_to_bottom(s, op(Opcode::DAMAGE, /*src=*/0, kActorPlayer, 5));
+    add_to_bottom(s, op(Opcode::DAMAGE, /*src=*/0, kActorPlayer, 5));
+    drain_queue(s);
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.player_hp, 70) << "both hits landed; the second's owner was "
+                                  "still alive (8 - 5 = 3) when it resolved";
+}
+
+TEST(DamageAttackerCancel, DyingOwnersThornsReflectionIsExemptAndLands) {
+    // The `info.type != THORNS` gate, on the guard's OWN owner test: a monster
+    // killed by the player still reflects its Thorns -- the reflection's owner
+    // is the dying monster, and only the exemption lets it land (the exact
+    // mechanism that keeps the Exploder's post-suicide explosion alive,
+    // ExplosivePower.java:47-57).
+    CombatState s = make_combat();
+    s.monsters[0].hp = 5;
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::THORNS, 3);
+    execute_opcode(s, op(Opcode::DAMAGE, kActorPlayer, 0, 10));
+    drain_queue(s);  // the queued reflection, owner already at 0 HP
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.player_hp, 77) << "THORNS-typed hit is exempt from the guard";
+}
+
+TEST(DamageAttackerCancel, EscapedOwnersQueuedHitStillLands) {
+    // What the owner guard does NOT contain: isEscaping. shouldCancelAction
+    // tests escape only on the TARGET (AbstractCreature.isDeadOrEscaped,
+    // :780-790); the owner test is `isDying || halfDead` alone, so an ESCAPED
+    // owner's queued hit lands. (Reachable organically: the gremlin-leader
+    // death fan-out escapes survivors mid-queue.) A guard written against
+    // monster_dead_or_escaped would fail this.
+    CombatState s = make_combat();
+    s.monsters[0].flags |= kMonsterFlagEscaped;  // hp stays 40 -- alive, gone
+    add_to_bottom(s, op(Opcode::DAMAGE, /*src=*/0, kActorPlayer, 7));
+    drain_queue(s);
+    EXPECT_EQ(s.player_hp, 73) << "escape does not cancel the owner's hit";
+}
+
 TEST(ApplyPowerSort, InstancedSlotsTravelWholeAndKeepRelativeOrder) {
     // Two Bombs (instanced, default priority) then a Weak: the sort moves
     // whole PowerSlot rows, so each fuse keeps its own counter, and the

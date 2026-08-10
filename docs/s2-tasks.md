@@ -564,7 +564,10 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   terms; the `isDying` half is a pre-existing divergence whose fix would move
   landed Act-1 behaviour and committed fixtures. A comment at `op_damage` names
   it and asks whichever batch lands the first halfDead producer to implement
-  both terms together. Also: no monster is yet both mid-combat spawnable and
+  both terms together. *(The halfDead batches landed without it; discharged
+  later by S2.49 — the guard is live as `damage_attacker_cancelled`,
+  `interp_damage.cpp`, both terms together, and no committed fixture moved.)*
+  Also: no monster is yet both mid-combat spawnable and
   pre-battle-bearing, so the pre-battle arm's test drives the wiring and both
   halves of the precondition rather than a stream side effect.
 
@@ -2513,7 +2516,7 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   disposition carrier notes re-pointed at this fix (retestable for
   S2.43's re-triage, rows preserved). Six presets green; counts re-derived
   by `ctest -N | tail -1` at land time.
-- **S2.49** `[ ]` **Attacker-side cancel of queued multi-hit attacks
+- **S2.49** `[x]` **Attacker-side cancel of queued multi-hit attacks
   (owner-directed fix).** `DamageAction.update` (DamageAction.java:69-73)
   cancels a queued hit whose owner is dying or half-dead, so a monster
   killed (or half-killed) partway through its own multi-hit attack loses
@@ -2536,6 +2539,61 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   guard reads the OWNER of the queued hit, not the current actor; negative:
   already-resolved hits stay resolved; fixtures accounted as above; six
   presets green.
+
+  **Log:** live as `damage_attacker_cancelled` (`interp_damage.cpp`,
+  declared in `interp_damage.hpp`), called from `execute_opcode`'s
+  plain-DAMAGE case ONLY — plain DAMAGE is the opcode that models a
+  queued `DamageAction`, and the actions behind the other damage opcodes
+  carry no owner guard and must not inherit one
+  (`DamageAllEnemiesAction.update` :48-83 and `VampireDamageAction.update`
+  :29-45 have neither the guard nor `shouldCancelAction`; the remaining
+  op_damage callers are player-sourced card actions — all re-read in
+  full). The Java re-read sharpened the brief in two ways, both encoded:
+  (1) the owner test appears TWICE in `DamageAction.update` — the
+  first-tick `info.type != THORNS && (info.owner.isDying ||
+  info.owner.halfDead)` (:69-73) AND the every-tick `shouldCancelAction`
+  preamble's `source != null && source.isDying` term (:65-68;
+  `AbstractGameAction.java:81-83`, `setValues` copies `source =
+  info.owner`), which collapse into one resolve-time condition under this
+  engine's atomic resolution; (2) the owner guard does NOT test
+  `isEscaping` — escape is a TARGET-side term only
+  (`AbstractCreature.isDeadOrEscaped` :780-790) — so an escaped owner's
+  queued hit still lands, pinned rather than assumed. The THORNS
+  exemption is load-bearing content: `ExplosivePower` queues
+  `SuicideAction` BEFORE its own THORNS-typed explosion (:47-57), so the
+  Exploder is always dying when it resolves and only the exemption lets
+  it land (the landed Exploder suite polices it). Engine encoding of
+  `isDying || halfDead`: `hp <= 0 || kMonsterFlagHalfDead`, spelled as
+  the disjunction even though halfDead implies hp == 0 today. The
+  player-owner half of the Java guard is deliberately not encoded:
+  `pump_step`'s top-of-step terminal check retires the queue at
+  `player_hp <= 0` before any later item resolves, `try_player_revive`
+  runs synchronously inside the dropping op, and the player is never
+  halfDead — derivation in the predicate's comment. Named tests
+  (damage_pipeline_test.cpp, `DamageAttackerCancel.*`):
+  `MonsterKilledMidMultiHitLosesRemainingHits` (isDying term),
+  `HalfDeadTransitionCancelsIdentically` (the REAL Awakened One
+  die-veto/`on_damaged` latch path; also proves a
+  `monster_basically_dead`-shaped guard would not cancel),
+  `GuardReadsTheQueuedHitsOwnerNotTheCurrentActor` (interleaved owners),
+  `AlreadyResolvedHitsStayResolved` (negative),
+  `DyingOwnersThornsReflectionIsExemptAndLands`,
+  `EscapedOwnersQueuedHitStillLands` (rules out a
+  `monster_dead_or_escaped`-shaped guard; with the half-dead test the
+  pair forces exactly `hp <= 0 || halfDead`). Fixtures: NONE moved —
+  `FixtureOracle.AllFixturesReplayWithZeroDiffs` (the 20 Stage-A traces)
+  and `TwinFixture.ReplayingEveryCommittedCaseReproducesItsStoredView`
+  (`twins_v1.bin`) green unchanged on all six presets, so no committed
+  trace contains a monster-sourced non-THORNS hit resolving after its
+  owner's death; no regeneration, `twins_v1.bin` stands. S2.48
+  interaction: none — the Looter/Mugger steal accrual is
+  queue-time-synchronous and Mug/Lunge are single-hit, so no steal rides
+  a cancellable trailing hit; the `RunStolenGoldOrdering.*` suites passed
+  unchanged. The interp_damage.cpp KNOWN GAP block is rewritten in place
+  as the implemented-guard derivation, and S2.2F's "Named residue, not
+  stubbed" inventory paragraph re-pointed at the discharge. Six presets
+  green; counts re-derived by `ctest -N | tail -1` at land time, not
+  restated here.
 
 ### S2-G2 `[ ]` **Gate: S2 verified (unblocks training Phase T4)** — tag `s2-g2-verified`
 **Deps:** S2.41–S2.49, S2-G1

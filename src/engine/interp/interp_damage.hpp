@@ -22,6 +22,18 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
                DamageType type = DamageType::NORMAL,
                bool pure = false, bool source_null = false) noexcept;
 
+// DamageAction.update's ATTACKER-side cancel (DamageAction.java:69-73), read
+// at RESOLVE time against the queued hit's OWNER (`src`). True == the hit is
+// cancelled: the caller must drop the item entirely (no pipeline, no block
+// decrement, no on-attacked fan-out, no HP write -- the Java's `isDone = true;
+// return;` before `target.damage`). Called by execute_opcode's plain-DAMAGE
+// dispatch ONLY: that opcode is the engine's model of a queued DamageAction,
+// while the other op_damage callers model actions without this guard
+// (DamageAllEnemiesAction, VampireDamageAction -- see the definition).
+[[nodiscard]] bool damage_attacker_cancelled(const CombatState& s, uint8_t src,
+                                             DamageType type,
+                                             bool source_null) noexcept;
+
 // LOSE_HP / LOSE_HP_PER_HAND.
 void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept;
 

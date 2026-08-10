@@ -737,29 +737,70 @@ void cards_took_player_damage(CombatState& s) noexcept {
 
 // --- Opcode bodies ----------------------------------------------------------
 
-// DAMAGE: compute output via the pipeline, then land it on tgt -- block absorbs
-// first (decrementBlock: block soaks up to its value), remainder hits hp,
-// currentHealth clamped >= 0. (Death/onDeath handling is not yet modeled; the
-// pump's hp<=0 check drives the COMBAT_OVER transition.)
-//
-// KNOWN GAP -- the ATTACKER-SIDE CANCEL is not modelled, in either of its two
-// terms. DamageAction.update (DamageAction.java:69-73) begins
+// ATTACKER-SIDE CANCEL (S2.49; formerly the KNOWN GAP note here).
+// DamageAction.update (DamageAction.java:69-73) begins its first tick with
 //     if (info.type != THORNS && (info.owner.isDying || info.owner.halfDead))
 //         { isDone = true; return; }
-// so a monster that dies -- or goes HALF-dead -- partway through its own
-// multi-hit attack has its REMAINING QUEUED HITS cancelled. This engine has no
-// attacker guard at all: every queued DAMAGE item lands regardless of what
-// became of its source.
+// and its every-tick preamble (:65-68) re-tests the owner through
+// shouldCancelAction()'s `source != null && source.isDying` term
+// (AbstractGameAction.java:81-83; setValues copies source = info.owner), also
+// behind the `info.type != THORNS` gate. This engine resolves the action
+// atomically, so the two sites collapse into ONE resolve-time condition:
+//     type != THORNS && (owner.isDying || owner.halfDead)  -> drop the hit.
+// A monster that dies -- or goes half-dead -- partway through its own
+// multi-hit attack therefore loses the remaining queued hits. Note what the
+// OWNER guard does NOT contain: isEscaping. shouldCancelAction tests escape
+// only on the TARGET (via AbstractCreature.isDeadOrEscaped, :780-790), so an
+// ESCAPED owner's queued hit still lands -- encoded and pinned, not assumed.
 //
-// Named here rather than fixed here, deliberately. The `isDying` half is a
-// PRE-EXISTING divergence that predates the halfDead work; fixing it would
-// change landed Act-1 behaviour (any monster killed mid-attack) and move
-// committed fixtures, which is out of scope for a framework task. The
-// `halfDead` half has no producer until the Darkling (S2.25) and the Awakened
-// One (S2.28) land. Whichever batch lands the first halfDead producer should
-// implement BOTH terms together -- they are one `if` -- and carry the fixture
-// churn alongside the content that makes it reachable. The note sits at the
-// site so the next reader meets it before writing a monster multi-hit body.
+// The THORNS exemption is load-bearing content, not an oddity: ExplosivePower
+// queues SuicideAction BEFORE its own 30-damage THORNS DamageAction
+// (ExplosivePower.java:47-57), so the Exploder is always dying when its
+// explosion resolves and only the exemption lets it land (power_explosive.cpp
+// queues the same shape). A null-source item is exempt too: Java could only
+// reach `info.owner.isDying` on a null owner by NPE, so no such action exists
+// -- every shipped null-owner DamageAction is THORNS-typed anyway.
+//
+// The predicate lives here but is CALLED from execute_opcode's plain-DAMAGE
+// case only (interp.cpp), because plain DAMAGE is the opcode that models a
+// queued DamageAction. The other op_damage callers model Java actions that
+// carry NO owner guard and must not inherit one: the AoE fan-out is
+// DamageAllEnemiesAction (update, :48-83 -- no owner test) and VAMPIRE_DAMAGE
+// is VampireDamageAction (update, :29-45 -- neither the guard nor
+// shouldCancelAction); DAMAGE_FEED / DAMAGE_GREED / RITUAL_DAGGER / the rest
+// are player-sourced card actions where the question below never bites.
+//
+// Owner == the PLAYER is deliberately not tested: Java's guard covers a dying
+// player's remaining hits, but the pump's top-of-step terminal check
+// (action_queue.cpp pump_step: player_hp <= 0 -> COMBAT_OVER) retires the
+// queue before any later item resolves, try_player_revive runs synchronously
+// inside the very op that dropped the player (so a revived player never reads
+// dead between items), and the player is never halfDead. The monster branch is
+// the entire observable surface.
+bool damage_attacker_cancelled(const CombatState& s, uint8_t src,
+                               DamageType type, bool source_null) noexcept {
+    if (type == DamageType::THORNS || source_null) {
+        return false;  // both exemptions derived above
+    }
+    if (src == kActorPlayer || src >= s.monster_count) {
+        return false;  // player owner (see above) / defensive out-of-range
+    }
+    const MonsterState& owner = s.monsters[src];
+    // isDying || halfDead, in this engine's terms: isDying is hp <= 0 (die()
+    // and SuicideAction both zero HP -- combat_state.hpp liveness note), and
+    // halfDead is the flag. halfDead implies hp == 0 today, making the second
+    // term redundant -- it is spelled anyway so the code IS the Java's
+    // disjunction rather than a consequence of that invariant. An escaped
+    // owner (hp > 0, kMonsterFlagEscaped) reads false here, exactly as the
+    // Java's owner guard reads it.
+    return owner.hp <= 0 || monster_half_dead(owner);
+}
+
+// DAMAGE: compute output via the pipeline, then land it on tgt -- block absorbs
+// first (decrementBlock: block soaks up to its value), remainder hits hp,
+// currentHealth clamped >= 0. The attacker-side cancel above runs BEFORE this
+// body is entered (execute_opcode drops the item), so nothing here fires for a
+// cancelled hit.
 void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
                int strength_mult,
                DamageType type, bool pure, bool source_null) noexcept {
