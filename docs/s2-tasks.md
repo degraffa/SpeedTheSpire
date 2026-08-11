@@ -86,6 +86,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | Mind Bloom boss re-fight **directed capture** (the oracle half of S2.33's acceptance) | S2.33 (sim half landed + pinned; no capture seat) | S2.43 | S2.33's acceptance reads "Mind Bloom's Act-1-boss re-fight replays zero-diff in a directed capture". The SIM half is landed and pinned against the decompile (beyond_events_test.cpp: the one-randomLong JDK shuffle twin, the fixed 25/50 gold row, the RARE `returnRandomRelic` pop, the EventRoom-not-boss combat flags, and the victory→reward→map walk), but the bridge never runs from a task worktree and two sibling event batches held the game install concurrently, so **no live capture was run** — deferred, not skipped. S2.43 (the next capture campaign) owes: a directed Act-3 capture that draws MindBloom, takes "I am War", plays the re-fight to the reward claim, and scores zero-diff through the differ; the seed/policy triple can come from `seed_scan --need-boss-id` once Act-3 reach is live (see the reach row above). Watch two rows while scoring it: the translator's act-local FIRED derivation (row above — an Act-2/3 event capture is exactly where it false-REDs) and trap-5's requirement that the driver record playtime |
 | Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). **RE-RUN HALF DISCHARGED by S2.41 (2026-08-09)**: with every S2.2x/S2.3x batch landed, §1's command was re-run verbatim (50,000 rows, release, `determinism_mismatches=0`) and the Act-2/3 cells are now **measured, at 0** — Act-1 reproduced to the row, `room_unimplemented` went 8 → 0, and the fuzz soak's new per-act coverage agrees over 100,000 independent cases (act 2 entered by 0.11 % of cases, act-2 boss fought 0 times, act 3 never). What is left of this row is therefore **not a content obligation**: sim-side depth is bounded by the E0 policies (~×30 loss per act), so a three-act sim number needs a different policy or the driver, not a later re-run. S2.43's live driver numbers are the remaining half. [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
 | Keys as obtainable content — emerald-elite node flag + EMERALD_KEY reward row; SAPPHIRE_KEY linked-row claim semantics | stage-b design §1.1 "Out" / s2-design §1 (S1/S2 scope) | **S3 planning** (owner-directed 2026-08-10) | The owner reviewed the deviation/exclusion inventory and directs that emerald-key rewards be implemented in the Act-4 wave: store `setEmeraldElite`'s chosen node (the mapRng draw is already modelled — combat_rewards.hpp:107-112 records that only the node flag is missing), surface the burning-elite combat's EMERALD_KEY reward row, and give the sapphire chest append its real claim semantics (today it is modelled as an ignored linked row that costs no RNG or state parity, per stage-b-design §1.1). Ruby is already live (the Recall arm grants it). This row exists so S3 planning inherits an explicit obligation instead of rediscovering the S1/S2 scope decision |
+| Per-step throughput **attribution** across S2 (the ×0.712 combat step / ×0.498 batch measured against B5.5) | S2.45 (an absolute one-build floor task: it measures, it does not A/B or optimise) | **S3 throughput work** | S2.45's floors all hold by ≥ ×166, and run-level stepping is ×0.956 of B5.5 — so S2.48's per-advance `sync_live_gold` costs nothing measurable. What is *unattributed* is the rest: combat stepping ×0.712 and the 10k-state batch ×0.498 across a whole content stage. Run length is constant (47.04 actions/run vs 46.93), so both are per-step cost ratios, not workload changes. Leading candidate for the batch is state size, not the interpreter — `sizeof(CombatState)` 3,896 → 8,088 B takes that benchmark's working set ~39 MB → ~81 MB against a 96 MiB L3, and it is a bandwidth-bound sweep. The sanctioned instrument is the interleaved `tools/bench_ab.sh` over two binaries, never two sequential runs; the narrow, cheap A/B that isolates the two commits the S2.45 brief flagged is **`d57e077` against `646bd18`** on `bench_advance_mask` + `bench_throughput`. Matters because training wall-clock is the currency the S3 baseline is quoted in ([verification/s245-throughput.md](verification/s245-throughput.md) §6) |
 
 ---
 
@@ -2368,12 +2369,77 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `check_stale_counts.sh` and `check_doc_links.sh` clean. New tests:
   `DistCheckS2Expect.*` (7) and `HolmReplicate.*` (5). Re-derive counts
   with `ctest -N | tail -1`.
-- **S2.45** `[ ]` ∥ **Throughput re-baseline.** B5.5 methodology over
+- **S2.45** `[x]` ∥ **Throughput re-baseline.** B5.5 methodology over
   three-act runs: per-step and per-combat floors must hold unchanged; new
   whole-machine three-act run rate recorded with methodology as the S3
   baseline (expected lower per run — not a regression; design §6 item 7).
   **Deps:** S2-G1 **Acceptance:** release-preset numbers recorded;
   per-step/per-combat floors green.
+  **Log:** 2026-08-10 — landed. Full report:
+  [verification/s245-throughput.md](verification/s245-throughput.md).
+  **All three floors HOLD**, release preset, B5.5's methodology and its
+  frozen `run_throughput.sh` discipline unchanged (`--benchmark_min_time=2s`,
+  one metric per binary invocation, exactly one `items_per_second` per run),
+  median of three whole-wrapper invocations: batch **13,517,300**
+  steps/sec/core (floor 50,000), complete combats **60,323.0**/sec/core with
+  1,424,080 `combat_steps`/sec (floor 300), complete A20 runs **195,311**/sec
+  whole-machine with 9,185,780 `run_steps`/sec (floor 0.4). Every invocation
+  printed PASS; the report checks the floors against the *worst* of five
+  readings (12,175,500 / 49,780.2 / 148,261 — margin ≥ ×166), because the
+  run-to-run spread is ±12 % with no covariate this task could isolate.
+
+  **Design §6 item 7's premise is falsified, and that is the finding.** Item 7
+  expects a drop proportional to run length; run length did not move —
+  **47.04** actions/run against B5.5's 46.93 (+0.2 %) — because under the E0
+  random policy **no run in the frozen corpus leaves Act 1**. The benchmark now
+  prints that rather than leaving it inferred: `act2_runs=0 act3_runs=0` over
+  ~35,000 measured runs, with `terminal_act_sum == runs_counted` exactly (mean
+  terminal act **1.000**) as the positive control that separates "nothing
+  reached act 2" from "the probe is dead". Cross-checked by a *different* tool
+  over the *same* corpus — `fuzz_soak --seeds 1000 --policies random --reps 1`
+  is the benchmark's case set case-for-case (`fuzz_policy_seed_for` ==
+  `policy_seed_for(seed, RANDOM, 0)`) — which reads 47.05 actions/case, act-2
+  cases 0, and **act-1 boss rooms entered 0**, deepest floor 13 of 16. So the
+  recorded number is a re-baseline against three-act *content*, not three-act
+  *trajectories*, and it is comparable to B5.5's. Same policy ceiling S2.41
+  measured and [verification/s242-deep-reach.md](verification/s242-deep-reach.md)
+  §11 records: no weight-free policy in this repo produces a three-act
+  trajectory to time. The S3 baseline is therefore recorded as a **pair** —
+  195,311 runs/sec (corpus-conditional) plus **9,185,780 run-steps/sec, which
+  is length-independent** and is the number a future three-act length should be
+  projected through. Quoting the runs/sec as "three-act runs per second" is
+  exactly the claim the report refuses.
+
+  **The S2.48/S2.49 risk is answered: no.** Run length being constant makes
+  every B5.5 ratio a per-step cost ratio. `run_steps`/sec is ×0.956 of B5.5 —
+  and the run-level step is precisely where S2.48 put `sync_live_gold` on every
+  in-combat advance, so at this resolution it costs nothing measurable.
+  Combat stepping is ×0.712 and the 10k-state batch ×0.498 across a whole
+  content stage; the batch's leading candidate is state size, not the
+  interpreter (`sizeof(CombatState)` 3,896 → **8,088** B, so the batch working
+  set went ~39 MB → ~81 MB against a 96 MiB L3, and that benchmark is a
+  bandwidth-bound sweep). **Deliberately not attributed** — these are absolute
+  one-build floor checks and the sanctioned comparison instrument is the
+  interleaved `tools/bench_ab.sh` over two binaries; an A/B against the B5.5
+  tree would compare two content sets, not two implementations. The narrow
+  follow-up that would settle it is named in the report §6: A/B `d57e077`
+  against `646bd18`, the two commits either side of S2.48 + S2.49.
+
+  **Harness extension** (`benchmarks/bench_throughput.cpp`, the only source
+  change; no engine, registry, fixture, golden or schema touched): four plain
+  counters on the whole-run benchmark — `runs_counted` (the denominator a rate
+  line cannot supply), `terminal_act_sum`, `act2_runs`, `act3_runs` — the act
+  read **once per run** from `RunController::run.act` after `RUN_OVER`, so
+  there is no per-step cost. No three-act *variant* was needed: the benchmark
+  runs to `RUN_OVER` and the engine has been act-general since S2.12, so it
+  already measured against three-act content; what it could not do was say how
+  far it got. `run_throughput.sh` untouched, no floor attached to the new
+  counters, `benchmarks/README.md` records them. Six presets green (WSL
+  `debug`/`asan`/`release` all with `-DSTS_BUILD_BENCHMARKS=ON`, so the new
+  benchmark source is compiled and warning-clean under GCC;
+  `win-debug`/`win-asan`/`win-release` at their standard settings, `/EHsc`
+  verified in the `win-debug` cache). `check_stale_counts.sh` and
+  `check_doc_links.sh` clean.
 - **S2.46** `[ ]` **Verification report + CI corpus + proactive audit.**
   B5.4 pattern: aggregated report with literal S2-G2 shortfalls; curated
   compressed corpus extended with three-act traces incl. one double-boss

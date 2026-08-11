@@ -114,8 +114,15 @@ uint64_t fuzz_policy_seed_for(int64_t seed) noexcept {
     return z ^ (z >> 31);
 }
 
+// S2.45: `terminal_act` receives the act the trajectory ENDED in. The act
+// counter never decreases (run_advance.cpp's act transition only ever does
+// ++act), so one read at the end is the run's maximum act -- no per-step cost,
+// and no second traversal. It exists because the S2 re-baseline claims a
+// THREE-ACT rate: with the E0 random policy losing roughly x30 per act
+// (docs/s2-tasks.md, S2.41), act-2 and act-3 reach in this fixed corpus is a
+// number the report has to print rather than assume.
 bool run_full_a20(int64_t seed, uint64_t policy_seed,
-                  uint64_t& steps) noexcept {
+                  uint64_t& steps, uint8_t& terminal_act) noexcept {
     RunController run = run_begin(seed, 20);
     sts::fuzz::PolicyRng rng(policy_seed);
     StepResult result{};
@@ -124,7 +131,10 @@ bool run_full_a20(int64_t seed, uint64_t policy_seed,
     for (uint32_t action_index = 0; action_index < kMaxRunActions;
          ++action_index) {
         const auto phase = static_cast<RunPhase>(run.phase);
-        if (phase == RunPhase::RUN_OVER) return true;
+        if (phase == RunPhase::RUN_OVER) {
+            terminal_act = run.run.act;
+            return true;
+        }
         if (phase == RunPhase::ROOM_UNIMPLEMENTED) return false;
 
         RunActionMask mask{};
@@ -178,6 +188,9 @@ void BM_RandomPolicyFullCombatPerCore(benchmark::State& state) {
 void BM_RandomPolicyFullA20RunWholeMachine(benchmark::State& state) {
     uint64_t random_runs = 0;
     uint64_t steps = 0;
+    uint64_t act2_runs = 0;
+    uint64_t act3_runs = 0;
+    uint64_t terminal_act_sum = 0;
     const uint64_t thread =
         static_cast<uint64_t>(state.thread_index());
 
@@ -187,11 +200,15 @@ void BM_RandomPolicyFullA20RunWholeMachine(benchmark::State& state) {
         const auto seed = static_cast<int64_t>(
             (sequence % kCompleteRunSeedCorpus) + 1);
         const uint64_t policy_seed = fuzz_policy_seed_for(seed);
-        if (!run_full_a20(seed, policy_seed, steps)) {
+        uint8_t terminal_act = 0;
+        if (!run_full_a20(seed, policy_seed, steps, terminal_act)) {
             state.SkipWithError(
                 "random-policy A20 run failed to reach RUN_OVER");
             return;
         }
+        terminal_act_sum += terminal_act;
+        if (terminal_act >= 2) ++act2_runs;
+        if (terminal_act >= 3) ++act3_runs;
         ++random_runs;
         benchmark::DoNotOptimize(steps);
     }
@@ -205,6 +222,32 @@ void BM_RandomPolicyFullA20RunWholeMachine(benchmark::State& state) {
     state.counters["run_steps"] =
         benchmark::Counter(static_cast<double>(steps * workers),
                            benchmark::Counter::kIsRate);
+    // Act-reach witnesses, NOT rates: Google Benchmark sums a default-flagged
+    // counter across workers and divides it by nothing, so these print as
+    // whole-machine COUNTS over the measurement. No worker multiplication
+    // here -- that correction exists only because kIsRate divides by the
+    // summed per-worker time (see the note above).
+    //
+    // Four counters rather than two, because a bare `act2_runs=0` is exactly
+    // as consistent with "no run left act 1" as with "the probe is dead", and
+    // an acceptance report must not have to guess which it read:
+    //   runs_counted      the DENOMINATOR. items_per_second is a rate, so the
+    //                     printed line otherwise carries no run count to put
+    //                     the reach counters over.
+    //   terminal_act_sum  sum of terminal acts => mean terminal act. Exactly
+    //                     1.000 x runs_counted says every run ended in act 1
+    //                     AND that the probe returned a real act rather than
+    //                     zeros -- the positive control the reach counters
+    //                     lack on their own.
+    //   act2_runs/act3_runs  the reach witnesses themselves.
+    state.counters["runs_counted"] =
+        benchmark::Counter(static_cast<double>(random_runs));
+    state.counters["terminal_act_sum"] =
+        benchmark::Counter(static_cast<double>(terminal_act_sum));
+    state.counters["act2_runs"] =
+        benchmark::Counter(static_cast<double>(act2_runs));
+    state.counters["act3_runs"] =
+        benchmark::Counter(static_cast<double>(act3_runs));
     state.SetItemsProcessed(
         static_cast<int64_t>(random_runs * workers));
 }

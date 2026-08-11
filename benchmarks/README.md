@@ -41,6 +41,23 @@ random-policy runs/sec across the machine. Workers cycle over the same fixed
 1,000-seed/policy-stream corpus accepted by the G6 random-policy soak, so this
 is a stable performance workload rather than a new content sweep.
 
+Since S2.45 the same benchmark also reports four act-reach counters:
+`runs_counted`, `terminal_act_sum`, `act2_runs` and `act3_runs`. The terminal
+act is read once per run from `RunController::run.act` (which only ever
+increments) after `RUN_OVER`. They are plain counters, not rates — Google
+Benchmark sums them across workers and divides them by nothing, so they print
+as whole-machine totals over the measurement, and `runs_counted` is the
+denominator the rate line cannot supply.
+
+They exist because the S2 re-baseline claims a *three-act* rate while the E0
+random policy loses roughly ×30 per act: how far into the three acts this fixed
+corpus actually gets has to be a printed number, not an inference.
+`terminal_act_sum` is the positive control — `terminal_act_sum ==
+runs_counted` says both that every run ended in act 1 *and* that the probe
+returned a real act rather than zeros, which a bare `act2_runs=0` cannot
+distinguish. Interpretation belongs to the report, not the floor script: no
+floor is attached to any of them.
+
 Google Benchmark sums both counters and elapsed time across worker states
 before applying a rate (`src/benchmark_runner.cc` and `src/counter.cc` in its
 fetched source), which makes an unadjusted multithread rate a per-worker
