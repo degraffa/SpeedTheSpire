@@ -111,10 +111,19 @@ the S2.3x event bodies, and S2.34's payout relic/card bodies. The gate soak
 nondeterminism and zero unimplemented parks; per-act reach is witnessed in
 the soak report rather than assumed, and `victories = 0` there is a measured
 *policy* ceiling (E0 heuristics lose ~×30 per act), not a content gap —
-depth verification belongs to the oracle driver (S2.42/S2.43). Open next in
-that ledger: **S2.43** oracle campaigns (needs the boss-relic storage row
-discharged first), **S2.44** tier-4, **S2.45** throughput re-baseline, then
-gate **S2-G2**, which unblocks training Phase T4.
+depth verification belongs to the oracle driver (S2.42/S2.43). Landed
+2026-08-10: **S2.47** (boss-relic offer storage — `BossChestState` into
+`RunState`, schema v8, offers now translator-emitted and differ-compared),
+**S2.44** (tier-4 S2 family, Holm + replicate-before-flagging, four negative
+controls), **S2.45** (throughput re-baseline — all three floors hold with
+huge margins; the "three-act runs/sec" premise was falsified since no E0 run
+leaves Act 1, so the S3 baseline is the runs/sec + run-steps/sec *pair*, see
+[verification/s245-throughput.md](docs/verification/s245-throughput.md)),
+and the owner-directed deviation closures **S2.48** (live-purse stolen-gold
+ordering; 121 standing-deviation dispositions now retestable) and **S2.49**
+(attacker-side cancel of a dying/half-dead owner's queued non-THORNS hits).
+Open next in that ledger: **S2.43** oracle campaigns (fully unblocked), then
+**S2.46**, then gate **S2-G2**, which unblocks training Phase T4.
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
 in [docs/stage-b-tasks.md](docs/stage-b-tasks.md) and
