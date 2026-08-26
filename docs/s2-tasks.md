@@ -2275,8 +2275,8 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   18 Smoke-Bomb escape-window capture artifacts (the fork's readiness
   held ready through the 2.5 s escape animation; closed at the source in
   two rounds — the isEscaping hold, then the endBattle settle-lag hold,
-  pin `370CBFA8…` — 13/18 recaptured clean, 5 re-queued under the
-  lag-hold jar) and **7 open residuals**, each with a per-run lead
+  pin `370CBFA8…` — all 18 recaptured CLEAN, zero race records, the
+  class fully discharged) and **7 open residuals**, each with a per-run lead
   (Gremlin Leader minion slots, Runic Pyramid, Ancient Tea Set, a
   floor-3 room disagreement, Ritual-Dagger-adjacent misc, a potion-slot
   case, a combat-over case) held with evidence in the data root's
