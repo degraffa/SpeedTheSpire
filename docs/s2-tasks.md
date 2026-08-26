@@ -1617,13 +1617,11 @@ are the "first registry authoring wave" the TE.2 acceptance names.
 
   Six presets green (`ctest -N | tail -1` for the current suite size);
   `check_stale_counts` + `check_doc_links` clean.
-- **S2.32** `[ ]` ∥ City events II: The Library, The Mausoleum, Vampires,
 - **S2.32** `[x]` ∥ City events II: The Library, The Mausoleum, Vampires,
   Colosseum + Masked Bandits (combat embeds), Knowing Skull, The Joust,
   N'loth, Designer, Duplicator (act-gated one-timer bodies).
   **Deps:** S2.02, S2.13, S2.01 (event encounter groups) **Acceptance:**
   as S2.31, plus combat-embed flow tests (two-fight Colosseum sequence).
-- **S2.33** `[x]` ∥ Beyond events: Falling, Mind Bloom (boss re-fight +
   **Log:** 2026-08-09 — landed. Ten bodies (five TheCity eventList rows +
   five act-gated one-timers), each Java file read in full; all ten
   `implemented: true` with options/a15 metadata in events.yaml, dispatch via
@@ -1738,7 +1736,7 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   audits, payout acquisitions, the two-fight Colosseum flow, the bandit
   move graphs, the deathReact pin, the colorless persistence pin). All six
   presets green; `check_stale_counts` + `check_doc_links` clean.
-- **S2.33** `[ ]` ∥ Beyond events: Falling, Mind Bloom (boss re-fight +
+- **S2.33** `[x]` ∥ Beyond events: Falling, Mind Bloom (boss re-fight +
   miscRng shuffle — trap 6), The Moai Head, Mysterious Sphere, Sensory
   Stone, Tomb of Lord Red Mask, Winding Halls; SecretPortal pinned per
   trap 5; the `Lab` listing resolved (deferred row).
