@@ -1819,5 +1819,127 @@ TEST(RelicHooksPantograph, OnlyRespondsToAtBattleStart) {
     EXPECT_EQ(win.player_hp, 70);
 }
 
+// --- Unceasing Top -----------------------------------------------------------
+//
+// onRefreshHand (UnceasingTop.java:48-54), dispatched at the pump's idle
+// boundary (action_queue.cpp unceasing_top_fires -- the gate's term-by-term
+// mapping is documented there). First live witness: s243_breadth STS432297,
+// where the game's Top drew on a mid-turn emptied hand and the sim's then-
+// deferred row forked the Hexaghost fight on draw order.
+
+// A play that empties the hand at idle draws exactly one card.
+CombatState TopState(int draw_pile_cards) {
+    CombatState s{};
+    // Pool 0 = the one hand card (a played Strike leaves the hand empty);
+    // pool 1.. = draw-pile Strikes.
+    s.card_pool[0].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[0].cost_now = 1;
+    s.hand[0] = 0;
+    s.hand_count = 1;
+    for (int i = 0; i < draw_pile_cards; ++i) {
+        s.card_pool[1 + i].card_id = static_cast<uint16_t>(CardId::STRIKE);
+        s.card_pool[1 + i].cost_now = 1;
+        s.draw[i] = static_cast<CardPoolIndex>(1 + i);
+    }
+    s.draw_count = static_cast<uint8_t>(draw_pile_cards);
+    s.player_hp = 70;
+    s.player_max_hp = 80;
+    s.player_energy = 3;
+    s.monster_count = 1;
+    s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[0].hp = 50;
+    s.monsters[0].max_hp = 50;
+    s.monster_attacks_queued = 1;
+    s.turn = 1;  // atTurnStart has run: the canDraw latch is armed
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    s.relics[0].relic_id = static_cast<uint16_t>(RelicId::UNCEASING_TOP);
+    s.relic_count = 1;
+    return s;
+}
+
+TEST(RelicHooksUnceasingTop, DrawsOneWhenAPlayEmptiesTheHandMidTurn) {
+    CombatState s = TopState(/*draw_pile_cards=*/3);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_EQ(s.hand_count, 1) << "the emptied hand refilled by exactly one";
+    EXPECT_EQ(s.draw_count, 2);
+    EXPECT_EQ(s.discard_count, 1) << "only the played Strike";
+}
+
+// Each refire needs the hand to empty AGAIN; a single fire never chains.
+TEST(RelicHooksUnceasingTop, RefiresOnALaterEmptyButNeverChains) {
+    CombatState s = TopState(3);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    ASSERT_EQ(s.hand_count, 1);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));  // play the drawn card too
+    pump(s);
+    EXPECT_EQ(s.hand_count, 1) << "second empty -> second single draw";
+    EXPECT_EQ(s.draw_count, 1);
+    EXPECT_EQ(s.discard_count, 2);
+}
+
+// canDraw is set at atTurnStart and cleared at atPreBattle (:33-41): before
+// the first turn has started (turn == 0, the pre-battle pump's idle), an
+// empty hand over a full draw pile must NOT fire.
+TEST(RelicHooksUnceasingTop, DoesNotFireBeforeTheFirstTurnStarts) {
+    CombatState s = TopState(3);
+    s.turn = 0;
+    s.hand_count = 0;
+    pump(s);
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.draw_count, 3);
+}
+
+// The gate's own No Draw check (:51): Battle Trance's power holds the Top off
+// for the turn. The -1 no-amount marker is exactly how NoDrawPower stores it.
+TEST(RelicHooksUnceasingTop, IsHeldOffByNoDraw) {
+    CombatState s = TopState(3);
+    s.player_powers[0].power_id = static_cast<uint16_t>(PowerId::NO_DRAW);
+    s.player_powers[0].amount = -1;
+    s.player_power_count = 1;
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.draw_count, 3);
+}
+
+// A nonempty DISCARD alone qualifies (the Java tests discard > 0 || draw > 0):
+// with no draw pile, playing the lone Strike leaves it in the discard, the Top
+// fires, and the fired draw RESHUFFLES that very card back to hand -- the
+// wheel spins. This is also the natural termination proof: hand 1 turns the
+// gate off, so one play costs one shuffle and one draw, never a loop.
+TEST(RelicHooksUnceasingTop, DiscardOnlyPilesFireAndTheDrawReshuffles) {
+    CombatState s = TopState(/*draw_pile_cards=*/0);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_EQ(s.hand_count, 1) << "the played Strike came straight back";
+    EXPECT_EQ(s.discard_count, 0);
+    EXPECT_EQ(s.draw_count, 0);
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id,
+              static_cast<uint16_t>(CardId::STRIKE));
+}
+
+// GENUINELY empty piles -- both zero at the idle -- are the last gate term:
+// no draw is queued and the pump returns instead of spinning.
+TEST(RelicHooksUnceasingTop, TrulyEmptyPilesDrawNothing) {
+    CombatState s = TopState(0);
+    s.hand_count = 0;  // e.g. the last card exhausted
+    pump(s);
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.draw_count, 0);
+    EXPECT_EQ(s.discard_count, 0);
+}
+
+// The relic must actually be HELD: the identical state without it stays empty.
+TEST(RelicHooksUnceasingTop, NoRelicNoDraw) {
+    CombatState s = TopState(3);
+    s.relic_count = 0;
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.draw_count, 3);
+}
+
 }  // namespace
 }  // namespace sts::engine

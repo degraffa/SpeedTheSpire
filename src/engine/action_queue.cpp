@@ -971,13 +971,80 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     return r;
 }
 
+// Unceasing Top's onRefreshHand (UnceasingTop.java:48-54), fired at the pump's
+// idle boundary -- the engine's equivalent of the per-frame refreshHandLayout
+// seam (CardGroup.java:231) at the ONE moment the Java gate can pass. The
+// gate, term by term:
+//   * actions.isEmpty()        -> s.action_count == 0. Mid-queue hand
+//     refreshes never fire in the game either (the term fails there), so
+//     idle-only is exact, not an approximation. The same term is what makes
+//     `!AbstractDungeon.isScreenUp` redundant here: an engine "screen" is a
+//     pending CHOOSE_CARD at the queue head, which keeps action_count > 0.
+//   * hand.isEmpty()           -> s.hand_count == 0.
+//   * canDraw                  -> s.turn >= 1. The latch is set at
+//     atTurnStart, cleared ONLY at atPreBattle (:33-41), so it is exactly
+//     "some turn has started this combat" -- which keeps the pre-battle
+//     pump's idle (empty hand, full draw pile) from firing a draw the game
+//     does not.
+//   * !turnHasEnded            -> structural at an idle: end-turn processing
+//     runs to completion inside the END step and never idles.
+//   * !disabledUntilEndOfTurn  -> structurally unreachable: the game sets it
+//     when the card queue's only entry is the end-turn autoplay
+//     (GameActionManager.java:204-206), a window inside that same atomic END
+//     step; no engine idle can observe it.
+//   * no "No Draw"             -> the player-power scan (interp.cpp's DRAW
+//     gate idiom; NoDrawPower carries the -1 no-amount marker, so only the
+//     id is read).
+//   * piles nonempty           -> draw_count + discard_count > 0, which is
+//     also what terminates the refire loop: each fired draw either fills the
+//     hand (gate fails on hand_count) or finds the piles empty.
+// Effect: addToBot DrawCardAction(player, 1) (:52-53; the flash and
+// RelicAboveCreatureAction are presentation), then keep pumping -- the hand
+// can empty again this turn and the game's Top fires again.
+//
+// First live witness: s243_breadth STS432297 (Hexaghost, floor 16) -- the
+// game's Top drew on a mid-turn emptied hand, the sim's deferred row did
+// not, and the fight forked on draw order. The registry row's DEFERRED note
+// is amended by the commit that adds this.
+[[nodiscard]] bool unceasing_top_fires(const CombatState& s) noexcept {
+    if (s.hand_count != 0 || s.action_count != 0 || s.turn < 1) {
+        return false;
+    }
+    if (static_cast<int>(s.draw_count) + static_cast<int>(s.discard_count) ==
+        0) {
+        return false;
+    }
+    if (!player_has_relic(s, RelicId::UNCEASING_TOP)) {
+        return false;
+    }
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id ==
+            static_cast<uint16_t>(PowerId::NO_DRAW)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void pump(CombatState& s, MonsterTurnFn take_turn) noexcept {
     for (;;) {
         const PumpStepResult r = pump_step(s, take_turn);
-        if (r.outcome == PumpOutcome::WAITING_ON_USER ||
-            r.outcome == PumpOutcome::COMBAT_OVER) {
+        if (r.outcome == PumpOutcome::COMBAT_OVER) {
             return;
         }
+        if (r.outcome != PumpOutcome::WAITING_ON_USER) {
+            continue;
+        }
+        if (!unceasing_top_fires(s)) {
+            return;
+        }
+        ActionQueueItem draw{};
+        draw.opcode = kOpcodeDrawCard;
+        draw.src = kActorPlayer;
+        draw.tgt = kActorPlayer;
+        draw.amount = 1;
+        draw.flags = 0;
+        add_to_bottom(s, draw);
     }
 }
 
