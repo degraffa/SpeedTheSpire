@@ -142,6 +142,19 @@ public class GameStateListener {
         if (AbstractDungeon.player != null && AbstractDungeon.player.isEscaping) {
             return false;
         }
+        // ... and through the settle LAG: updateEscapeAnimation's expiry frame
+        // clears isEscaping in the same breath as it calls endBattle
+        // (AbstractPlayer.java:2286-2291), but the ROOM finishes the battle in
+        // its own later update (isBattleOver -> the battle-over block flips
+        // phase COMPLETE and opens the reward screen), so for a frame or two
+        // the state reads "phase COMBAT, isEscaping false, battle over" -- and
+        // the first recapture campaign proved a command CAN land there: five of
+        // eighteen runs burned a potion in that gap (game consumed it
+        // post-settle; the sim, already in COMBAT_REWARD, rightly refuses an
+        // in-combat-only potion). Hold until the room has actually moved on.
+        if (inCombat && AbstractDungeon.getCurrRoom().isBattleOver) {
+            return false;
+        }
         // This check happens before the rest since dying can happen in combat and messes with the other cases.
         if (newScreen == AbstractDungeon.CurrentScreen.DEATH && newScreen != previousScreen) {
             return true;
