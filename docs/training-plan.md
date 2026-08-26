@@ -310,12 +310,24 @@ Phases and gates are the Phase T ledger's structure
   eval harness. **No durable training before the leak gates are green and R
   is measured.**
 - **T2 (combat expert iteration, parallel with S2):** snapshot bank from
-  survival-biased play stratified by floor/deck/HP; from-scratch ExIt with
+  survival-biased play *and* from TE.3's handicap-assisted deep-state
+  generator (driver-side assist only — interpreter-enqueued real damage
+  plus rollback-on-death, so every harvested state is a legal engine state
+  carrying its assist level as provenance; states harvested under assist
+  are legal but distribution-shifted, so the bank stratifies/weights on
+  that provenance rather than assuming it away), stratified by
+  floor/deck/HP; from-scratch ExIt with
   the exploration kit stated up front (Gumbel root sampling,
   action-sampling temperature, replay freshness — first-generation collapse
   is the classic failure); leaf currency V0→V1; exactly-solvable
   micro-combats as permanent ground-truth search tests; branch-K
   counterfactual resets with common random numbers at macro decisions.
+  Pre-registered contingency, not a commitment: if the from-scratch loop
+  stalls after the declared exploration kit is exhausted, the next lever
+  is assist-*annealed* generation (curriculum over rules, reusing the
+  TE.3 knob) — adopted only via a change-log entry here, because rule
+  annealing trains against a game whose optimal play differs from the
+  real one and must never become a silent default.
 - **T3 (Act-1 integrated agent):** macro imitation heads;
   encounter-outcome pretraining; run-level expectimax planner;
   bootstrapped-horizon full-run training valued by V1; behavioral
@@ -458,3 +470,13 @@ scheduling before touching anything else.
 - 2026-08-01 — document created (proposed, uncommitted).
 - 2026-08-01 — landed; the §8.9 InitialPlan.md patches were discharged in
   the same change per conventions §4.
+- 2026-08-26 — §4.3 T2 amended: the snapshot bank gains a second source,
+  the TE.3 handicap-assisted deep-state generator (sim-repo task; assist
+  damage through the effect interpreter + rollback-on-death, legal states
+  only, assist-level provenance recorded), motivated by the measured E0
+  reach ceiling (~×30 loss rate per act, S2-G1 soak `victories = 0`); a
+  pre-registered assist-annealing contingency recorded for a stalled T2.2
+  cold start. Idea origin: external (Jorbs's handicap-annealing
+  curriculum), adopted as *state generation*, deliberately not as
+  rule-annealed training. Ledger owner: TE.3; T2.1/T2.2 annotated in both
+  ledgers per the mirror rule.

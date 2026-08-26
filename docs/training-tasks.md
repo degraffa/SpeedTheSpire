@@ -334,6 +334,41 @@ force run 1 with `workflow_dispatch` after this lands).
   7 UNVERIFIED markers each owned by a ledger row). G7 "Then:" updated;
   Wave 1 (S2.01–S2.04) dispatched by the orchestrator at landing.
 
+- **TE.3** `[ ]` ∥ **Handicap-assisted deep-state generator.** Sim-side
+  driver that reaches Act 2–3 states cheaply for the T2.1 snapshot bank
+  (and any S2-side coverage use), closing the measured gap that scripted
+  policies lose ~×30 per act (S2-G1 soak: `victories = 0`, so unassisted
+  harvesting starves the deep strata). Mechanism contract — **assist,
+  don't mutate**, with implementation latitude inside it: (a) per-turn
+  assist damage enqueued through the effect interpreter as real DAMAGE
+  effects (real triggers and death handling; no fake powers, no direct
+  monster-HP pokes, no player hp/max-hp edits), and (b) death rescue by
+  floor-boundary snapshot + rollback-and-escalate (on player death,
+  restore the snapshot, raise the assist level, continue) — so every
+  harvested state is a legal engine state with a legitimately-accumulated
+  deck/relic/gold/HP progression; the *trajectory* is impossible, the
+  *states* are not. Assist schedule deterministic from (seed, config),
+  config hash in artifact identity (TE.1 discipline). Every snapshot
+  records provenance — assist level at harvest + rolled-back death count —
+  so downstream training stratifies/weights/excludes on it (plan §4.3:
+  the distribution shift is measured, not assumed). Harvest container
+  format documented for the training repo; bank formatting itself stays
+  T2.1's. Origin: external idea (Jorbs's handicap-annealing curriculum),
+  adopted per the 2026-08-26 plan change-log entry as state generation
+  only.
+  **Deps:** — (S2-G1 content and the landed E0 policy seam suffice;
+  coordinates with, never starves, the open S2.43/S2-G2 work per the
+  plan §4.4 capacity ordering)
+  **Acceptance:** a cohort of ≥ 500 assisted runs harvests ≥ 10k
+  snapshots (floor-boundary and combat) with ≥ 30 % from Act 2+ floors
+  and every RunPhase reachable in a three-act run represented, boss chest
+  included; ≥ 1,000 sampled snapshots reload, step through `advance`
+  under the debug preset, and pass the `make_hidden_twin` spot-check;
+  same (seed, config) → byte-identical harvest; reach report (per-act
+  reach, floor/deck-size distributions, assist-level histogram,
+  rolled-back death counts) vs the TE.1 survival-biased baseline
+  committed under `docs/verification/`. **Log:** —
+
 ---
 
 ## Phase T1 — Training repo bootstrap (Gate GT1)
@@ -439,14 +474,19 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
 - **T2.1** `[ ]` ∥ **Snapshot bank.** Reachable-state harvesting from
   survival-biased policies (the four landed B5.1 E0 heuristics suffice for
   the first bank; TE.1's campaign drivers and, later, agent checkpoints
-  improve it — TE.1 is deliberately not a dep), stratified by
+  improve it — TE.1 is deliberately not a dep; deep strata additionally
+  from TE.3's handicap-assisted generator, whose assist-level and
+  rolled-back-death provenance fields carry into the bank schema so
+  training can stratify, weight, or exclude on them — TE.3 is likewise an
+  accelerant, not a dep), stratified by
   floor/deck-archetype/HP; branch-K memcpy reset tooling; bank format
   versioned with the trajectory schema.
   **Deps:** GT1 **Acceptance:** bank of ≥ 100k snapshots with the
   stratification report: ≥ 20 % of snapshots from floors 8+ and every
   RunPhase represented (vs the random-policy baseline's 97.6 % floor-1–7
-  mass); reload + twin-test spot check green on ≥ 1,000 sampled
-  snapshots. **Log:** —
+  mass), with a provenance breakdown (survival-biased vs handicap-assisted)
+  whenever TE.3 states are included; reload + twin-test spot check green
+  on ≥ 1,000 sampled snapshots. **Log:** —
 
 - **T2.2** `[ ]` **Combat ExIt loop v1.** From-scratch expert iteration on
   the bank: teacher search at high budget → distill policy + value —
@@ -458,7 +498,10 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   generation. Production-loop plumbing per plan §5 lands here: atomic
   weight hot-swap, day-one telemetry (learner ingest vs actor production,
   steps-per-run per weights version), and ≥ 1 permanent debug-preset
-  worker.
+  worker. Pre-registered fallback (plan §4.3 contingency): if the paired
+  bars below stay unmet after the declared exploration kit is exhausted,
+  the next lever is assist-*annealed* generation via the TE.3 knob —
+  adopted only with a plan change-log entry, never silently.
   **Deps:** T2.1, T1.3 **Acceptance:** on the frozen combat suite, paired:
   search > direct policy > scripted baselines at p < 0.01, and the
   distilled student retains ≥ 60 % of the paired search gain (thresholds
@@ -635,3 +678,9 @@ desired.
   `docs/*-tasks.md` ledgers and `docs/*-log.md` archives (protocol bullet
   discharged); stage-b's G7 Log now points at the campaign handoff and
   records TE.2's ownership of the S2 scope exercise.
+- 2026-08-26 — TE.3 added (handicap-assisted deep-state generator), per
+  the same-day plan §4.3 amendment; T2.1 gains the TE.3 bank source +
+  provenance-breakdown acceptance line, T2.2 gains the pre-registered
+  assist-annealing fallback sentence. T2.x edits mirrored verbatim into
+  `SpireTrainer/docs/training-tasks.md` per its tracked-in-both-places
+  rule.
