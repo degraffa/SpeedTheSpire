@@ -2247,6 +2247,42 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   actually asserts UB-freedom. Still owed by the campaign itself:
   everything in the Acceptance line, the Mind Bloom directed capture, the
   fork-redeploy/bottle row, and the trap-5 playtime recording duty.
+  **Campaign launched 2026-08-26 (owner go-ahead; breadth wave complete,
+  triage in progress).** Pre-flight: trap-5 playtime anchor landed in the
+  fork + translator (`oracle.playtime`, disposition `oracle`; pinned) and
+  the bottle row verified already-satisfied (Track C, see the corrected
+  row). BREADTH (S2-G2 item 1 evidence): 2,000 distinct sequential A20
+  seeds — `s243_breadth_rand` 500 @ random-legal, `_take` 750 + `_skip`
+  750 @ survival external with the S2.42 boss-relic TAKE/SKIP cohort
+  configs, policy-seed 1234 — 2,000/2,000 seeds completed, 0 failed,
+  ~236k captured actions at ~38 actions/s aggregate. Reach, measured:
+  Act-1 boss fights 221/750 take + 212/750 skip (29.5 %/28.3 % — TE.1's
+  31 % holds at scale), 19 Act-1 boss KILLS (8 take + 11 skip), 19 Act-2
+  entries, deepest floor 27, **0 Act-2 boss fights** — the §8 escalation
+  number: breadth-policy depth alone cannot fill G2-2/G2-3, so the depth
+  cohorts need either the sanctioned sim-consulting driver (S2.V2, named
+  by design §6's driver-risk paragraph — the ledger task does not exist
+  yet and would need opening) or seed-targeted directed captures once
+  `seed_scan --need-boss-kill-act 2` cohorts exist; decide at the next
+  session. TRIAGE (Stage B discipline, zero-wildcard): 94/2,000
+  state_divergence as captured; worked to SIX root causes, all landed
+  same-day — the replay command map's boss-chest seam (every one of the
+  19 Act-2 crossers; all 19 replay clean through boss kill → chest →
+  both relic branches → act transition), the FiredAccum boss_ids fold,
+  the stale live-gold projection, the fairy live-belt burn, the Addict
+  one-click leave, and Unceasing Top's deferred onRefreshHand (first
+  live witness) — leaving 68/94 replay-clean at their run terminals plus
+  18 Smoke-Bomb escape-window capture artifacts (the fork's readiness
+  held ready through the 2.5 s escape animation; closed at the source in
+  two rounds — the isEscaping hold, then the endBattle settle-lag hold,
+  pin `370CBFA8…` — 13/18 recaptured clean, 5 re-queued under the
+  lag-hold jar) and **7 open residuals**, each with a per-run lead
+  (Gremlin Leader minion slots, Runic Pyramid, Ancient Tea Set, a
+  floor-3 room disagreement, Ritual-Dagger-adjacent misc, a potion-slot
+  case, a combat-over case) held with evidence in the data root's
+  `s243_triage_notes.md`. The re-run of `--replay` over the full
+  divergent set is the retest instrument; classifications regenerate
+  with the next `postprocess` pass.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool
