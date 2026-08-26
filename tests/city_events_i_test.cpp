@@ -244,7 +244,13 @@ TEST(Addict, LeaveIsStateNeutralAndTheEventHasNoA15Branch) {
     choose(a15, 2);
     EXPECT_EQ(a15.run.gold, gold);
     EXPECT_EQ(a15.run.relic_count, relics);
-    choose(a15, 0);
+    // ONE click: the Java's default arm calls openMap() at the press itself
+    // (Addict.java:65-69), so the rewritten single-button page is installed
+    // behind an already-open map and is never clicked. This test's earlier
+    // form spent a second choose here, which is exactly the extra page that
+    // put the sim a floor behind both Act-2 event captures of the
+    // s243_breadth campaigns -- pay and rob DO keep their second click (the
+    // two flows above), leave does not.
     EXPECT_EQ(a15.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 }
 

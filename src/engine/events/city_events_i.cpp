@@ -162,6 +162,17 @@ EventDialogStatus addict_choose(RunController& rc, EventDialogState& es,
     if (es.screen != 0) {
         return EventDialogStatus::FINISHED;
     }
+    if (option >= 2) {
+        // The `default` arm (:65-69): unlike pay and rob, LEAVE calls
+        // this.openMap() at the press itself, so the rewritten single-button
+        // page (screenNum = 1, :71) is installed BEHIND an already-open map
+        // and is never clicked -- the same unreachable dressing as Tomb of
+        // Lord Red Mask's leave (beyond_events.cpp). One click, FINISHED.
+        // Modelling it as a page put the sim one screen -- and then one
+        // whole floor -- behind every capture that declined the Addict
+        // (both Act-2 event divergences of the s243_breadth campaigns).
+        return EventDialogStatus::FINISHED;
+    }
     if (option == 0) {
         // :46-49, in Java statement order: the relic is ROLLED, then 85 gold
         // is lost, then the relic is obtained. The gold loss sits between the
