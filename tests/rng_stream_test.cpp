@@ -307,9 +307,12 @@ TEST(RngStreamGolden, FloorAndActDerivationMatchGoldenSet5) {
             ASSERT_EQ(got.s0, exp_s0) << "act " << act << " s0";
             ASSERT_EQ(got.s1, exp_s1) << "act " << act << " s1";
 
-            // Cross-check the header's offset arithmetic independently.
-            const RngStream ref =
-                sts::engine::from_seed(entry.seed + kActOffset[act - 1]);
+            // Cross-check the header's offset arithmetic independently. The
+            // sum wraps through uint64_t exactly as map_stream's does: golden
+            // set 5's Long.MAX_VALUE seed makes the signed spelling UB.
+            const RngStream ref = sts::engine::from_seed(static_cast<int64_t>(
+                static_cast<uint64_t>(entry.seed) +
+                static_cast<uint64_t>(kActOffset[act - 1])));
             EXPECT_EQ(got.s0, ref.s0) << "act " << act << " offset arithmetic";
             EXPECT_EQ(got.s1, ref.s1) << "act " << act << " offset arithmetic";
         }

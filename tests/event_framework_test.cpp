@@ -1455,7 +1455,11 @@ TEST(S213EventFlags, EveryIdOneToFiftyOneRoundTripsThroughItsOwnWord) {
             EXPECT_EQ(rs.event_flags, 1u << (id - 1u));
             EXPECT_EQ(rs.event_flags_hi, 0u) << "ids 1..31 must not touch hi";
         } else {
-            EXPECT_EQ(rs.event_flags_hi, 1u << (id - 33u));
+            // Bit (id - 32): id 32 is bit 0. The pin deliberately does NOT
+            // mirror the accessor's expression -- the (id - 33u) era had this
+            // line share the accessor's underflow at id 32, so both sides
+            // wrapped identically and the round trip stayed green over UB.
+            EXPECT_EQ(rs.event_flags_hi, 1u << (id - 32u));
             EXPECT_EQ(rs.event_flags, 0u) << "ids 32..63 must not touch lo";
         }
         // ... and only that id reads set.
@@ -1500,7 +1504,7 @@ TEST(S213EventFlags, AnActTwoDrawSetsTheHiWordAndLeavesTheLoWordAlone) {
     const uint16_t drawn = generate_event(rs);
     ASSERT_EQ(drawn, 41u) << "Nest was the only thing in the pool";
     EXPECT_EQ(rs.event_flags, 0u);
-    EXPECT_EQ(rs.event_flags_hi, 1u << (41u - 33u));
+    EXPECT_EQ(rs.event_flags_hi, 1u << (41u - 32u));
     EXPECT_TRUE(event_flag_test(rs, 41));
     EXPECT_EQ(rs.event_membership, 0u);
 }

@@ -244,7 +244,14 @@ constexpr void advance_counter_to(RngStream& s, int32_t target) noexcept {
 // at floor-transition time. Counter starts at 0.
 [[nodiscard]] constexpr RngStream floor_stream(int64_t run_seed,
                                                int32_t floor_after_increment) noexcept {
-    return from_seed(run_seed + static_cast<int64_t>(floor_after_increment));
+    // The sum wraps THROUGH uint64_t: Java's `seed + floorNum` is a long
+    // addition with defined two's-complement wraparound, and golden set 5
+    // pins a run_seed of Long.MAX_VALUE where `+ floor` overflows. Signed
+    // overflow in C++ is UB (UBSan flagged exactly this line); the unsigned
+    // round trip is the bit-identical, defined spelling of Java's wrap.
+    return from_seed(static_cast<int64_t>(
+        static_cast<uint64_t>(run_seed) +
+        static_cast<uint64_t>(static_cast<int64_t>(floor_after_increment))));
 }
 
 // Act-scoped mapRng seed (design doc §3.4; Exordium/TheCity/TheBeyond/
@@ -257,7 +264,10 @@ constexpr void advance_counter_to(RngStream& s, int32_t target) noexcept {
     constexpr int64_t kActMult[5] = {0, 1, 100, 200, 300};
     const int64_t offset =
         static_cast<int64_t>(act_num) * kActMult[act_num];
-    return from_seed(run_seed + offset);
+    // Same defined-wrap spelling as floor_stream above: Java's long addition
+    // wraps, C++'s signed addition must not be allowed to.
+    return from_seed(static_cast<int64_t>(static_cast<uint64_t>(run_seed) +
+                                          static_cast<uint64_t>(offset)));
 }
 
 }  // namespace sts::engine

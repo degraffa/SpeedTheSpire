@@ -2260,6 +2260,18 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                         out.can_choose_node[x] = true;
                     }
                 }
+            } else if (run_cur_row(rc) >= kMapRows) {
+                // Above the act's row range no node choice exists -- the same
+                // high guard map_edge_connects applies, for the same reason:
+                // run_cur_row saturates BELOW at -1 (the first-pick branch),
+                // but an off-nominal (act, floor) pair -- act 0's base is -17,
+                // so a value-init controller phase-flipped to MAP_CHOICE puts
+                // row 16 here -- would otherwise index rs.map out of bounds.
+                // In every reachable state MAP_CHOICE has row <= kMapRows-2
+                // (row 14's only onward edge is the boss edge, and the boss
+                // floor itself never re-enters MAP_CHOICE), so this arm offers
+                // nothing rather than asserting: the mask is a total pull API
+                // over arbitrary controllers, exactly like map_edge_connects.
             } else {
                 const int y = run_cur_row(rc);
                 const uint8_t e =

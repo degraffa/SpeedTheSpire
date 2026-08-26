@@ -562,7 +562,7 @@ struct PublicView {
     PvMask action_mask;
 
     // ======================= v3 (S2.13) tail append =========================
-    // The FIRED bitset's second word: event ids 32..63 at bit (id-33), the
+    // The FIRED bitset's second word: event ids 32..63 at bit (id-32), the
     // Act-2/3 events S2.02 registered and S2.13 made drawable. It sits AFTER
     // action_mask rather than beside `event_flags` because only a true tail
     // append leaves every v2 offset -- the mask channel's included -- where it

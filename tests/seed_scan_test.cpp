@@ -161,7 +161,7 @@ TEST(SeedScanEventFlags, BitIsIdMinusOne) {
     // shifting out of range.
     //
     // S2.13 made those ids drawable and split the ENGINE-side storage into two
-    // words (RunState::event_flags + event_flags_hi, bit id-1 / bit id-33,
+    // words (RunState::event_flags + event_flags_hi, bit id-1 / bit id-32,
     // reached through event_flag_set/event_flag_test). It did NOT widen this
     // PLANNER-side helper: `tools/oracle_bridge/planner` was off limits to it
     // (held concurrently by S2.42). So the guard below is still literally true

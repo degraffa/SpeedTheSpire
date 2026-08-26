@@ -301,7 +301,7 @@ struct RunState {
     // the carve does not fit and the answer is to surface a schema bump, not
     // to reorder members.
     //
-    // Bit assignment: id 32..63 -> bit (id - 33). Never open-code that shift --
+    // Bit assignment: id 32..63 -> bit (id - 32). Never open-code that shift --
     // go through event_flag_set / event_flag_test (event_framework.hpp), which
     // route an id to the right word.
     uint8_t  pad_rng_align_lo[2];     // explicit padding (see the PADDING note)

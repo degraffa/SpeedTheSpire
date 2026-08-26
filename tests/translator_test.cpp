@@ -418,7 +418,7 @@ TEST(Translator, ActTwoPoolsParseWithTheCityWidthsAndOrder) {
 
     // The FIRED derivation routes Beggar (id 34) to the HI word -- the old
     // `<< (first_id - 1)` block shift would have been UB at first_id 32.
-    EXPECT_EQ(rs.event_flags_hi, 1u << (34u - 33u)) << "Beggar (id 34)";
+    EXPECT_EQ(rs.event_flags_hi, 1u << (34u - 32u)) << "Beggar (id 34)";
     // Shrine ids are act-independent, so Purifier stays a lo-word id.
     EXPECT_EQ(rs.event_flags & (1u << (15u - 1u)), 1u << (15u - 1u))
         << "Purifier (id 15)";

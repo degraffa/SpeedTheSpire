@@ -344,7 +344,7 @@ void reinit_act_event_pools(RunState& rs) noexcept;
 // --- The one-shot FIRED bitset (ids 1..63 across two words) -------------------
 
 // RunState::event_flags holds ids 1..31 at bit (id-1); RunState::event_flags_hi
-// holds ids 32..63 at bit (id-33). The split exists because widening the first
+// holds ids 32..63 at bit (id-32). The split exists because widening the first
 // word in place is illegal in PublicView and would be an unplanned
 // SCHEMA_VERSION bump in RunState (run_state.hpp's carve note). ALWAYS go
 // through these two; no call site may open-code the shift. An id outside

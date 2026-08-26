@@ -254,7 +254,15 @@ void event_flag_set(RunState& rs, uint16_t id) noexcept {
     if (id >= 1u && id <= 31u) {
         rs.event_flags |= 1u << (id - 1u);
     } else if (id >= 32u && id <= 63u) {
-        rs.event_flags_hi |= 1u << (id - 33u);
+        // Bit (id - 32): the hi word's first id sits at bit 0, tiling all 32
+        // bits. This was `id - 33u` until 2026-08-25 -- an off-by-one that
+        // UNDERFLOWED at id 32 (shift count 0xFFFFFFFF, formally UB; x86's
+        // shift masking happened to park id 32 on bit 31, so every test that
+        // mirrored the same expression stayed green). UBSan flagged it on
+        // every id-32 fire, but as a RECOVERABLE diagnostic ctest never
+        // failed on; -fno-sanitize-recover=undefined (Sanitizers.cmake) now
+        // turns any such diagnostic into a test failure.
+        rs.event_flags_hi |= 1u << (id - 32u);
     }
     // Anything else (0 == EventId::NONE, or a future id past 63) is a no-op
     // rather than a UB shift. A 64th id needs a third word, not a wider shift.
@@ -265,7 +273,7 @@ bool event_flag_test(const RunState& rs, uint16_t id) noexcept {
         return (rs.event_flags & (1u << (id - 1u))) != 0u;
     }
     if (id >= 32u && id <= 63u) {
-        return (rs.event_flags_hi & (1u << (id - 33u))) != 0u;
+        return (rs.event_flags_hi & (1u << (id - 32u))) != 0u;
     }
     return false;
 }

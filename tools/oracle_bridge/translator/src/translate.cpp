@@ -251,7 +251,7 @@ private:
 // Set the FIRED bit for every set bit of `fired_bits` in a pool block whose
 // bit 0 is `first_id`. The FIRED bitset spans TWO RunState words --
 // `event_flags` (ids 1..31, bit id-1) and `event_flags_hi` (ids 32..63, bit
-// id-33) -- because S2.02's Act-2/3 ids do not fit one uint32_t and neither
+// id-32) -- because S2.02's Act-2/3 ids do not fit one uint32_t and neither
 // RunState nor PublicView could widen the first word in place (run_state.hpp's
 // carve note). Routed one id at a time through the engine accessor so the split
 // is stated in exactly one place; the block shift this replaced,

@@ -30,8 +30,16 @@ function(sts_enable_sanitizers target)
     if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
         # clang-cl spellings: /Zi for debug info, /Oy- to keep frame pointers.
         # The GNU -g / -fno-omit-frame-pointer are not accepted by this driver.
+        # -fno-sanitize-recover=undefined: UBSan's DEFAULT is print-and-
+        # continue, and ctest never fails on a recoverable diagnostic -- the
+        # event_flags_hi id-32 shift underflow (event_framework.cpp) printed
+        # "shift exponent 4294967295 is too large" on every asan-preset run
+        # while its test reported OK. Non-recoverable UBSan aborts the test
+        # instead, which is the only mode under which "asan preset green"
+        # actually asserts UB-freedom.
         target_compile_options(${target} PUBLIC
-            -fsanitize=address,undefined /Zi /Oy-)
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined
+            /Zi /Oy-)
 
         # LINKING IS NOT SYMMETRIC WITH THE POSIX CASE, and -fsanitize= on the
         # link line does NOT work here. With an MSVC-style driver CMake emits
@@ -56,8 +64,11 @@ function(sts_enable_sanitizers target)
             clang_rt.asan_dynamic_runtime_thunk-x86_64.lib
             /wholearchive:clang_rt.asan_dynamic_runtime_thunk-x86_64.lib)
     else()
+        # -fno-sanitize-recover=undefined: same rationale as the clang-cl
+        # branch above -- recoverable UBSan diagnostics scroll past ctest.
         target_compile_options(${target} PUBLIC
-            -fsanitize=address,undefined -fno-omit-frame-pointer -g)
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined
+            -fno-omit-frame-pointer -g)
         target_link_options(${target} PUBLIC -fsanitize=address,undefined)
     endif()
 endfunction()
