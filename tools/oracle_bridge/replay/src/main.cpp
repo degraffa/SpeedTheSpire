@@ -114,6 +114,7 @@
 #include "sts/translate/translate.hpp"
 
 #include "command_map.hpp"
+#include "fired_accum.hpp"
 #include "mk_board.hpp"
 
 namespace {
@@ -614,6 +615,12 @@ void print_pool_evidence(const std::string& seed_string, int floor,
 
     RunController rc = run_begin(run.seed, 20);
     GridSession grid;
+    // Cross-record FIRED accumulation (fired_accum.hpp): the translator's
+    // per-record derivation is act-local, so from Act 2 on the expected side
+    // must carry the union of everything the capture attested earlier or an
+    // Act-1 fire false-REDs every later record. Exact for a floor-1 walk --
+    // which --replay structurally is -- and a byte-exact no-op within Act 1.
+    sts::replay::FiredAccum fired;
     bool pending_curse_transform_preview = false;
 
     for (std::size_t k = 0; k < run.records.size(); ++k) {
@@ -627,6 +634,7 @@ void print_pool_evidence(const std::string& seed_string, int floor,
 
         RunState expected = rec.run;
         RunState actual = rc.run;
+        fired.fold(expected);
         project_live_combat_sheet(rc, actual);
         neutralize_incomparable(expected);
         neutralize_incomparable(actual);

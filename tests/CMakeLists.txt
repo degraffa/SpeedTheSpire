@@ -748,6 +748,16 @@ sts_add_test(replay_readout_shapes_test LIBS sts_engine replay_readout_shapes)
 # strings.
 sts_add_test(replay_mk_board_test LIBS replay_mk_board)
 
+# S2.43 pre-work: --replay's cross-record FIRED accumulation
+# (tools/oracle_bridge/replay/src/fired_accum.hpp). The translator's per-record
+# FIRED derivation is act-local, complete only until dungeonTransitionSetup
+# rebuilds the event/shrine lists at an act crossing; the accumulator restores
+# the whole-run view on the expected side. The suite pins the fold's direction,
+# its Act-1 no-op guarantee (what keeps the committed corpus byte-exact), the
+# cross-act union, the shrine-bit aliasing case that ruled out a masking
+# recognizer, and the no-false-green property.
+sts_add_test(replay_fired_accum_test LIBS replay_fired_accum)
+
 # B4.1: map path generation (MapGenerator re-expression) vs the live-game oracle
 # corpus (tests/golden/map_paths/oracle_maps.txt, derived from campaign
 # b13_on20b). Header-only engine code, so it links sts_engine like the other

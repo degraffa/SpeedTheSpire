@@ -50,6 +50,17 @@ target_include_directories(replay_mk_board INTERFACE
 # command-map target keeps standing on its own.
 target_link_libraries(replay_command_map INTERFACE replay_mk_board)
 
+# The cross-record FIRED accumulator (src/fired_accum.hpp): --replay's answer
+# to the translator's act-local FIRED derivation (the S2.13 deferred row). Its
+# own INTERFACE target for the same reason as the three above -- fold in the
+# wrong direction and every Act-1 capture still replays green while the first
+# Act-2 record quietly compares a widened ACTUAL side instead of a widened
+# EXPECTED side. It reads RunState's two flag words, so it links sts_engine.
+add_library(replay_fired_accum INTERFACE)
+target_include_directories(replay_fired_accum INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(replay_fired_accum INTERFACE sts_engine)
+
 add_executable(replay_run_diff src/main.cpp)
 target_link_libraries(replay_run_diff
     PRIVATE oracle_translator nlohmann_json replay_command_map replay_mk_board)
