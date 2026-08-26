@@ -127,6 +127,21 @@ public class GameStateListener {
         if (pendingObtainEffect()) {
             return false;
         }
+        // SpeedTheSpire fork fix (2026-08-26, S2.43 triage): a player escape
+        // (Smoke Bomb) settles only when its 2.5s wall-clock animation ends
+        // (SmokeBomb.use sets isEscaping/escapeTimer, SmokeBomb.java:43-46;
+        // AbstractPlayer.updateEscapeAnimation -> endBattle, :2281-2292). The
+        // fight is still "my turn" with empty queues during that window, so
+        // readiness stayed true and a driver could land `end` INSIDE it --
+        // running a full monster turn before the escape settled, a semantic
+        // outcome dependent on animation timing (9 of 2,000 s243_breadth runs
+        // hit exactly this). Hold readiness until the escape settles, the same
+        // shape as the obtain-effect hold above: narrow (the flag is set only
+        // by the player's own escape) and bounded (the timer always reaches
+        // zero -- no never-ready hang).
+        if (AbstractDungeon.player != null && AbstractDungeon.player.isEscaping) {
+            return false;
+        }
         // This check happens before the rest since dying can happen in combat and messes with the other cases.
         if (newScreen == AbstractDungeon.CurrentScreen.DEATH && newScreen != previousScreen) {
             return true;
