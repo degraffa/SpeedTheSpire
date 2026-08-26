@@ -301,20 +301,26 @@ void neutralize_presentation_only(RunState& s) noexcept {
 }
 
 // DURING a combat the run layer deliberately does not write the live sheet back
-// into RunState: hp/max_hp live in CombatState, gold accrued mid-combat sits in
-// the combat accumulator, and relic counters tick on the combat mirror. All of
-// it is settled in one place when the fight ends (run_advance.cpp's
+// into RunState: hp/max_hp live in CombatState and relic counters tick on the
+// combat mirror, all settled when the fight ends (run_advance.cpp's
 // fold_back_combat). The capture, by contrast, reports the game's live values on
 // every in-combat dump, so a mid-combat record can only be compared against the
 // folded projection. This applies exactly that projection to a COPY -- it makes
 // the comparison STRICTER (the live HP is now checked at every action), it never
 // runs on a reward record, and the fields it touches are compared as usual
 // everywhere else.
+//
+// GOLD is deliberately NOT projected any more: since S2.48 the run layer
+// charges steals AND banks the Hand-of-Greed payout into RunState.gold at
+// every in-combat step boundary (sync_live_gold), so at comparison time the
+// unbanked remainder is zero and the purse is already the game's live purse.
+// The old `actual.gold += combat_gold` here predated that and double-credited
+// exactly the banked amount -- the +40-for-a-+20-kill family the s243_breadth
+// campaigns surfaced (STS431475: ColorlessPotion -> Hand of Greed -> kill).
 void project_live_combat_sheet(const RunController& rc, RunState& actual) noexcept {
     if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT)) return;
     actual.hp = rc.combat.player_hp;
     actual.max_hp = rc.combat.player_max_hp;
-    actual.gold += static_cast<int32_t>(rc.combat.combat_gold);
     const uint8_t n = rc.combat.relic_count < rc.run.relic_count
                           ? rc.combat.relic_count : rc.run.relic_count;
     for (uint8_t i = 0; i < n; ++i) actual.relics[i].counter = rc.combat.relics[i].counter;

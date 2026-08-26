@@ -62,15 +62,38 @@ namespace sts::replay {
 // simulator holds. Call once per record, in record order, on the EXPECTED
 // state -- before diff_run_states and after translation (the neutralizers do
 // not touch these words, so order against them is immaterial).
+//
+// `boss_ids` rides the same fold, for the same reason in a different field:
+// the translator fills only boss_ids[stock_act - 1] from the record's own
+// `act_boss` (its comment records the honest limit), so the moment a run
+// crosses into Act 2 the expected side's slot 0 collapses to 0 while the
+// simulator's run-scoped write (run_advance.cpp, the act transition) rightly
+// keeps Act 1's boss -- the first residual the fixed boss-chest walk
+// surfaced (STS431337: `boss_ids[0]: 0 -> 18` on every post-crossing
+// record). The union rule is per-slot nonzero-wins; the exactness argument
+// is the FIRED one verbatim -- each act's slot is attested by that act's own
+// records before the crossing, a slot never changes within an act (the boss
+// list's front is fixed at construction; a second boss in one act rewrites
+// nothing, A20's double boss lives in its own storage), and 0-vs-nonzero
+// substitution only carries forward what the capture itself attested, so a
+// sim/capture disagreement on a SET slot still diffs.
 struct FiredAccum {
     uint32_t lo = 0;
     uint32_t hi = 0;
+    uint16_t boss_ids[sts::engine::kBossIdCap] = {};
 
     void fold(sts::engine::RunState& expected) noexcept {
         lo |= expected.event_flags;
         hi |= expected.event_flags_hi;
         expected.event_flags = lo;
         expected.event_flags_hi = hi;
+        for (int i = 0; i < sts::engine::kBossIdCap; ++i) {
+            if (expected.boss_ids[i] != 0) {
+                boss_ids[i] = expected.boss_ids[i];
+            } else {
+                expected.boss_ids[i] = boss_ids[i];
+            }
+        }
     }
 };
 

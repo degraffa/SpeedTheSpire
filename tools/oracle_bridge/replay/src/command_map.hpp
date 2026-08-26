@@ -58,6 +58,9 @@ using sts::engine::RestScreen;
 using sts::engine::RunActionMask;
 using sts::engine::RunController;
 using sts::engine::RunPhase;
+using sts::engine::RoomType;
+using sts::engine::kBossChestOfferCount;
+using sts::engine::kChooseCancelGrid;
 using sts::engine::kChooseShopColoredBase;
 using sts::engine::kChooseShopColorlessBase;
 using sts::engine::kChooseShopPotionBase;
@@ -1290,6 +1293,60 @@ struct ShopTarget {
                 return m;
             }
         }
+        // THE LIBRARY's twenty-card read (TheLibrary.java:66-91): the game
+        // hosts the one-pick on GridCardSelectScreen, so the capture labels it
+        // GRID -- but the run layer models it as the event's BOARD, twenty
+        // ordinary event options (city_events_ii.cpp, library_menu) with NO
+        // event grid_kind. Recognize it by shape, and map the index REVERSED:
+        // the Java builds the group by addToBottom in roll order, and
+        // addToBottom is a PREPEND (CardGroup.java:459-461 -- the same fact
+        // the Bottled-trio session snapshots descending for), so the game's
+        // grid runs in REVERSE roll order while the sim's board is roll
+        // order. The reversal is verified POSITIONALLY by card name over the
+        // whole board -- the M&K corpus taught that order claims get checked,
+        // not assumed (this arm's first draft mapped identity, and STS432432
+        // refuted it on row 0: Rupture, the first roll, sits at the END of
+        // the capture's list). Mandatory and cancel-free (open(group, 1, ...,
+        // false), :91), so no GridSession buffering: the pick commits at the
+        // press.
+        if (rc.phase == static_cast<uint8_t>(RunPhase::EVENT_DIALOG) &&
+            rc.event.grid_kind == static_cast<uint8_t>(EventGridKind::NONE) &&
+            verb == "choose" && !s.card_offer.empty()) {
+            RunActionMask mask{};
+            legal_actions(rc, mask);
+            int options = 0;
+            for (int i = 0; i < kEventOptionCap; ++i) {
+                if (mask.can_choose_event_option[i]) ++options;
+            }
+            if (options == static_cast<int>(s.card_offer.size())) {
+                const int idx = arg(1);
+                if (idx < 0 || idx >= options) {
+                    m.reason = "event-board grid `choose " +
+                               std::to_string(idx) + "` is outside the " +
+                               std::to_string(options) + "-card board";
+                    return m;
+                }
+                for (int i = 0; i < options; ++i) {
+                    const auto id = static_cast<CardId>(
+                        rc.event.board[options - 1 - i].card_id);
+                    if (std::string(sts::registry::card_game_id(id)) !=
+                        s.card_offer[static_cast<std::size_t>(i)]) {
+                        m.reason = "event-board grid row " + std::to_string(i) +
+                                   " is " + s.card_offer[static_cast<std::size_t>(i)] +
+                                   " in the capture but the sim's board, read "
+                                   "in reverse roll order, has " +
+                                   std::string(sts::registry::card_game_id(id)) +
+                                   " there; the two boards disagree";
+                        return m;
+                    }
+                }
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(make_action(
+                    ActionVerb::CHOOSE,
+                    static_cast<uint8_t>(options - 1 - idx)));
+                return m;
+            }
+        }
         // FIRST, the classification that used to be missing. If the sim has no
         // grid up, the capture is driving a screen the engine never opened, and
         // the old code found that out one step later as "grid choose index has
@@ -1410,6 +1467,25 @@ struct ShopTarget {
             // forever: the following map `choose` became LEAVE_ROOM, and its
             // CHOOSE(dst) fell into `ITEM_REWARD`'s `else` branch as
             // `claim_reward(dst)`.
+            // A BOSS room's reward proceed is NOT the lazy-leave case: the
+            // game's ProceedButton goes STRAIGHT to the synthetic
+            // TreasureRoomBoss (goToTreasureRoom, ProceedButton.java:179-187)
+            // -- floor++, trap-7 reseed, three BOSS-pool pops at entry -- with
+            // no map overlay to defer through and no way back. The sim's
+            // CHOOSE kChooseProceed on the boss COMBAT_REWARD is that same
+            // transition (run_advance.hpp: "the boss reward screen's proceed
+            // enters a real TreasureRoomBoss"). Mapping it to NOOP instead
+            // left the sim parked in COMBAT_REWARD on floor 16 while the
+            // capture opened the chest -- the uniform 24-field floor-17
+            // CHEST divergence every Act-2 crosser of the s243_breadth
+            // campaigns hit.
+            if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD) &&
+                rc.room_type == static_cast<uint8_t>(RoomType::Boss)) {
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(
+                    make_action(ActionVerb::CHOOSE, kChooseProceed));
+                return m;
+            }
             // Leaving is deferred to the map choice. This applies at Neow too:
             // the map is an overlay and `return` can reopen the still-mounted
             // item-reward screen, including claimable potions. The actual map
@@ -1419,6 +1495,40 @@ struct ShopTarget {
             return m;
         }
         m.reason = "reward-screen command '" + verb + "' is not modelled";
+        return m;
+    }
+
+    if (s.screen_type == "BOSS_REWARD") {
+        // The boss chest's three-relic pick screen (BossRelicSelectScreen).
+        // Sim state: RunPhase::BOSS_TREASURE with boss_chest.screen ==
+        // RELIC_SELECT (boss_chest.hpp) -- can_claim_reward[0..2] picks, and
+        // the screen's cancel button is the SKIP (a reversible close back to
+        // CLOSED, kChooseCancelGrid; run_advance.hpp's BOSS_TREASURE row).
+        if (rc.phase != static_cast<uint8_t>(RunPhase::BOSS_TREASURE)) {
+            m.reason = "boss-relic screen arrived while the sim is in " +
+                       std::string(phase_name(rc.phase)) +
+                       ", not the boss chest room";
+            return m;
+        }
+        if (verb == "choose") {
+            const int idx = arg(1);
+            if (idx < 0 || idx >= static_cast<int>(kBossChestOfferCount)) {
+                m.reason = "boss-relic choose index is outside the three "
+                           "offers";
+                return m;
+            }
+            m.kind = MapKind::ACTIONS;
+            m.actions.push_back(
+                make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(idx)));
+            return m;
+        }
+        if (verb == "skip") {
+            m.kind = MapKind::ACTIONS;
+            m.actions.push_back(
+                make_action(ActionVerb::CHOOSE, kChooseCancelGrid));
+            return m;
+        }
+        m.reason = "boss-relic screen command '" + verb + "' is not modelled";
         return m;
     }
 
@@ -1470,6 +1580,34 @@ struct ShopTarget {
     }
 
     if (s.screen_type == "CHEST") {
+        // The label covers BOTH chest rooms: the map's TreasureRoom and the
+        // post-boss TreasureRoomBoss (RunPhase::BOSS_TREASURE), whose CLOSED
+        // and DONE states render the same CHEST screen. The two rooms need
+        // OPPOSITE proceed semantics, so the boss arm is taken first.
+        if (rc.phase == static_cast<uint8_t>(RunPhase::BOSS_TREASURE)) {
+            if (verb == "choose") {
+                // `open` -- legal only while the chest sits CLOSED
+                // (boss_chest.hpp: showing the screen mutates nothing, so a
+                // reopen offers the same three relics).
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(
+                    make_action(ActionVerb::CHOOSE, kChooseOpenChest));
+                return m;
+            }
+            if (verb == "proceed") {
+                // NOT the treasure room's deferred map-overlay leave: the boss
+                // chest's proceed IS the act transition (run_advance.hpp,
+                // S2.12 -- dungeonTransitionSetup, then the next act's map at
+                // MAP_CHOICE), from CLOSED (the noPick path) and DONE alike,
+                // and there is nothing to bounce back to. Emit the real press.
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(
+                    make_action(ActionVerb::CHOOSE, kChooseProceed));
+                return m;
+            }
+            m.reason = "boss-chest command '" + verb + "' is not modelled";
+            return m;
+        }
         if (verb == "choose") {
             if (rc.phase != static_cast<uint8_t>(RunPhase::TREASURE_ROOM)) {
                 m.reason = "chest open arrived while the sim is in " +

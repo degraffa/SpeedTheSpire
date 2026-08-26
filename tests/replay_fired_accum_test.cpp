@@ -130,4 +130,38 @@ TEST(ReplayFiredAccum, FoldSubstitutesTheUnionNotTheRecord) {
     EXPECT_EQ(fresh.event_flags_hi, want.event_flags_hi);
 }
 
+// boss_ids rides the same fold (the translator fills only the record's own
+// act's slot from `act_boss`): an Act-2 record's zero slot 0 is carried
+// forward from what Act 1's own records attested. Within Act 1 the fold is a
+// no-op on a set slot -- the committed-corpus guarantee, same as FIRED.
+TEST(ReplayFiredAccum, BossIdSlotCarriesAcrossTheActCrossing) {
+    FiredAccum acc;
+    RunState act1{};
+    act1.boss_ids[0] = 18;  // what the Act-1 records' act_boss joined to
+    acc.fold(act1);
+    EXPECT_EQ(act1.boss_ids[0], 18) << "a set slot must fold as a no-op";
+
+    RunState act2{};  // post-crossing translation: slot 0 collapsed to 0
+    act2.boss_ids[1] = 33;
+    acc.fold(act2);
+    EXPECT_EQ(act2.boss_ids[0], 18) << "Act 1's attested boss must carry";
+    EXPECT_EQ(act2.boss_ids[1], 33);
+}
+
+// No false green: the fold substitutes only into a ZERO slot. A capture that
+// attests a DIFFERENT boss than the accumulator has seen keeps its own value
+// on the expected side, so a sim/capture disagreement still diffs.
+TEST(ReplayFiredAccum, BossIdFoldNeverOverwritesAnAttestedSlot) {
+    FiredAccum acc;
+    RunState first{};
+    first.boss_ids[0] = 18;
+    acc.fold(first);
+
+    RunState conflicting{};
+    conflicting.boss_ids[0] = 19;  // the capture says a different boss
+    acc.fold(conflicting);
+    EXPECT_EQ(conflicting.boss_ids[0], 19)
+        << "an attested slot is the capture's word, never the accumulator's";
+}
+
 }  // namespace
