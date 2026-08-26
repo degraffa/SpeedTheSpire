@@ -182,9 +182,13 @@ void spend_wing_boots_charge(RunState& rs) noexcept {
 // Burn the fairies the combat consumed. The combat mirror is a COUNT, not a slot
 // map, so the number spent is (what the belt still holds) - (what the mirror has
 // left); the slots are cleared LEFTMOST FIRST, which is the order
-// AbstractPlayer.damage's loop consumes them in. Exactly-once by construction:
-// this runs inside fold_back_combat, and the mirror is re-derived from the belt
-// at the next enter_combat rather than carried across.
+// AbstractPlayer.damage's loop consumes them in. Called at EVERY in-combat step
+// boundary since the S2.43 triage (the game destroys the potion mid-turn,
+// AbstractPlayer.java:1491, so the belt must track it live -- the S2.48
+// live-purse discipline) and again from fold_back_combat as the closing sync.
+// Exactly-once by construction wherever it is called from: each call burns only
+// the delta, after which held == left, and the mirror is re-derived from the
+// belt at the next enter_combat rather than carried across.
 void burn_consumed_fairies(RunController& rc) noexcept {
     const uint8_t held = count_belt_fairies(rc.run);
     const uint8_t left = combat_fairy_armed(rc.combat.flags);
@@ -2809,6 +2813,7 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
     if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
         fill_combat_result(rc.combat, res);
         sync_live_gold(rc);         // this path pumps outside advance()
+        burn_consumed_fairies(rc);  // same live-belt boundary as the advance path
         drain_pending_obtains(rc);
         finish_combat_after_action(rc, res);
     } else {
@@ -2844,9 +2849,10 @@ bool step_discard_potion(RunController& rc, Action a, StepResult& res) noexcept 
         // DECREMENT, do not recompute from the belt: the mirror is
         // (held - already consumed), and a discard lowers `held` by one without
         // changing what was consumed. Recomputing would resurrect a fairy that
-        // had already fired this combat. Floored at 0 for the case where the
-        // discarded slot is one the revive had logically already spent (the
-        // slots are only cleared at fold-back).
+        // had already fired this combat. Since the live-belt burn (S2.43) a
+        // spent fairy leaves the belt at its own step boundary, so held == left
+        // at every command boundary and the discarded slot is always a real
+        // fairy; the floor at 0 stays as defence in depth.
         if (was_fairy && rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
             const uint8_t armed = combat_fairy_armed(rc.combat.flags);
             rc.combat.flags = with_combat_fairy_armed(
@@ -3189,6 +3195,15 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
             // greed remainder (sync_live_gold's contract). This is what keeps
             // RunState.gold tracking the game's mid-combat purse.
             sync_live_gold(rc);
+            // The belt keeps the same live discipline (the S2.48 precedent,
+            // extended by S2.43 triage): a Fairy the revive consumed this step
+            // leaves the belt NOW -- the game destroys the potion inside
+            // AbstractPlayer.damage (:1491) mid-turn, so deferring the burn to
+            // fold-back left every later in-combat record holding a potion the
+            // capture no longer shows. burn_consumed_fairies burns exactly
+            // (held - mirror), so the per-step call is idempotent and the
+            // fold-back call becomes the closing sync.
+            burn_consumed_fairies(rc);
             // Before finish_combat_after_action, which may fold the combat back
             // and end it: an obtain that happened during this step must reach
             // the deck while the run layer still has the combat in hand.
