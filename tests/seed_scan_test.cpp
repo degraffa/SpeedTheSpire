@@ -7,8 +7,10 @@
 //   1. The EventId <-> name table. `--need-event "Match and Keep!"` resolving
 //      to the wrong id yields a list of seeds for some other shrine, and every
 //      downstream artifact looks fine.
-//   2. The event_flags bit layout. event_framework.cpp:392 writes bit (id-1);
-//      an off-by-one here reports the neighbouring event.
+//   2. The event_flags bit layout. The engine routes ids 1..31 to
+//      event_flags bit (id-1) and 32..63 to event_flags_hi bit (id-32); the
+//      planner reads the pair as one uint64. An off-by-one on either side
+//      reports the neighbouring event.
 //   3. Determinism. A ScanRow must be a pure function of its ScanCase. If it
 //      is not, the list is unreproducible and the whole premise -- that a scan
 //      predicts what a capture will meet -- is void.
@@ -16,6 +18,8 @@
 //      near-worthless case the rule exists to exclude.
 
 #include "sts/planner/seed_scan.hpp"
+
+#include "sts/engine/event_framework.hpp"
 
 #include <string>
 #include <vector>
@@ -134,62 +138,67 @@ TEST(SeedScanEventNames, ResolvesBothSpellingsCaseInsensitively) {
 
 // --- 2. the flag layout ------------------------------------------------------
 
-TEST(SeedScanEventFlags, BitIsIdMinusOne) {
-    // src/engine/event_framework.cpp:392 -- `rs.event_flags |= 1u << (id - 1)`.
-    // RunState::event_flags is a uint32_t, so only ids 1..31 have a bit; the
-    // loop is bounded by the WORD, not by the enum, and `1u << 31` upward would
-    // itself be UB in this test.
-    const auto has_bit = [](EventId id) {
-        return static_cast<uint32_t>(id) >= 1u && static_cast<uint32_t>(id) <= 31u;
-    };
+TEST(SeedScanEventFlags, CombinedWordMirrorsBothEngineWords) {
+    // The combined-uint64 layout seed_scan.hpp pins: ids 1..31 at bit (id-1)
+    // -- RunState::event_flags verbatim -- and ids 32..63 at bit id, the
+    // engine hi word's bit (id-32) sitting 32 higher. Bit 31 is unused, as
+    // the engine's low word leaves it. (This test's earlier form pinned the
+    // one-word helper's ids-past-31-read-false guard, the under-reporting the
+    // deferred-obligations row recorded; the S2.42-held widening inverted it.)
+    //
+    // The mirror claim is checked LITERALLY: fire each id through the
+    // engine's own accessor and require the planner helper to read the
+    // resulting `lo | (hi << 32)` pair, so the two layouts cannot drift apart
+    // without this loop failing.
     for (const auto& e : sts::planner::event_names()) {
-        if (!has_bit(e.id)) continue;
         SCOPED_TRACE(std::string(e.symbol));
-        const uint32_t bit = 1u << (static_cast<uint32_t>(e.id) - 1u);
-        EXPECT_TRUE(sts::planner::event_flag_set(bit, e.id));
+        sts::engine::RunState rs{};
+        sts::engine::event_flag_set(rs, static_cast<uint16_t>(e.id));
+        const uint64_t flags =
+            static_cast<uint64_t>(rs.event_flags) |
+            (static_cast<uint64_t>(rs.event_flags_hi) << 32);
+        EXPECT_NE(flags, 0u) << "the engine accessor must have a bit for "
+                             << e.symbol;
+        EXPECT_TRUE(sts::planner::event_flag_set(flags, e.id));
         // ... and only that id.
         for (const auto& other : sts::planner::event_names()) {
             if (other.id == e.id) continue;
-            EXPECT_FALSE(sts::planner::event_flag_set(bit, other.id))
+            EXPECT_FALSE(sts::planner::event_flag_set(flags, other.id))
                 << "bit for " << e.symbol << " also read as " << other.symbol;
         }
     }
-    // EventId::NONE never fires and has no bit; a shift by -1 would be UB.
-    EXPECT_FALSE(sts::planner::event_flag_set(0xFFFFFFFFu, EventId::NONE));
-    // S2.02's Act-2/3 ids 32..51 are past the end of THIS word. They read
-    // false for EVERY flags value -- including all-ones -- rather than
-    // shifting out of range.
-    //
-    // S2.13 made those ids drawable and split the ENGINE-side storage into two
-    // words (RunState::event_flags + event_flags_hi, bit id-1 / bit id-32,
-    // reached through event_flag_set/event_flag_test). It did NOT widen this
-    // PLANNER-side helper: `tools/oracle_bridge/planner` was off limits to it
-    // (held concurrently by S2.42). So the guard below is still literally true
-    // of `sts::planner::event_flag_set`, and its consequence is that a
-    // seed-scan row under-reports Act-2/3 fires -- an offline reporting gap,
-    // not a false green. Widening it is a live deferred-obligations row
-    // (owner S2.42); when that lands, this loop inverts.
+    // EventId::NONE never fires and has no bit; ids past 63 have no bit in
+    // either engine word. Both read false for EVERY flags value -- including
+    // all-ones -- rather than shifting out of range.
+    EXPECT_FALSE(sts::planner::event_flag_set(~uint64_t{0}, EventId::NONE));
+    // Bit 31 belongs to NO id: an all-ones value must decode to exactly the
+    // registry's events, so a stray bit 31 can never surface as a phantom row.
     for (const auto& e : sts::planner::event_names()) {
-        if (has_bit(e.id)) continue;
-        SCOPED_TRACE(std::string(e.symbol));
-        EXPECT_GT(static_cast<uint32_t>(e.id), 31u);
-        EXPECT_FALSE(sts::planner::event_flag_set(0xFFFFFFFFu, e.id));
-        EXPECT_FALSE(sts::planner::event_flag_set(0u, e.id));
+        EXPECT_NE(sts::planner::event_flag_set(uint64_t{1} << 31, e.id), true)
+            << "bit 31 wrongly read as " << e.symbol;
     }
 }
 
-TEST(SeedScanEventFlags, DecodesInAscendingIdOrder) {
-    const uint32_t flags = (1u << (12 - 1)) |  // Match and Keep!
-                           (1u << (1 - 1)) |   // Big Fish
-                           (1u << (31 - 1));   // The Woman in Blue
+TEST(SeedScanEventFlags, DecodesInAscendingIdOrderAcrossBothWords) {
+    // Two lo-word ids, the lo word's last id, and two hi-word ids (Beggar 34
+    // at bit 34, Falling 45 at bit 45) -- the ascending join must run
+    // straight across the word boundary, which is exactly what an Act-2/3
+    // coverage read of a scan row depends on.
+    const uint64_t flags = (uint64_t{1} << (12 - 1)) |  // Match and Keep!
+                           (uint64_t{1} << (1 - 1)) |   // Big Fish
+                           (uint64_t{1} << (31 - 1)) |  // The Woman in Blue
+                           (uint64_t{1} << 34) |        // Beggar (id 34)
+                           (uint64_t{1} << 45);         // Falling (id 45)
     const std::vector<EventId> ids = sts::planner::decode_event_flags(flags);
-    ASSERT_EQ(ids.size(), 3u);
+    ASSERT_EQ(ids.size(), 5u);
     EXPECT_EQ(ids[0], EventId::BIG_FISH);
     EXPECT_EQ(ids[1], EventId::MATCH_AND_KEEP);
     EXPECT_EQ(ids[2], EventId::THE_WOMAN_IN_BLUE);
+    EXPECT_EQ(ids[3], EventId::BEGGAR);
+    EXPECT_EQ(ids[4], EventId::FALLING);
 
     EXPECT_EQ(sts::planner::event_flags_text(flags),
-              "Big Fish|Match and Keep!|The Woman in Blue");
+              "Big Fish|Match and Keep!|The Woman in Blue|Beggar|Falling");
     EXPECT_EQ(sts::planner::event_flags_text(0), "");
     EXPECT_TRUE(sts::planner::decode_event_flags(0).empty());
 }
@@ -268,7 +277,7 @@ TEST(SeedScanDeterminism, SeedTextAndValueAgree) {
 
 namespace {
 
-ScanRow FakeRow(uint32_t flags, bool treasure, bool boss, uint32_t floor) {
+ScanRow FakeRow(uint64_t flags, bool treasure, bool boss, uint32_t floor) {
     ScanRow r;
     r.seed = MakeSeed("STS00001");
     r.event_flags = flags;

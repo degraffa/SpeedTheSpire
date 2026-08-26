@@ -134,21 +134,20 @@ std::string_view event_game_id(EventId id) {
     return {};
 }
 
-bool event_flag_set(uint32_t flags, EventId id) {
+bool event_flag_set(uint64_t flags, EventId id) {
     const auto v = static_cast<uint32_t>(id);
-    // event_framework.cpp:392 writes bit (id-1); EventId 0 is NONE and never
-    // fires. RunState::event_flags is a uint32_t, so only ids 1..31 -- the S1
-    // Act-1 rows generate_event can currently return -- have a bit at all.
-    // S2.02's Act-2/3 ids 32..51 exist in the enum but have NO flag bit yet;
-    // widening the word (or splitting it per act) belongs to S2.13, the task
-    // that first makes those ids drawable. Until then this bound is what keeps
-    // the shift in range, so it is a live guard, not a restatement of the
-    // enum's extent.
-    if (v == 0 || v > 31) return false;
-    return (flags & (1u << (v - 1u))) != 0u;
+    // The combined-word layout the header pins: ids 1..31 at bit (id-1) --
+    // the engine's low word verbatim -- and ids 32..63 at bit id, the
+    // engine's hi-word bit (id-32) sitting 32 higher. EventId 0 is NONE and
+    // never fires; ids past 63 have no bit in either engine word (the engine
+    // accessor is a no-op there too), so both bounds stay live guards against
+    // an out-of-range shift.
+    if (v == 0 || v > 63) return false;
+    const unsigned bit = v <= 31 ? v - 1u : v;
+    return (flags & (uint64_t{1} << bit)) != 0u;
 }
 
-std::vector<EventId> decode_event_flags(uint32_t flags) {
+std::vector<EventId> decode_event_flags(uint64_t flags) {
     std::vector<EventId> out;
     for (const EventName& e : event_name_table()) {
         if (event_flag_set(flags, e.id)) out.push_back(e.id);
@@ -156,7 +155,7 @@ std::vector<EventId> decode_event_flags(uint32_t flags) {
     return out;
 }
 
-std::string event_flags_text(uint32_t flags) {
+std::string event_flags_text(uint64_t flags) {
     std::string s;
     for (const EventName& e : event_name_table()) {
         if (!event_flag_set(flags, e.id)) continue;
@@ -213,7 +212,7 @@ namespace {
 // requires -- the terminal controller is observed twice.
 struct Watch {
     uint32_t max_floor = 0;
-    uint32_t event_flags = 0;
+    uint64_t event_flags = 0;
     bool treasure = false;
     bool boss = false;
     // S2.42 per-act depth. Every one of these is a max / OR / latch, so the
@@ -230,10 +229,14 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
     auto* w = static_cast<Watch*>(ctx);
     const auto floor = static_cast<uint32_t>(rc.run.floor);
     if (floor > w->max_floor) w->max_floor = floor;
-    // event_flags is a run-long accumulating bitset (event_framework.cpp:392),
-    // so OR-ing every observation is the same as reading the terminal value --
-    // and stays correct if a future engine change ever clears a bit.
-    w->event_flags |= rc.run.event_flags;
+    // event_flags is a run-long accumulating bitset (event_framework.cpp's
+    // event_flag_set), so OR-ing every observation is the same as reading the
+    // terminal value -- and stays correct if a future engine change ever
+    // clears a bit. BOTH engine words are taken, in the combined layout the
+    // header pins: an Act-2/3 fire lives in event_flags_hi and would
+    // otherwise never reach a seed-scan row.
+    w->event_flags |= static_cast<uint64_t>(rc.run.event_flags) |
+                      (static_cast<uint64_t>(rc.run.event_flags_hi) << 32);
     // Both the static Treasure map node and a ? room whose eventRng roll came
     // up TREASURE reach the same on_player_entry(RoomType::Treasure), which
     // sets this phase (src/engine/run_advance.cpp:695-701, :724-727) -- so one

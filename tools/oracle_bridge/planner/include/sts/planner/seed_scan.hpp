@@ -12,8 +12,9 @@
 // THE OBSERVATION THAT MAKES A PRE-SCAN POSSIBLE. Event selection is a pure
 // function of RunState: generate_event (src/engine/event_framework.cpp:359-395)
 // takes a THROWAWAY copy of rs.event_rng, draws from it, removes the drawn id
-// from the committed pool bitset, and records the firing in
-// `rs.event_flags |= 1u << (id - 1)` (:392). So the simulator can answer "does
+// from the committed pool bitset, and records the firing through
+// `event_flag_set` (ids 1..31 -> event_flags, 32..63 -> event_flags_hi -- the
+// engine's routed accessor). So the simulator can answer "does
 // this seed contain that shrine" in microseconds, and the capture campaign only
 // ever has to be pointed at seeds already known to contain the target.
 //
@@ -147,16 +148,22 @@ struct EventName {
 // The `game_id` for an id, or "" if the id is not in the table.
 [[nodiscard]] std::string_view event_game_id(registry::EventId id);
 
-// Decode RunState::event_flags -- bit (id-1) per event_framework.cpp:392, with
-// the EventId 1..31 layout of event_framework.hpp:164-169. The word is a
-// uint32_t, so S2.02's Act-2/3 ids 32..51 have no bit and always read false;
-// S2.13, which makes them drawable, owns widening the storage.
-[[nodiscard]] bool event_flag_set(uint32_t flags, registry::EventId id);
-[[nodiscard]] std::vector<registry::EventId> decode_event_flags(uint32_t flags);
+// Decode the COMBINED FIRED bitset -- both engine words in one uint64_t, low
+// 32 bits mirroring RunState::event_flags (ids 1..31 at bit id-1) and high 32
+// mirroring RunState::event_flags_hi (ids 32..63 at bit id, i.e. the engine's
+// hi-word bit (id-32) shifted up by 32). Bit 31 is unused, exactly as the
+// engine's low word leaves it unused -- the combined value is the two storage
+// words laid side by side, `lo | (uint64_t(hi) << 32)`, never a re-packing, so
+// a row's number can be split back into the engine's words by inspection.
+// (Until the S2.42-held widening landed, these took one uint32_t and Act-2/3
+// ids silently read false -- the under-reporting the deferred-obligations row
+// recorded.)
+[[nodiscard]] bool event_flag_set(uint64_t flags, registry::EventId id);
+[[nodiscard]] std::vector<registry::EventId> decode_event_flags(uint64_t flags);
 // '|'-joined game ids, in ascending id order; "" for no flags. This is the
 // results file's `events` column, so the separator is deliberately not a
 // comma, tab or space -- every one of those occurs inside a game id.
-[[nodiscard]] std::string event_flags_text(uint32_t flags);
+[[nodiscard]] std::string event_flags_text(uint64_t flags);
 
 // --- Seed identity -----------------------------------------------------------
 
@@ -263,7 +270,7 @@ struct ScanRow {
     fuzz::EndReason end_reason = fuzz::EndReason::RUN_OVER;
     uint32_t actions = 0;
     uint32_t max_floor = 0;    // highest RunState::floor observed
-    uint32_t event_flags = 0;  // terminal RunState::event_flags
+    uint64_t event_flags = 0;  // terminal event_flags | (event_flags_hi << 32)
     bool treasure_entered = false;  // RunPhase::TREASURE_ROOM was ever live
     bool boss_reached = false;      // RoomType::Boss was ever the current room
     // One entry per tracked relic, in the order the targets were given to
