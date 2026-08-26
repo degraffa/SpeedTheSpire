@@ -1028,6 +1028,23 @@ TEST(Translator, AnchorMismatchRefused) {
     }
 }
 
+TEST(Translator, PlaytimeIsDispositionedOracleNotUnknown) {
+    // s2-design section 5 trap 5: the redeployed fork records
+    // CardCrawlGame.playtime in the oracle block so a violated SecretPortal
+    // >= 800s pin is detectable. The field is capture-side evidence, never
+    // RunState -- the disposition is `oracle`, and a capture carrying it must
+    // translate cleanly (the FieldReader is fail-loud, so without the
+    // disposition this insert would abort as schema drift). Absence stays
+    // legal too: every other test in this file runs the pre-redeploy sample.
+    std::vector<std::string> lines = read_lines(sample_path());
+    std::string tampered = lines[1];
+    const std::string anchor = "\"oracle\":{";
+    auto pos = tampered.find(anchor);
+    ASSERT_NE(pos, std::string::npos);
+    tampered.insert(pos + anchor.size(), "\"playtime\":812.53125,");
+    EXPECT_NO_THROW((void)tr::translate_lines({lines[0], tampered}, "playtime"));
+}
+
 // --- G4 id-tolerance accounting mode --------------------------------------
 //
 // G4's checklist item 1 runs the translator over a real A20 campaign that

@@ -511,6 +511,7 @@ bit-exact differential testing needs — the frozen inventory of design §2.5.
 | `floor` | int | 10 | `AbstractDungeon.floorNum` | anchor |
 | `act` | int | 10 | `AbstractDungeon.actNum` | anchor |
 | `ascension` | int | 10 | `AbstractDungeon.ascensionLevel` | anchor |
+| `playtime` | float | 10 | `CardCrawlGame.playtime` | s2-design §5 trap 5 duty: wall-clock seconds, recorded so a violated SecretPortal `>= 800.0f` pin is detectable, never diffed (the sim pins the gate false) |
 | `streams` | object | 1-2 | see §5.2 | the 14 RNG streams |
 | `cardBlizzRandomizer` | int | 3 | `AbstractDungeon.cardBlizzRandomizer` | card-reward rarity pity offset |
 | `blizzardPotionMod` | int | 4 | `AbstractRoom.blizzardPotionMod` | potion-drop ratchet (±10) |

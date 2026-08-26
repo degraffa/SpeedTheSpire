@@ -666,6 +666,15 @@ struct OracleAnchors {
     a.ascension = as_i64(fr.require("ascension"), ctx, path + ".ascension");
     // anchors are cross-checked against stock top-level by the caller.
 
+    // playtime (s2-design §5 trap 5): wall-clock seconds the fork records so a
+    // violated SecretPortal >= 800s pin is DETECTABLE. Deliberately never
+    // translated into RunState -- the sim has no playtime model, which is the
+    // whole deviation -- so the disposition is `oracle`: capture-side evidence
+    // read by the scorer only when a shrine-list divergence implicates the
+    // gate. A disposition mark, not a require(): pre-redeploy captures lack
+    // the field, and absence is legal.
+    fr.oracle("playtime");
+
     parse_streams(fr.require("streams"), path + ".streams", ctx, rs, cs);
     fr.mapped();
 

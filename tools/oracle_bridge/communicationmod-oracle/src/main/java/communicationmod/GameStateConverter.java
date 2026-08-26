@@ -6,6 +6,7 @@ import com.megacrit.cardcrawl.actions.GameActionManager;
 import com.megacrit.cardcrawl.cards.AbstractCard;
 import com.megacrit.cardcrawl.characters.AbstractPlayer;
 import com.megacrit.cardcrawl.core.AbstractCreature;
+import com.megacrit.cardcrawl.core.CardCrawlGame;
 import com.megacrit.cardcrawl.core.Settings;
 import com.megacrit.cardcrawl.dungeons.AbstractDungeon;
 import com.megacrit.cardcrawl.events.AbstractEvent;
@@ -172,6 +173,13 @@ public class GameStateConverter {
         oracle.put("floor", AbstractDungeon.floorNum);
         oracle.put("act", AbstractDungeon.actNum);
         oracle.put("ascension", AbstractDungeon.ascensionLevel);
+        // s2-design section 5 trap 5: the simulator pins SecretPortal's
+        // playtime gate (>= 800s, AbstractDungeon.java:1929-1933) FALSE, and
+        // the capture side must record playtime so a violated pin is
+        // detectable rather than silent. Wall-clock, deliberately outside
+        // the diffed state -- the scorer reads it only when a shrine-list
+        // divergence implicates the gate.
+        oracle.put("playtime", CardCrawlGame.playtime);
 
         // Rows 1-2 -- the 13 dungeon streams (AbstractDungeon.java:149-161) plus
         // Neow's event-scoped 14th (NeowEvent.rng), each {counter, s0, s1}.
