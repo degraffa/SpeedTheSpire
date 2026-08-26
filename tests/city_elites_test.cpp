@@ -733,16 +733,87 @@ TEST(CityElites, SummonWithOneLiveMinionTakesTheNextTwoFreeSlots) {
     telegraph(s, kLeader, r::kGremlinLeaderMoveRally, MonsterIntent::UNKNOWN);
     gremlin_leader_take_turn(s, kLeader);
 
-    EXPECT_EQ(spawn_draw_x_from_flags(queued(s, 0).flags),
-              kGremlinLeaderSlotX[1]);
-    EXPECT_EQ(spawn_draw_x_from_flags(queued(s, 1).flags),
-              kGremlinLeaderSlotX[2]);
-    // -170 walks past -366 and stops at the second record (also -170) -> 1.
+    // The slot KEY is species-dependent (a Wizard sits 35 left of its slot,
+    // GremlinWizard.java:48) -- and seed 41's first pick IS a Wizard, so the
+    // expected x is derived from the picked id rather than assumed.
+    const auto slot_key = [&](uint8_t i, int slot) {
+        const uint16_t id =
+            static_cast<uint16_t>(queued(s, i).flags & 0xFFFFu);
+        return id == static_cast<uint16_t>(MonsterId::GREMLIN_WIZARD)
+                   ? static_cast<int16_t>(kGremlinLeaderSlotX[slot] -
+                                          kGremlinWizardXOffset)
+                   : kGremlinLeaderSlotX[slot];
+    };
+    EXPECT_EQ(spawn_draw_x_from_flags(queued(s, 0).flags), slot_key(0, 1));
+    EXPECT_EQ(spawn_draw_x_from_flags(queued(s, 1).flags), slot_key(1, 2));
+    // -170 (or a Wizard's -205) walks past -366 and stops at the second
+    // record (-170) -> 1.
     EXPECT_EQ(queued(s, 0).tgt, 1);
-    // -532 is left of everything, so it stops immediately -> 0.
+    // -532/-567 is left of everything, so it stops immediately -> 0.
     EXPECT_EQ(queued(s, 1).tgt, 0);
     // The leader started at 2 and both inserts land at or below it: 2 -> 3 -> 4.
     EXPECT_EQ(queued(s, 2).tgt, 4);
+}
+
+// The Gremlin Wizard's ctor x offset (GremlinWizard.java:48: `super(...,
+// x - 35.0f, y)`; the other four gremlins pass x through). getSmartPosition
+// sorts by drawX with a STRICT >, so a dead Wizard record at the list's head
+// keeps every later same-slot summon to its RIGHT -- dropping the offset made
+// the summon tie with the corpse and insert at 0 instead, rotating the whole
+// monster array from rally 2 on and sending every positional replay target to
+// the wrong minion (seed STS431071, the S2.43 triage).
+TEST(CityElites, RallySummonInsertsAfterADeadWizardRecordInTheSameSlot) {
+    for (int64_t seed = 1; seed <= 64; ++seed) {
+        CombatState s = LeaderGroup(seed, MonsterId::GREMLIN_WIZARD,
+                                    MonsterId::GREMLIN_THIEF);
+        // The encounter Wizard rides the same ctor road: POSX[0] - 35.
+        ASSERT_EQ(s.monsters[0].draw_x,
+                  static_cast<int16_t>(kGremlinLeaderSlotX[0] -
+                                       kGremlinWizardXOffset));
+        s.monsters[0].hp = 0;  // the dead Wizard record heads the list
+        s.monsters[1].hp = 0;
+        telegraph(s, kLeader, r::kGremlinLeaderMoveRally,
+                  MonsterIntent::UNKNOWN);
+        gremlin_leader_take_turn(s, kLeader);
+        ASSERT_GE(s.action_count, 2);
+        const uint16_t first_id =
+            static_cast<uint16_t>(queued(s, 0).flags & 0xFFFFu);
+        if (first_id == static_cast<uint16_t>(MonsterId::GREMLIN_WIZARD)) {
+            // A Wizard pick keys -401 and legitimately ties with the corpse;
+            // find a seed whose first pick is any other species.
+            continue;
+        }
+        EXPECT_EQ(queued(s, 0).tgt, 1)
+            << "seed " << seed << ": the slot-0 summon (-366) must insert "
+            << "AFTER the dead Wizard (-401), not tie with it at 0";
+        // The second summon (slot 1: -170, or -205 for a Wizard) walks past
+        // both -401 and -366 and stops at the dead thief -> 2, either way.
+        EXPECT_EQ(queued(s, 1).tgt, 2);
+        return;  // one non-Wizard witness is the test
+    }
+    FAIL() << "no seed in 1..64 gave a non-Wizard first pick";
+}
+
+// ...and a LIVE Wizard still claims its slot: the occupancy scan must match
+// POSX[k] - 35 as slot k's key, or RALLY would double-book the Wizard's slot.
+TEST(CityElites, ALiveWizardStillClaimsItsSummonSlot) {
+    CombatState s = LeaderGroup(17, MonsterId::GREMLIN_WIZARD,
+                                MonsterId::GREMLIN_THIEF);
+    s.monsters[1].hp = 0;  // one live gremlin (the Wizard) -> RALLY reachable
+    telegraph(s, kLeader, r::kGremlinLeaderMoveRally, MonsterIntent::UNKNOWN);
+    gremlin_leader_take_turn(s, kLeader);
+    ASSERT_GE(s.action_count, 2);
+    const int16_t x0 = spawn_draw_x_from_flags(queued(s, 0).flags);
+    const int16_t x1 = spawn_draw_x_from_flags(queued(s, 1).flags);
+    EXPECT_TRUE(x0 == kGremlinLeaderSlotX[1] ||
+                x0 == static_cast<int16_t>(kGremlinLeaderSlotX[1] -
+                                           kGremlinWizardXOffset))
+        << "slot 0 is occupied by the live Wizard; first summon takes slot 1 "
+        << "(got x=" << x0 << ")";
+    EXPECT_TRUE(x1 == kGremlinLeaderSlotX[2] ||
+                x1 == static_cast<int16_t>(kGremlinLeaderSlotX[2] -
+                                           kGremlinWizardXOffset))
+        << "second summon takes slot 2 (got x=" << x1 << ")";
 }
 
 TEST(CityElites, TheSummonPoolIsTheEightEntryAiRngListAndIsDrawnWithReplacement) {

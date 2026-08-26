@@ -273,6 +273,18 @@ void op_block_per_non_attack(CombatState& s, int block_per_card) noexcept {
     for (int k = n - 1; k >= 0; --k) {  // reverse hand order: last card first
         exhaust_card(s, to_exhaust[k]);
     }
+    // The per-card GainBlockActions are addToTop, one per collected card
+    // (BlockPerNonAttackAction.java:35-37), so they resolve in REVERSE hand
+    // order and every one PRECEDES the pending UseCardAction -- a forward walk
+    // pushing each to the top reproduces exactly that. The order is not
+    // cosmetic (the op_dropkick precedent's sibling, S2.43 triage): each gain
+    // fires ON_GAINED_BLOCK, and Juggernaut's per-gain
+    // DamageRandomEnemyAction draws card_random_rng at ITS execute over the
+    // live monsters -- a mid-sequence kill reshapes the pool, so the gains'
+    // resolve order is observable through the target sequence. (Sentinel's
+    // exhaust-chain energy items sit behind these after the push; the game
+    // resolved them earlier, but GAIN_ENERGY commutes with BLOCK and with the
+    // queued THORNS damage, so the boundary state is identical.)
     for (int k = 0; k < n; ++k) {
         ActionQueueItem blk{};
         blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
@@ -280,7 +292,7 @@ void op_block_per_non_attack(CombatState& s, int block_per_card) noexcept {
         blk.tgt = kActorPlayer;
         blk.amount = block_per_card;
         blk.flags = 0;  // card-style block: Dexterity/Frail apply per gain
-        add_to_bottom(s, blk);
+        add_to_top(s, blk);  // addToTop (BlockPerNonAttackAction.java:36)
     }
 }
 

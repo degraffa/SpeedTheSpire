@@ -189,6 +189,14 @@ void spend_wing_boots_charge(RunState& rs) noexcept {
 // Exactly-once by construction wherever it is called from: each call burns only
 // the delta, after which held == left, and the mirror is re-derived from the
 // belt at the next enter_combat rather than carried across.
+//
+// THE MIRROR'S INVARIANT: combat_fairy_armed counts the belt's not-yet-consumed
+// Fairies, maintained on BOTH edges -- armed at enter_combat, armed again by
+// any in-combat belt gain (use_entropic_brew is the one such writer), and
+// decremented by try_player_revive and by step_discard_potion. `held - left`
+// then names exactly the Fairies a revive consumed; an obtain that failed to
+// arm would make this subtraction eat the new potion at the next boundary
+// (seed STS432580, the S2.43 triage).
 void burn_consumed_fairies(RunController& rc) noexcept {
     const uint8_t held = count_belt_fairies(rc.run);
     const uint8_t left = combat_fairy_armed(rc.combat.flags);
@@ -206,6 +214,47 @@ void burn_consumed_fairies(RunController& rc) noexcept {
     }
 }
 
+// Mirror run-persistent per-instance card state (S2.34) into the master deck:
+// pool row i is master row i for the entry deck (enter_combat builds the pool
+// 1:1 in deck order, and nothing removes a master row mid-combat --
+// OBTAIN_CARD only appends), so the combat instance's `misc` copies back by
+// index for exactly the rows whose CardDef declares initial_misc != 0. The
+// card_id equality guard keeps a mid-combat master APPEND (whose index has no
+// pool row of its own) from aliasing a MAKE_CARD-created pool row.
+// Combat-scratch misc (Rampage's accumulator, the AUTOPLAY_X_ENERGY snapshot)
+// never syncs: neither card's def carries initial_misc.
+//
+// Called at EVERY in-combat step boundary since the S2.43 triage, not only
+// from the combat fold: the game's write is MID-ACTION -- RitualDaggerAction
+// walks masterDeck by uuid right after the kill gate
+// (RitualDaggerAction.java:39-46) -- so a capture record taken between the
+// kill and the combat's end already shows the grown master misc, and a run
+// that DIES before the fold would otherwise never settle it (seed STS432354,
+// where the lag stood for the last five records of the run). The S2.48
+// live-purse discipline, extended the same way sync_live_gold and
+// burn_consumed_fairies were: a plain idempotent copy, so the per-step repeat
+// is free and the fold_back_combat call becomes the closing sync.
+void sync_run_persistent_misc(RunController& rc) noexcept {
+    int n_cards = static_cast<int>(rc.run.master_deck_count);
+    if (n_cards > kMasterDeckCap) {
+        n_cards = kMasterDeckCap;
+    }
+    if (n_cards > kCardPoolCap) {
+        n_cards = kCardPoolCap;
+    }
+    for (int i = 0; i < n_cards; ++i) {
+        const CardInstance& pool_card = rc.combat.card_pool[i];
+        CardInstance& master_card = rc.run.master_deck[i];
+        if (pool_card.card_id != master_card.card_id) {
+            continue;
+        }
+        const CardDef* def = card_def(static_cast<CardId>(master_card.card_id));
+        if (def != nullptr && def->initial_misc != 0) {
+            master_card.misc = pool_card.misc;
+        }
+    }
+}
+
 void fold_back_combat(RunController& rc) noexcept {
     burn_consumed_fairies(rc);
     rc.run.hp = rc.combat.player_hp;
@@ -219,38 +268,9 @@ void fold_back_combat(RunController& rc) noexcept {
     sync_live_gold(rc);
     rc.combat.combat_gold = 0;
     rc.stolen_live.banked = 0;
-    // Run-persistent per-instance card state (S2.34): pool row i is master row
-    // i for the entry deck (enter_combat builds the pool 1:1 in deck order,
-    // and nothing removes a master row mid-combat -- OBTAIN_CARD only
-    // appends), so the combat instance's `misc` folds back by index for
-    // exactly the rows whose CardDef declares initial_misc != 0 (Ritual
-    // Dagger: RitualDaggerAction's masterDeck-by-uuid write,
-    // RitualDaggerAction.java:40-46). The card_id equality guard keeps a
-    // mid-combat master APPEND (whose index has no pool row of its own) from
-    // aliasing a MAKE_CARD-created pool row. Combat-scratch misc (Rampage's
-    // accumulator, the AUTOPLAY_X_ENERGY snapshot) never folds: neither
-    // card's def carries initial_misc.
-    {
-        int n_cards = static_cast<int>(rc.run.master_deck_count);
-        if (n_cards > kMasterDeckCap) {
-            n_cards = kMasterDeckCap;
-        }
-        if (n_cards > kCardPoolCap) {
-            n_cards = kCardPoolCap;
-        }
-        for (int i = 0; i < n_cards; ++i) {
-            const CardInstance& pool_card = rc.combat.card_pool[i];
-            CardInstance& master_card = rc.run.master_deck[i];
-            if (pool_card.card_id != master_card.card_id) {
-                continue;
-            }
-            const CardDef* def =
-                card_def(static_cast<CardId>(master_card.card_id));
-            if (def != nullptr && def->initial_misc != 0) {
-                master_card.misc = pool_card.misc;
-            }
-        }
-    }
+    // The closing misc sync; the per-step calls at the live boundaries have
+    // already settled every earlier kill (see sync_run_persistent_misc).
+    sync_run_persistent_misc(rc);
     const uint8_t n =
         rc.combat.relic_count < rc.run.relic_count ? rc.combat.relic_count
                                                    : rc.run.relic_count;
@@ -455,13 +475,31 @@ void use_entropic_brew(RunController& rc, uint8_t slot) noexcept {
     if (sozu) {
         return;  // in combat: every ObtainPotionAction resolves as a flash only
     }
+    uint8_t fairies_placed = 0;
     for (uint8_t i = 0; i < count; ++i) {
         for (uint8_t dst = 0; dst < count; ++dst) {
             if (rc.run.potions[dst] == static_cast<uint16_t>(PotionId::NONE)) {
                 rc.run.potions[dst] = static_cast<uint16_t>(rolls[i]);
+                if (rolls[i] == PotionId::FAIRY_POTION) {
+                    ++fairies_placed;
+                }
                 break;
             }
         }
+    }
+    // A Fairy the Brew just put on the belt is LIVE: AbstractPlayer.damage
+    // reads hasPotion("FairyPotion") off the belt at the moment of death
+    // (AbstractPlayer.java:1485-1493), so a mid-combat obtain both revives and
+    // must be counted by the combat mirror -- otherwise the very next step
+    // boundary's burn_consumed_fairies computes held(1) - armed(0) and eats
+    // the brand-new potion as if a revive had spent it (seed STS432580, the
+    // S2.43 triage). Placed potions only: a roll that found no empty slot is
+    // dropped by the game too (AbstractPlayer.java:2078-2080) and never arms.
+    if (in_combat && fairies_placed > 0) {
+        rc.combat.flags = with_combat_fairy_armed(
+            rc.combat.flags,
+            static_cast<uint8_t>(combat_fairy_armed(rc.combat.flags) +
+                                 fairies_placed));
     }
 }
 
@@ -2814,6 +2852,11 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
         fill_combat_result(rc.combat, res);
         sync_live_gold(rc);         // this path pumps outside advance()
         burn_consumed_fairies(rc);  // same live-belt boundary as the advance path
+        // Same live boundary for run-persistent misc (RitualDaggerAction's
+        // mid-action masterDeck write), and BEFORE drain_pending_obtains so a
+        // same-step master APPEND cannot present a fresh master row to the
+        // index-keyed copy.
+        sync_run_persistent_misc(rc);
         drain_pending_obtains(rc);
         finish_combat_after_action(rc, res);
     } else {
@@ -2842,10 +2885,11 @@ bool step_discard_potion(RunController& rc, Action a, StepResult& res) noexcept 
         clear_potion_slot(rc.run, slot);
         // Keep the combat's armed-Fairy mirror in step with the belt. A Fairy
         // is discardable IN COMBAT (canDiscard has no combat gate,
-        // AbstractPotion.java:398-400), and it is the only mid-combat belt
-        // mutation there is -- a Fairy can never be USED (canUse is false) and
-        // Entropic Brew, the only other slot writer, is out-of-combat-only. If
-        // the mirror were left alone, a thrown-away Fairy would still revive.
+        // AbstractPotion.java:398-400). The belt has exactly one other
+        // mid-combat writer -- Entropic Brew's in-combat branch, which ARMS
+        // the mirror for each Fairy it places (see use_entropic_brew; a Fairy
+        // can never be USED, canUse is false). If the mirror were left alone
+        // here, a thrown-away Fairy would still revive.
         // DECREMENT, do not recompute from the belt: the mirror is
         // (held - already consumed), and a discard lowers `held` by one without
         // changing what was consumed. Recomputing would resurrect a fairy that
@@ -3204,6 +3248,15 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
             // (held - mirror), so the per-step call is idempotent and the
             // fold-back call becomes the closing sync.
             burn_consumed_fairies(rc);
+            // Run-persistent misc keeps the same live discipline: the game
+            // grows Ritual Dagger's masterDeck row INSIDE the action
+            // (RitualDaggerAction.java:39-46), so the master mirror must be
+            // current at this command boundary -- a run that dies before the
+            // fold otherwise carries the stale row to its terminal records
+            // (seed STS432354). Before drain_pending_obtains so a same-step
+            // master APPEND cannot present a fresh master row to the
+            // index-keyed copy.
+            sync_run_persistent_misc(rc);
             // Before finish_combat_after_action, which may fold the combat back
             // and end it: an obtain that happened during this step must reach
             // the deck while the run layer still has the combat in hand.

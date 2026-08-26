@@ -150,19 +150,80 @@ int32_t game_hand_size(const CombatState& s) noexcept {
 
 namespace {
 
-// A lethal damage action calls clearPostCombatActions, which deliberately KEEPS
-// HealAction and UseCardAction (GameActionManager.java:130-136). Both remain
-// gameplay-visible after the last monster dies: filing can spend Strange Spoon
-// RNG / fire onExhaust, and Reaper's VampireDamageAllEnemiesAction queues its
-// heal before invoking the clear (STS300219 seq 23-24).
+// A lethal damage action calls clearPostCombatActions, whose survivor set is
+// FOUR-ARMED (GameActionManager.java:130-137, the loop at :134):
+//
+//     if (e instanceof HealAction || e instanceof GainBlockAction ||
+//         e instanceof UseCardAction ||
+//         e.actionType == AbstractGameAction.ActionType.DAMAGE) continue;
+//
+// and the survivors genuinely RESOLVE before victory settlement: endBattle()
+// is deathTimer-gated (AbstractMonster.die arms deathTimer, :928-950;
+// updateDeathAnimation calls endBattle only once it runs out, :866-871), so
+// AbstractRoom.update keeps draining the queue for the whole death animation
+// (AbstractRoom.java:264-267). All four arms remain gameplay-visible: filing
+// can spend Strange Spoon RNG / fire onExhaust; Reaper's
+// VampireDamageAllEnemiesAction queues its heal before invoking the clear
+// (STS300219 seq 23-24); and a THORNS DamageAction queued BEHIND the killing
+// blow -- the Guardian's Sharp Hide onUseCard retaliation, addToBot'd after
+// Blood for Blood's own damage -- still lands on the player, because the
+// dying-owner cancel exempts THORNS (DamageAction.java:65,70; the engine's
+// damage_attacker_cancelled, S2.49). Keeping only two of the four arms dropped
+// exactly that hit (seed STS431342: 4 hp, the Sharp Hide amount).
+//
+// The DAMAGE arm maps to every opcode whose modelled Java action sets
+// actionType = DAMAGE -- verified per class, because the name is not the type:
+// DropkickAction is ActionType.BLOCK (and not a GainBlockAction, so the game
+// CLEARS it) and FiendFireAction is ActionType.WAIT (cleared too).
+//
+// SCOPE: the widened set applies to the VICTORY terminal only. Every one of
+// clearPostCombatActions' call sites is gated on areMonstersBasicallyDead()
+// (DamageAction.java:88-91 and its 19 siblings); the player-death and
+// player-escape terminals have no such call, so they keep the established
+// USE_CARD/HEAL-only behaviour (a settled class this must not re-open).
 //
 // The headless pump otherwise keeps its established immediate terminal halt.
-// Rebuild the ring without those two action shapes, preserving every abandoned
-// action, then resolve the saved post-combat actions in their original queue
-// order. Hook actions a UseCardAction adds land behind the preserved queue,
-// exactly as addToBot from its later position would; a saved HealAction then
-// executes before those new hooks when it originally followed the filing.
-void resolve_pending_post_combat_actions_at_terminal(CombatState& s) noexcept {
+// Rebuild the ring without the survivor shapes, preserving every abandoned
+// action, then resolve the survivors in their original queue order through
+// execute_opcode -- which keeps damage_attacker_cancelled live, so a dying
+// owner's NON-thorns queued hits still cancel (S2.49) and the THORNS
+// exemption is what decides. Hook actions a survivor adds land behind the
+// preserved queue, exactly as addToBot from its later position would.
+[[nodiscard]] bool survives_clear_post_combat(Opcode opcode,
+                                              bool victory) noexcept {
+    switch (opcode) {
+        case Opcode::USE_CARD:  // instanceof UseCardAction (:134)
+        case Opcode::HEAL:      // instanceof HealAction (:134)
+            return true;
+        case Opcode::BLOCK:     // instanceof GainBlockAction (:134)
+            return victory;
+        // actionType == DAMAGE, one Java class citation per opcode:
+        case Opcode::DAMAGE:               // DamageAction.java:34
+        case Opcode::LOSE_HP:              // LoseHPAction.java:29
+        case Opcode::DAMAGE_BLOCK:         // Body Slam's DamageAction
+        case Opcode::DAMAGE_STR_MULT:      // Heavy Blade's DamageAction
+        case Opcode::DAMAGE_PER_STRIKE:    // Perfected Strike's DamageAction
+        case Opcode::LOSE_HP_PER_HAND:     // Regret's LoseHPAction
+        case Opcode::DAMAGE_UPGRADE_SCALE: // Searing Blow's DamageAction
+        case Opcode::DAMAGE_RAMPAGE:       // Rampage's DamageAction
+        case Opcode::SUICIDE:              // SuicideAction (DAMAGE ctor)
+        case Opcode::DAMAGE_FEED:          // FeedAction (DAMAGE ctor)
+        case Opcode::VAMPIRE_DAMAGE_ALL:   // VampireDamageAllEnemiesAction
+        case Opcode::DAMAGE_DRAW_PILE:     // Mind Blast's DamageAction
+        case Opcode::DAMAGE_GREED:         // GreedAction (DAMAGE ctor)
+        case Opcode::VAMPIRE_DAMAGE:       // VampireDamageAction
+        case Opcode::RITUAL_DAGGER:        // RitualDaggerAction (DAMAGE ctor)
+            return victory;
+        default:
+            // DROPKICK (ActionType.BLOCK, not a GainBlockAction) and
+            // FIEND_FIRE (ActionType.WAIT) are cleared ON PURPOSE; everything
+            // else the game clears too.
+            return false;
+    }
+}
+
+void resolve_pending_post_combat_actions_at_terminal(CombatState& s,
+                                                     bool victory) noexcept {
     ActionQueueItem kept[kActionQueueCap]{};
     ActionQueueItem post_combat[kActionQueueCap]{};
     uint8_t kept_count = 0;
@@ -173,7 +234,7 @@ void resolve_pending_post_combat_actions_at_terminal(CombatState& s) noexcept {
             (static_cast<unsigned>(s.action_head) + i) % kActionQueueCap);
         const ActionQueueItem item = s.action_queue[src];
         const Opcode opcode = static_cast<Opcode>(item.opcode);
-        if (opcode == Opcode::USE_CARD || opcode == Opcode::HEAL) {
+        if (survives_clear_post_combat(opcode, victory)) {
             post_combat[post_combat_count++] = item;
         } else {
             kept[kept_count++] = item;
@@ -765,11 +826,17 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     // so an escape terminal is distinct from a kill by inspection.
     if (s.player_hp <= 0 || (s.flags & kCombatFlagPlayerEscaped) != 0u ||
         (!any_monster_alive(s) && (s.flags & kCombatFlagCannotLose) == 0u)) {
-        // Resolve pending UseCardAction filing exactly: the game retains those
-        // actions after lethal damage, so their Spoon RNG and onExhaust fan-out
-        // remain gameplay-visible. Then normalize any limbo entry which never
-        // acquired a USE_CARD (a terminal-cancelled queued autoplay).
-        resolve_pending_post_combat_actions_at_terminal(s);
+        // Resolve the clearPostCombatActions survivor set exactly: the game
+        // retains those actions after lethal damage (four arms on a VICTORY,
+        // see survives_clear_post_combat; USE_CARD/HEAL only on a defeat or
+        // escape), so their Spoon RNG, onExhaust fan-out, and THORNS
+        // retaliation remain gameplay-visible. Then normalize any limbo entry
+        // which never acquired a USE_CARD (a terminal-cancelled queued
+        // autoplay). Defeat wins a tie: a player at 0 alongside an emptied
+        // field is the defeat terminal, not a victory.
+        const bool victory =
+            s.player_hp > 0 && (s.flags & kCombatFlagPlayerEscaped) == 0u;
+        resolve_pending_post_combat_actions_at_terminal(s, victory);
         normalize_terminal_card_queue(s);
         flush_limbo_at_combat_over(s);
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);

@@ -1205,12 +1205,15 @@ void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 // WHO GROWS. The Java grows (a) the MASTER-DECK card with the same uuid and
 // (b) every in-battle instance of that uuid (GetAllInBattleInstances.get --
 // cardInUse + all five piles). In this engine:
-//   (a) settles at the run layer's combat fold-back: pool row i IS master row
-//       i for the entry deck (enter_combat builds the pool 1:1 in deck
-//       order), the combat layer has no RunState (the combat_gold precedent),
-//       and the fold copies pool misc -> master misc exactly for rows whose
-//       CardDef.initial_misc != 0 -- so the growth this writes into the
-//       played instance reaches the master card at combat end.
+//   (a) settles at the run layer's NEXT COMMAND BOUNDARY: pool row i IS
+//       master row i for the entry deck (enter_combat builds the pool 1:1 in
+//       deck order), the combat layer has no RunState (the combat_gold
+//       precedent), and sync_run_persistent_misc copies pool misc -> master
+//       misc for rows whose CardDef.initial_misc != 0 at every in-combat step
+//       (the Java's write is mid-action, RitualDaggerAction.java:39-46, so
+//       the capture shows the grown master row before the combat ends -- seed
+//       STS432354's dying run pinned this), with the combat fold-back as the
+//       closing sync.
 //   (b) is the played instance itself: with no makeSameInstanceOf copy in
 //       flight, the uuid group is exactly {the played card} (it sits in limbo
 //       as cardInUse while this action resolves, and it is this pool row).
@@ -1450,24 +1453,36 @@ void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept {
 
 // DropkickAction.update: test Vulnerable when the action resolves. Damage is
 // first; if the condition was true, GainEnergyAction then DrawCardAction follow.
+//
+// ALL THREE ARE addToTop (DropkickAction.java:30-34: addToTop(Draw), then
+// addToTop(GainEnergy), then addToTop(Damage)), so the follow-ups sit ABOVE
+// the UseCardAction that files the played Dropkick -- the card is still in
+// LIMBO when its own draw runs, and an empty-deck reshuffle sweeps the discard
+// WITHOUT it (18 cards, not 19; seed STS432630's boss fight, the S2.43
+// triage). add_to_bottom here landed the pair BEHIND the pending USE_CARD,
+// filing the Dropkick to discard first and perturbing the reshuffle
+// permutation. The two pushes queue draw-then-energy so the queue reads
+// [energy, draw, ..., USE_CARD], and they happen BEFORE the inline op_damage
+// so anything the damage itself add_to_top's (Buffer's ReducePowerAction)
+// still lands in front of them, exactly as the game's topmost DamageAction
+// resolves first.
 void op_dropkick(CombatState& s, const ActionQueueItem& item) noexcept {
     const bool vulnerable = actor_has_power(s, item.tgt, PowerId::VULNERABLE);
-    op_damage(s, item.src, item.tgt, item.amount);
-    if (!vulnerable) {
-        return;
+    if (vulnerable) {
+        ActionQueueItem draw{};
+        draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+        draw.src = kActorPlayer;
+        draw.tgt = kActorPlayer;
+        draw.amount = 1;
+        add_to_top(s, draw);  // addToTop (DropkickAction.java:31)
+        ActionQueueItem energy{};
+        energy.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+        energy.src = kActorPlayer;
+        energy.tgt = kActorPlayer;
+        energy.amount = 1;
+        add_to_top(s, energy);  // addToTop (DropkickAction.java:32)
     }
-    ActionQueueItem energy{};
-    energy.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
-    energy.src = kActorPlayer;
-    energy.tgt = kActorPlayer;
-    energy.amount = 1;
-    add_to_bottom(s, energy);
-    ActionQueueItem draw{};
-    draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
-    draw.src = kActorPlayer;
-    draw.tgt = kActorPlayer;
-    draw.amount = 1;
-    add_to_bottom(s, draw);
+    op_damage(s, item.src, item.tgt, item.amount);
 }
 
 // --- Public: DAMAGE pipeline -------------------------------------------------

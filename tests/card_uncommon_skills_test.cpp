@@ -780,6 +780,56 @@ TEST(CardUncommonSkillsSecondWind, DexterityAppliesPerCardAndSentinelFires) {
     EXPECT_EQ(s.player_energy, 7) << "6 - 1 + Sentinel's 2 (exhausted mid-sweep)";
 }
 
+// The per-card GainBlockActions are addToTop (BlockPerNonAttackAction.java:
+// 35-37), so every one PRECEDES the pending UseCardAction that files Second
+// Wind. Not cosmetic since Juggernaut landed: each gain's ON_GAINED_BLOCK
+// queues a THORNS DamageRandomEnemyAction whose card_random_rng draw happens
+// at ITS execute over the LIVE monsters, so the gains' queue position is
+// observable through the target sequence (S2.43 triage, the op_dropkick
+// precedent's sibling). Pinned at the queue shape, where the ordering IS the
+// contract.
+TEST(CardUncommonSkillsSecondWind, BlockGainsPrecedeTheFilingUseCard) {
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::SECOND_WIND);
+    AddHand(s, CardId::DEFEND);
+    AddHand(s, CardId::DAZED);
+    ASSERT_TRUE(queue_card_play(s, 0, kActorPlayer));
+    // Pump one step at a time (the play sits on the CARD queue until a step
+    // dequeues it; the next step executes EXHAUST_NON_ATTACKS, which pushes
+    // the block gains) and snapshot the action queue at the step where both
+    // BLOCK items first exist -- the shape under test, before it drains.
+    bool snapshot_taken = false;
+    for (int step = 0; step < 32 && !snapshot_taken; ++step) {
+        const PumpStepResult r = pump_step(s, dispatch_monster_turn);
+        ASSERT_NE(r.outcome, PumpOutcome::COMBAT_OVER);
+        int blocks = 0;
+        int first_block_pos = -1;
+        int use_card_pos = -1;
+        for (uint8_t k = 0; k < s.action_count; ++k) {
+            const ActionQueueItem& q =
+                s.action_queue[(s.action_head + k) % kActionQueueCap];
+            if (static_cast<Opcode>(q.opcode) == Opcode::BLOCK) {
+                ++blocks;
+                if (first_block_pos < 0) {
+                    first_block_pos = k;
+                }
+            } else if (static_cast<Opcode>(q.opcode) == Opcode::USE_CARD) {
+                use_card_pos = k;
+            }
+        }
+        if (blocks == 2) {
+            snapshot_taken = true;
+            ASSERT_GE(use_card_pos, 0)
+                << "the filing USE_CARD must still be pending when the block "
+                   "gains are queued";
+            EXPECT_LT(first_block_pos, use_card_pos)
+                << "both addToTop block gains precede the filing action -- "
+                   "the played card is still in limbo while they resolve";
+        }
+    }
+    ASSERT_TRUE(snapshot_taken) << "no step held both BLOCK items in queue";
+}
+
 // ===========================================================================
 // Seeing Red -- +2 energy; exhausts; cost 1 -> 0
 // ===========================================================================

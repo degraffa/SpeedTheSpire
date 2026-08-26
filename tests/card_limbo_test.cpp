@@ -95,6 +95,15 @@ void GiveRelic(CombatState& s, RelicId id) {
     ++s.relic_count;
 }
 
+void AddPower(CombatState& s, uint8_t actor, PowerId id, int16_t amount) {
+    PowerSlot* slots = actor == kActorPlayer ? s.player_powers
+                                             : s.monsters[actor].powers;
+    uint8_t* count = actor == kActorPlayer ? &s.player_power_count
+                                           : &s.monsters[actor].power_count;
+    slots[*count] = PowerSlot{static_cast<uint16_t>(id), amount, 0, 0};
+    ++*count;
+}
+
 bool PileHas(const CardPoolIndex* pile, uint8_t count, CardPoolIndex pi) {
     for (uint8_t i = 0; i < count; ++i) {
         if (pile[i] == pi) {
@@ -144,6 +153,43 @@ TEST(CardLimbo, ShrugItOffReshuffleExcludesThePlayedCard) {
     EXPECT_EQ(s.discard[0], shrug);
     // Exactly one shuffle_rng draw was consumed (one CardGroup.shuffle).
     EXPECT_EQ(s.shuffle_rng.counter, 1);
+    (void)d0; (void)d1; (void)d2;
+}
+
+// The same invariant for a draw the card's OPCODE queues rather than a data
+// program step: Dropkick's Vulnerable follow-ups are addToTop
+// (DropkickAction.java:30-34), so the DRAW resolves while the played Dropkick
+// is still cardInUse and an empty-deck reshuffle covers the pre-play discard
+// only. The engine used to add_to_bottom them, filing the Dropkick to the
+// discard BEFORE its own draw -- a 4-card reshuffle instead of 3, a different
+// permutation, a different drawn card (seed STS432630's boss fight, the S2.43
+// triage).
+TEST(CardLimbo, DropkickReshuffleExcludesThePlayedCard) {
+    CombatState s = MakeCombat();
+    AddPower(s, 0, PowerId::VULNERABLE, 2);
+    const CardPoolIndex kick = AddHand(s, CardId::DROPKICK);
+    const CardPoolIndex d0 = AddDiscard(s, CardId::STRIKE);
+    const CardPoolIndex d1 = AddDiscard(s, CardId::DEFEND);
+    const CardPoolIndex d2 = AddDiscard(s, CardId::STRIKE);
+    ASSERT_EQ(s.draw_count, 0);
+    const int16_t energy_before = s.player_energy;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    // The reshuffle covered {d0, d1, d2} only; one of them was drawn.
+    EXPECT_EQ(s.hand_count, 1);
+    EXPECT_FALSE(PileHas(s.hand, s.hand_count, kick))
+        << "the played card must never be drawn back by its own draw";
+    EXPECT_EQ(s.draw_count, 2);
+    EXPECT_FALSE(PileHas(s.draw, s.draw_count, kick))
+        << "the played card was shuffled into the draw pile (limbo ignored)";
+    ASSERT_EQ(s.discard_count, 1)
+        << "UseCardAction files the played card into the emptied discard";
+    EXPECT_EQ(s.discard[0], kick);
+    EXPECT_EQ(s.shuffle_rng.counter, 1);
+    EXPECT_EQ(s.player_energy, energy_before)
+        << "pay 1, then the queued GainEnergy(1) resolves before USE_CARD";
     (void)d0; (void)d1; (void)d2;
 }
 
@@ -370,14 +416,16 @@ TEST(CardLimbo, HavocExhumeReplayConsumesOneShotExhaust) {
     EXPECT_FALSE(PileHas(s.exhaust, s.exhaust_count, strike));
 }
 
-// A lethal DamageAction invokes clearPostCombatActions, whose allowlist retains
-// UseCardAction (DamageAction.java:88-91; GameActionManager.java:130-136).
-// Therefore the filing action still consumes Strange Spoon RNG and
-// moveToExhaustPile still fires onExhaust hooks. With one other hand card,
-// Fiend Fire's anyNumber random ExhaustAction still draws random(0); filing
-// then draws the deliberately-selected false Spoon boolean. Feel No Pain queues one BLOCK for
-// the hand card before lethal damage and a second for Fiend Fire at terminal
-// filing; both stay queued under the engine's established immediate halt.
+// A lethal DamageAction invokes clearPostCombatActions, whose allowlist
+// retains UseCardAction AND GainBlockAction (DamageAction.java:88-91;
+// GameActionManager.java:130-137). Therefore the filing action still consumes
+// Strange Spoon RNG and moveToExhaustPile still fires onExhaust hooks. With
+// one other hand card, Fiend Fire's anyNumber random ExhaustAction still
+// draws random(0); filing then draws the deliberately-selected false Spoon
+// boolean. Feel No Pain queues one BLOCK for the hand card before lethal
+// damage -- a clearPostCombatActions SURVIVOR on a victory, so it RESOLVES
+// (+3 block) -- and a second for Fiend Fire at terminal filing, which lands
+// after the partition and stays queued under the established halt.
 TEST(CardLimbo, TerminalUseCardStillRollsSpoonAndDispatchesOnExhaustInOrder) {
     int64_t seed = 0;
     for (;; ++seed) {
@@ -409,14 +457,13 @@ TEST(CardLimbo, TerminalUseCardStillRollsSpoonAndDispatchesOnExhaustInOrder) {
         << "Fiend Fire's own program exhausts the hand first";
     EXPECT_EQ(s.exhaust[1], fiend)
         << "the retained UseCardAction files the source afterwards";
-    ASSERT_EQ(s.action_count, 2)
-        << "Feel No Pain fires for both exhausts under the terminal halt";
-    for (uint8_t i = 0; i < s.action_count; ++i) {
-        const ActionQueueItem& item =
-            s.action_queue[(s.action_head + i) % kActionQueueCap];
-        EXPECT_EQ(static_cast<Opcode>(item.opcode), Opcode::BLOCK);
-        EXPECT_EQ(item.amount, 3);
-    }
+    EXPECT_EQ(s.player_block, 3)
+        << "the pre-lethal Feel No Pain BLOCK survives the clear and resolves";
+    ASSERT_EQ(s.action_count, 1)
+        << "the filing's own Feel No Pain BLOCK lands after the partition";
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_EQ(static_cast<Opcode>(item.opcode), Opcode::BLOCK);
+    EXPECT_EQ(item.amount, 3);
 }
 
 // --- 8. The limbo window is visible at a blocking choice: the played card is

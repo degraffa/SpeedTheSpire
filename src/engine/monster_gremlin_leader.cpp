@@ -94,8 +94,13 @@ void queue_rally(CombatState& s, uint8_t mi) noexcept {
     bool slot_taken[3] = {false, false, false};
     for (uint8_t k = 0; k < 3; ++k) {
         for (uint8_t i = 0; i < s.monster_count && i < kMonsterCap; ++i) {
+            // A slot's occupant sits at POSX[k] -- or POSX[k] - 35 when the
+            // occupant is a Gremlin Wizard, whose ctor passes `x - 35.0f` up
+            // (GremlinWizard.java:48); see kGremlinWizardXOffset.
             if (s.monsters[i].hp > 0 &&
-                s.monsters[i].draw_x == kGremlinLeaderSlotX[k]) {
+                (s.monsters[i].draw_x == kGremlinLeaderSlotX[k] ||
+                 s.monsters[i].draw_x ==
+                     kGremlinLeaderSlotX[k] - kGremlinWizardXOffset)) {
                 slot_taken[k] = true;
                 break;
             }
@@ -135,7 +140,21 @@ void queue_rally(CombatState& s, uint8_t mi) noexcept {
         const sts::registry::MonsterDef& def = summon_def(id);
         const int32_t hp = random(s.monster_hp_rng, def.hp_min(kMonsterAscension),
                                   def.hp_max(kMonsterAscension));
-        const int16_t x = kGremlinLeaderSlotX[slot];
+        // The position KEY is species-dependent: GremlinWizard's ctor passes
+        // `x - 35.0f` to super (GremlinWizard.java:48; the other four gremlins
+        // pass x unmodified), and getSmartPosition sorts by drawX -- so a
+        // Wizard summoned into a slot sits strictly LEFT of every other
+        // occupant of that slot, and a later same-slot summon inserts AFTER a
+        // dead Wizard record instead of tying with it. Missing this offset
+        // rotated the sim's monster list from rally 2 on and made every
+        // positional replay target hit the wrong minion (seed STS431071, the
+        // S2.43 triage). draw_x is offsetX-units and the scan is monotone, so
+        // the integer -35 is exact; the shifted values collide with no slot
+        // key and not the leader's +35.
+        int16_t x = kGremlinLeaderSlotX[slot];
+        if (id == MonsterId::GREMLIN_WIZARD) {
+            x = static_cast<int16_t>(x - kGremlinWizardXOffset);
+        }
 
         // getSmartPosition (:92-99): walk the list and BREAK at the first record
         // the newcomer is not strictly right of. Identical to
@@ -332,7 +351,16 @@ void gremlin_leader_use_pre_battle_action(CombatState& s, uint8_t mi) noexcept {
         if (k >= s.monster_count || k >= kMonsterCap) {
             break;
         }
-        s.monsters[k].draw_x = kGremlinLeaderSlotX[k];
+        // An encounter-rolled Wizard minion routes through the same ctor and
+        // carries the same -35 x offset (GremlinWizard.java:48;
+        // MonsterHelper.java:507-509) -- the slot key discipline queue_rally
+        // scans by.
+        s.monsters[k].draw_x =
+            s.monsters[k].monster_id ==
+                    static_cast<uint16_t>(MonsterId::GREMLIN_WIZARD)
+                ? static_cast<int16_t>(kGremlinLeaderSlotX[k] -
+                                       kGremlinWizardXOffset)
+                : kGremlinLeaderSlotX[k];
         ActionQueueItem minion{};
         minion.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
         minion.src = k;  // ApplyPowerAction(m, m, ...) -- source IS the target

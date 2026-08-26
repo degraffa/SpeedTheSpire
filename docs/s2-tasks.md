@@ -2283,6 +2283,50 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `s243_triage_notes.md`. The re-run of `--replay` over the full
   divergent set is the retest instrument; classifications regenerate
   with the next `postprocess` pass.
+  **Residual closure (2026-08-26, second wave): the open queue is ZERO.**
+  All seven dug to root cause with the `--combat` instrument; six were
+  engine defects, fixed same-day with named regression tests, and every
+  fixed capture replays CLEAN to its run terminal: the Ritual Dagger
+  master-misc mid-action write (`sync_run_persistent_misc`, the live-purse
+  discipline extended — the game writes masterDeck INSIDE
+  RitualDaggerAction, so a run that dies pre-fold carries the grown row;
+  STS432354 345/345), the Entropic Brew in-combat Fairy obtain leaving the
+  armed-fairy mirror stale (the live-belt fix's one regression — the burn
+  ate the fresh potion at its own step boundary; arming per PLACED Fairy
+  also closed the downstream We-Meet-Again belt-conditional miscRng gold
+  tail; STS432580 236/236), Blood Potion's inline heal (now a queued HEAL
+  item per BloodPotion.java:44-45 — observable behind ColorlessPotion's
+  open DISCOVERY screen; STS432663 138/138), Dropkick's follow-ups queued
+  add_to_bottom where DropkickAction addToTop's all three (the played card
+  must stay in LIMBO across its own empty-deck reshuffle — 18 cards, not
+  19; STS432630 220/220; the same-class Second Wind ordering fixed as a
+  rider, observable through Juggernaut's per-gain random-target draws),
+  the victory-terminal survivor set widened to the game's FOUR-arm
+  clearPostCombatActions allowlist (`survives_clear_post_combat`:
+  + GainBlockAction + actionType==DAMAGE, per-opcode Java-class audited —
+  DropkickAction is ActionType.BLOCK and FiendFireAction WAIT, both
+  correctly cleared; victory-scoped, S2.49's dying-owner cancel intact —
+  the Guardian's Sharp Hide THORNS retaliation behind the lethal blow now
+  lands; STS431342 284/284, the Runic Pyramid lead falsified), and the
+  Gremlin Wizard ctor x-offset (`x - 35.0f`, GremlinWizard.java:48 — the
+  smart-position key whose absence rotated the monster array after a dead
+  Wizard and sent every positional replay target to the wrong minion;
+  STS431071 270/270, all four capture rallies' insertion indices
+  reproduce). The seventh, STS430130, is NOT a defect: Cauldron's
+  documented-deferred onEquip (registry row 107) — the "floor-3 room
+  disagreement" was the shop's brew screen, and the live capture measured
+  a previously unrecorded HIDDEN RNG burn (combatRewardScreen.open()'s
+  setupItemReward constructs a full 3-card reward, +9 cardRng + blizz,
+  which Cauldron then deletes from view) — row-107 provenance now carries
+  the full account for the equip-plumbing owner, and the replay harness's
+  reward-row stop now NAMES the deferred relic
+  (`deferred_reward_screen_owner`) instead of reading as a mapping
+  defect. Retest: `s243_resweep5.log` over the full 94-run divergent set
+  = **75 CLEAN + 19 PART, and the PART set is exactly {STS430130} ∪ the
+  18 recaptured escape-window artifacts** (set-verified against
+  `s243_recap_seeds.txt`) — zero open, zero wildcards. The collided
+  first-round recap postprocess was re-run in a clean window (all 10
+  workers exit 0, zero untriaged). Six presets green.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool

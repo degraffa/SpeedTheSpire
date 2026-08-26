@@ -469,6 +469,28 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
            "this stop)";
 }
 
+// The Cauldron/Orrery half of the same discipline, for the REWARD-ROW mapping
+// stop: their deferred onEquip ASSEMBLES a combat-reward screen (Cauldron's
+// five brewed potions, Cauldron.java:30-45; Orrery's card rewards,
+// Orrery.java:27-33) that the sim never opened, so a capture claim on that
+// screen finds no sim row -- a stop that used to read as a mapping defect
+// (seed STS430130, the S2.43 triage). Returns the relic's name when the most
+// recent acquisition explains the missing screen, else "" (the same
+// desync-vs-deferral guard as unsimulated_grid_reason: without the phase gate
+// and the deferred check, the text would confidently misattribute).
+[[nodiscard]] inline std::string deferred_reward_screen_owner(
+    const RunController& rc) {
+    if (!phase_can_follow_relic_pickup(rc.phase) || rc.run.relic_count == 0) {
+        return "";
+    }
+    const RelicId last = static_cast<RelicId>(
+        rc.run.relics[rc.run.relic_count - 1].relic_id);
+    if (!relic_on_equip_deferred(last)) {
+        return "";
+    }
+    return std::string(sts::registry::relic_game_id(last));
+}
+
 // The capture's `choose N` -> the run layer's event-option ordinal, i.e. the
 // position of the button whose `choice_index` is N (see
 // `ScreenInfo::option_choice_index` for why the two spaces differ). Returns -1
@@ -1412,8 +1434,18 @@ struct ShopTarget {
                 }
             }
             if (sim_index < 0 || sim_index >= rc.rewards.count) {
-                m.reason = "combat-reward row '" + chosen.type +
-                           "' has no corresponding sim row after key elision";
+                const std::string owner = deferred_reward_screen_owner(rc);
+                m.reason =
+                    owner.empty()
+                        ? "combat-reward row '" + chosen.type +
+                              "' has no corresponding sim row after key "
+                              "elision"
+                        : "combat-reward row '" + chosen.type +
+                              "' has no sim counterpart: the most recently "
+                              "acquired relic is " +
+                              owner +
+                              ", whose deferred onEquip assembles this "
+                              "reward screen";
                 return m;
             }
             const RewardItemKind sim_kind = static_cast<RewardItemKind>(

@@ -436,8 +436,11 @@ OPCODES = {
     # increase and queue_effect_step stamps the SOURCE POOL INDEX into `flags`
     # (the DAMAGE_RAMPAGE shape) -- the base damage and the growth target are
     # both that instance's misc, read/written at EXECUTE time. The master-deck
-    # half settles at the combat fold-back (the combat layer has no RunState;
-    # the combat_gold precedent) keyed on CardDef.initial_misc != 0.
+    # half settles at every in-combat command boundary
+    # (sync_run_persistent_misc -- the Java's write is mid-action,
+    # RitualDaggerAction.java:39-46; the combat layer has no RunState, the
+    # combat_gold precedent) keyed on CardDef.initial_misc != 0, with the
+    # combat fold-back as the closing sync.
     "RITUAL_DAGGER": 73,
     # CODEX is CodexAction (CodexAction.java:22-64), queued addToBot by
     # Nilry's Codex's onPlayerEndTurn (NilrysCodex.java:29-32). All-monsters-

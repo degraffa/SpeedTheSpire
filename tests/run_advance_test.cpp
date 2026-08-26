@@ -1814,6 +1814,8 @@ TEST(RunPotion, EntropicBrewInCombatUnderSozuRollsButObtainsNothing) {
     EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng));
     EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
     EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(combat_fairy_armed(rc.combat.flags), 0)
+        << "a suppressed obtain places nothing and must not arm the mirror";
 }
 
 TEST(RunPotion, EntropicBrewInCombatDrawsLimitedAndFills) {
@@ -1833,6 +1835,75 @@ TEST(RunPotion, EntropicBrewInCombatDrawsLimitedAndFills) {
     EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng));
     EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(first));
     EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(second));
+}
+
+// Advance `rng` until its NEXT limited roll is a Fairy in a Bottle, probing
+// with a copy so the fairy roll itself is left unconsumed. Bounded so a pool
+// change fails loudly instead of hanging.
+static bool advance_until_next_limited_roll_is_fairy(RngStream& rng) {
+    for (int i = 0; i < 10000; ++i) {
+        RngStream probe = rng;
+        if (hand_limited_potion_roll(probe) == PotionId::FAIRY_POTION) {
+            return true;
+        }
+        (void)hand_limited_potion_roll(rng);
+    }
+    return false;
+}
+
+// The S2.43 triage's STS432580: Entropic Brew's in-combat branch is a
+// mid-combat BELT GAIN (EntropicBrew.java:39-42 -> ObtainPotionAction ->
+// AbstractPlayer.obtainPotion), and a Fairy it places is LIVE -- the revive
+// reads hasPotion("FairyPotion") off the belt (AbstractPlayer.java:1485-1493).
+// The combat's armed-fairy mirror must therefore arm on the obtain; before it
+// did, burn_consumed_fairies at the very same step boundary computed
+// held(1) - armed(0) and ate the brand-new potion.
+TEST(RunPotion, EntropicBrewInCombatKeepsAFairyItRolls) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_TRUE(advance_until_next_limited_roll_is_fairy(rc.run.potion_rng))
+        << "no fairy in 10,000 limited rolls -- pool changed?";
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::FAIRY_POTION))
+        << "the burn at this step's boundary must not eat the fresh Fairy";
+    uint8_t fairies_on_belt = 0;
+    for (uint8_t i = 0; i < rc.run.potion_slots; ++i) {
+        if (static_cast<PotionId>(rc.run.potions[i]) ==
+            PotionId::FAIRY_POTION) {
+            ++fairies_on_belt;
+        }
+    }
+    EXPECT_EQ(combat_fairy_armed(rc.combat.flags), fairies_on_belt)
+        << "every placed Fairy arms the mirror";
+
+    // Idempotence: a further boundary with no revive burns nothing.
+    step(rc, make_action(ActionVerb::END_TURN));
+    if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+        EXPECT_EQ(rc.run.potions[0],
+                  static_cast<uint16_t>(PotionId::FAIRY_POTION));
+    }
+}
+
+// ...and the armed Fairy actually revives: the game's read is live, so dying
+// with only the Brew-obtained Fairy on the belt is a save, not a death.
+TEST(RunPotion, AFairyObtainedMidCombatStillRevives) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_TRUE(advance_until_next_limited_roll_is_fairy(rc.run.potion_rng));
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    ASSERT_EQ(rc.run.potions[0],
+              static_cast<uint16_t>(PotionId::FAIRY_POTION));
+
+    rc.combat.player_hp = 1;
+    step(rc, make_action(ActionVerb::END_TURN));  // Jaw Worm opens with Chomp.
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+        << "the Fairy must have saved the run";
+    EXPECT_GT(rc.combat.player_hp, 0);
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE))
+        << "the spent Fairy leaves the belt at its own step boundary";
+    EXPECT_EQ(combat_fairy_armed(rc.combat.flags), 0);
 }
 
 TEST(RunPotion, TargetPotionDelegatesToCombatPumpAndConsumesSlot) {
@@ -3476,6 +3547,57 @@ TEST(RunCombatGold, RitualDaggerKillFoldsItsGrownMiscToTheMasterDeck) {
             EXPECT_EQ(rc.run.master_deck[i].misc, 0) << i;
         }
     }
+}
+
+// The LIVE half of the same mirror (S2.43 triage, seed STS432354): the Java's
+// masterDeck write is MID-ACTION (RitualDaggerAction.java:39-46), so the
+// capture's master row is grown at the very next record after the kill -- not
+// at combat end. sync_run_persistent_misc therefore runs at every in-combat
+// command boundary, and a run that DIES before the fold still carries the
+// grown row to its terminal records. Pinned through real steps, not a direct
+// helper call: the boundary IS the contract.
+TEST(RunCombatGold, RitualDaggerGrowthReachesTheMasterDeckAtTheNextBoundary) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    ASSERT_TRUE(add_card_to_master_deck(rc.run, CardId::RITUAL_DAGGER));
+    const uint16_t dagger_row =
+        static_cast<uint16_t>(rc.run.master_deck_count - 1);
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.card_pool[dagger_row].card_id,
+              static_cast<uint16_t>(CardId::RITUAL_DAGGER));
+
+    // The state a mid-fight dagger kill leaves behind: the pool instance has
+    // grown, the combat continues (in the capture, two elites were still up).
+    rc.combat.card_pool[dagger_row].misc = 18;
+    EXPECT_EQ(rc.run.master_deck[dagger_row].misc, 15)
+        << "no boundary has passed yet";
+
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+        << "the fight must still be live for the boundary claim to mean "
+           "anything";
+    EXPECT_EQ(rc.run.master_deck[dagger_row].misc, 18)
+        << "the growth reaches the master card at the step boundary, before "
+           "any fold";
+    // Combat-scratch misc still never syncs, per-step included.
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        if (i != dagger_row) {
+            EXPECT_EQ(rc.run.master_deck[i].misc, 0) << i;
+        }
+    }
+
+    // The capture's exact shape: the player dies before any fold. The master
+    // row must already hold the growth at the terminal. (Bounded retry: a
+    // rolled non-damaging monster turn just repeats the boundary.)
+    for (int t = 0; t < 8 &&
+                    rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
+         ++t) {
+        rc.combat.player_hp = 1;
+        step(rc, make_action(ActionVerb::END_TURN));
+    }
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_EQ(rc.run.master_deck[dagger_row].misc, 18);
 }
 
 // The scripted walk a fuzz seed sweep once dead-ended on, pinned by name.

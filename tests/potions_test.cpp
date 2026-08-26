@@ -331,13 +331,21 @@ TEST(Potions, AncientPotionGrantsArtifact) {
 
 // --- NATIVE with body: Blood Potion percent heal -----------------------------
 
-TEST(Potions, BloodPotionHealsPercentOfMaxHp) {
+TEST(Potions, BloodPotionQueuesItsHealAndResolvesOnThePump) {
     CombatState s = MakeCombat();
     s.player_max_hp = 80;
     s.player_hp = 40;
-    ASSERT_TRUE(use_potion(s, PotionId::BLOOD_POTION, 0));  // native: applied inline
-    EXPECT_EQ(s.action_count, 0) << "native heal queues nothing";
-    EXPECT_EQ(s.player_hp, 56);  // 40 + floor(80 * 20/100) = 40 + 16
+    // addToBot(HealAction(...)), BloodPotion.java:44-45 -- queued, per the
+    // HEAL-opcode convention, so a screen-blocking action ahead of it defers
+    // the heal exactly as in the game (seed STS432663, the S2.43 triage).
+    ASSERT_TRUE(use_potion(s, PotionId::BLOOD_POTION, 0));
+    ASSERT_EQ(s.action_count, 1) << "one queued HealAction-equivalent";
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_EQ(item.opcode, static_cast<uint16_t>(Opcode::HEAL));
+    EXPECT_EQ(item.amount, 16);  // floor(80 * 20/100)
+    EXPECT_EQ(s.player_hp, 40) << "nothing lands before the pump";
+    drain_actions(s);
+    EXPECT_EQ(s.player_hp, 56);  // 40 + 16
     EXPECT_EQ(potion_def(PotionId::BLOOD_POTION)->potency, 20);
 }
 
@@ -346,7 +354,37 @@ TEST(Potions, BloodPotionHealClampsToMaxHp) {
     s.player_max_hp = 80;
     s.player_hp = 70;
     ASSERT_TRUE(use_potion(s, PotionId::BLOOD_POTION, 0));
+    drain_actions(s);
     EXPECT_EQ(s.player_hp, 80);  // 70 + 16 = 86, clamped to 80
+}
+
+// The observable window (seed STS432663, the S2.43 triage): Blood Potion
+// drunk while Colorless Potion's non-skippable DISCOVERY holds the queue
+// head. The game's HealAction parks BEHIND the screen and lands only at the
+// pick (the capture's hp stayed 53 for exactly the one record its screen was
+// open, then jumped to 68); an inline heal would land a record early.
+TEST(Potions, BloodPotionHealWaitsBehindAnOpenDiscoveryScreen) {
+    CombatState s = MakeCombat();
+    s.player_max_hp = 75;
+    s.player_hp = 53;
+    s.card_random_rng = from_seed(5);
+    ASSERT_TRUE(use_potion(s, PotionId::COLORLESS_POTION, 0));
+    pump(s);
+    ASSERT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    ASSERT_EQ(s.action_count, 1);
+
+    ASSERT_TRUE(use_potion(s, PotionId::BLOOD_POTION, 0));
+    pump(s);  // still blocked at the DISCOVERY head
+    EXPECT_EQ(s.action_count, 2) << "[DISCOVERY, HEAL]";
+    EXPECT_EQ(s.player_hp, 53) << "the heal waits for the pick";
+
+    // One advance() step (StepCombat is defined further down this file).
+    Action pick = make_action(ActionVerb::CHOOSE, 0);
+    StepResult r{};
+    advance(std::span<CombatState>(&s, 1), std::span<const Action>(&pick, 1),
+            std::span<StepResult>(&r, 1));
+    EXPECT_EQ(s.player_hp, 68);  // 53 + floor(75 * 20/100) = 53 + 15
+    EXPECT_EQ(s.action_count, 0) << "the re-pump drained the parked heal";
 }
 
 // --- NATIVE with body: Blessing of the Forge (Armaments+ in a bottle) ---------

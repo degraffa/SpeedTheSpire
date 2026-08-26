@@ -15,7 +15,7 @@
 #include "sts/engine/cards.hpp"         // CardEffectStep
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
-#include "sts/engine/relic_hooks.hpp"   // heal_player_with_relics (Magic Flower)
+#include "sts/engine/relic_hooks.hpp"   // player_has_relic (Sacred Bark)
 #include "sts/engine/rng_stream.hpp"    // random (potionRng draws)
 #include "sts/engine/types.hpp"         // PotionId
 #include "sts/registry/manifest.hpp"    // generated kPotionsCount
@@ -151,19 +151,30 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
                   "(Fruit Juice, Entropic Brew) do not.");
     switch (id) {
         case PotionId::BLOOD_POTION: {
-            // HealAction(player, floor(maxHealth * potency/100)). Replicate the
-            // game's float math exactly: (int)((float)maxHealth *
-            // ((float)potency / 100.0f)) (BloodPotion.java:43). heal() clamps to
-            // [0, maxHealth]. potency is the heal PERCENT (20).
-            // Routed through the shared in-combat heal seam so Magic Flower's
-            // x1.5 applies (MagicFlower.onPlayerHeal, MagicFlower.java:30-37 --
-            // the relic hooks AbstractPlayer.heal, so it sees EVERY heal in a
-            // combat room, not only relic-sourced ones). Without the relic the
-            // seam is the same clamped add this used to spell inline.
+            // addToBot(HealAction(player, floor(maxHealth * potency/100))),
+            // BloodPotion.java:44-45 -- QUEUED, not applied inline, per the
+            // HEAL-opcode convention (interp.hpp: "queued rather than applied
+            // inline wherever the Java queues a HealAction"). The window is
+            // observable: used while a screen-blocking action holds the queue
+            // head (ColorlessPotion's DISCOVERY), the game's heal waits for
+            // the pick while an inline write lands a record early (seed
+            // STS432663, the S2.43 triage). With an empty queue the caller's
+            // pump resolves it within the same step, so the common case is
+            // unchanged. The amount is fixed at use() time exactly as the
+            // Java's HealAction captures it at construction: (int)((float)
+            // maxHealth * ((float)potency / 100.0f)) (BloodPotion.java:43),
+            // potency the heal PERCENT (20). op_heal routes through
+            // heal_player_with_relics, so Magic Flower's x1.5
+            // (MagicFlower.java:30-37) applies at RESOLUTION, as in the game.
             const float ratio = static_cast<float>(potency) / 100.0f;
             const int heal = static_cast<int>(
                 static_cast<float>(s.player_max_hp) * ratio);
-            heal_player_with_relics(s, heal);
+            ActionQueueItem item{};
+            item.opcode = static_cast<uint16_t>(Opcode::HEAL);
+            item.src = kActorPlayer;
+            item.tgt = kActorPlayer;
+            item.amount = heal;
+            add_to_bottom(s, item);
             break;
         }
         case PotionId::BLESSING_OF_THE_FORGE: {

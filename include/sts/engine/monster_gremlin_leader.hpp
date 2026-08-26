@@ -69,11 +69,20 @@
 //     is the design decision this module makes, argued rather than defaulted.
 //     `identifySlot` (:48-54) returns the first index whose entry is `null ||
 //     isDying`, and the ONLY thing the answer is used for is which POSX the new
-//     gremlin gets. Since GremlinLeader.POSX = {-366, -170, -532} are three
-//     DISTINCT values, and every gremlin in this fight sits at exactly one of
-//     them (the encounter builds its two at POSX[0] and POSX[1],
-//     MonsterHelper.java:507-509; every summon takes its slot's POSX), "slot k is
-//     occupied" is exactly "some LIVE record has draw_x == POSX[k]".
+//     gremlin gets. A slot's occupant key is SPECIES-DEPENDENT: GremlinWizard's
+//     ctor passes `x - 35.0f` up to super (GremlinWizard.java:48; the other
+//     four gremlins pass x unmodified), so slot k's occupant sits at POSX[k]
+//     or POSX[k] - 35. The six resulting values {-366, -401, -170, -205,
+//     -532, -567} are all DISTINCT (and distinct from the leader's +35), and
+//     every gremlin in this fight sits at exactly one of them (the encounter
+//     builds its two at POSX[0] and POSX[1] through the same ctors,
+//     MonsterHelper.java:507-509; every summon takes its slot's key), so
+//     "slot k is occupied" is exactly "some LIVE record has draw_x ==
+//     POSX[k] or POSX[k] - kGremlinWizardXOffset". The offset is not
+//     cosmetic: getSmartPosition sorts by drawX, so a dead Wizard record at
+//     the head of the list keeps LATER same-slot summons to its right --
+//     dropping the offset rotated the whole monster array from rally 2 on
+//     (seed STS431071, the S2.43 triage).
 //
 //     The alternative -- storing three record indices in the leader -- was
 //     rejected for a concrete reason, not a stylistic one: record indices SHIFT
@@ -124,6 +133,12 @@ namespace sts::engine {
 // always lands at list position 0 while slot 1 (-170) lands furthest right of the
 // three. The table is deliberately not sorted -- it is indexed by slot.
 inline constexpr int16_t kGremlinLeaderSlotX[3] = {-366, -170, -532};
+
+// GremlinWizard's ctor x offset (GremlinWizard.java:48: `super(..., x - 35.0f,
+// y)`); the other four gremlin ctors pass x through unmodified. A Wizard
+// occupying slot k therefore sits at kGremlinLeaderSlotX[k] minus this --
+// header note (5) has the six-value distinctness argument.
+inline constexpr int16_t kGremlinWizardXOffset = 35;
 
 // The leader's own `offsetX` (GremlinLeader.java:66, the ctor's 9th argument).
 // Larger than all three slot positions, so every summon inserts BEFORE it and

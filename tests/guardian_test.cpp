@@ -18,6 +18,7 @@
 
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/advance.hpp"
+#include "sts/engine/card_play.hpp"
 #include "sts/engine/cards.hpp"
 #include "sts/engine/encounters.hpp"
 #include "sts/engine/interp.hpp"
@@ -628,6 +629,91 @@ TEST(GuardianSharpHide, PlayerBlockFromTheSameCardStillAbsorbs) {
     drain_actions(s);
     EXPECT_EQ(s.player_hp, 500);
     EXPECT_EQ(s.player_block, 6);
+}
+
+// The S2.43 residual (seed STS431342): the Sharp Hide DamageAction is queued
+// BEHIND the killing blow, and clearPostCombatActions KEEPS it -- its
+// actionType is DAMAGE (GameActionManager.java:130-137) and the dying-owner
+// cancel exempts THORNS (DamageAction.java:65,70) -- while endBattle() waits
+// on the death animation, so the retaliation resolves before victory
+// settlement. The engine's terminal resolver dropped it (USE_CARD/HEAL only)
+// and the player finished 4 hp rich.
+TEST(GuardianSharpHide, RetaliationQueuedBehindTheLethalBlowStillLands) {
+    CombatState s = make_guardian_state(21017, /*player_hp=*/17);
+    MonsterState& g = s.monsters[0];
+    g.powers[g.power_count].power_id = static_cast<uint16_t>(PowerId::SHARP_HIDE);
+    g.powers[g.power_count].amount = 4;
+    ++g.power_count;
+    g.hp = 5;
+    g.block = 0;
+    s.player_energy = 3;
+    const CardDef* strike = card_def(CardId::STRIKE);
+    ASSERT_NE(strike, nullptr);
+    s.card_pool[0].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[0].cost_now = card_cost(*strike, 0);
+    s.card_pool[0].flags = card_flags(*strike, 0);
+    s.hand[0] = 0;
+    s.hand_count = 1;
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_EQ(s.player_hp, 13) << "17 - Sharp Hide 4, landed post-lethal";
+}
+
+// The S2.49 pair that proves the survivor set keys on the THORNS exemption
+// rather than on "run everything": a dying owner's queued NORMAL hit is
+// cancelled inside execute_opcode (damage_attacker_cancelled) even though the
+// DAMAGE item survives the clear; its THORNS twin lands.
+TEST(GuardianSharpHide, DyingOwnersNormalHitStillCancelsAtTheVictoryTerminal) {
+    for (const bool thorns : {false, true}) {
+        CombatState s = make_guardian_state(21018, /*player_hp=*/50);
+        s.monsters[0].hp = 5;
+        ActionQueueItem kill = damage_item(0, 10);
+        add_to_bottom(s, kill);
+        ActionQueueItem hit{};
+        hit.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+        hit.src = 0;  // the (about to be) dying Guardian
+        hit.tgt = kActorPlayer;
+        hit.amount = 10;
+        hit.flags = make_damage_flags(thorns ? DamageType::THORNS
+                                             : DamageType::NORMAL);
+        add_to_bottom(s, hit);
+        s.phase = static_cast<uint8_t>(CombatPhase::RESOLVING);
+        pump(s);
+        EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+        EXPECT_EQ(s.player_hp, thorns ? 40 : 50)
+            << "thorns=" << thorns
+            << ": only the THORNS twin survives its owner's death";
+    }
+}
+
+// Terminal-kind scoping: the game calls clearPostCombatActions only from
+// damage gated on areMonstersBasicallyDead() -- a DEFEAT has no such call, so
+// the widened survivor set must not apply there. A queued GainBlockAction
+// behind the player's death stays abandoned.
+TEST(GuardianSharpHide, DefeatTerminalKeepsTheNarrowSurvivorSet) {
+    CombatState s = make_guardian_state(21019, /*player_hp=*/5);
+    ActionQueueItem kill{};
+    kill.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    kill.src = 0;
+    kill.tgt = kActorPlayer;
+    kill.amount = 10;
+    kill.flags = make_damage_flags(DamageType::NORMAL);
+    add_to_bottom(s, kill);
+    ActionQueueItem blk{};
+    blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+    blk.src = kActorPlayer;
+    blk.tgt = kActorPlayer;
+    blk.amount = 3;
+    add_to_bottom(s, blk);
+    s.phase = static_cast<uint8_t>(CombatPhase::RESOLVING);
+    pump(s);
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_LE(s.player_hp, 0);
+    EXPECT_EQ(s.player_block, 0)
+        << "BLOCK is a victory-only survivor; a defeat abandons it";
 }
 
 // ===========================================================================
