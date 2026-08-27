@@ -75,39 +75,63 @@ a roll-up hash over the sorted (campaign, seed, sha256) triples, so a changed
 artifact moves one visible number. The raw captures stay uncommitted (design
 B §7.3) — the manifest is what pins them.
 
-The no-argument defaults name today's cohorts: the three breadth groups
-`s243_breadth_rand` / `_take` / `_skip`, the four escape-window recapture
-groups `s243_recap_*` / `s243_recap2_*`, `s243_resweep5.log` as the retest
-sweep, and the `s243_prep` seed-scan summary as the sim-side rare-event
-census, all under the fixed `D:\STS_BG_Mod\_oracle_data` root. Repeated
-`--breadth` / `--recapture` flags select a different aggregate;
-`--retest-log`, `--prep-census`, `--dispositions`, `--registry`,
-`--artifact-root` and `--out-dir` move the rest. Cohort membership comes from
-each group's own `parallel_group.json`, never from a directory glob. The S2
-depth cohorts join through the same flags when S2.V2's scan output schedules
-them; nothing about the accounting changes but its numbers.
+The no-argument defaults name today's cohorts under five **roles**, one flag
+per role: `--breadth` (the three breadth groups `s243_breadth_rand` / `_take`
+/ `_skip` plus the `s243_breadth_top2` top-up), `--recapture` (the four
+escape-window recapture groups `s243_recap_*` / `s243_recap2_*`), `--depth`
+(the fourteen S2.V2 depth cohorts carrying items 2 and 3 plus the Mind Bloom
+directed captures), `--iteration` (the twenty-two divergence-stopped waves
+that drove the day's engine and emitter fixes) and `--preflight` (the two
+fork-pin preflights). `s243_resweep7.log` is the retest sweep and the
+`s243_prep` seed-scan summary the sim-side rare-event census, both under the
+fixed `D:\STS_BG_Mod\_oracle_data` root; `--retest-log`, `--prep-census`,
+`--dispositions`, `--registry`, `--artifact-root` and `--out-dir` move the
+rest. Cohort membership comes from each group's own `parallel_group.json`,
+never from a directory glob.
 
-**What it will not do.** It never infers a bar. Items 2 and 3 have no cohort
-yet, so they render as literal shortfalls naming the missing registry BOSS
-rows — the B5.4 "literal shortfall" tradition, and the reason double-boss
-detection is a real artifact-side detector (two distinct Act-3 `act_boss`
-identities in one run) pinned by synthetic fixtures rather than a column
-hard-wired false under a comment naming a future task. It also fails loudly
-rather than bucketing: an artifact whose hash drifts, whose header does not
-identify it as this campaign's A20 Ironclad run, whose records disagree about
-their own `act`, whose classification is outside the known vocabulary, or
-whose `event_id` is neither a registry row nor one of the explicitly
-allowlisted non-registry ids, aborts the report.
+The roles are not decoration. Only `breadth` runs count toward item 1's 2,000;
+only a `breadth` or `preflight` cohort is required to have finished its seed
+list; only an `iteration` cohort may carry a campaign-level disposition, and
+every one of them must; and a `preflight` cohort may carry no disposition at
+all — every one of its runs must read clean both as captured and today.
+
+A worker the driver stopped mid-campaign never reaches the postprocess that
+writes `report.json`. Its run rows are read from `campaign_progress.json`'s
+`seeds_done` block instead (the same additive reach fields), which file spoke
+is recorded per cohort, and its classification can only come from the retest
+sweep — an artifact neither source classifies aborts the report. The artifact
+set is enumerated from the worker **directory**, so the capture the driver
+died on is inventoried, hashed and classified like any other, with no
+completed run row and therefore no reach claims.
+
+**What it will not do.** It never infers a bar. Every shortfall column is
+unchanged from the run that printed four UNMETs — the B5.4 "literal
+shortfall" tradition — and only the numbers moved. Nothing is read off a
+convenient field either: `boss_kill_acts` is a *set* of act numbers, and the
+captures show the Act-2 boss chest's trailing MAP record already carrying
+`act: 3`, so both halves of item 3 are read artifact-side from the ordered
+Act-3 `act_boss` identities (every identity but the last is witnessed killed;
+the last only on a victory), and only a double-boss run that ends in victory
+counts toward the bar. It also fails loudly rather than bucketing: an artifact
+whose hash drifts, whose header does not identify it as this campaign's A20
+Ironclad run, whose records disagree about their own `act`, whose
+classification or campaign status is outside the known vocabulary, or whose
+`event_id` is neither a registry row nor one of the explicitly allowlisted
+non-registry ids, aborts the report.
 
 Dispositions live in `s243_dispositions.json` (format
-`STS-S2-DIVERGENCE-DISPOSITIONS v1`) and are exact, never wildcards. Two
-lists, because two different things are dispositioned: `items` keys a run
-finding by (campaign_id, seed, classification), and `event_rows` keys design
-§6 item 4's per-row alternative to a sighting by a registry `game_id`. The
+`STS-S2-DIVERGENCE-DISPOSITIONS v1`) and are exact, never wildcards. Three
+lists, because three different things are dispositioned: `items` keys a run
+finding by (campaign_id, seed, classification); `event_rows` keys design §6
+item 4's per-row alternative to a sighting by a registry `game_id`; and
+`campaign_rows` keys an `iteration` cohort by its group id, because what an
+iteration wave lost is a whole cohort **seat**, not one finding. The run-level
 `superseded-by-recapture` status must name the replacement capture, which the
 tool then verifies against its own evidence set — same seed, present, and its
 own current classification clean — and whose replay-recognized capture-race
-count it prints rather than assumes.
+count it prints rather than assumes; the campaign-level one must name a
+consumed cohort, other than itself, every one of whose captures reads clean
+today. The alternative, `resolved`, names the landed fix instead.
 
 Four rules differ from `generate_report.py`, deliberately:
 
@@ -117,8 +141,9 @@ Four rules differ from `generate_report.py`, deliberately:
    so a triage wave's effect is visible rather than overwritten.
 2. **Provenance is per cohort.** Worker provenance must agree *within* a
    group; the groups' fork pins are expected to differ, because the
-   escape-window class was closed over two successive fork holds and
-   collapsing the pins would hide that.
+   escape-window class was closed over two successive fork holds and the
+   SecretPortal playtime pin came later still — collapsing the pins would
+   hide that.
 3. **A non-gameplay terminal is excluded, not fatal.** B5.4 raises; this tool
    drops the run from the full-run count, lists it by seed and outcome, and
    keeps going — a dashboard whose job is printing shortfalls cannot abort on
@@ -127,7 +152,10 @@ Four rules differ from `generate_report.py`, deliberately:
    regenerate over improving inputs: when a sibling task makes a
    dispositioned run replay clean, the output is a rendered "no longer
    exercised" row. An *untriaged* finding still counts against the bar, which
-   is the half that protects the gate.
+   is the half that protects the gate. A retest verdict naming a campaign
+   outside the selected cohorts is reported the same way — selecting a subset
+   must not slander the rest — but a verdict for a campaign that WAS read and
+   a seed that was not is a missing artifact, and is fatal.
 
 Unit tests: `test_s2_report.py`, registered as `verify_report_s2_python_test`.
 Every fixture is a synthetic temp-directory campaign tree — the committed

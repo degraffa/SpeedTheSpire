@@ -1,41 +1,41 @@
 id,name,game_id,pool,acts,act2_3_sightings_clean,any_act_sightings_clean,sim_prep_census_rows,witness_campaign_id,witness_seed,disposition_status,status
-12,MATCH_AND_KEEP,Match and Keep!,SHRINE,1 2 3,0,890,4449,,,,OWED
-13,GOLDEN_SHRINE,Golden Shrine,SHRINE,1 2 3,0,148,3342,,,,OWED
-14,TRANSMORGRIFIER,Transmorgrifier,SHRINE,1 2 3,2,117,3507,s243_breadth_take.worker-003-of-008,STS431626,,sighted-zero-diff
-15,PURIFIER,Purifier,SHRINE,1 2 3,2,158,4436,s243_breadth_skip.worker-008-of-008,STS432567,,sighted-zero-diff
-16,UPGRADE_SHRINE,Upgrade Shrine,SHRINE,1 2 3,0,125,4492,,,,OWED
-17,WHEEL_OF_CHANGE,Wheel of Change,SHRINE,1 2 3,4,324,3469,s243_breadth_take.worker-008-of-008,STS431071,,sighted-zero-diff
-18,ACCURSED_BLACKSMITH,Accursed Blacksmith,SPECIAL,1 2 3,0,117,3434,,,,OWED
-19,BONFIRE_ELEMENTALS,Bonfire Elementals,SPECIAL,1 2 3,0,189,3985,,,,OWED
-20,DESIGNER,Designer,SPECIAL,2 3,0,0,2,,,,OWED
-21,DUPLICATOR,Duplicator,SPECIAL,2 3,0,0,4,,,,OWED
-22,FACE_TRADER,FaceTrader,SPECIAL,1 2,0,193,4008,,,,OWED
-23,FOUNTAIN_OF_CLEANSING,Fountain of Cleansing,SPECIAL,1 2 3,0,11,707,,,,OWED
-24,KNOWING_SKULL,Knowing Skull,SPECIAL,2,0,0,1,,,,OWED
-25,LAB,Lab,SPECIAL,1 2 3,0,55,3580,,,,OWED
-26,NLOTH,N'loth,SPECIAL,2,0,0,4,,,,OWED
-27,NOTE_FOR_YOURSELF,NoteForYourself,SPECIAL,1 2 3,0,0,0,,,,OWED
-28,SECRET_PORTAL,SecretPortal,SPECIAL,3,0,0,0,,,,OWED
-29,THE_JOUST,The Joust,SPECIAL,2,0,0,6,,,,OWED
-30,WE_MEET_AGAIN,WeMeetAgain,SPECIAL,1 2 3,0,142,3249,,,,OWED
-31,THE_WOMAN_IN_BLUE,The Woman in Blue,SPECIAL,1 2 3,2,148,3350,s243_breadth_skip.worker-006-of-008,STS432405,,sighted-zero-diff
-32,ADDICT,Addict,EVENT,2,4,4,0,s243_breadth_take.worker-004-of-008,STS431619,,sighted-zero-diff
-33,BACK_TO_BASICS,Back to Basics,EVENT,2,6,6,0,s243_breadth_take.worker-004-of-008,STS431619,,sighted-zero-diff
-34,BEGGAR,Beggar,EVENT,2,2,2,0,s243_breadth_skip.worker-003-of-008,STS432354,,sighted-zero-diff
-35,COLOSSEUM,Colosseum,EVENT,2,0,0,0,,,,OWED
-36,CURSED_TOME,Cursed Tome,EVENT,2,4,4,0,s243_breadth_skip.worker-005-of-008,STS432204,,sighted-zero-diff
-37,DRUG_DEALER,Drug Dealer,EVENT,2,2,2,0,s243_breadth_take.worker-007-of-008,STS431342,,sighted-zero-diff
-38,FORGOTTEN_ALTAR,Forgotten Altar,EVENT,2,2,2,0,s243_breadth_take.worker-003-of-008,STS431626,,sighted-zero-diff
-39,GHOSTS,Ghosts,EVENT,2,4,4,0,s243_breadth_skip.worker-001-of-008,STS432432,,sighted-zero-diff
-40,MASKED_BANDITS,Masked Bandits,EVENT,2,4,4,0,s243_breadth_skip.worker-003-of-008,STS432354,,sighted-zero-diff
-41,NEST,Nest,EVENT,2,3,3,0,s243_breadth_skip.worker-003-of-008,STS432354,,sighted-zero-diff
-42,THE_LIBRARY,The Library,EVENT,2,2,2,0,s243_breadth_skip.worker-001-of-008,STS432432,,sighted-zero-diff
-43,THE_MAUSOLEUM,The Mausoleum,EVENT,2,6,6,0,s243_breadth_take.worker-004-of-008,STS431619,,sighted-zero-diff
-44,VAMPIRES,Vampires,EVENT,2,0,0,0,,,,OWED
-45,FALLING,Falling,EVENT,3,0,0,0,,,,OWED
-46,MIND_BLOOM,MindBloom,EVENT,3,0,0,0,,,,OWED
-47,THE_MOAI_HEAD,The Moai Head,EVENT,3,0,0,0,,,,OWED
-48,MYSTERIOUS_SPHERE,Mysterious Sphere,EVENT,3,0,0,0,,,,OWED
-49,SENSORY_STONE,SensoryStone,EVENT,3,0,0,0,,,,OWED
-50,TOMB_OF_LORD_RED_MASK,Tomb of Lord Red Mask,EVENT,3,0,0,0,,,,OWED
-51,WINDING_HALLS,Winding Halls,EVENT,3,0,0,0,,,,OWED
+12,MATCH_AND_KEEP,Match and Keep!,SHRINE,1 2 3,23,926,4449,s2v2_take_e.worker-001-of-001,STS100038,,sighted-zero-diff
+13,GOLDEN_SHRINE,Golden Shrine,SHRINE,1 2 3,2,152,3342,s2v2_mb_103364.worker-001-of-001,STS103364,,sighted-zero-diff
+14,TRANSMORGRIFIER,Transmorgrifier,SHRINE,1 2 3,2,119,3507,s243_breadth_take.worker-003-of-008,STS431626,,sighted-zero-diff
+15,PURIFIER,Purifier,SHRINE,1 2 3,2,162,4436,s243_breadth_skip.worker-008-of-008,STS432567,,sighted-zero-diff
+16,UPGRADE_SHRINE,Upgrade Shrine,SHRINE,1 2 3,0,125,4492,,,reachability-argument,disposition-on-record
+17,WHEEL_OF_CHANGE,Wheel of Change,SHRINE,1 2 3,4,332,3469,s243_breadth_take.worker-008-of-008,STS431071,,sighted-zero-diff
+18,ACCURSED_BLACKSMITH,Accursed Blacksmith,SPECIAL,1 2 3,10,139,3434,s2v2_take_e.worker-001-of-001,STS100038,,sighted-zero-diff
+19,BONFIRE_ELEMENTALS,Bonfire Elementals,SPECIAL,1 2 3,6,210,3985,s2v2_mb_102529.worker-001-of-001,STS102529,,sighted-zero-diff
+20,DESIGNER,Designer,SPECIAL,2 3,6,6,2,s2v2_take_107575.worker-001-of-001,STS107575,,sighted-zero-diff
+21,DUPLICATOR,Duplicator,SPECIAL,2 3,2,2,4,s2v2_skip_b.worker-001-of-001,STS105134,,sighted-zero-diff
+22,FACE_TRADER,FaceTrader,SPECIAL,1 2,0,193,4008,,,reachability-argument,disposition-on-record
+23,FOUNTAIN_OF_CLEANSING,Fountain of Cleansing,SPECIAL,1 2 3,0,11,707,,,reachability-argument,disposition-on-record
+24,KNOWING_SKULL,Knowing Skull,SPECIAL,2,0,0,1,,,reachability-argument,disposition-on-record
+25,LAB,Lab,SPECIAL,1 2 3,1,56,3580,s2v2_dbv_103509a.worker-001-of-001,STS103509,,sighted-zero-diff
+26,NLOTH,N'loth,SPECIAL,2,0,0,4,,,reachability-argument,disposition-on-record
+27,NOTE_FOR_YOURSELF,NoteForYourself,SPECIAL,1 2 3,0,0,0,,,reachability-argument,disposition-on-record
+28,SECRET_PORTAL,SecretPortal,SPECIAL,3,0,0,0,,,reachability-argument,disposition-on-record
+29,THE_JOUST,The Joust,SPECIAL,2,0,0,6,,,reachability-argument,disposition-on-record
+30,WE_MEET_AGAIN,WeMeetAgain,SPECIAL,1 2 3,6,160,3249,s2v2_take_e.worker-001-of-001,STS100038,,sighted-zero-diff
+31,THE_WOMAN_IN_BLUE,The Woman in Blue,SPECIAL,1 2 3,8,156,3350,s243_breadth_skip.worker-006-of-008,STS432405,,sighted-zero-diff
+32,ADDICT,Addict,EVENT,2,18,18,0,s243_breadth_take.worker-004-of-008,STS431619,,sighted-zero-diff
+33,BACK_TO_BASICS,Back to Basics,EVENT,2,20,20,0,s243_breadth_take.worker-004-of-008,STS431619,,sighted-zero-diff
+34,BEGGAR,Beggar,EVENT,2,10,10,0,s243_breadth_skip.worker-003-of-008,STS432354,,sighted-zero-diff
+35,COLOSSEUM,Colosseum,EVENT,2,0,0,0,,,reachability-argument,disposition-on-record
+36,CURSED_TOME,Cursed Tome,EVENT,2,54,54,0,s243_breadth_skip.worker-005-of-008,STS432204,,sighted-zero-diff
+37,DRUG_DEALER,Drug Dealer,EVENT,2,6,6,0,s243_breadth_take.worker-007-of-008,STS431342,,sighted-zero-diff
+38,FORGOTTEN_ALTAR,Forgotten Altar,EVENT,2,10,10,0,s243_breadth_take.worker-003-of-008,STS431626,,sighted-zero-diff
+39,GHOSTS,Ghosts,EVENT,2,8,8,0,s243_breadth_skip.worker-001-of-008,STS432432,,sighted-zero-diff
+40,MASKED_BANDITS,Masked Bandits,EVENT,2,6,6,0,s243_breadth_skip.worker-003-of-008,STS432354,,sighted-zero-diff
+41,NEST,Nest,EVENT,2,18,18,0,s243_breadth_skip.worker-003-of-008,STS432354,,sighted-zero-diff
+42,THE_LIBRARY,The Library,EVENT,2,7,7,0,s243_breadth_skip.worker-001-of-008,STS432432,,sighted-zero-diff
+43,THE_MAUSOLEUM,The Mausoleum,EVENT,2,18,18,0,s243_breadth_take.worker-004-of-008,STS431619,,sighted-zero-diff
+44,VAMPIRES,Vampires,EVENT,2,10,10,0,s2v2_take_e.worker-001-of-001,STS100439,,sighted-zero-diff
+45,FALLING,Falling,EVENT,3,12,12,0,s2v2_take_107575.worker-001-of-001,STS107575,,sighted-zero-diff
+46,MIND_BLOOM,MindBloom,EVENT,3,4,4,0,s2v2_awk_105835.worker-001-of-001,STS105835,,sighted-zero-diff
+47,THE_MOAI_HEAD,The Moai Head,EVENT,3,2,2,0,s2v2_mb_118993.worker-001-of-001,STS118993,,sighted-zero-diff
+48,MYSTERIOUS_SPHERE,Mysterious Sphere,EVENT,3,6,6,0,s2v2_db47_b.worker-001-of-001,STS128113,,sighted-zero-diff
+49,SENSORY_STONE,SensoryStone,EVENT,3,6,6,0,s2v2_dbv_103509a.worker-001-of-001,STS103509,,sighted-zero-diff
+50,TOMB_OF_LORD_RED_MASK,Tomb of Lord Red Mask,EVENT,3,7,7,0,s2v2_db47_b.worker-001-of-001,STS128113,,sighted-zero-diff
+51,WINDING_HALLS,Winding Halls,EVENT,3,15,15,0,s2v2_db47_b.worker-001-of-001,STS128113,,sighted-zero-diff

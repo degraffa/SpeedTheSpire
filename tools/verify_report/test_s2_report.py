@@ -109,11 +109,12 @@ class S2ReportTest(unittest.TestCase):
             "wall_clock=1.00s",
         ]) + "\n")
 
-    def set_dispositions(self, items, event_rows):
+    def set_dispositions(self, items, event_rows, campaign_rows=()):
         dump(self.dispositions, {
             "format": s2.DISPOSITIONS_FORMAT,
             "items": items,
             "event_rows": event_rows,
+            "campaign_rows": list(campaign_rows),
         })
 
     def retest_text(self, entries):
@@ -132,6 +133,41 @@ class S2ReportTest(unittest.TestCase):
                         for index, worker in enumerate(workers)],
         })
 
+    def _write_artifact(self, directory, campaign_id, spec, policy, config,
+                        fork):
+        """Write one synthetic capture and return its path."""
+        seed = spec["seed"]
+        artifact = directory / f"run_{seed}_a20_ironclad.jsonl"
+        header = {
+            "record_kind": "header", "campaign_id": campaign_id,
+            "seed": {"string": seed}, "ascension": 20,
+            "character": "IRONCLAD", "oracle_block_enabled": True,
+            "fork_jar_sha256": fork, "driver_version": "b1.7.0",
+            "policy": policy, "policy_seed": 1234,
+            "schema_version": 1,
+        }
+        if config is not None:
+            header["external_policy"] = {
+                "cmd_sha256": "CMD0",
+                "config_path": f"D:/tools/{config}",
+                "config_sha256": f"CFG-{config}",
+            }
+        body = [json.dumps(header)]
+        for act, boss, events in spec.get("records", []):
+            body.append(json.dumps({
+                "record_kind": "action",
+                "state_json": {
+                    "game_state": {
+                        "act": act, "act_boss": boss,
+                        "oracle": {"act": act},
+                        "screen_state": {
+                            "event_id": events} if events else {},
+                    },
+                },
+            }))
+        write(artifact, "\n".join(body) + "\n")
+        return artifact
+
     def worker(self, campaign_id, runs, policy="external",
                config="policy_bossrelic_take.json", fork="FORK0",
                corrupt_hash=False):
@@ -140,35 +176,8 @@ class S2ReportTest(unittest.TestCase):
         rows = []
         for spec in runs:
             seed = spec["seed"]
-            artifact = directory / f"run_{seed}_a20_ironclad.jsonl"
-            header = {
-                "record_kind": "header", "campaign_id": campaign_id,
-                "seed": {"string": seed}, "ascension": 20,
-                "character": "IRONCLAD", "oracle_block_enabled": True,
-                "fork_jar_sha256": fork, "driver_version": "b1.7.0",
-                "policy": policy, "policy_seed": 1234,
-                "schema_version": 1,
-            }
-            if config is not None:
-                header["external_policy"] = {
-                    "cmd_sha256": "CMD0",
-                    "config_path": f"D:/tools/{config}",
-                    "config_sha256": f"CFG-{config}",
-                }
-            body = [json.dumps(header)]
-            for act, boss, events in spec.get("records", []):
-                body.append(json.dumps({
-                    "record_kind": "action",
-                    "state_json": {
-                        "game_state": {
-                            "act": act, "act_boss": boss,
-                            "oracle": {"act": act},
-                            "screen_state": {
-                                "event_id": events} if events else {},
-                        },
-                    },
-                }))
-            write(artifact, "\n".join(body) + "\n")
+            artifact = self._write_artifact(
+                directory, campaign_id, spec, policy, config, fork)
             digest = "0" * 64 if corrupt_hash else sha256(artifact)
             rows.append({
                 "seed": seed,
@@ -205,10 +214,52 @@ class S2ReportTest(unittest.TestCase):
                          (2, "Act2 Boss", "Cross Act")]},
         ])
 
-    def run_aggregate(self, breadth=("bg",), recapture=()):
+    def progress_worker(self, campaign_id, runs, extra_seeds=(),
+                        policy="external",
+                        config="policy_bossrelic_take.json", fork="FORK0",
+                        status="fatal_environment_drift"):
+        """A worker the driver stopped mid-campaign: no report.json at all.
+
+        `runs` are the seeds that finished (the `seeds_done` block); every
+        seed in `extra_seeds` gets an artifact and no run row, which is the
+        capture the driver died on.
+        """
+        directory = self.campaigns / campaign_id
+        rows = []
+        for spec in runs:
+            self._write_artifact(directory, campaign_id, spec, policy, config,
+                                 fork)
+            rows.append({
+                "seed": spec["seed"],
+                "actions": spec.get("actions", 5),
+                "outcome": spec.get("outcome", "death"),
+                "max_act": spec.get("max_act", 1),
+                "victory": spec.get("victory", False),
+                "boss_fight_acts": spec.get("boss_fight_acts", []),
+                "boss_kill_acts": spec.get("boss_kill_acts", []),
+                "boss_relic_acts": spec.get("boss_relic_acts", []),
+                "artifact": f"run_{spec['seed']}_a20_ironclad.jsonl",
+            })
+        for spec in extra_seeds:
+            self._write_artifact(directory, campaign_id, spec, policy, config,
+                                 fork)
+        dump(directory / "campaign_progress.json", {
+            "campaign_id": campaign_id,
+            "status": status,
+            "schema_version": 1, "driver_version": "b1.7.0",
+            "fork_jar_sha256": fork,
+            "policy": policy, "policy_seed": 1234,
+            "updated_utc": "2026-08-27T00:00:00Z",
+            "seeds_done": rows,
+            "seeds_failed": [],
+        })
+
+    def run_aggregate(self, breadth=("bg",), recapture=(), depth=(),
+                      iteration=(), preflight=()):
         return s2.aggregate(
             self.campaigns, list(breadth), list(recapture), self.retest,
-            self.dispositions, self.registry, self.census)
+            self.dispositions, self.registry, self.census, list(depth),
+            list(iteration), list(preflight))
 
     # -- loud failure ------------------------------------------------------
 
@@ -294,10 +345,13 @@ class S2ReportTest(unittest.TestCase):
             self.run_aggregate()
         self.assertIn("distinct `act` values", str(caught.exception))
 
-    def test_retest_verdict_outside_the_cohorts_is_fatal(self):
+    def test_a_sweep_verdict_for_a_missing_capture_is_fatal(self):
+        """A verdict inside a READ campaign whose seed has no artifact."""
         self.simple_tree()
-        write(self.retest,
-              self.retest_text([("other.worker-001", "STS9", "PART", "x")]))
+        write(self.retest, self.retest_text([
+            ("bg.worker-001", "STS1", "CLEAN", "terminal"),
+            ("bg.worker-001", "STS9", "PART", "x"),
+        ]))
         with self.assertRaises(ReportError) as caught:
             self.run_aggregate()
         self.assertIn("outside the consumed cohorts", str(caught.exception))
@@ -662,6 +716,328 @@ class S2ReportTest(unittest.TestCase):
         with self.assertRaises(ReportError) as caught:
             self.run_aggregate()
         self.assertIn("not registry rows", str(caught.exception))
+
+    # -- depth cohorts: progress-sourced rows and mid-seed captures ---------
+
+    def test_a_stopped_campaigns_rows_come_from_campaign_progress(self):
+        self.group("dp", ["dp.worker-001"])
+        self.progress_worker("dp.worker-001", [
+            {"seed": "STS1", "max_act": 3, "boss_fight_acts": [2],
+             "boss_kill_acts": [2], "boss_relic_acts": [2],
+             "records": [(2, "Act2 Boss", None), (3, "Act3 Boss A", None)]},
+        ])
+        write(self.retest, self.retest_text(
+            [("dp.worker-001", "STS1", "CLEAN", "run terminal")]))
+        report = self.run_aggregate(breadth=(), depth=("dp",))
+        cohort = report["inputs"]["cohorts"][0]
+        self.assertEqual(cohort["row_sources"], ["campaign progress"])
+        self.assertEqual(cohort["campaign_statuses"],
+                         ["fatal_environment_drift"])
+        self.assertEqual(cohort["provenance"]["pipeline_version"], None)
+        cell = report["item2_act2_depth"]["per_row"]["Act2 Boss"]
+        self.assertEqual(cell["boss_reward_claim_runs"], 1)
+        self.assertEqual(cell["onward_transition_runs"], 1)
+        self.assertIn("campaign progress", s2.markdown(report))
+
+    def test_the_capture_the_driver_died_on_is_still_inventoried(self):
+        self.group("dp", ["dp.worker-001"])
+        self.progress_worker(
+            "dp.worker-001",
+            [{"seed": "STS1", "records": [(1, "Act1 Boss", None)]}],
+            extra_seeds=[{"seed": "STS2",
+                          "records": [(1, "Act1 Boss", None)]}])
+        write(self.retest, self.retest_text([
+            ("dp.worker-001", "STS1", "CLEAN", "run terminal"),
+            ("dp.worker-001", "STS2", "CLEAN", "artifact exhausted"),
+        ]))
+        report = self.run_aggregate(breadth=(), depth=("dp",))
+        self.assertEqual(report["evidence_totals"]["runs_consumed"], 2)
+        cohort = report["inputs"]["cohorts"][0]
+        self.assertEqual(cohort["captures_with_no_completed_run_row"], 1)
+        rows = {entry["seed"]: entry for entry in report["artifact_manifest"]}
+        self.assertEqual(rows["STS2"]["row_source"], "artifact only")
+        self.assertEqual(rows["STS2"]["capture_classification"], None)
+        self.assertEqual(rows["STS2"]["final_classification"], "clean")
+        self.assertIn("capture stopped mid-seed", s2.markdown(report))
+
+    def test_an_unclassified_capture_the_sweep_misses_is_fatal(self):
+        self.group("dp", ["dp.worker-001"])
+        self.progress_worker(
+            "dp.worker-001",
+            [{"seed": "STS1", "records": [(1, "Act1 Boss", None)]}],
+            extra_seeds=[{"seed": "STS2",
+                          "records": [(1, "Act1 Boss", None)]}])
+        write(self.retest, self.retest_text([
+            ("dp.worker-001", "STS1", "CLEAN", "run terminal"),
+        ]))
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate(breadth=(), depth=("dp",))
+        self.assertIn("cannot classify it at all", str(caught.exception))
+
+    def test_a_run_row_naming_an_absent_capture_is_fatal(self):
+        self.group("dp", ["dp.worker-001"])
+        self.progress_worker(
+            "dp.worker-001",
+            [{"seed": "STS1", "records": [(1, "Act1 Boss", None)]}])
+        (self.campaigns / "dp.worker-001"
+         / "run_STS1_a20_ironclad.jsonl").unlink()
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate(breadth=(), depth=("dp",))
+        self.assertIn("not on disk", str(caught.exception))
+
+    def test_a_breadth_cohort_must_have_finished_its_seed_list(self):
+        self.group("bg", ["bg.worker-001"])
+        self.progress_worker(
+            "bg.worker-001",
+            [{"seed": "STS1", "records": [(1, "Act1 Boss", None)]}])
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate()
+        self.assertIn("must have finished its seed list",
+                      str(caught.exception))
+
+    def test_an_unknown_campaign_status_is_fatal(self):
+        self.group("dp", ["dp.worker-001"])
+        self.progress_worker(
+            "dp.worker-001",
+            [{"seed": "STS1", "records": [(1, "Act1 Boss", None)]}],
+            status="probably_fine")
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate(breadth=(), depth=("dp",))
+        self.assertIn("outside the known vocabulary", str(caught.exception))
+
+    def test_translation_drift_is_a_known_classification(self):
+        self.group("bg", ["bg.worker-001"])
+        self.worker("bg.worker-001", [
+            {"seed": "STS1", "classification": "translation_drift",
+             "records": [(1, "Act1 Boss", None)]},
+        ])
+        report = self.run_aggregate()
+        self.assertEqual(report["evidence_totals"]["classification_final"],
+                         {"clean": 1})
+        self.assertEqual(
+            report["evidence_totals"]["classification_as_captured"],
+            {"translation_drift": 1})
+
+    # -- campaign-level dispositions (the `iteration` role) ----------------
+
+    def iteration_tree(self):
+        """One iteration cohort plus the depth cohort that refilled its seat."""
+        self.group("it", ["it.worker-001"])
+        self.progress_worker("it.worker-001", [], extra_seeds=[
+            {"seed": "STS1", "records": [(1, "Act1 Boss", None)]}])
+        self.group("dp", ["dp.worker-001"])
+        self.worker("dp.worker-001",
+                    [{"seed": "STS1", "records": [(1, "Act1 Boss", None)]}])
+        write(self.retest, self.retest_text([
+            ("it.worker-001", "STS1", "CLEAN", "artifact exhausted"),
+            ("dp.worker-001", "STS1", "CLEAN", "run terminal"),
+        ]))
+
+    def test_an_iteration_cohort_without_a_disposition_is_fatal(self):
+        self.iteration_tree()
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate(breadth=(), depth=("dp",), iteration=("it",))
+        self.assertIn("needs an exact campaign disposition",
+                      str(caught.exception))
+
+    def test_a_campaign_supersession_names_its_successor_exactly(self):
+        self.iteration_tree()
+        self.set_dispositions([], [], [{
+            "group": "it", "status": "superseded-by-recapture",
+            "superseded_by": "dp", "reference": "fixture", "note": "fixture",
+        }])
+        report = self.run_aggregate(
+            breadth=(), depth=("dp",), iteration=("it",))
+        self.assertEqual(report["campaign_dispositions"], [{
+            "group": "it", "status": "superseded-by-recapture",
+            "superseded_by": "dp", "reference": "fixture", "note": "fixture",
+        }])
+        self.assertIn("| it | superseded-by-recapture | dp |",
+                      s2.markdown(report))
+
+    def test_a_campaign_supersession_by_an_absent_cohort_is_fatal(self):
+        self.iteration_tree()
+        self.set_dispositions([], [], [{
+            "group": "it", "status": "superseded-by-recapture",
+            "superseded_by": "ghost", "reference": "fixture",
+            "note": "fixture",
+        }])
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate(breadth=(), depth=("dp",), iteration=("it",))
+        self.assertIn("not in the consumed evidence", str(caught.exception))
+
+    def test_a_campaign_supersession_by_a_non_clean_cohort_is_fatal(self):
+        self.iteration_tree()
+        write(self.retest, self.retest_text([
+            ("it.worker-001", "STS1", "CLEAN", "artifact exhausted"),
+            ("dp.worker-001", "STS1", "PART", "stop"),
+        ]))
+        self.set_dispositions([{
+            "campaign_id": "dp.worker-001", "seed": "STS1",
+            "classification": "part", "status": "resolved",
+            "reference": "fixture", "note": "fixture",
+        }], [], [{
+            "group": "it", "status": "superseded-by-recapture",
+            "superseded_by": "dp", "reference": "fixture", "note": "fixture",
+        }])
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate(breadth=(), depth=("dp",), iteration=("it",))
+        self.assertIn("do not all read clean today", str(caught.exception))
+
+    def test_a_resolved_campaign_disposition_needs_no_successor(self):
+        self.iteration_tree()
+        self.set_dispositions([], [], [{
+            "group": "it", "status": "resolved",
+            "reference": "fixture commit", "note": "fixture",
+        }])
+        report = self.run_aggregate(
+            breadth=(), depth=("dp",), iteration=("it",))
+        self.assertEqual(report["campaign_dispositions"][0]["status"],
+                         "resolved")
+        self.assertEqual(report["stale_dispositions"]["campaign_rows"], [])
+
+    def test_an_invalid_campaign_disposition_status_is_fatal(self):
+        self.iteration_tree()
+        self.set_dispositions([], [], [{
+            "group": "it", "status": "probably-fine",
+            "reference": "fixture", "note": "fixture",
+        }])
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate(breadth=(), depth=("dp",), iteration=("it",))
+        self.assertIn("invalid campaign status", str(caught.exception))
+
+    def test_a_preflight_cohort_may_not_lean_on_a_disposition(self):
+        self.group("pf", ["pf.worker-001"])
+        self.worker("pf.worker-001", [
+            {"seed": "STS1", "classification": "state_divergence",
+             "records": [(1, "Act1 Boss", None)]},
+        ])
+        write(self.retest,
+              self.retest_text([("pf.worker-001", "STS1", "PART", "stop")]))
+        self.set_dispositions([{
+            "campaign_id": "pf.worker-001", "seed": "STS1",
+            "classification": "part", "status": "resolved",
+            "reference": "fixture", "note": "fixture",
+        }], [])
+        with self.assertRaises(ReportError) as caught:
+            self.run_aggregate(breadth=(), preflight=("pf",))
+        self.assertIn("must be clean as captured and today",
+                      str(caught.exception))
+
+    # -- retest scope ------------------------------------------------------
+
+    def test_a_sweep_verdict_for_an_unread_campaign_is_counted_not_fatal(self):
+        self.simple_tree()
+        write(self.retest, self.retest_text([
+            ("bg.worker-001", "STS1", "CLEAN", "terminal"),
+            ("bg.worker-001", "STS2", "CLEAN", "terminal"),
+            ("other.worker-001", "STS9", "CLEAN", "terminal"),
+        ]))
+        report = self.run_aggregate()
+        self.assertEqual(
+            report["inputs"]["retest_verdicts_outside_consumed_cohorts"], 1)
+        self.assertIn("outside the consumed cohorts: **1**",
+                      s2.markdown(report))
+
+    # -- act-3 kill and double-boss accounting -----------------------------
+
+    def test_act3_kills_are_read_from_the_ordered_identities(self):
+        """A crossing into act 3 is not a kill; a handoff to a second is."""
+        self.group("bg", ["bg.worker-001"])
+        self.worker("bg.worker-001", [
+            # Reached the second boss and lost to it: the FIRST is killed.
+            {"seed": "STS1", "max_act": 3, "victory": False,
+             "boss_fight_acts": [3], "boss_kill_acts": [2, 3],
+             "records": [(3, "Act3 Boss A", None), (3, "Act3 Boss B", None)]},
+            # Died to the first boss, but `boss_kill_acts` still carries 3
+            # from the Act-2 chest's trailing act-3 record: no kill at all.
+            {"seed": "STS2", "max_act": 3, "victory": False,
+             "boss_fight_acts": [3], "boss_kill_acts": [2, 3],
+             "records": [(3, "Act3 Boss C", None)]},
+        ])
+        report = self.run_aggregate()
+        item3 = report["item3_act3_depth"]
+        self.assertEqual(item3["rows_witnessed_killed"], ["Act3 Boss A"])
+        self.assertEqual(item3["per_row"]["Act3 Boss B"]["kill_runs"], 0)
+        self.assertEqual(item3["per_row"]["Act3 Boss C"]["kill_runs"], 0)
+        self.assertEqual(item3["double_boss_run_count"], 1)
+        self.assertEqual(item3["completed_double_boss_run_count"], 0)
+        self.assertEqual(item3["double_boss_shortfall_to_3"], 3)
+        self.assertIn("no (lost to the second boss)", s2.markdown(report))
+
+    def test_only_completed_double_boss_runs_count_toward_the_bar(self):
+        self.group("bg", ["bg.worker-001"])
+        runs = []
+        for index, (first, second) in enumerate(
+                [("Act3 Boss A", "Act3 Boss B"),
+                 ("Act3 Boss B", "Act3 Boss A"),
+                 ("Act3 Boss A", "Act3 Boss B")]):
+            runs.append({
+                "seed": f"STS{index + 1}", "max_act": 3, "victory": True,
+                "boss_fight_acts": [3], "boss_kill_acts": [3],
+                "records": [(3, first, None), (3, second, None)],
+            })
+        runs.append({
+            "seed": "STS9", "max_act": 3, "victory": False,
+            "boss_fight_acts": [3], "boss_kill_acts": [3],
+            "records": [(3, "Act3 Boss C", None), (3, "Act3 Boss A", None)],
+        })
+        self.worker("bg.worker-001", runs)
+        item3 = self.run_aggregate()["item3_act3_depth"]
+        self.assertEqual(item3["double_boss_run_count"], 4)
+        self.assertEqual(item3["completed_double_boss_run_count"], 3)
+        self.assertEqual(item3["double_boss_first_boss_identities"],
+                         ["Act3 Boss A", "Act3 Boss B"])
+        self.assertEqual(item3["rows_witnessed_killed"],
+                         ["Act3 Boss A", "Act3 Boss B", "Act3 Boss C"])
+        self.assertTrue(item3["met"])
+
+    # -- the depth take/skip axis ------------------------------------------
+
+    def test_the_scripted_follower_configs_carry_the_take_skip_axis(self):
+        self.group("dt", ["dt.worker-001"])
+        self.worker("dt.worker-001", [
+            {"seed": "STS1", "max_act": 3, "boss_fight_acts": [2],
+             "boss_kill_acts": [2], "boss_relic_acts": [2],
+             "records": [(2, "Act2 Boss", None)]},
+        ], config="follower_sim_search.json")
+        self.group("ds", ["ds.worker-001"])
+        self.worker("ds.worker-001", [
+            {"seed": "STS2", "max_act": 3, "boss_fight_acts": [2],
+             "boss_kill_acts": [2], "boss_relic_acts": [2],
+             "records": [(2, "Act2 Boss", None)]},
+        ], config="follower_sim_search_skip.json")
+        write(self.retest, self.retest_text([
+            ("dt.worker-001", "STS1", "CLEAN", "run terminal")]))
+        item2 = self.run_aggregate(
+            breadth=(), depth=("dt", "ds"))["item2_act2_depth"]
+        cell = item2["per_row"]["Act2 Boss"]
+        self.assertEqual(cell["take_cohort_runs"], 1)
+        self.assertEqual(cell["skip_cohort_runs"], 1)
+        self.assertEqual(item2["unattributed_boss_relic_policies"], {})
+        self.assertEqual(item2["rows_with_boss_relic_pick"], ["Act2 Boss"])
+        self.assertTrue(item2["met"])
+
+    def test_a_row_with_no_take_witness_fails_the_pick_half(self):
+        self.group("ds", ["ds.worker-001"])
+        self.worker("ds.worker-001", [
+            {"seed": "STS2", "max_act": 3, "boss_fight_acts": [2],
+             "boss_kill_acts": [2], "boss_relic_acts": [2],
+             "records": [(2, "Act2 Boss", None)]},
+        ], config="follower_sim_search_skip.json")
+        write(self.retest, self.retest_text([
+            ("ds.worker-001", "STS2", "CLEAN", "run terminal")]))
+        item2 = self.run_aggregate(breadth=(), depth=("ds",))["item2_act2_depth"]
+        self.assertEqual(item2["rows_with_boss_relic_pick"], [])
+        self.assertFalse(item2["met"])
+
+    def test_an_act4_event_id_is_allowlisted_not_fatal(self):
+        self.group("bg", ["bg.worker-001"])
+        self.worker("bg.worker-001", [
+            {"seed": "STS1", "records": [(4, "Act3 Boss A", "Spire Heart")]},
+        ])
+        report = self.run_aggregate()
+        self.assertEqual(report["evidence_totals"]["runs_consumed"], 1)
 
     def test_census_head_and_depth_are_parsed(self):
         self.simple_tree()

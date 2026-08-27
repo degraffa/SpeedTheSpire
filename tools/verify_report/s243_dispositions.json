@@ -1,15 +1,206 @@
 {
-  "event_rows": [],
+  "campaign_rows": [
+    {
+      "group": "s2v2_take",
+      "note": "The first depth launch of the STS100009 seat. It stopped before any record could be compared (0 records replayed) on the follower-glue stops the same day's driver commits closed -- 3e16101 (glue rule 3, the collapsed one-click dialog, named in its own subject as this campaign's first stop) and 9ad238b (the sim-only proceed skip, the mirror seam of the same run). Superseded by the clean full-line recapture of the same (seed, policy, policy-seed) seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 depth wave, STS100009 sim_search ps0, wave 1 of 4",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100009_c"
+    },
+    {
+      "group": "s2v2_take_b",
+      "note": "The second wave of the same seat, four records deep, still inside the follower-glue family (acc564a, potion discards as side actions; c412119, a Neow blessing never matching a one-option screen). Superseded by the clean full-line recapture of the same seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 depth wave, STS100009 sim_search ps0, wave 2 of 4",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100009_c"
+    },
+    {
+      "group": "s2v2_take_c",
+      "note": "Twelve records deep -- the capture whose arithmetic decided S2.V2's first engine divergence: a Double-Tapped Rampage under-damaged by its own growth step, root-caused to a per-uuid accumulator and fixed in 5174b7b (`CardFlag::REPLAY_MISC_LINK`). The ledger's `12/12 records, 0 diffs` verdict is this artifact. Superseded by the clean full-line recapture of the same seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- the first depth ENGINE divergence (double-tapped Rampage)",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100009_c"
+    },
+    {
+      "group": "s2v2_take_100009",
+      "note": "229 records deep, stopping at step 224 on the floor-20 Library read: the run layer models it as twenty event options while the game hosts it on `GridCardSelectScreen`. Fixed in the emitter, 8c4cb7a. Superseded by the clean full-line recapture of the same seat, re-emitted against the corrected line.",
+      "reference": "docs/s2-tasks.md S2.43 -- The Library's read pick is a GRID screen",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100009_c"
+    },
+    {
+      "group": "s2v2_take_d",
+      "note": "An earlier wave of the STS100439 seat, 186 records deep. The same seed runs to its death terminal in the successor cohort (413 actions, act 3, the Act-2 Champ take seat item 2 scores), and both captures replay clean on today's engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 depth wave, STS100439 sim_search ps0",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_e"
+    },
+    {
+      "group": "s2v2_take_100075",
+      "note": "Two records deep, stopping at step 1 on a `THREE_SMALL_POTIONS` claim. The engine was right and the SCRIPT EMITTER's claim ordinal was wrong (a kind ordinal beside an id, where the live matcher filters on rtype AND id); fixed to an identity ordinal in a1821cd. Superseded by the clean full-line recapture of the same seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- the STS100075 Neow-potion divergence is a PHANTOM",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100075_b"
+    },
+    {
+      "group": "s2v2_take_108173",
+      "note": "287 records deep. The seat's divergence was the constant 21-hp deficit from the floor-22 Centurion-and-Healer fight: `spawn_group_trace` published `monster_count` slot by slot, so a slot-0 Centurion rolled its opener against an empty group. Fixed in 0300d4b. Superseded by the clean full-line recapture of the same seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- the spawn pre-pass never reached the run layer (`act2-hp-offset`)",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_108173_c"
+    },
+    {
+      "group": "s2v2_take_108173_b",
+      "note": "Not a divergence-stopped wave: a COMPLETE earlier capture of the same STS108173 take seat, 445 records, replaying clean today. The cohort scores the later `_c` capture of the same seat, taken after the day's remaining engine fixes landed, so this one is recorded as superseded rather than counted twice for the same Act-2 BOSS row.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 Act-2 Collector take seat, earlier capture",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_108173_c"
+    },
+    {
+      "group": "s2v2_skip_a",
+      "note": "72 records deep on the STS105134 skip seat. The successor cohort carries the same seed to its death terminal in act 3 with the Act-2 Champ boss-relic SKIP witnessed, and carries STS111111's Automaton skip beside it.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 Act-2 SKIP cohort, STS105134",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_skip_b"
+    },
+    {
+      "group": "s2v2_db47_a",
+      "note": "178 records deep. The same seat's successor is the completed A20 double-boss VICTORY this dashboard scores for item 3 (Time Eater first, then Donu and Deca).",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 double-boss seat, STS128113 sim_search ps47",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_db47_b"
+    },
+    {
+      "group": "s2v2_skip_108173",
+      "note": "221 records deep on the STS108173 SKIP seat, the wave whose `--combat` triage produced the finding: `monsters[0].move_history[0] 2 -> 3` at the floor-22 fight's first record, because `spawn_group_trace` published `monster_count` slot by slot and the slot-0 Centurion took Centurion.java's alone-arm. Fixed in 0300d4b (`MonsterFramework.SpawnTracePublishesTheKeptCountBeforeAnyInitRuns` and two more, all verified RED on the pre-fix engine); this capture replays clean on the landed engine. No successor cohort exists for the skip seat -- the Act-2 skip evidence item 2 scores comes from `s2v2_skip_b` -- so this is resolved by the fix, not superseded by a recapture.",
+      "reference": "docs/s2-tasks.md S2.43 -- the spawn pre-pass never reached the run layer (`act2-hp-offset`), fix 0300d4b",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_skip_108173_b",
+      "note": "The retry of the same STS108173 skip seat, same root cause and same fix (0300d4b). Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the spawn pre-pass never reached the run layer (`act2-hp-offset`), fix 0300d4b",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db27_a",
+      "note": "The STS128113 sim_search ps27 double-boss seat. Its stop was the LEAD D family: under Snecko-applied Confusion the live `Power Through+` costs 2 where the sim had re-seeded `cost_now` from the registry row through `upgrade_instance`. Fixed in 37b543e together with the pile-move `resetAttributes` half. The fix moved this line's own trajectory (ps27 no longer reaches a victory), so the double-boss seat moved to ps47 rather than being recaptured here; this capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- LEAD D, in-combat card COST state, fix 37b543e",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db27_b",
+      "note": "The retry of the same STS128113 ps27 seat, same root cause and same fix (37b543e). Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- LEAD D, in-combat card COST state, fix 37b543e",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db153_a",
+      "note": "Wave 1 of four on the STS108107 sim_search ps153 seat. The seat's deepest stop (step 506, script `Upgrade Shrine` vs live `The Woman in Blue`) is the Act-3 event-roll class: `getShrine` draws `tmp.get(rng.random(tmp.size() - 1))`, so the engine's hardcoded-false SecretPortal shortened the list and changed the drawn INDEX past 800 s of wall clock. Fixed on the replay side in e7338a4 (playtime an explicit input, the trap-5 pin intact for the simulator) and on the capture side in e61b358 (the fork pins the same clock at 0). Every one of the seat's four captures replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db153_b",
+      "note": "Wave 2 of four on the STS108107 ps153 seat; see the `s2v2_db153_a` row for the derivation. Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db153_c",
+      "note": "Wave 3 of four on the STS108107 ps153 seat; see the `s2v2_db153_a` row for the derivation. Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db153_d",
+      "note": "Wave 4 of four on the STS108107 ps153 seat -- the wave that produced the 924.34705 s witness the fix is derived against (`replay_run_diff --replay` is CLEAN on it at 518 records after e7338a4). See the `s2v2_db153_a` row for the derivation.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_mindbloom_a",
+      "note": "Wave 1 of two on the STS101166 sim_search ps0 Mind Bloom seat. Its stop is LEAD D witness (i): a `Bash+` the live game holds at cost 2 with 0 energy, because `Soul.update` calls `clearPowers()` -> `resetAttributes` on every move into the draw or discard pile while the engine wired `reset_cost_for_turn` only to the end-turn sweep. Fixed in 37b543e. The fix moved this line out of `--need-event MindBloom --min-act 3`, so the Mind Bloom seat was refilled by the directed captures `s2v2_mb_102529` and `s2v2_mb_118993` on other seeds rather than recaptured here; this capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- LEAD D, in-combat card COST state, fix 37b543e",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_mindbloom_b",
+      "note": "Wave 2 of two on the STS101166 ps0 Mind Bloom seat, same root cause and same fix (37b543e); see the `s2v2_mindbloom_a` row. Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- LEAD D, in-combat card COST state, fix 37b543e",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_awk_153269",
+      "note": "The STS153269 sim_search ps174 Awakened-One seat, 543 records deep, stopping at step 533 with script `Designer` against live `Fountain of Cleansing` -- the second witness of the Act-3 event-roll class (floor 38, playtime 960.92236 s, index 10 of 15 against index 8 of 14). Fixed in e7338a4, with the capture side pinned in e61b358; `replay_run_diff --replay` is CLEAN on this capture at 543 records on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_awk_193303",
+      "note": "The STS193303 sim_search ps106 Awakened-One seat, 444 records deep, stopping at step 430 on a floor-38 CARD_REWARD the live game rendered with both SKILLs upgraded and the ATTACK not, with `Toxic Egg 2` held. Root cause: the game previews a card reward through every owned relic's `onPreviewObtainCard` at ASSEMBLY, at two sites the engine had neither of. Fixed in bd2dc55 (`apply_offer_previews`, egg-gated, consuming no RNG); this capture replays CLEAN, 444/444 records, on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- a held EGG upgrades the reward OFFER, fix bd2dc55",
+      "status": "resolved"
+    }
+  ],
+  "event_rows": [
+    {
+      "game_id": "Upgrade Shrine",
+      "note": "Reachable and abundant, simply not drawn in an act-2/3 `?` room by these cohorts. It is a SHRINE row with an ALWAYS draw condition present in all three acts' shrine lists (Exordium.java:238-246 position 4, TheCity.java:217 / TheBeyond.java:205 position 5), it fires in 4,492 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds), and the breadth cohort sighted it 125 times in act 1. Deliberately not captured in act 2/3. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+      "status": "reachability-argument"
+    },
+    {
+      "game_id": "FaceTrader",
+      "note": "A one-time SPECIAL with an unconditional getShrine add whose own act gate is TheCity OR Exordium (AbstractDungeon.java:1904-1908), so an Act-2 draw needs nothing of the player. It fires in 4,008 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds) and the breadth cohort sighted it 193 times in act 1; the one-time list simply resolved elsewhere in act 2 in these runs. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+      "status": "reachability-argument"
+    },
+    {
+      "game_id": "Fountain of Cleansing",
+      "note": "Gated on `player.isCursed` (AbstractDungeon.java:1889-1893), which is why it is rarer: 707 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds) and 11 act-1 sightings in the breadth cohort. It was also witnessed LIVE inside this campaign, on the other side of the differ: STS153269's floor-38 `?` room drew it in the game, which is the witness the Act-3 event-roll root cause (SecretPortal's wall-clock gate) was derived against -- the capture stops at that step, so it is evidence of reach rather than a scored sighting. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+      "status": "reachability-argument"
+    },
+    {
+      "game_id": "Knowing Skull",
+      "note": "An Act-2-only SPECIAL gated on `currentHealth > 12` (AbstractDungeon.java:1909-1913), so at A20 it competes for one of very few act-2 `?` rooms in a run that is usually below that line. Nonzero but rare in the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds): 1 row. Reachable and schedulable, deliberately not captured. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+      "status": "reachability-argument"
+    },
+    {
+      "game_id": "N'loth",
+      "note": "An Act-2-only SPECIAL gated on `player.relics.size() >= 2` (AbstractDungeon.java:1914-1918) -- a gate an A20 run passes trivially, so its rarity is one-time-list competition, not the condition. 4 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds). Reachable and schedulable, deliberately not captured. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+      "status": "reachability-argument"
+    },
+    {
+      "game_id": "NoteForYourself",
+      "note": "STRUCTURALLY unreachable in this campaign, and the campaign is A20-only by its own bar. `isNoteForYourselfAvailable` (AbstractDungeon.java:1360-1379) returns false at `ascensionLevel >= 15`, so the row is never ADDED to `specialOneTimeEventList` at all -- collapsed in the engine to `note_for_yourself_available(ascension) == ascension < 15` (event_framework.hpp) under the pinned reference profile. The live captures agree from the other side: every `oracle.specialOneTimeEventList` dump in this report's evidence omits it. A sighting would require a non-A20 capture, which is outside the S2-G2 bar's own scope.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+      "status": "reachability-argument"
+    },
+    {
+      "game_id": "SecretPortal",
+      "note": "Deliberately unreachable on BOTH sides, and that is now enforced rather than assumed. The engine pins `build_shrine_pool`'s eligibility false in every act (trap 5, `SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond`) because the only gate left is `CardCrawlGame.playtime >= 800.0f` -- nondeterministic wall clock, unrepresentable in a sim whose verification story is determinism in (seed, actions). As of 2026-08-27 the ORACLE mirrors that pin: `patches/OraclePlaytimePinPatch` replaces the one playtime read inside `AbstractDungeon.getShrine` with a helper pinned at 0.0f, so the fork the depth cohorts run against cannot draw it either. Sighting it would mean breaking the pin the gate depends on.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting; s2-design.md section 5 trap 5",
+      "status": "reachability-argument"
+    },
+    {
+      "game_id": "The Joust",
+      "note": "An Act-2-only SPECIAL gated on `gold >= 50` (AbstractDungeon.java:1919-1923), a gate an A20 run passes routinely; 6 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds), the highest of the act-2-only one-time specials. Reachable and schedulable, deliberately not captured. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+      "status": "reachability-argument"
+    },
+    {
+      "game_id": "Colosseum",
+      "note": "An ordinary Act-2 EVENT-pool row (TheCity.java:185-198 position 3) whose only gate is map POSITION -- `currMapNode.y > map.size() / 2` (AbstractDungeon.java:1975-1979), the top half of the Act-2 map. Its zero in the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds) is a property of that census, not of the row: the scan's policies leave act 1 in ~0.1 % of rows and never walk the upper half of act 2, which is why all seven act-3-only EVENT rows read zero there too while every one of them is sighted in this report. Reachable and schedulable. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+      "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+      "status": "reachability-argument"
+    }
+  ],
   "format": "STS-S2-DIVERGENCE-DISPOSITIONS v1",
   "items": [
-    {
-      "campaign_id": "s243_breadth_rand.worker-007-of-008",
-      "classification": "part",
-      "note": "NOT a defect. The replay stops at the combat-reward row Cauldron's deferred onEquip assembles; the harness names the owner explicitly (`deferred_reward_screen_owner`). The live capture also measured a previously unrecorded hidden RNG burn -- combatRewardScreen.open() constructs a full 3-card reward (+9 cardRng plus blizz bookkeeping) that Cauldron then deletes from view -- now recorded in the row-107 provenance. Discharge belongs to the Egg-trio onEquip reward-screen preview-pass plumbing row, not to this campaign.",
-      "reference": "registry/relics.yaml row 107 (Cauldron) -- documented-deferred onEquip",
-      "seed": "STS430130",
-      "status": "standing-deviation"
-    },
     {
       "campaign_id": "s243_breadth_skip.worker-001-of-008",
       "classification": "part",
@@ -228,8 +419,8 @@
     },
     {
       "campaign_id": "s243_recap_skip.worker-003-of-004",
-      "classification": "state_divergence",
-      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "classification": "part",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
       "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
       "seed": "STS432530",
       "status": "superseded-by-recapture",
@@ -240,8 +431,8 @@
     },
     {
       "campaign_id": "s243_recap_skip.worker-004-of-004",
-      "classification": "state_divergence",
-      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "classification": "part",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
       "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
       "seed": "STS432616",
       "status": "superseded-by-recapture",
@@ -252,8 +443,8 @@
     },
     {
       "campaign_id": "s243_recap_take.worker-002-of-006",
-      "classification": "state_divergence",
-      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "classification": "part",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
       "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
       "seed": "STS431657",
       "status": "superseded-by-recapture",
@@ -264,8 +455,8 @@
     },
     {
       "campaign_id": "s243_recap_take.worker-003-of-006",
-      "classification": "state_divergence",
-      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "classification": "part",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
       "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
       "seed": "STS431170",
       "status": "superseded-by-recapture",
@@ -276,8 +467,8 @@
     },
     {
       "campaign_id": "s243_recap_take.worker-006-of-006",
-      "classification": "state_divergence",
-      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "classification": "part",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
       "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
       "seed": "STS431537",
       "status": "superseded-by-recapture",

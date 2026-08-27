@@ -1,25 +1,149 @@
 {
-  "divergence_inventory": [
+  "campaign_dispositions": [
     {
-      "artifact_sha256": "085193ba9f7b82b131554eab70cd984662355c3fc88c041781b13b740fc5d123",
-      "campaign_id": "s243_breadth_rand.worker-007-of-008",
-      "capture_classification": "state_divergence",
-      "classification": "part",
-      "classification_source": "retest sweep",
-      "disposition": {
-        "campaign_id": "s243_breadth_rand.worker-007-of-008",
-        "classification": "part",
-        "note": "NOT a defect. The replay stops at the combat-reward row Cauldron's deferred onEquip assembles; the harness names the owner explicitly (`deferred_reward_screen_owner`). The live capture also measured a previously unrecorded hidden RNG burn -- combatRewardScreen.open() constructs a full 3-card reward (+9 cardRng plus blizz bookkeeping) that Cauldron then deletes from view -- now recorded in the row-107 provenance. Discharge belongs to the Egg-trio onEquip reward-screen preview-pass plumbing row, not to this campaign.",
-        "reference": "registry/relics.yaml row 107 (Cauldron) -- documented-deferred onEquip",
-        "seed": "STS430130",
-        "status": "standing-deviation"
-      },
-      "group": "s243_breadth_rand",
-      "retest_first_divergence": "seq=36 floor=3 screen=COMBAT_REWARD (7 fields) -- the stop above is DOWNSTREAM of this",
-      "role": "breadth",
-      "seed": "STS430130",
-      "superseding_recapture": null
+      "group": "s2v2_awk_153269",
+      "note": "The STS153269 sim_search ps174 Awakened-One seat, 543 records deep, stopping at step 533 with script `Designer` against live `Fountain of Cleansing` -- the second witness of the Act-3 event-roll class (floor 38, playtime 960.92236 s, index 10 of 15 against index 8 of 14). Fixed in e7338a4, with the capture side pinned in e61b358; `replay_run_diff --replay` is CLEAN on this capture at 543 records on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
     },
+    {
+      "group": "s2v2_awk_193303",
+      "note": "The STS193303 sim_search ps106 Awakened-One seat, 444 records deep, stopping at step 430 on a floor-38 CARD_REWARD the live game rendered with both SKILLs upgraded and the ATTACK not, with `Toxic Egg 2` held. Root cause: the game previews a card reward through every owned relic's `onPreviewObtainCard` at ASSEMBLY, at two sites the engine had neither of. Fixed in bd2dc55 (`apply_offer_previews`, egg-gated, consuming no RNG); this capture replays CLEAN, 444/444 records, on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- a held EGG upgrades the reward OFFER, fix bd2dc55",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db153_a",
+      "note": "Wave 1 of four on the STS108107 sim_search ps153 seat. The seat's deepest stop (step 506, script `Upgrade Shrine` vs live `The Woman in Blue`) is the Act-3 event-roll class: `getShrine` draws `tmp.get(rng.random(tmp.size() - 1))`, so the engine's hardcoded-false SecretPortal shortened the list and changed the drawn INDEX past 800 s of wall clock. Fixed on the replay side in e7338a4 (playtime an explicit input, the trap-5 pin intact for the simulator) and on the capture side in e61b358 (the fork pins the same clock at 0). Every one of the seat's four captures replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db153_b",
+      "note": "Wave 2 of four on the STS108107 ps153 seat; see the `s2v2_db153_a` row for the derivation. Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db153_c",
+      "note": "Wave 3 of four on the STS108107 ps153 seat; see the `s2v2_db153_a` row for the derivation. Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db153_d",
+      "note": "Wave 4 of four on the STS108107 ps153 seat -- the wave that produced the 924.34705 s witness the fix is derived against (`replay_run_diff --replay` is CLEAN on it at 518 records after e7338a4). See the `s2v2_db153_a` row for the derivation.",
+      "reference": "docs/s2-tasks.md S2.43 -- the Act-3 event-roll divergence class is SecretPortal's wall-clock gate, fixes e7338a4 + e61b358",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db27_a",
+      "note": "The STS128113 sim_search ps27 double-boss seat. Its stop was the LEAD D family: under Snecko-applied Confusion the live `Power Through+` costs 2 where the sim had re-seeded `cost_now` from the registry row through `upgrade_instance`. Fixed in 37b543e together with the pile-move `resetAttributes` half. The fix moved this line's own trajectory (ps27 no longer reaches a victory), so the double-boss seat moved to ps47 rather than being recaptured here; this capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- LEAD D, in-combat card COST state, fix 37b543e",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db27_b",
+      "note": "The retry of the same STS128113 ps27 seat, same root cause and same fix (37b543e). Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- LEAD D, in-combat card COST state, fix 37b543e",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_db47_a",
+      "note": "178 records deep. The same seat's successor is the completed A20 double-boss VICTORY this dashboard scores for item 3 (Time Eater first, then Donu and Deca).",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 double-boss seat, STS128113 sim_search ps47",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_db47_b"
+    },
+    {
+      "group": "s2v2_mindbloom_a",
+      "note": "Wave 1 of two on the STS101166 sim_search ps0 Mind Bloom seat. Its stop is LEAD D witness (i): a `Bash+` the live game holds at cost 2 with 0 energy, because `Soul.update` calls `clearPowers()` -> `resetAttributes` on every move into the draw or discard pile while the engine wired `reset_cost_for_turn` only to the end-turn sweep. Fixed in 37b543e. The fix moved this line out of `--need-event MindBloom --min-act 3`, so the Mind Bloom seat was refilled by the directed captures `s2v2_mb_102529` and `s2v2_mb_118993` on other seeds rather than recaptured here; this capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- LEAD D, in-combat card COST state, fix 37b543e",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_mindbloom_b",
+      "note": "Wave 2 of two on the STS101166 ps0 Mind Bloom seat, same root cause and same fix (37b543e); see the `s2v2_mindbloom_a` row. Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- LEAD D, in-combat card COST state, fix 37b543e",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_skip_108173",
+      "note": "221 records deep on the STS108173 SKIP seat, the wave whose `--combat` triage produced the finding: `monsters[0].move_history[0] 2 -> 3` at the floor-22 fight's first record, because `spawn_group_trace` published `monster_count` slot by slot and the slot-0 Centurion took Centurion.java's alone-arm. Fixed in 0300d4b (`MonsterFramework.SpawnTracePublishesTheKeptCountBeforeAnyInitRuns` and two more, all verified RED on the pre-fix engine); this capture replays clean on the landed engine. No successor cohort exists for the skip seat -- the Act-2 skip evidence item 2 scores comes from `s2v2_skip_b` -- so this is resolved by the fix, not superseded by a recapture.",
+      "reference": "docs/s2-tasks.md S2.43 -- the spawn pre-pass never reached the run layer (`act2-hp-offset`), fix 0300d4b",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_skip_108173_b",
+      "note": "The retry of the same STS108173 skip seat, same root cause and same fix (0300d4b). Its capture replays clean on the landed engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- the spawn pre-pass never reached the run layer (`act2-hp-offset`), fix 0300d4b",
+      "status": "resolved"
+    },
+    {
+      "group": "s2v2_skip_a",
+      "note": "72 records deep on the STS105134 skip seat. The successor cohort carries the same seed to its death terminal in act 3 with the Act-2 Champ boss-relic SKIP witnessed, and carries STS111111's Automaton skip beside it.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 Act-2 SKIP cohort, STS105134",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_skip_b"
+    },
+    {
+      "group": "s2v2_take",
+      "note": "The first depth launch of the STS100009 seat. It stopped before any record could be compared (0 records replayed) on the follower-glue stops the same day's driver commits closed -- 3e16101 (glue rule 3, the collapsed one-click dialog, named in its own subject as this campaign's first stop) and 9ad238b (the sim-only proceed skip, the mirror seam of the same run). Superseded by the clean full-line recapture of the same (seed, policy, policy-seed) seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 depth wave, STS100009 sim_search ps0, wave 1 of 4",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100009_c"
+    },
+    {
+      "group": "s2v2_take_100009",
+      "note": "229 records deep, stopping at step 224 on the floor-20 Library read: the run layer models it as twenty event options while the game hosts it on `GridCardSelectScreen`. Fixed in the emitter, 8c4cb7a. Superseded by the clean full-line recapture of the same seat, re-emitted against the corrected line.",
+      "reference": "docs/s2-tasks.md S2.43 -- The Library's read pick is a GRID screen",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100009_c"
+    },
+    {
+      "group": "s2v2_take_100075",
+      "note": "Two records deep, stopping at step 1 on a `THREE_SMALL_POTIONS` claim. The engine was right and the SCRIPT EMITTER's claim ordinal was wrong (a kind ordinal beside an id, where the live matcher filters on rtype AND id); fixed to an identity ordinal in a1821cd. Superseded by the clean full-line recapture of the same seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- the STS100075 Neow-potion divergence is a PHANTOM",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100075_b"
+    },
+    {
+      "group": "s2v2_take_108173",
+      "note": "287 records deep. The seat's divergence was the constant 21-hp deficit from the floor-22 Centurion-and-Healer fight: `spawn_group_trace` published `monster_count` slot by slot, so a slot-0 Centurion rolled its opener against an empty group. Fixed in 0300d4b. Superseded by the clean full-line recapture of the same seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- the spawn pre-pass never reached the run layer (`act2-hp-offset`)",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_108173_c"
+    },
+    {
+      "group": "s2v2_take_108173_b",
+      "note": "Not a divergence-stopped wave: a COMPLETE earlier capture of the same STS108173 take seat, 445 records, replaying clean today. The cohort scores the later `_c` capture of the same seat, taken after the day's remaining engine fixes landed, so this one is recorded as superseded rather than counted twice for the same Act-2 BOSS row.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 Act-2 Collector take seat, earlier capture",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_108173_c"
+    },
+    {
+      "group": "s2v2_take_b",
+      "note": "The second wave of the same seat, four records deep, still inside the follower-glue family (acc564a, potion discards as side actions; c412119, a Neow blessing never matching a one-option screen). Superseded by the clean full-line recapture of the same seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 depth wave, STS100009 sim_search ps0, wave 2 of 4",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100009_c"
+    },
+    {
+      "group": "s2v2_take_c",
+      "note": "Twelve records deep -- the capture whose arithmetic decided S2.V2's first engine divergence: a Double-Tapped Rampage under-damaged by its own growth step, root-caused to a per-uuid accumulator and fixed in 5174b7b (`CardFlag::REPLAY_MISC_LINK`). The ledger's `12/12 records, 0 diffs` verdict is this artifact. Superseded by the clean full-line recapture of the same seat.",
+      "reference": "docs/s2-tasks.md S2.43 -- the first depth ENGINE divergence (double-tapped Rampage)",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_100009_c"
+    },
+    {
+      "group": "s2v2_take_d",
+      "note": "An earlier wave of the STS100439 seat, 186 records deep. The same seed runs to its death terminal in the successor cohort (413 actions, act 3, the Act-2 Champ take seat item 2 scores), and both captures replay clean on today's engine.",
+      "reference": "docs/s2-tasks.md S2.43 -- S2.V2 depth wave, STS100439 sim_search ps0",
+      "status": "superseded-by-recapture",
+      "superseded_by": "s2v2_take_e"
+    }
+  ],
+  "divergence_inventory": [
     {
       "artifact_sha256": "e08498dd67d67839c77ea8116dc1d9badb745c13eb535609ce02fcc7ba461494",
       "campaign_id": "s243_breadth_skip.worker-001-of-008",
@@ -600,12 +724,12 @@
       "artifact_sha256": "2e0da07719f6b70037f0706603a5c11e5302d38ebe258c70d0686c3b13e100bf",
       "campaign_id": "s243_recap_skip.worker-003-of-004",
       "capture_classification": "state_divergence",
-      "classification": "state_divergence",
-      "classification_source": "capture postprocess",
+      "classification": "part",
+      "classification_source": "retest sweep",
       "disposition": {
         "campaign_id": "s243_recap_skip.worker-003-of-004",
-        "classification": "state_divergence",
-        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "classification": "part",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
         "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
         "seed": "STS432530",
         "status": "superseded-by-recapture",
@@ -615,7 +739,7 @@
         }
       },
       "group": "s243_recap_skip",
-      "retest_first_divergence": null,
+      "retest_first_divergence": "seq=76 floor=6 screen=COMBAT_REWARD (1 field)",
       "role": "recapture",
       "seed": "STS432530",
       "superseding_recapture": {
@@ -632,12 +756,12 @@
       "artifact_sha256": "c32abdc73105ed1d06605725cb0daa1167f7b3192cfef98628b9da84cdc5f588",
       "campaign_id": "s243_recap_skip.worker-004-of-004",
       "capture_classification": "state_divergence",
-      "classification": "state_divergence",
-      "classification_source": "capture postprocess",
+      "classification": "part",
+      "classification_source": "retest sweep",
       "disposition": {
         "campaign_id": "s243_recap_skip.worker-004-of-004",
-        "classification": "state_divergence",
-        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "classification": "part",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
         "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
         "seed": "STS432616",
         "status": "superseded-by-recapture",
@@ -647,7 +771,7 @@
         }
       },
       "group": "s243_recap_skip",
-      "retest_first_divergence": null,
+      "retest_first_divergence": "seq=68 floor=6 screen=COMBAT_REWARD (1 field)",
       "role": "recapture",
       "seed": "STS432616",
       "superseding_recapture": {
@@ -664,12 +788,12 @@
       "artifact_sha256": "2fedf3e95a88f957e61bc092f5aaa3210dfd8d14ce0c21c15657147ae555a021",
       "campaign_id": "s243_recap_take.worker-002-of-006",
       "capture_classification": "state_divergence",
-      "classification": "state_divergence",
-      "classification_source": "capture postprocess",
+      "classification": "part",
+      "classification_source": "retest sweep",
       "disposition": {
         "campaign_id": "s243_recap_take.worker-002-of-006",
-        "classification": "state_divergence",
-        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "classification": "part",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
         "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
         "seed": "STS431657",
         "status": "superseded-by-recapture",
@@ -679,7 +803,7 @@
         }
       },
       "group": "s243_recap_take",
-      "retest_first_divergence": null,
+      "retest_first_divergence": "seq=87 floor=6 screen=COMBAT_REWARD (1 field)",
       "role": "recapture",
       "seed": "STS431657",
       "superseding_recapture": {
@@ -696,12 +820,12 @@
       "artifact_sha256": "cbfb24bb70520e26fd425366c2dd7d0af432baf4d219aaac987fd4318b46eb72",
       "campaign_id": "s243_recap_take.worker-003-of-006",
       "capture_classification": "state_divergence",
-      "classification": "state_divergence",
-      "classification_source": "capture postprocess",
+      "classification": "part",
+      "classification_source": "retest sweep",
       "disposition": {
         "campaign_id": "s243_recap_take.worker-003-of-006",
-        "classification": "state_divergence",
-        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "classification": "part",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
         "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
         "seed": "STS431170",
         "status": "superseded-by-recapture",
@@ -711,7 +835,7 @@
         }
       },
       "group": "s243_recap_take",
-      "retest_first_divergence": null,
+      "retest_first_divergence": "seq=86 floor=7 screen=COMBAT_REWARD (1 field)",
       "role": "recapture",
       "seed": "STS431170",
       "superseding_recapture": {
@@ -728,12 +852,12 @@
       "artifact_sha256": "f0537b3485d69065e2812809d3596f444079a293675e756cc2accbc8e27fe41c",
       "campaign_id": "s243_recap_take.worker-006-of-006",
       "capture_classification": "state_divergence",
-      "classification": "state_divergence",
-      "classification_source": "capture postprocess",
+      "classification": "part",
+      "classification_source": "retest sweep",
       "disposition": {
         "campaign_id": "s243_recap_take.worker-006-of-006",
-        "classification": "state_divergence",
-        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "classification": "part",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. It still replays PART under the full-corpus resweep7 sweep -- the capture is mid-animation, so the verdict is a property of the artifact and not of the engine. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
         "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
         "seed": "STS431537",
         "status": "superseded-by-recapture",
@@ -743,7 +867,7 @@
         }
       },
       "group": "s243_recap_take",
-      "retest_first_divergence": null,
+      "retest_first_divergence": "seq=80 floor=6 screen=COMBAT_REWARD (1 field)",
       "role": "recapture",
       "seed": "STS431537",
       "superseding_recapture": {
@@ -758,23 +882,39 @@
     }
   ],
   "evidence_totals": {
-    "classification_final": {
-      "clean": 1999,
-      "part": 19,
-      "state_divergence": 5
+    "classification_as_captured": {
+      "(unclassified at capture)": 26,
+      "clean": 1938,
+      "state_divergence": 101,
+      "translation_drift": 1
     },
-    "findings": 24,
-    "runs_consumed": 2023
+    "classification_final": {
+      "clean": 2043,
+      "part": 23
+    },
+    "findings": 23,
+    "reclassified_by_retest": 128,
+    "runs_by_role": {
+      "breadth": 2002,
+      "depth": 17,
+      "iteration": 22,
+      "preflight": 2,
+      "recapture": 23
+    },
+    "runs_consumed": 2066
   },
   "format": "STS-S2-VERIFICATION-REPORT v1",
   "inputs": {
-    "artifact_bytes_consumed": 4031391633,
-    "artifact_roll_up_sha256": "2dcb397e7a467d9eae94bd2aff6f520af161f7af7eeb6b5278165c912719b880",
+    "artifact_bytes_consumed": 4285586896,
+    "artifact_roll_up_sha256": "b7713a687deacf86847e4aa75adbf62d8512b853d992c3d6e7dd7ea5e283f388",
     "artifact_root": "D:\\STS_BG_Mod\\_oracle_data\\campaigns",
-    "artifacts_consumed": 2023,
+    "artifacts_consumed": 2066,
     "cohorts": [
       {
         "artifact_bytes": 425156593,
+        "campaign_statuses": [
+          "complete"
+        ],
         "capture_pins": [
           {
             "policy": "random-legal",
@@ -784,6 +924,7 @@
             "policy_seed": 1234
           }
         ],
+        "captures_with_no_completed_run_row": 0,
         "group": "s243_breadth_rand",
         "newest_finished_utc": "2026-08-26T05:10:09.695385Z",
         "provenance": {
@@ -795,45 +936,59 @@
           "schema_version": 1
         },
         "role": "breadth",
+        "row_sources": [
+          "campaign report"
+        ],
         "runs": 500,
-        "worker_reports": [
+        "worker_evidence": [
           {
             "campaign_id": "s243_breadth_rand.worker-001-of-008",
-            "report_sha256": "213071982437690c9e63bc42339c6c237c9c432deba23a1f9442fdddf2924064"
+            "evidence_file": "report.json",
+            "evidence_sha256": "213071982437690c9e63bc42339c6c237c9c432deba23a1f9442fdddf2924064"
           },
           {
             "campaign_id": "s243_breadth_rand.worker-002-of-008",
-            "report_sha256": "fd42721d68e72b7807dfd452a2492eb28d5447c9242c5507b27397801a9e2c80"
+            "evidence_file": "report.json",
+            "evidence_sha256": "fd42721d68e72b7807dfd452a2492eb28d5447c9242c5507b27397801a9e2c80"
           },
           {
             "campaign_id": "s243_breadth_rand.worker-003-of-008",
-            "report_sha256": "629f89a7ea96c85fbc62c6b4c056494ce7b1ccde471a18904ee8cb6651aef831"
+            "evidence_file": "report.json",
+            "evidence_sha256": "629f89a7ea96c85fbc62c6b4c056494ce7b1ccde471a18904ee8cb6651aef831"
           },
           {
             "campaign_id": "s243_breadth_rand.worker-004-of-008",
-            "report_sha256": "578a1c8ecc65e796386c60d9895f667d78f244783ed0e1c89872717b1a82e215"
+            "evidence_file": "report.json",
+            "evidence_sha256": "578a1c8ecc65e796386c60d9895f667d78f244783ed0e1c89872717b1a82e215"
           },
           {
             "campaign_id": "s243_breadth_rand.worker-005-of-008",
-            "report_sha256": "e7e68ce589c0855eac65d5e8e3695b49d941b3df59a9cd9a7355a42aa33a8c72"
+            "evidence_file": "report.json",
+            "evidence_sha256": "e7e68ce589c0855eac65d5e8e3695b49d941b3df59a9cd9a7355a42aa33a8c72"
           },
           {
             "campaign_id": "s243_breadth_rand.worker-006-of-008",
-            "report_sha256": "ea8c1463b4f268fe29f942372fc36f4c778ccfd663498ae667846a18decbe667"
+            "evidence_file": "report.json",
+            "evidence_sha256": "ea8c1463b4f268fe29f942372fc36f4c778ccfd663498ae667846a18decbe667"
           },
           {
             "campaign_id": "s243_breadth_rand.worker-007-of-008",
-            "report_sha256": "9aa2c2f9eb456af0251d84cbd28839a4e6177b73bfb0c2f2b338b24a47ff4591"
+            "evidence_file": "report.json",
+            "evidence_sha256": "9aa2c2f9eb456af0251d84cbd28839a4e6177b73bfb0c2f2b338b24a47ff4591"
           },
           {
             "campaign_id": "s243_breadth_rand.worker-008-of-008",
-            "report_sha256": "2fd76edb93aea1b2ee585df1842f5f260dc180d7698b1ff9f2536763df5aaa73"
+            "evidence_file": "report.json",
+            "evidence_sha256": "2fd76edb93aea1b2ee585df1842f5f260dc180d7698b1ff9f2536763df5aaa73"
           }
         ],
         "workers": 8
       },
       {
         "artifact_bytes": 1769749437,
+        "campaign_statuses": [
+          "complete"
+        ],
         "capture_pins": [
           {
             "policy": "external",
@@ -843,6 +998,7 @@
             "policy_seed": 1234
           }
         ],
+        "captures_with_no_completed_run_row": 0,
         "group": "s243_breadth_take",
         "newest_finished_utc": "2026-08-26T05:59:35.809875Z",
         "provenance": {
@@ -854,45 +1010,59 @@
           "schema_version": 1
         },
         "role": "breadth",
+        "row_sources": [
+          "campaign report"
+        ],
         "runs": 750,
-        "worker_reports": [
+        "worker_evidence": [
           {
             "campaign_id": "s243_breadth_take.worker-001-of-008",
-            "report_sha256": "5f2f175432587b54446c09718ecb87796c6c86d882034ef8f24bd95aec8714e5"
+            "evidence_file": "report.json",
+            "evidence_sha256": "5f2f175432587b54446c09718ecb87796c6c86d882034ef8f24bd95aec8714e5"
           },
           {
             "campaign_id": "s243_breadth_take.worker-002-of-008",
-            "report_sha256": "7a6ae9821da53e868fea313cfd5f40a8e52269953754d7c6ab6ce4711baa2745"
+            "evidence_file": "report.json",
+            "evidence_sha256": "7a6ae9821da53e868fea313cfd5f40a8e52269953754d7c6ab6ce4711baa2745"
           },
           {
             "campaign_id": "s243_breadth_take.worker-003-of-008",
-            "report_sha256": "6e7800b528be472694f4745d63a2b706c62c51f3b14891599c0c97039eb51a51"
+            "evidence_file": "report.json",
+            "evidence_sha256": "6e7800b528be472694f4745d63a2b706c62c51f3b14891599c0c97039eb51a51"
           },
           {
             "campaign_id": "s243_breadth_take.worker-004-of-008",
-            "report_sha256": "f287bd762b862a6575f29501ffea6d89ccc376d5acd4035aded37e93579e82e3"
+            "evidence_file": "report.json",
+            "evidence_sha256": "f287bd762b862a6575f29501ffea6d89ccc376d5acd4035aded37e93579e82e3"
           },
           {
             "campaign_id": "s243_breadth_take.worker-005-of-008",
-            "report_sha256": "4677851f187e6281841adfb7b964ac331eaa35fa8145f99a8c79b77b4284938a"
+            "evidence_file": "report.json",
+            "evidence_sha256": "4677851f187e6281841adfb7b964ac331eaa35fa8145f99a8c79b77b4284938a"
           },
           {
             "campaign_id": "s243_breadth_take.worker-006-of-008",
-            "report_sha256": "4d3ea73df01b998ee55a8d12029ba7ce8911cd97e75c3624dbef2254a717e47c"
+            "evidence_file": "report.json",
+            "evidence_sha256": "4d3ea73df01b998ee55a8d12029ba7ce8911cd97e75c3624dbef2254a717e47c"
           },
           {
             "campaign_id": "s243_breadth_take.worker-007-of-008",
-            "report_sha256": "45affc65ac85530055f16208c475968c8b72ba6869651859d2dcff84b878c6d6"
+            "evidence_file": "report.json",
+            "evidence_sha256": "45affc65ac85530055f16208c475968c8b72ba6869651859d2dcff84b878c6d6"
           },
           {
             "campaign_id": "s243_breadth_take.worker-008-of-008",
-            "report_sha256": "9c71b74f9732c293c9d061a3e968fda63401a6f2362704ebb427e8b259166e6c"
+            "evidence_file": "report.json",
+            "evidence_sha256": "9c71b74f9732c293c9d061a3e968fda63401a6f2362704ebb427e8b259166e6c"
           }
         ],
         "workers": 8
       },
       {
         "artifact_bytes": 1777276375,
+        "campaign_statuses": [
+          "complete"
+        ],
         "capture_pins": [
           {
             "policy": "external",
@@ -902,6 +1072,7 @@
             "policy_seed": 1234
           }
         ],
+        "captures_with_no_completed_run_row": 0,
         "group": "s243_breadth_skip",
         "newest_finished_utc": "2026-08-26T06:53:26.274590Z",
         "provenance": {
@@ -913,45 +1084,59 @@
           "schema_version": 1
         },
         "role": "breadth",
+        "row_sources": [
+          "campaign report"
+        ],
         "runs": 750,
-        "worker_reports": [
+        "worker_evidence": [
           {
             "campaign_id": "s243_breadth_skip.worker-001-of-008",
-            "report_sha256": "d6a3b3e30e2dad307ce0ff78f7a17b524cb25a1999dc8a77ea2c216a3e820da4"
+            "evidence_file": "report.json",
+            "evidence_sha256": "d6a3b3e30e2dad307ce0ff78f7a17b524cb25a1999dc8a77ea2c216a3e820da4"
           },
           {
             "campaign_id": "s243_breadth_skip.worker-002-of-008",
-            "report_sha256": "c422a41dd72fa3759a3918d87d485958ff881b50d9e3df8d2261051b7c9df3cc"
+            "evidence_file": "report.json",
+            "evidence_sha256": "c422a41dd72fa3759a3918d87d485958ff881b50d9e3df8d2261051b7c9df3cc"
           },
           {
             "campaign_id": "s243_breadth_skip.worker-003-of-008",
-            "report_sha256": "f49de56d48533ac19242b891bf6777202ea7f09d3e029697955b708642af34d5"
+            "evidence_file": "report.json",
+            "evidence_sha256": "f49de56d48533ac19242b891bf6777202ea7f09d3e029697955b708642af34d5"
           },
           {
             "campaign_id": "s243_breadth_skip.worker-004-of-008",
-            "report_sha256": "e1dd272e6e689ece9e4eb26767fbda6a3d1ea823613d4f31a9da4ac80a199d60"
+            "evidence_file": "report.json",
+            "evidence_sha256": "e1dd272e6e689ece9e4eb26767fbda6a3d1ea823613d4f31a9da4ac80a199d60"
           },
           {
             "campaign_id": "s243_breadth_skip.worker-005-of-008",
-            "report_sha256": "63eaa4f5e4086b912742c9f2f3e3a90108d36105fa02985e15c8f28142d9a97c"
+            "evidence_file": "report.json",
+            "evidence_sha256": "63eaa4f5e4086b912742c9f2f3e3a90108d36105fa02985e15c8f28142d9a97c"
           },
           {
             "campaign_id": "s243_breadth_skip.worker-006-of-008",
-            "report_sha256": "70c9e234fda111c9d7a688cecdefbdb305b9308d4a7c7a1da38947637888f9cd"
+            "evidence_file": "report.json",
+            "evidence_sha256": "70c9e234fda111c9d7a688cecdefbdb305b9308d4a7c7a1da38947637888f9cd"
           },
           {
             "campaign_id": "s243_breadth_skip.worker-007-of-008",
-            "report_sha256": "73a583a994d8bfba67a47218de8afb5e4751a1e09c03c6e7212e84424211c377"
+            "evidence_file": "report.json",
+            "evidence_sha256": "73a583a994d8bfba67a47218de8afb5e4751a1e09c03c6e7212e84424211c377"
           },
           {
             "campaign_id": "s243_breadth_skip.worker-008-of-008",
-            "report_sha256": "b2d05d6e95607a2347d3671bb99041717255f2fe448989ccc5a77ca17432ca3c"
+            "evidence_file": "report.json",
+            "evidence_sha256": "b2d05d6e95607a2347d3671bb99041717255f2fe448989ccc5a77ca17432ca3c"
           }
         ],
         "workers": 8
       },
       {
-        "artifact_bytes": 22641554,
+        "artifact_bytes": 5560448,
+        "campaign_statuses": [
+          "complete"
+        ],
         "capture_pins": [
           {
             "policy": "external",
@@ -961,6 +1146,46 @@
             "policy_seed": 1234
           }
         ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s243_breadth_top2",
+        "newest_finished_utc": "2026-08-27T10:56:28.752972Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "breadth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 2,
+        "worker_evidence": [
+          {
+            "campaign_id": "s243_breadth_top2.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "cd3e2dc153bb1a2f3e586223e78ff4baaf0319a83546e4108f390a27969c1852"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 22641554,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "5694B7B3FE8C3DE124AE3ABC2F21424CF3D7B492B017024DC62B6350A6C0FBBC",
+            "policy_config": "policy_bossrelic_take.json",
+            "policy_config_sha256": "B4E8C46418341F344A3481F2A137856A17799C4ADEA83E8FDE99F13674244F91",
+            "policy_seed": 1234
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
         "group": "s243_recap_take",
         "newest_finished_utc": "2026-08-26T07:55:45.719398Z",
         "provenance": {
@@ -972,37 +1197,49 @@
           "schema_version": 1
         },
         "role": "recapture",
+        "row_sources": [
+          "campaign report"
+        ],
         "runs": 8,
-        "worker_reports": [
+        "worker_evidence": [
           {
             "campaign_id": "s243_recap_take.worker-001-of-006",
-            "report_sha256": "94a6cf4dcb7e13dc09dd2be532bc2de421b93727e1bec98d1b066d261ecdc566"
+            "evidence_file": "report.json",
+            "evidence_sha256": "94a6cf4dcb7e13dc09dd2be532bc2de421b93727e1bec98d1b066d261ecdc566"
           },
           {
             "campaign_id": "s243_recap_take.worker-002-of-006",
-            "report_sha256": "b7519e030adcdea13b4b8aed30cb78695032d29f0cdb5f1b3047230784cb2745"
+            "evidence_file": "report.json",
+            "evidence_sha256": "b7519e030adcdea13b4b8aed30cb78695032d29f0cdb5f1b3047230784cb2745"
           },
           {
             "campaign_id": "s243_recap_take.worker-003-of-006",
-            "report_sha256": "347600fba903afa422b8a64b23d319856d518305f37e777d64b9061238ba8e81"
+            "evidence_file": "report.json",
+            "evidence_sha256": "347600fba903afa422b8a64b23d319856d518305f37e777d64b9061238ba8e81"
           },
           {
             "campaign_id": "s243_recap_take.worker-004-of-006",
-            "report_sha256": "41561cec22ef39426ab8922ce540d8bcb9d67c5b1a850ce77d605f6b920dc095"
+            "evidence_file": "report.json",
+            "evidence_sha256": "41561cec22ef39426ab8922ce540d8bcb9d67c5b1a850ce77d605f6b920dc095"
           },
           {
             "campaign_id": "s243_recap_take.worker-005-of-006",
-            "report_sha256": "87744e68abae2317a8b46e6cc59ec8628401d23ddc11b42b8b8f09209c5e8402"
+            "evidence_file": "report.json",
+            "evidence_sha256": "87744e68abae2317a8b46e6cc59ec8628401d23ddc11b42b8b8f09209c5e8402"
           },
           {
             "campaign_id": "s243_recap_take.worker-006-of-006",
-            "report_sha256": "8e93d487b45b1ed23d19d6813c45d9798e6ad59f2d6cfc9f451a6fa57cd30e64"
+            "evidence_file": "report.json",
+            "evidence_sha256": "8e93d487b45b1ed23d19d6813c45d9798e6ad59f2d6cfc9f451a6fa57cd30e64"
           }
         ],
         "workers": 6
       },
       {
         "artifact_bytes": 24026897,
+        "campaign_statuses": [
+          "complete"
+        ],
         "capture_pins": [
           {
             "policy": "external",
@@ -1012,6 +1249,7 @@
             "policy_seed": 1234
           }
         ],
+        "captures_with_no_completed_run_row": 0,
         "group": "s243_recap_skip",
         "newest_finished_utc": "2026-08-26T08:06:38.360220Z",
         "provenance": {
@@ -1023,29 +1261,39 @@
           "schema_version": 1
         },
         "role": "recapture",
+        "row_sources": [
+          "campaign report"
+        ],
         "runs": 10,
-        "worker_reports": [
+        "worker_evidence": [
           {
             "campaign_id": "s243_recap_skip.worker-001-of-004",
-            "report_sha256": "eafe4e70de52c6521863f47ab1cf57a3c98458d028761d0c74f5efccc4bb8a5a"
+            "evidence_file": "report.json",
+            "evidence_sha256": "eafe4e70de52c6521863f47ab1cf57a3c98458d028761d0c74f5efccc4bb8a5a"
           },
           {
             "campaign_id": "s243_recap_skip.worker-002-of-004",
-            "report_sha256": "a6cfce654018817d2dc6413173b3836a49c2512376164477b4a069ddb3110d97"
+            "evidence_file": "report.json",
+            "evidence_sha256": "a6cfce654018817d2dc6413173b3836a49c2512376164477b4a069ddb3110d97"
           },
           {
             "campaign_id": "s243_recap_skip.worker-003-of-004",
-            "report_sha256": "4cd57d79b78a7496b1dbb2ced6a4cc85060609b079d1e236b876f8e8926b8b84"
+            "evidence_file": "report.json",
+            "evidence_sha256": "4cd57d79b78a7496b1dbb2ced6a4cc85060609b079d1e236b876f8e8926b8b84"
           },
           {
             "campaign_id": "s243_recap_skip.worker-004-of-004",
-            "report_sha256": "811d8d6ed9f3239cec1a29c23abac019d70f5713c7d764f0053bfbe7739db61f"
+            "evidence_file": "report.json",
+            "evidence_sha256": "811d8d6ed9f3239cec1a29c23abac019d70f5713c7d764f0053bfbe7739db61f"
           }
         ],
         "workers": 4
       },
       {
         "artifact_bytes": 8263821,
+        "campaign_statuses": [
+          "complete"
+        ],
         "capture_pins": [
           {
             "policy": "external",
@@ -1055,6 +1303,7 @@
             "policy_seed": 1234
           }
         ],
+        "captures_with_no_completed_run_row": 0,
         "group": "s243_recap2_take",
         "newest_finished_utc": "2026-08-26T08:24:25.082648Z",
         "provenance": {
@@ -1066,25 +1315,34 @@
           "schema_version": 1
         },
         "role": "recapture",
+        "row_sources": [
+          "campaign report"
+        ],
         "runs": 3,
-        "worker_reports": [
+        "worker_evidence": [
           {
             "campaign_id": "s243_recap2_take.worker-001-of-003",
-            "report_sha256": "a92cedf5381d407602f01739bde06066ef92d73d9deda8256dfc2b168a75dbe9"
+            "evidence_file": "report.json",
+            "evidence_sha256": "a92cedf5381d407602f01739bde06066ef92d73d9deda8256dfc2b168a75dbe9"
           },
           {
             "campaign_id": "s243_recap2_take.worker-002-of-003",
-            "report_sha256": "582bae87b46fca6860b05bbae73fbfb9502cf2d5bf576d231dda0a588bbc6720"
+            "evidence_file": "report.json",
+            "evidence_sha256": "582bae87b46fca6860b05bbae73fbfb9502cf2d5bf576d231dda0a588bbc6720"
           },
           {
             "campaign_id": "s243_recap2_take.worker-003-of-003",
-            "report_sha256": "b1f074424a7deecb6e8914826dc1c188bb408d39835d2d4add775f92e0a72584"
+            "evidence_file": "report.json",
+            "evidence_sha256": "b1f074424a7deecb6e8914826dc1c188bb408d39835d2d4add775f92e0a72584"
           }
         ],
         "workers": 3
       },
       {
         "artifact_bytes": 4276956,
+        "campaign_statuses": [
+          "complete"
+        ],
         "capture_pins": [
           {
             "policy": "external",
@@ -1094,6 +1352,7 @@
             "policy_seed": 1234
           }
         ],
+        "captures_with_no_completed_run_row": 0,
         "group": "s243_recap2_skip",
         "newest_finished_utc": "2026-08-26T08:25:53.031236Z",
         "provenance": {
@@ -1105,27 +1364,1515 @@
           "schema_version": 1
         },
         "role": "recapture",
+        "row_sources": [
+          "campaign report"
+        ],
         "runs": 2,
-        "worker_reports": [
+        "worker_evidence": [
           {
             "campaign_id": "s243_recap2_skip.worker-001-of-002",
-            "report_sha256": "ad439827f3b7a8fff294e036f6cdc673e3ef978d048a33ec2292a0e8669a9a23"
+            "evidence_file": "report.json",
+            "evidence_sha256": "ad439827f3b7a8fff294e036f6cdc673e3ef978d048a33ec2292a0e8669a9a23"
           },
           {
             "campaign_id": "s243_recap2_skip.worker-002-of-002",
-            "report_sha256": "b9bba56267a49f2fc1996e89ab000494364219fc7986b15975c18a473eedf67b"
+            "evidence_file": "report.json",
+            "evidence_sha256": "b9bba56267a49f2fc1996e89ab000494364219fc7986b15975c18a473eedf67b"
           }
         ],
         "workers": 2
+      },
+      {
+        "artifact_bytes": 14437353,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "AFE570EDF3F708D1D3D1A90A3778F6C4D343BFCCA6DB31624B2C5A877F27FC5E",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_take_e",
+        "newest_finished_utc": "2026-08-27T11:01:06.050627Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 2,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_e.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "c46f43a55e1e07c3baab8d400af1396704c4b2a485e322254ba5f37ad618c26c"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 11260224,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "DC8AA06F2F58C21431BE605B4901AC30E448164CB1B6269FD4F8A0301EE9145C",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_take_107575",
+        "newest_finished_utc": "2026-08-27T11:14:05.867652Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_107575.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "d870a952d284c5463afeb48a3d9fc0ecf71b20d254e28450f82ac86a52ce0a1f"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 8169853,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_take_100075_b",
+        "newest_finished_utc": "2026-08-27T12:17:00.113721Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_100075_b.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "a32936bd483dbecce14dc3bfb859354fdae131c628c10360364195ff11cbebab"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 7303383,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_take_108173_c",
+        "newest_finished_utc": "2026-08-27T13:32:15.962828Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_108173_c.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "2b2800493c18e21bcf0b812d5242a91f1e309974b12e2db7e1f1c50d5c1c25b0"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 8319775,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_take_100038_b",
+        "newest_finished_utc": "2026-08-27T12:38:37.628204Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_100038_b.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "14995c69a3b9b6c16ad85c0d795adbe713839248823b2b6fc5bc348cdc2086d6"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 8785605,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_take_100009_c",
+        "newest_finished_utc": "2026-08-27T13:31:34.302520Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_100009_c.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "36c43340fdd0967cce7a143c839a2546abacf4a9c24fe85d940d50ab2e9f52ea"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 16795081,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "AFE570EDF3F708D1D3D1A90A3778F6C4D343BFCCA6DB31624B2C5A877F27FC5E",
+            "policy_config": "follower_sim_search_skip.json",
+            "policy_config_sha256": "687B4B9CA8270B81BA8FB0F58BFEBDE6A45E070BFCB6D8C217347EFA6806EDE0",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_skip_b",
+        "newest_finished_utc": "2026-08-27T11:02:05.538176Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 3,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_skip_b.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "36b3da6b80f80bd93b5ccfd85f842030db8d009eeafae29325d6c04125471b8a"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 14172588,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "9D094F5FCF5C9EEE1494A4CE0B202642587E38541A3B7AEE3A8715D672328E35",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 47
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_db47_b",
+        "newest_finished_utc": "2026-08-27T11:07:58.163664Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 47,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_db47_b.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "865bed9a3d86d1bc7d5db0dbdb31c715812880e20f92411f85cdab545dae9df6"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 13113821,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 347
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_dbv_103509a",
+        "newest_finished_utc": "2026-08-27T17:48:15.560395Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "ABD95268462FA31E7F7498B45BA4539E3731CC38E59850B547D03AE6F372A4C1",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 347,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_dbv_103509a.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "fcf13b0e1c517a3e1e1c3b37a12f1905d69712e2e87a6b0c0edb0368652d4fef"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 13795046,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 472
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_dbv_103509b",
+        "newest_finished_utc": "2026-08-27T17:49:39.744145Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "ABD95268462FA31E7F7498B45BA4539E3731CC38E59850B547D03AE6F372A4C1",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 472,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_dbv_103509b.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "784f34a82bfd73b55c6975c855e3b0eafed32605420fa6866bbe1a9f684821eb"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 13678628,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 317
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_awk_105835",
+        "newest_finished_utc": "2026-08-27T13:34:11.755521Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 317,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_awk_105835.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "1d10f59bb2aea0149ec09ba757b2feb857fdfef5e55da1fab0368e76f2d1ce51"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 12813570,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 25
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_mb_102529",
+        "newest_finished_utc": "2026-08-27T17:12:27.914621Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "ABD95268462FA31E7F7498B45BA4539E3731CC38E59850B547D03AE6F372A4C1",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 25,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_mb_102529.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "d3ba60efca65b1c4f66b9a02d5bf764713000ba2992af354539e6c4dd2128bcf"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 11686464,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 28
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_mb_118993",
+        "newest_finished_utc": "2026-08-27T17:13:33.540939Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "ABD95268462FA31E7F7498B45BA4539E3731CC38E59850B547D03AE6F372A4C1",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 28,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_mb_118993.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "3ba370bf0858b0a5029177a008880e6adbd05519b78d159661a46aafd7de54e0"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 9841966,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_mb_103364",
+        "newest_finished_utc": "2026-08-27T11:18:58.451840Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "depth",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_mb_103364.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "6c2c246df00c9518b00d15c4124ba57e018e720de559ddbe0d4e304613a9a2a1"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 1262,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "BAB474D647215C3B7A6041EED15CB254C2222187FE94350FCFC76AA13C555E0D",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_take",
+        "newest_finished_utc": "2026-08-27T10:36:21.704395Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "bbcc2c5cbdd6d71acdbd3eed54218ca96fe2ea931d78ba4a0239dfc849c8e8a0"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 49063,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "4CE19127D035EE727A7F32A1852830C2AEFDADE11683EC99BCA851B766E37F9D",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_take_b",
+        "newest_finished_utc": "2026-08-27T10:40:22.787564Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_b.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "b7cf7fe267829a32c8357b1d9d449a77a07b6d6e6bc28ff1aec64de9c16cfe26"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 167340,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "149A770833C3761A7082FFE482C88659897285105D63290AC00B0753F2E289AD",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_take_c",
+        "newest_finished_utc": "2026-08-27T10:42:17.441241Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_c.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "34f9c3c71f881952edaec3bf449322a1d63be538b564b07c44e2242cb4424775"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 3141355,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "149A770833C3761A7082FFE482C88659897285105D63290AC00B0753F2E289AD",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_take_d",
+        "newest_finished_utc": "2026-08-27T10:45:26.161264Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_d.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "b32f39cca295a7a2f3151f7d15d095520cf8242d9f2e0fdf2ab8f90bb99662c9"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 3819031,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_take_100009",
+        "newest_finished_utc": "2026-08-27T12:10:31.951012Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_100009.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "fedcb8d32787c24578716615d7b135224ab57b4258d269fe9e791b82b3cfa96e"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 27553,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "DC8AA06F2F58C21431BE605B4901AC30E448164CB1B6269FD4F8A0301EE9145C",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_take_100075",
+        "newest_finished_utc": "2026-08-27T11:11:57.452114Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_100075.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "66f0ba4a97b1816f8ef4485d1b0daffe2a6c70dce9f32fdb5a1f27cca4b63ac6"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 4875435,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "DC8AA06F2F58C21431BE605B4901AC30E448164CB1B6269FD4F8A0301EE9145C",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_take_108173",
+        "newest_finished_utc": "2026-08-27T11:14:53.570703Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_108173.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "38826e7e6f8a615430fb0327ef09dd3c6aefab21a4d75f061f582fb26542ef95"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 8080021,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s2v2_take_108173_b",
+        "newest_finished_utc": "2026-08-27T12:18:00.222821Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_take_108173_b.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "7cdc3f1180a6feed941f9104d505bc02d026fbb4d10400cfe98a92004ec65647"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 1120177,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "149A770833C3761A7082FFE482C88659897285105D63290AC00B0753F2E289AD",
+            "policy_config": "follower_sim_search_skip.json",
+            "policy_config_sha256": "687B4B9CA8270B81BA8FB0F58BFEBDE6A45E070BFCB6D8C217347EFA6806EDE0",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_skip_a",
+        "newest_finished_utc": "2026-08-27T10:45:45.140801Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_skip_a.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "f5141d7a9c44dfccc733065dcb91b81fb6263936df9bb196847a057f67ef0638"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 3697891,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "DC8AA06F2F58C21431BE605B4901AC30E448164CB1B6269FD4F8A0301EE9145C",
+            "policy_config": "follower_sim_search_skip.json",
+            "policy_config_sha256": "687B4B9CA8270B81BA8FB0F58BFEBDE6A45E070BFCB6D8C217347EFA6806EDE0",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_skip_108173",
+        "newest_finished_utc": "2026-08-27T11:17:33.844386Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_skip_108173.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "fe2b234ba19c3b20a3c1d2703564adbed619844e29da62e72f6389fca0714cc7"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 4324636,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search_skip.json",
+            "policy_config_sha256": "687B4B9CA8270B81BA8FB0F58BFEBDE6A45E070BFCB6D8C217347EFA6806EDE0",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_skip_108173_b",
+        "newest_finished_utc": "2026-08-27T11:20:05.070042Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_skip_108173_b.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "f9c2d0065907ca8316fbe5ec035f5f03a3ab71647fb43ecb3f2c7f784429f3d8"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 2894496,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "149A770833C3761A7082FFE482C88659897285105D63290AC00B0753F2E289AD",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 27
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_db27_a",
+        "newest_finished_utc": "2026-08-27T10:46:06.857778Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 27,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_db27_a.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "c336dee5371e85cb01cf0050b2442437a7dc730a793c0699020dbf76d44ffc1a"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 6202659,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "AFE570EDF3F708D1D3D1A90A3778F6C4D343BFCCA6DB31624B2C5A877F27FC5E",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 27
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_db27_b",
+        "newest_finished_utc": "2026-08-27T11:07:03.757490Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 27,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_db27_b.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "ae714110c0f765021d5395e0a0b6babce97e161a9eb6106e3ff3377fc4e218dc"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 3067510,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "149A770833C3761A7082FFE482C88659897285105D63290AC00B0753F2E289AD",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 47
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_db47_a",
+        "newest_finished_utc": "2026-08-27T10:46:29.901115Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 47,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_db47_a.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "b03bb7a58442529ac0e3f913b2a554ba5616770e2eea7bd7f2348563816ec41e"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 838576,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "1D584B14015AD87599C4D2AF37E835B930EACAD39BD75DD33432157FFBFA8836",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 153
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_db153_a",
+        "newest_finished_utc": "2026-08-27T10:47:42.043227Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 153,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_db153_a.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "9796b3c036d87083d74fc14791355c7a12bf780dc138999507cbd845a7c54c63"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 1402964,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "9D094F5FCF5C9EEE1494A4CE0B202642587E38541A3B7AEE3A8715D672328E35",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 153
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_db153_b",
+        "newest_finished_utc": "2026-08-27T11:09:24.022748Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 153,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_db153_b.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "88f72967b4bff1e8cdd7f08823031c1053116b72856b19bbf72cd53c9433aec2"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 1402967,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "DC8AA06F2F58C21431BE605B4901AC30E448164CB1B6269FD4F8A0301EE9145C",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 153
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_db153_c",
+        "newest_finished_utc": "2026-08-27T11:18:07.719626Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 153,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_db153_c.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "9cd6113c280f8371d5023a950e1ff2fdd265bb7346cb7ced82245161ed4610a8"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 10183893,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 153
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_db153_d",
+        "newest_finished_utc": "2026-08-27T11:21:08.038392Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 153,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_db153_d.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "58dc940cc7593f7596dc292c71722c8fa1e893d95cd8e50b3481497e0434f08c"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 4550850,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "AFE570EDF3F708D1D3D1A90A3778F6C4D343BFCCA6DB31624B2C5A877F27FC5E",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_mindbloom_a",
+        "newest_finished_utc": "2026-08-27T10:53:14.381997Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_mindbloom_a.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "7f6ae62c6a5addc7afaeb400201cca5896912982f079d8f7329b70dc61fcfa59"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 5985555,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "9D094F5FCF5C9EEE1494A4CE0B202642587E38541A3B7AEE3A8715D672328E35",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 0
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_mindbloom_b",
+        "newest_finished_utc": "2026-08-27T11:10:44.113179Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 0,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_mindbloom_b.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "6e12b44c89b7f1463488872b276fb11b12099664719f247a81d4b8d2e7ed4061"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 10119823,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 174
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_awk_153269",
+        "newest_finished_utc": "2026-08-27T13:33:33.986759Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 174,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_awk_153269.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "30e258aa36af82925723240d6d9ef163a26ec7b3d538b03f1d9c48f0a0867f27"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 8479757,
+        "campaign_statuses": [
+          "fatal_environment_drift"
+        ],
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "CA9A78D8B73603549CC24EE14DAFD5992F9EE71135E78F2270675373FCF6C6F0",
+            "policy_config": "follower_sim_search.json",
+            "policy_config_sha256": "0A90034E05C624CB73CA086EB2A30081A9648354F614B4F612F299AA2620260F",
+            "policy_seed": 106
+          }
+        ],
+        "captures_with_no_completed_run_row": 1,
+        "group": "s2v2_awk_193303",
+        "newest_finished_utc": "2026-08-27T13:32:58.726829Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": null,
+          "policy": "external",
+          "policy_seed": 106,
+          "schema_version": 1
+        },
+        "role": "iteration",
+        "row_sources": [
+          "campaign progress"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s2v2_awk_193303.worker-001-of-001",
+            "evidence_file": "campaign_progress.json",
+            "evidence_sha256": "b7769ef0bdb32675a926fe9dc91740415837146b57bac11de8bc20167595660d"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 14233,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "random-legal",
+            "policy_cmd_sha256": null,
+            "policy_config": null,
+            "policy_config_sha256": null,
+            "policy_seed": 1234
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "s243_preflight",
+        "newest_finished_utc": "2026-08-26T04:55:35.831302Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "9BC4BF6A76F57C78E69B4A355D8BA1A2B2A7698E3A30B1619AC70EABCB714555",
+          "pipeline_version": "b5.4.0",
+          "policy": "random-legal",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "preflight",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "s243_preflight.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "d41f6e104eb1ad7258c39f79edfa365b67d298d2e9578733081782002f4d9f0f"
+          }
+        ],
+        "workers": 1
+      },
+      {
+        "artifact_bytes": 14411,
+        "campaign_statuses": [
+          "complete"
+        ],
+        "capture_pins": [
+          {
+            "policy": "random-legal",
+            "policy_cmd_sha256": null,
+            "policy_config": null,
+            "policy_config_sha256": null,
+            "policy_seed": 1234
+          }
+        ],
+        "captures_with_no_completed_run_row": 0,
+        "group": "fork_pin_preflight",
+        "newest_finished_utc": "2026-08-27T15:17:50.468995Z",
+        "provenance": {
+          "driver_version": "b1.7.1",
+          "fork_jar_sha256": "ABD95268462FA31E7F7498B45BA4539E3731CC38E59850B547D03AE6F372A4C1",
+          "pipeline_version": "b5.4.0",
+          "policy": "random-legal",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "preflight",
+        "row_sources": [
+          "campaign report"
+        ],
+        "runs": 1,
+        "worker_evidence": [
+          {
+            "campaign_id": "fork_pin_preflight.worker-001-of-001",
+            "evidence_file": "report.json",
+            "evidence_sha256": "bf5f6f66c13d95127526de84e67491400af21176edd197d99caa5c0a350e93b3"
+          }
+        ],
+        "workers": 1
       }
     ],
     "dispositions": {
-      "event_row_items": 0,
+      "campaign_row_items": 22,
+      "event_row_items": 9,
       "path": "s243_dispositions.json",
-      "run_items": 24,
-      "sha256": "936a06fbb3f3a9b36b030de7b3a5e5bdb89d3e7ca4dc2f373042983c6dab99d9"
+      "run_items": 23,
+      "sha256": "a68df1a91c472272fdb3e3b2ce2f19d02df8b0e46bd64635044cf5212dd1aeaf"
     },
-    "newest_capture_finished_utc": "2026-08-26T08:25:53.031236Z",
+    "newest_capture_finished_utc": "2026-08-27T17:49:39.744145Z",
     "prep_census": {
       "actions": 18960088,
       "depth_all_policies": {
@@ -1148,33 +2895,34 @@
       "sha256": "41812c14f49bccb0718b8572f04ee1361b48bb903b892cbef26fd0497cd23db9"
     },
     "retest_log": {
-      "path": "s243_resweep5.log",
-      "sha256": "5e61590a2fc7b1800b50deb3d8a7c40e7d2e61684ce2836c00eba515958103b4",
-      "verdicts": 94
-    }
+      "path": "s243_resweep7.log",
+      "sha256": "71a546f42e05d5a13fbcfc8876b93a57e60ea16df8ee0c80da781760b6f2348d",
+      "verdicts": 2066
+    },
+    "retest_verdicts_outside_consumed_cohorts": 0
   },
   "item1_breadth": {
-    "breadth_runs": 2000,
+    "breadth_runs": 2002,
     "capture_race_records": 62,
     "capture_race_runs": 58,
-    "captured_actions": 236218,
+    "captured_actions": 236532,
     "classification_as_captured": {
-      "clean": 1906,
+      "clean": 1908,
       "state_divergence": 94
     },
     "classification_final": {
-      "clean": 1981,
-      "part": 19
+      "clean": 1984,
+      "part": 18
     },
-    "distinct_breadth_seeds": 2000,
-    "full_run_attempts": 1998,
-    "full_run_shortfall_to_2000": 2,
+    "distinct_breadth_seeds": 2002,
+    "full_run_attempts": 2000,
+    "full_run_shortfall_to_2000": 0,
     "gameplay_terminal_outcomes": [
       "act1_boss_reward",
       "death",
       "victory"
     ],
-    "met": false,
+    "met": true,
     "mixed_policies": true,
     "non_gameplay_terminal_runs": [
       {
@@ -1205,36 +2953,36 @@
     "zero_untriaged": true
   },
   "item2_act2_depth": {
-    "act2_boss_fight_clean_runs": 0,
-    "act2_entering_clean_runs": 19,
-    "met": false,
+    "act2_boss_fight_clean_runs": 16,
+    "act2_entering_clean_runs": 35,
+    "met": true,
     "per_row": {
       "Automaton": {
-        "boss_chest_runs": 0,
-        "boss_fight_runs": 0,
-        "boss_reward_claim_runs": 0,
-        "kill_runs": 0,
-        "onward_transition_runs": 0,
-        "skip_cohort_runs": 0,
-        "take_cohort_runs": 0
+        "boss_chest_runs": 4,
+        "boss_fight_runs": 4,
+        "boss_reward_claim_runs": 4,
+        "kill_runs": 4,
+        "onward_transition_runs": 4,
+        "skip_cohort_runs": 1,
+        "take_cohort_runs": 3
       },
       "Champ": {
-        "boss_chest_runs": 0,
-        "boss_fight_runs": 0,
-        "boss_reward_claim_runs": 0,
-        "kill_runs": 0,
-        "onward_transition_runs": 0,
-        "skip_cohort_runs": 0,
-        "take_cohort_runs": 0
+        "boss_chest_runs": 8,
+        "boss_fight_runs": 8,
+        "boss_reward_claim_runs": 8,
+        "kill_runs": 8,
+        "onward_transition_runs": 8,
+        "skip_cohort_runs": 1,
+        "take_cohort_runs": 7
       },
       "Collector": {
-        "boss_chest_runs": 0,
-        "boss_fight_runs": 0,
-        "boss_reward_claim_runs": 0,
-        "kill_runs": 0,
-        "onward_transition_runs": 0,
+        "boss_chest_runs": 4,
+        "boss_fight_runs": 4,
+        "boss_reward_claim_runs": 4,
+        "kill_runs": 4,
+        "onward_transition_runs": 4,
         "skip_cohort_runs": 0,
-        "take_cohort_runs": 0
+        "take_cohort_runs": 4
       }
     },
     "registry_boss_rows": [
@@ -1242,47 +2990,167 @@
       "Champ",
       "Collector"
     ],
-    "rows_with_onward_transition": [],
-    "rows_with_skip_witness": [],
-    "rows_with_take_witness": [],
-    "rows_with_zero_diff_boss_chest": [],
-    "rows_with_zero_diff_boss_reward_claim": [],
+    "rows_with_boss_relic_pick": [
+      "Automaton",
+      "Champ",
+      "Collector"
+    ],
+    "rows_with_onward_transition": [
+      "Automaton",
+      "Champ",
+      "Collector"
+    ],
+    "rows_with_skip_witness": [
+      "Automaton",
+      "Champ"
+    ],
+    "rows_with_take_witness": [
+      "Automaton",
+      "Champ",
+      "Collector"
+    ],
+    "rows_with_zero_diff_boss_chest": [
+      "Automaton",
+      "Champ",
+      "Collector"
+    ],
+    "rows_with_zero_diff_boss_reward_claim": [
+      "Automaton",
+      "Champ",
+      "Collector"
+    ],
     "unattributed_boss_relic_policies": {},
     "unknown_boss_identities": {}
   },
   "item3_act3_depth": {
-    "act3_entering_clean_runs": 0,
-    "detector_exercised_by_live_evidence": false,
-    "double_boss_first_boss_identities": [],
-    "double_boss_identity_shortfall_to_2": 2,
-    "double_boss_run_count": 0,
-    "double_boss_runs": [],
-    "double_boss_shortfall_to_3": 3,
-    "met": false,
+    "act3_entering_clean_runs": 16,
+    "act3_victory_clean_runs": 3,
+    "completed_double_boss_run_count": 3,
+    "completed_double_boss_runs": [
+      {
+        "bosses": [
+          "Time Eater",
+          "Donu and Deca"
+        ],
+        "campaign_id": "s2v2_db47_b.worker-001-of-001",
+        "completed": true,
+        "outcome": "victory",
+        "seed": "STS128113",
+        "victory": true
+      },
+      {
+        "bosses": [
+          "Donu and Deca",
+          "Time Eater"
+        ],
+        "campaign_id": "s2v2_dbv_103509a.worker-001-of-001",
+        "completed": true,
+        "outcome": "victory",
+        "seed": "STS103509",
+        "victory": true
+      },
+      {
+        "bosses": [
+          "Donu and Deca",
+          "Time Eater"
+        ],
+        "campaign_id": "s2v2_dbv_103509b.worker-001-of-001",
+        "completed": true,
+        "outcome": "victory",
+        "seed": "STS103509",
+        "victory": true
+      }
+    ],
+    "detector_exercised_by_live_evidence": true,
+    "double_boss_first_boss_identities": [
+      "Donu and Deca",
+      "Time Eater"
+    ],
+    "double_boss_identity_shortfall_to_2": 0,
+    "double_boss_run_count": 5,
+    "double_boss_runs": [
+      {
+        "bosses": [
+          "Awakened One",
+          "Donu and Deca"
+        ],
+        "campaign_id": "s2v2_awk_105835.worker-001-of-001",
+        "completed": false,
+        "outcome": "death",
+        "seed": "STS105835",
+        "victory": false
+      },
+      {
+        "bosses": [
+          "Time Eater",
+          "Donu and Deca"
+        ],
+        "campaign_id": "s2v2_db47_b.worker-001-of-001",
+        "completed": true,
+        "outcome": "victory",
+        "seed": "STS128113",
+        "victory": true
+      },
+      {
+        "bosses": [
+          "Donu and Deca",
+          "Time Eater"
+        ],
+        "campaign_id": "s2v2_dbv_103509a.worker-001-of-001",
+        "completed": true,
+        "outcome": "victory",
+        "seed": "STS103509",
+        "victory": true
+      },
+      {
+        "bosses": [
+          "Donu and Deca",
+          "Time Eater"
+        ],
+        "campaign_id": "s2v2_dbv_103509b.worker-001-of-001",
+        "completed": true,
+        "outcome": "victory",
+        "seed": "STS103509",
+        "victory": true
+      },
+      {
+        "bosses": [
+          "Time Eater",
+          "Donu and Deca"
+        ],
+        "campaign_id": "s2v2_mb_118993.worker-001-of-001",
+        "completed": false,
+        "outcome": "death",
+        "seed": "STS118993",
+        "victory": false
+      }
+    ],
+    "double_boss_shortfall_to_3": 0,
+    "met": true,
     "per_row": {
       "Awakened One": {
         "boss_chest_runs": 0,
-        "boss_fight_runs": 0,
+        "boss_fight_runs": 2,
         "boss_reward_claim_runs": 0,
-        "kill_runs": 0,
+        "kill_runs": 1,
         "onward_transition_runs": 0,
         "skip_cohort_runs": 0,
         "take_cohort_runs": 0
       },
       "Donu and Deca": {
         "boss_chest_runs": 0,
-        "boss_fight_runs": 0,
+        "boss_fight_runs": 5,
         "boss_reward_claim_runs": 0,
-        "kill_runs": 0,
+        "kill_runs": 3,
         "onward_transition_runs": 0,
         "skip_cohort_runs": 0,
         "take_cohort_runs": 0
       },
       "Time Eater": {
         "boss_chest_runs": 0,
-        "boss_fight_runs": 0,
+        "boss_fight_runs": 4,
         "boss_reward_claim_runs": 0,
-        "kill_runs": 0,
+        "kill_runs": 4,
         "onward_transition_runs": 0,
         "skip_cohort_runs": 0,
         "take_cohort_runs": 0
@@ -1293,75 +3161,39 @@
       "Donu and Deca",
       "Time Eater"
     ],
-    "rows_witnessed_killed": [],
+    "rows_witnessed_killed": [
+      "Awakened One",
+      "Donu and Deca",
+      "Time Eater"
+    ],
     "unknown_boss_identities": {}
   },
   "item4_event_depth": {
     "act2_3_registry_event_rows": 40,
-    "disposition_on_record": 0,
-    "met": false,
-    "owed": 25,
-    "owed_rows": [
-      "Match and Keep!",
-      "Golden Shrine",
-      "Upgrade Shrine",
-      "Accursed Blacksmith",
-      "Bonfire Elementals",
-      "Designer",
-      "Duplicator",
-      "FaceTrader",
-      "Fountain of Cleansing",
-      "Knowing Skull",
-      "Lab",
-      "N'loth",
-      "NoteForYourself",
-      "SecretPortal",
-      "The Joust",
-      "WeMeetAgain",
-      "Colosseum",
-      "Vampires",
-      "Falling",
-      "MindBloom",
-      "The Moai Head",
-      "Mysterious Sphere",
-      "SensoryStone",
-      "Tomb of Lord Red Mask",
-      "Winding Halls"
-    ],
+    "disposition_on_record": 9,
+    "met": true,
+    "owed": 0,
+    "owed_rows": [],
     "rows": [
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 23,
         "acts": [
           1,
           2,
           3
         ],
-        "any_act_sightings_clean": 890,
+        "any_act_sightings_clean": 926,
         "disposition": null,
         "game_id": "Match and Keep!",
         "id": 12,
         "name": "MATCH_AND_KEEP",
         "pool": "SHRINE",
         "sim_prep_census_rows": 4449,
-        "status": "OWED",
-        "witness": null
-      },
-      {
-        "act2_3_sightings_clean": 0,
-        "acts": [
-          1,
-          2,
-          3
-        ],
-        "any_act_sightings_clean": 148,
-        "disposition": null,
-        "game_id": "Golden Shrine",
-        "id": 13,
-        "name": "GOLDEN_SHRINE",
-        "pool": "SHRINE",
-        "sim_prep_census_rows": 3342,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_take_e.worker-001-of-001",
+          "seed": "STS100038"
+        }
       },
       {
         "act2_3_sightings_clean": 2,
@@ -1370,7 +3202,27 @@
           2,
           3
         ],
-        "any_act_sightings_clean": 117,
+        "any_act_sightings_clean": 152,
+        "disposition": null,
+        "game_id": "Golden Shrine",
+        "id": 13,
+        "name": "GOLDEN_SHRINE",
+        "pool": "SHRINE",
+        "sim_prep_census_rows": 3342,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_mb_103364.worker-001-of-001",
+          "seed": "STS103364"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 2,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 119,
         "disposition": null,
         "game_id": "Transmorgrifier",
         "id": 14,
@@ -1390,7 +3242,7 @@
           2,
           3
         ],
-        "any_act_sightings_clean": 158,
+        "any_act_sightings_clean": 162,
         "disposition": null,
         "game_id": "Purifier",
         "id": 15,
@@ -1411,13 +3263,18 @@
           3
         ],
         "any_act_sightings_clean": 125,
-        "disposition": null,
+        "disposition": {
+          "game_id": "Upgrade Shrine",
+          "note": "Reachable and abundant, simply not drawn in an act-2/3 `?` room by these cohorts. It is a SHRINE row with an ALWAYS draw condition present in all three acts' shrine lists (Exordium.java:238-246 position 4, TheCity.java:217 / TheBeyond.java:205 position 5), it fires in 4,492 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds), and the breadth cohort sighted it 125 times in act 1. Deliberately not captured in act 2/3. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+          "status": "reachability-argument"
+        },
         "game_id": "Upgrade Shrine",
         "id": 16,
         "name": "UPGRADE_SHRINE",
         "pool": "SHRINE",
         "sim_prep_census_rows": 4492,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
@@ -1427,7 +3284,7 @@
           2,
           3
         ],
-        "any_act_sightings_clean": 324,
+        "any_act_sightings_clean": 332,
         "disposition": null,
         "game_id": "Wheel of Change",
         "id": 17,
@@ -1441,70 +3298,82 @@
         }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 10,
         "acts": [
           1,
           2,
           3
         ],
-        "any_act_sightings_clean": 117,
+        "any_act_sightings_clean": 139,
         "disposition": null,
         "game_id": "Accursed Blacksmith",
         "id": 18,
         "name": "ACCURSED_BLACKSMITH",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 3434,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_take_e.worker-001-of-001",
+          "seed": "STS100038"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 6,
         "acts": [
           1,
           2,
           3
         ],
-        "any_act_sightings_clean": 189,
+        "any_act_sightings_clean": 210,
         "disposition": null,
         "game_id": "Bonfire Elementals",
         "id": 19,
         "name": "BONFIRE_ELEMENTALS",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 3985,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_mb_102529.worker-001-of-001",
+          "seed": "STS102529"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 6,
         "acts": [
           2,
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 6,
         "disposition": null,
         "game_id": "Designer",
         "id": 20,
         "name": "DESIGNER",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 2,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_take_107575.worker-001-of-001",
+          "seed": "STS107575"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 2,
         "acts": [
           2,
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 2,
         "disposition": null,
         "game_id": "Duplicator",
         "id": 21,
         "name": "DUPLICATOR",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 4,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_skip_b.worker-001-of-001",
+          "seed": "STS105134"
+        }
       },
       {
         "act2_3_sightings_clean": 0,
@@ -1513,13 +3382,18 @@
           2
         ],
         "any_act_sightings_clean": 193,
-        "disposition": null,
+        "disposition": {
+          "game_id": "FaceTrader",
+          "note": "A one-time SPECIAL with an unconditional getShrine add whose own act gate is TheCity OR Exordium (AbstractDungeon.java:1904-1908), so an Act-2 draw needs nothing of the player. It fires in 4,008 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds) and the breadth cohort sighted it 193 times in act 1; the one-time list simply resolved elsewhere in act 2 in these runs. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+          "status": "reachability-argument"
+        },
         "game_id": "FaceTrader",
         "id": 22,
         "name": "FACE_TRADER",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 4008,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
@@ -1530,13 +3404,18 @@
           3
         ],
         "any_act_sightings_clean": 11,
-        "disposition": null,
+        "disposition": {
+          "game_id": "Fountain of Cleansing",
+          "note": "Gated on `player.isCursed` (AbstractDungeon.java:1889-1893), which is why it is rarer: 707 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds) and 11 act-1 sightings in the breadth cohort. It was also witnessed LIVE inside this campaign, on the other side of the differ: STS153269's floor-38 `?` room drew it in the game, which is the witness the Act-3 event-roll root cause (SecretPortal's wall-clock gate) was derived against -- the capture stops at that step, so it is evidence of reach rather than a scored sighting. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+          "status": "reachability-argument"
+        },
         "game_id": "Fountain of Cleansing",
         "id": 23,
         "name": "FOUNTAIN_OF_CLEANSING",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 707,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
@@ -1545,31 +3424,39 @@
           2
         ],
         "any_act_sightings_clean": 0,
-        "disposition": null,
+        "disposition": {
+          "game_id": "Knowing Skull",
+          "note": "An Act-2-only SPECIAL gated on `currentHealth > 12` (AbstractDungeon.java:1909-1913), so at A20 it competes for one of very few act-2 `?` rooms in a run that is usually below that line. Nonzero but rare in the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds): 1 row. Reachable and schedulable, deliberately not captured. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+          "status": "reachability-argument"
+        },
         "game_id": "Knowing Skull",
         "id": 24,
         "name": "KNOWING_SKULL",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 1,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 1,
         "acts": [
           1,
           2,
           3
         ],
-        "any_act_sightings_clean": 55,
+        "any_act_sightings_clean": 56,
         "disposition": null,
         "game_id": "Lab",
         "id": 25,
         "name": "LAB",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 3580,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_dbv_103509a.worker-001-of-001",
+          "seed": "STS103509"
+        }
       },
       {
         "act2_3_sightings_clean": 0,
@@ -1577,13 +3464,18 @@
           2
         ],
         "any_act_sightings_clean": 0,
-        "disposition": null,
+        "disposition": {
+          "game_id": "N'loth",
+          "note": "An Act-2-only SPECIAL gated on `player.relics.size() >= 2` (AbstractDungeon.java:1914-1918) -- a gate an A20 run passes trivially, so its rarity is one-time-list competition, not the condition. 4 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds). Reachable and schedulable, deliberately not captured. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+          "status": "reachability-argument"
+        },
         "game_id": "N'loth",
         "id": 26,
         "name": "NLOTH",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 4,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
@@ -1594,13 +3486,18 @@
           3
         ],
         "any_act_sightings_clean": 0,
-        "disposition": null,
+        "disposition": {
+          "game_id": "NoteForYourself",
+          "note": "STRUCTURALLY unreachable in this campaign, and the campaign is A20-only by its own bar. `isNoteForYourselfAvailable` (AbstractDungeon.java:1360-1379) returns false at `ascensionLevel >= 15`, so the row is never ADDED to `specialOneTimeEventList` at all -- collapsed in the engine to `note_for_yourself_available(ascension) == ascension < 15` (event_framework.hpp) under the pinned reference profile. The live captures agree from the other side: every `oracle.specialOneTimeEventList` dump in this report's evidence omits it. A sighting would require a non-A20 capture, which is outside the S2-G2 bar's own scope.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+          "status": "reachability-argument"
+        },
         "game_id": "NoteForYourself",
         "id": 27,
         "name": "NOTE_FOR_YOURSELF",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
@@ -1609,13 +3506,18 @@
           3
         ],
         "any_act_sightings_clean": 0,
-        "disposition": null,
+        "disposition": {
+          "game_id": "SecretPortal",
+          "note": "Deliberately unreachable on BOTH sides, and that is now enforced rather than assumed. The engine pins `build_shrine_pool`'s eligibility false in every act (trap 5, `SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond`) because the only gate left is `CardCrawlGame.playtime >= 800.0f` -- nondeterministic wall clock, unrepresentable in a sim whose verification story is determinism in (seed, actions). As of 2026-08-27 the ORACLE mirrors that pin: `patches/OraclePlaytimePinPatch` replaces the one playtime read inside `AbstractDungeon.getShrine` with a helper pinned at 0.0f, so the fork the depth cohorts run against cannot draw it either. Sighting it would mean breaking the pin the gate depends on.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting; s2-design.md section 5 trap 5",
+          "status": "reachability-argument"
+        },
         "game_id": "SecretPortal",
         "id": 28,
         "name": "SECRET_PORTAL",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
@@ -1624,40 +3526,48 @@
           2
         ],
         "any_act_sightings_clean": 0,
-        "disposition": null,
+        "disposition": {
+          "game_id": "The Joust",
+          "note": "An Act-2-only SPECIAL gated on `gold >= 50` (AbstractDungeon.java:1919-1923), a gate an A20 run passes routinely; 6 rows of the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds), the highest of the act-2-only one-time specials. Reachable and schedulable, deliberately not captured. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+          "status": "reachability-argument"
+        },
         "game_id": "The Joust",
         "id": 29,
         "name": "THE_JOUST",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 6,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 6,
         "acts": [
           1,
           2,
           3
         ],
-        "any_act_sightings_clean": 142,
+        "any_act_sightings_clean": 160,
         "disposition": null,
         "game_id": "WeMeetAgain",
         "id": 30,
         "name": "WE_MEET_AGAIN",
         "pool": "SPECIAL",
         "sim_prep_census_rows": 3249,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_take_e.worker-001-of-001",
+          "seed": "STS100038"
+        }
       },
       {
-        "act2_3_sightings_clean": 2,
+        "act2_3_sightings_clean": 8,
         "acts": [
           1,
           2,
           3
         ],
-        "any_act_sightings_clean": 148,
+        "any_act_sightings_clean": 156,
         "disposition": null,
         "game_id": "The Woman in Blue",
         "id": 31,
@@ -1671,11 +3581,11 @@
         }
       },
       {
-        "act2_3_sightings_clean": 4,
+        "act2_3_sightings_clean": 18,
         "acts": [
           2
         ],
-        "any_act_sightings_clean": 4,
+        "any_act_sightings_clean": 18,
         "disposition": null,
         "game_id": "Addict",
         "id": 32,
@@ -1689,11 +3599,11 @@
         }
       },
       {
-        "act2_3_sightings_clean": 6,
+        "act2_3_sightings_clean": 20,
         "acts": [
           2
         ],
-        "any_act_sightings_clean": 6,
+        "any_act_sightings_clean": 20,
         "disposition": null,
         "game_id": "Back to Basics",
         "id": 33,
@@ -1707,11 +3617,11 @@
         }
       },
       {
-        "act2_3_sightings_clean": 2,
+        "act2_3_sightings_clean": 10,
         "acts": [
           2
         ],
-        "any_act_sightings_clean": 2,
+        "any_act_sightings_clean": 10,
         "disposition": null,
         "game_id": "Beggar",
         "id": 34,
@@ -1730,21 +3640,26 @@
           2
         ],
         "any_act_sightings_clean": 0,
-        "disposition": null,
+        "disposition": {
+          "game_id": "Colosseum",
+          "note": "An ordinary Act-2 EVENT-pool row (TheCity.java:185-198 position 3) whose only gate is map POSITION -- `currMapNode.y > map.size() / 2` (AbstractDungeon.java:1975-1979), the top half of the Act-2 map. Its zero in the `s243_prep` sim-side census (200,000 scanned rows over 20,000 seeds) is a property of that census, not of the row: the scan's policies leave act 1 in ~0.1 % of rows and never walk the upper half of act 2, which is why all seven act-3-only EVENT rows read zero there too while every one of them is sighted in this report. Reachable and schedulable. S2.V2's scan machinery schedules directed event captures by name -- `seed_scan --need-event <id>` -- and that path is proven live, not asserted: the two Mind Bloom directed captures in this report's own depth cohorts (`s2v2_mb_102529`, `s2v2_mb_118993`) were scheduled through it and both replay zero-diff.",
+          "reference": "docs/s2-design.md section 6 S2-G2 item 4 -- the sanctioned per-row `reachability-argument` alternative to a sighting",
+          "status": "reachability-argument"
+        },
         "game_id": "Colosseum",
         "id": 35,
         "name": "COLOSSEUM",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
+        "status": "disposition-on-record",
         "witness": null
       },
       {
-        "act2_3_sightings_clean": 4,
+        "act2_3_sightings_clean": 54,
         "acts": [
           2
         ],
-        "any_act_sightings_clean": 4,
+        "any_act_sightings_clean": 54,
         "disposition": null,
         "game_id": "Cursed Tome",
         "id": 36,
@@ -1758,11 +3673,11 @@
         }
       },
       {
-        "act2_3_sightings_clean": 2,
+        "act2_3_sightings_clean": 6,
         "acts": [
           2
         ],
-        "any_act_sightings_clean": 2,
+        "any_act_sightings_clean": 6,
         "disposition": null,
         "game_id": "Drug Dealer",
         "id": 37,
@@ -1776,11 +3691,11 @@
         }
       },
       {
-        "act2_3_sightings_clean": 2,
+        "act2_3_sightings_clean": 10,
         "acts": [
           2
         ],
-        "any_act_sightings_clean": 2,
+        "any_act_sightings_clean": 10,
         "disposition": null,
         "game_id": "Forgotten Altar",
         "id": 38,
@@ -1794,69 +3709,15 @@
         }
       },
       {
-        "act2_3_sightings_clean": 4,
+        "act2_3_sightings_clean": 8,
         "acts": [
           2
         ],
-        "any_act_sightings_clean": 4,
+        "any_act_sightings_clean": 8,
         "disposition": null,
         "game_id": "Ghosts",
         "id": 39,
         "name": "GHOSTS",
-        "pool": "EVENT",
-        "sim_prep_census_rows": 0,
-        "status": "sighted-zero-diff",
-        "witness": {
-          "campaign_id": "s243_breadth_skip.worker-001-of-008",
-          "seed": "STS432432"
-        }
-      },
-      {
-        "act2_3_sightings_clean": 4,
-        "acts": [
-          2
-        ],
-        "any_act_sightings_clean": 4,
-        "disposition": null,
-        "game_id": "Masked Bandits",
-        "id": 40,
-        "name": "MASKED_BANDITS",
-        "pool": "EVENT",
-        "sim_prep_census_rows": 0,
-        "status": "sighted-zero-diff",
-        "witness": {
-          "campaign_id": "s243_breadth_skip.worker-003-of-008",
-          "seed": "STS432354"
-        }
-      },
-      {
-        "act2_3_sightings_clean": 3,
-        "acts": [
-          2
-        ],
-        "any_act_sightings_clean": 3,
-        "disposition": null,
-        "game_id": "Nest",
-        "id": 41,
-        "name": "NEST",
-        "pool": "EVENT",
-        "sim_prep_census_rows": 0,
-        "status": "sighted-zero-diff",
-        "witness": {
-          "campaign_id": "s243_breadth_skip.worker-003-of-008",
-          "seed": "STS432354"
-        }
-      },
-      {
-        "act2_3_sightings_clean": 2,
-        "acts": [
-          2
-        ],
-        "any_act_sightings_clean": 2,
-        "disposition": null,
-        "game_id": "The Library",
-        "id": 42,
-        "name": "THE_LIBRARY",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
         "status": "sighted-zero-diff",
@@ -1872,6 +3733,60 @@
         ],
         "any_act_sightings_clean": 6,
         "disposition": null,
+        "game_id": "Masked Bandits",
+        "id": 40,
+        "name": "MASKED_BANDITS",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-003-of-008",
+          "seed": "STS432354"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 18,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 18,
+        "disposition": null,
+        "game_id": "Nest",
+        "id": 41,
+        "name": "NEST",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-003-of-008",
+          "seed": "STS432354"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 7,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 7,
+        "disposition": null,
+        "game_id": "The Library",
+        "id": 42,
+        "name": "THE_LIBRARY",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-001-of-008",
+          "seed": "STS432432"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 18,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 18,
+        "disposition": null,
         "game_id": "The Mausoleum",
         "id": 43,
         "name": "THE_MAUSOLEUM",
@@ -1884,129 +3799,154 @@
         }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 10,
         "acts": [
           2
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 10,
         "disposition": null,
         "game_id": "Vampires",
         "id": 44,
         "name": "VAMPIRES",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_take_e.worker-001-of-001",
+          "seed": "STS100439"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 12,
         "acts": [
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 12,
         "disposition": null,
         "game_id": "Falling",
         "id": 45,
         "name": "FALLING",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_take_107575.worker-001-of-001",
+          "seed": "STS107575"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 4,
         "acts": [
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 4,
         "disposition": null,
         "game_id": "MindBloom",
         "id": 46,
         "name": "MIND_BLOOM",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_awk_105835.worker-001-of-001",
+          "seed": "STS105835"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 2,
         "acts": [
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 2,
         "disposition": null,
         "game_id": "The Moai Head",
         "id": 47,
         "name": "THE_MOAI_HEAD",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_mb_118993.worker-001-of-001",
+          "seed": "STS118993"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 6,
         "acts": [
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 6,
         "disposition": null,
         "game_id": "Mysterious Sphere",
         "id": 48,
         "name": "MYSTERIOUS_SPHERE",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_db47_b.worker-001-of-001",
+          "seed": "STS128113"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 6,
         "acts": [
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 6,
         "disposition": null,
         "game_id": "SensoryStone",
         "id": 49,
         "name": "SENSORY_STONE",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_dbv_103509a.worker-001-of-001",
+          "seed": "STS103509"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 7,
         "acts": [
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 7,
         "disposition": null,
         "game_id": "Tomb of Lord Red Mask",
         "id": 50,
         "name": "TOMB_OF_LORD_RED_MASK",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_db47_b.worker-001-of-001",
+          "seed": "STS128113"
+        }
       },
       {
-        "act2_3_sightings_clean": 0,
+        "act2_3_sightings_clean": 15,
         "acts": [
           3
         ],
-        "any_act_sightings_clean": 0,
+        "any_act_sightings_clean": 15,
         "disposition": null,
         "game_id": "Winding Halls",
         "id": 51,
         "name": "WINDING_HALLS",
         "pool": "EVENT",
         "sim_prep_census_rows": 0,
-        "status": "OWED",
-        "witness": null
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s2v2_db47_b.worker-001-of-001",
+          "seed": "STS128113"
+        }
       }
     ],
-    "sighted_zero_diff": 15
+    "sighted_zero_diff": 31
   },
   "stale_dispositions": {
+    "campaign_rows": [],
     "event_rows": [],
     "runs": []
   }

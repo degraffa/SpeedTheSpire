@@ -8,6 +8,23 @@ waves regenerated, joins the registry, and reports design `docs/s2-design.md`
 section 6 items 1-4 with **literal shortfalls** -- the numbers as the inputs
 read today, never a bar inferred to be met.
 
+Five cohort ROLES, because the S2.43 corpus is five different kinds of
+evidence and flattening them would hide which is which:
+
+* `breadth`   -- the 2,000-seed mixed-policy wave plus its top-up (item 1).
+* `recapture` -- the escape-window recaptures that supersede breadth captures.
+* `depth`     -- the S2.V2 depth cohorts that carry items 2 and 3, plus the
+  Mind Bloom directed captures the S2.33 deferred row asked for.
+* `iteration` -- the divergence-stopped waves that DROVE the day's engine and
+  emitter fixes.  Every one of them replays clean today, so they raise no
+  finding; each nonetheless carries an exact CAMPAIGN-level disposition
+  (`superseded-by-recapture` naming the clean successor for the same cohort
+  seat, or `resolved` naming the landed fix), because a campaign seat is what
+  was superseded, not a single (seed, classification) finding.
+* `preflight` -- fork-pin preflights.  They carry no divergence evidence at
+  all, so the tool requires every one of their runs to be clean both as
+  captured and today rather than accepting a disposition for them.
+
 Four rules the S2 evidence forced, each a deliberate departure from B5.4:
 
 * **The classification input is layered.**  A worker `report.json` carries the
@@ -28,6 +45,15 @@ Four rules the S2 evidence forced, each a deliberate departure from B5.4:
   dispositioned run replay clean, the right output is a rendered "no longer
   exercised" row, not a tool that refuses to run.  An *untriaged* finding is
   still counted against the bar, which is the half that protects the gate.
+
+A fifth rule the depth cohorts forced: **a campaign the driver stopped
+mid-seed is still evidence.**  Such a worker never reached the postprocess
+that writes `report.json`, so its run rows come from `campaign_progress.json`
+and its classification can only come from the retest sweep -- which is exactly
+what the sweep is for.  The artifact set is enumerated from the worker
+DIRECTORY, not from the row list, so the capture the driver died on is
+inventoried too; a run row naming an absent artifact, or an artifact no row
+and no directory walk accounts for, is fatal.
 
 Runtime: the artifact pass reads and hashes every consumed capture (roughly
 4 GB for the current cohorts; well under a minute warm).
@@ -62,14 +88,18 @@ from generate_report import (  # noqa: E402
 REPORT_FORMAT = "STS-S2-VERIFICATION-REPORT v1"
 DISPOSITIONS_FORMAT = "STS-S2-DIVERGENCE-DISPOSITIONS v1"
 
-# The cohorts S2.43's breadth wave produced.  These are the *current* named
-# cohorts, in the `generate_report.py` tradition of a no-argument default that
-# names today's evidence; `--breadth`/`--recapture` select a different set, and
-# the depth cohorts join here when S2.V2's scan output schedules them.
+# The cohorts S2.43 produced, by role.  These are the *current* named cohorts,
+# in the `generate_report.py` tradition of a no-argument default that names
+# today's evidence; the per-role flags select a different set.  Together they
+# name every campaign directory the full-corpus retest sweep covers -- which
+# the sweep cross-check below turns into a fail-loud completeness property.
 DEFAULT_BREADTH_GROUPS = (
     "s243_breadth_rand",
     "s243_breadth_take",
     "s243_breadth_skip",
+    # The top-up that carried the full-run attempt count back to 2,000 after
+    # two breadth seeds ended `noop_wedge` (both escape-window artifacts).
+    "s243_breadth_top2",
 )
 DEFAULT_RECAPTURE_GROUPS = (
     "s243_recap_take",
@@ -77,8 +107,62 @@ DEFAULT_RECAPTURE_GROUPS = (
     "s243_recap2_take",
     "s243_recap2_skip",
 )
+# The S2.V2 depth cohorts.  Act-2 take seats first (one per Act-2 BOSS row,
+# twice over), then the Act-2 skip seat, then the Act-3 kill / double-boss
+# seats, then the two Mind Bloom directed captures the S2.33 deferred row
+# asked for plus the full Mind Bloom line that turned clean with the
+# death-terminal fix.
+DEFAULT_DEPTH_GROUPS = (
+    "s2v2_take_e",
+    "s2v2_take_107575",
+    "s2v2_take_100075_b",
+    "s2v2_take_108173_c",
+    "s2v2_take_100038_b",
+    "s2v2_take_100009_c",
+    "s2v2_skip_b",
+    "s2v2_db47_b",
+    "s2v2_dbv_103509a",
+    "s2v2_dbv_103509b",
+    "s2v2_awk_105835",
+    "s2v2_mb_102529",
+    "s2v2_mb_118993",
+    "s2v2_mb_103364",
+)
+# The divergence-stopped waves that drove the day's fixes.  They are consumed
+# so their captures stay in the hashed inventory; each carries a campaign-level
+# disposition in the dispositions file.
+DEFAULT_ITERATION_GROUPS = (
+    "s2v2_take",
+    "s2v2_take_b",
+    "s2v2_take_c",
+    "s2v2_take_d",
+    "s2v2_take_100009",
+    "s2v2_take_100075",
+    "s2v2_take_108173",
+    "s2v2_take_108173_b",
+    "s2v2_skip_a",
+    "s2v2_skip_108173",
+    "s2v2_skip_108173_b",
+    "s2v2_db27_a",
+    "s2v2_db27_b",
+    "s2v2_db47_a",
+    "s2v2_db153_a",
+    "s2v2_db153_b",
+    "s2v2_db153_c",
+    "s2v2_db153_d",
+    "s2v2_mindbloom_a",
+    "s2v2_mindbloom_b",
+    "s2v2_awk_153269",
+    "s2v2_awk_193303",
+)
+# Fork-pin preflights: one throwaway A20 seed each, run only to prove the
+# deployed jar answers.  No divergence evidence, so no disposition surface.
+DEFAULT_PREFLIGHT_GROUPS = (
+    "s243_preflight",
+    "fork_pin_preflight",
+)
 DEFAULT_ARTIFACT_ROOT = Path(r"D:\STS_BG_Mod\_oracle_data\campaigns")
-DEFAULT_RETEST_LOG = Path(r"D:\STS_BG_Mod\_oracle_data\s243_resweep5.log")
+DEFAULT_RETEST_LOG = Path(r"D:\STS_BG_Mod\_oracle_data\s243_resweep7.log")
 DEFAULT_PREP_CENSUS = Path(
     r"D:\STS_BG_Mod\_oracle_data\s243_prep\scan_s243_prep.txt")
 
@@ -91,10 +175,32 @@ GAMEPLAY_TERMINAL_OUTCOMES = frozenset({
     "death", "victory", "act1_boss_reward",
 })
 
-# The whole classification vocabulary.  Anything else is fatal: this tool may
-# not invent a bucket for an artifact it cannot classify.
-KNOWN_CLASSIFICATIONS = frozenset({"clean", "state_divergence", "part"})
+# The whole classification vocabulary: every verdict `campaign_pipeline.py`
+# can write (`campaign_pipeline.py:990-1000`) plus `part`, which only the
+# retest sweep produces.  Anything else is fatal: this tool may not invent a
+# bucket for an artifact it cannot classify.
+KNOWN_CLASSIFICATIONS = frozenset({
+    "clean",
+    "state_divergence",
+    "translation_drift",
+    "encounter_list_divergence",
+    "replay_harness_error",
+    "part",
+})
 CLEAN_CLASSIFICATION = "clean"
+
+# Every `campaign_progress.json` status `campaign_driver.py` writes.  A worker
+# stopped mid-campaign is normal for the depth/iteration waves and is reported;
+# an unknown status is fatal.
+KNOWN_CAMPAIGN_STATUSES = frozenset({
+    "in_progress",
+    "complete",
+    "complete_with_failures",
+    "fatal_environment_drift",
+})
+COMPLETE_CAMPAIGN_STATUSES = frozenset({"complete", "complete_with_failures"})
+# Roles whose bar depends on the campaign having finished its seed list.
+ROLES_REQUIRING_A_COMPLETE_CAMPAIGN = frozenset({"breadth", "preflight"})
 
 # Dispositions.  `open-*` is reviewed but never acceptance (the B5.4 rule).
 RUN_DISPOSITION_STATUSES = frozenset({
@@ -103,6 +209,13 @@ RUN_DISPOSITION_STATUSES = frozenset({
     "resolved",
     "open-product-divergence",
     "open-harness-gap",
+})
+# Campaign-level dispositions, for the `iteration` role only: either a clean
+# successor exists for the same cohort seat, or the divergence the wave found
+# has a landed fix.  There is no third answer and no wildcard.
+CAMPAIGN_DISPOSITION_STATUSES = frozenset({
+    "superseded-by-recapture",
+    "resolved",
 })
 # Design section 6 item 4's two sanctioned per-row alternatives to a sighting.
 EVENT_DISPOSITION_STATUSES = frozenset({
@@ -115,14 +228,22 @@ EVENT_DISPOSITION_STATUSES = frozenset({
 NON_REGISTRY_EVENT_IDS = {
     "Neow Event": "the Neow blessing screen -- run-layer content, not an "
                   "events.yaml row (design B section 4.2)",
+    "Spire Heart": "the Act-4 Spire Heart room, reached past the Act-3 "
+                   "double-boss victory; Act 4 is outside S2 scope, so it is "
+                   "not an events.yaml row",
 }
 
 # The scripted boss-relic cohort configs, by the SHA-pinned config file the
 # capture header names.  Named data, so a cohort's take/skip identity comes
-# from the pin the run actually used and not from its directory name.
+# from the pin the run actually used and not from its directory name.  The
+# breadth/recapture waves ran the S2.42 boss-relic policy pair; the S2.V2
+# depth waves ran the scripted follower, whose two configs select the
+# `sim_search` (take) and `sim_search_skip` (skip) emitted lines.
 BOSS_RELIC_POLICY_CONFIGS = {
     "policy_bossrelic_take.json": "take",
     "policy_bossrelic_skip.json": "skip",
+    "follower_sim_search.json": "take",
+    "follower_sim_search_skip.json": "skip",
 }
 
 ARTIFACT_NAME_RE = re.compile(
@@ -337,18 +458,23 @@ def load_retest_log(path: Path) -> dict:
 def load_dispositions(path: Path) -> tuple:
     """Read the exact, wildcard-free disposition table.
 
-    Two lists, because the two things being dispositioned are different: a run
-    finding is keyed (campaign_id, seed, classification), while design section
-    6 item 4's per-row alternative to a sighting is keyed by a registry event
-    row's `game_id`.
+    Three lists, because three different things are dispositioned: a run
+    finding is keyed (campaign_id, seed, classification); design section 6
+    item 4's per-row alternative to a sighting is keyed by a registry event
+    row's `game_id`; and an `iteration` COHORT -- a divergence-stopped wave
+    whose whole seat was later refilled or whose finding was fixed -- is keyed
+    by its group campaign id.
     """
     value = read_json(path)
     if value.get("format") != DISPOSITIONS_FORMAT:
         raise ReportError(f"{path}: unsupported dispositions format")
     items = value.get("items")
     event_rows = value.get("event_rows")
-    if not isinstance(items, list) or not isinstance(event_rows, list):
-        raise ReportError(f"{path}: items and event_rows must both be lists")
+    campaign_rows = value.get("campaign_rows")
+    if not isinstance(items, list) or not isinstance(event_rows, list) \
+            or not isinstance(campaign_rows, list):
+        raise ReportError(
+            f"{path}: items, event_rows and campaign_rows must all be lists")
 
     runs: dict = {}
     for item in items:
@@ -394,7 +520,31 @@ def load_dispositions(path: Path) -> tuple:
             raise ReportError(
                 f"{path}: event row {game_id} needs a reference and a note")
         events[game_id] = item
-    return runs, events
+
+    campaigns: dict = {}
+    for item in campaign_rows:
+        if not isinstance(item, dict):
+            raise ReportError(f"{path}: campaign disposition must be an object")
+        group = str(item.get("group", ""))
+        if not group:
+            raise ReportError(f"{path}: campaign disposition needs a group")
+        if group in campaigns:
+            raise ReportError(f"{path}: duplicate campaign disposition {group}")
+        status = item.get("status")
+        if status not in CAMPAIGN_DISPOSITION_STATUSES:
+            raise ReportError(
+                f"{path}: invalid campaign status for {group}: {status!r}")
+        if not str(item.get("reference", "")).strip() or \
+                not str(item.get("note", "")).strip():
+            raise ReportError(
+                f"{path}: campaign row {group} needs a reference and a note")
+        if status == "superseded-by-recapture":
+            if not str(item.get("superseded_by", "")).strip():
+                raise ReportError(
+                    f"{path}: campaign row {group} must name the cohort that "
+                    f"supersedes it as superseded_by")
+        campaigns[group] = item
+    return runs, events, campaigns
 
 
 def load_prep_census(path: Path) -> dict[str, Any]:
@@ -450,8 +600,73 @@ def load_prep_census(path: Path) -> dict[str, Any]:
 # aggregation
 # --------------------------------------------------------------------------
 
+def load_worker_evidence(directory: Path, campaign_id: str) -> dict[str, Any]:
+    """The run rows and provenance of one worker, whichever file carries them.
+
+    A worker that finished its seed list has a postprocessed `report.json`
+    whose rows carry the capture-time classification and the source artifact's
+    SHA-256.  A worker the driver stopped mid-campaign never reaches the
+    postprocess, so its rows come from `campaign_progress.json`'s `seeds_done`
+    block -- the same additive reach fields (`campaign_driver.py`
+    `_reach_fields`), written per completed seed, with no classification and
+    no hash.  Which file spoke is recorded, never smoothed over.
+    """
+    report_path = directory / "report.json"
+    if report_path.exists():
+        report = read_json(report_path)
+        if report.get("report_format") != "STS-ORACLE-CAMPAIGN-REPORT v1":
+            raise ReportError(
+                f"{campaign_id}: unsupported campaign report format")
+        if report.get("campaign_id") != campaign_id:
+            raise ReportError(
+                f"{campaign_id}: report names a different campaign")
+        return {
+            "source": "campaign report",
+            "record": report,
+            "rows": list(report.get("runs") or []),
+            "campaign_status": str(report.get("campaign_status") or ""),
+            "finished_utc": str(report.get("finished_utc") or ""),
+            "evidence_file": report_path,
+            "pipeline_version": report.get("pipeline_version"),
+        }
+    progress_path = directory / "campaign_progress.json"
+    if not progress_path.exists():
+        raise ReportError(
+            f"{campaign_id}: neither report.json nor campaign_progress.json "
+            f"exists, so this worker carries no run rows at all")
+    progress = read_json(progress_path)
+    if progress.get("campaign_id") != campaign_id:
+        raise ReportError(
+            f"{campaign_id}: campaign_progress.json names a different campaign")
+    return {
+        "source": "campaign progress",
+        "record": progress,
+        "rows": list(progress.get("seeds_done") or []),
+        "campaign_status": str(progress.get("status") or ""),
+        "finished_utc": str(progress.get("updated_utc") or ""),
+        "evidence_file": progress_path,
+        "pipeline_version": None,
+    }
+
+
+def worker_artifacts(directory: Path, campaign_id: str) -> dict[str, Path]:
+    """Every capture on disk for one worker, keyed by the seed it names."""
+    found: dict[str, Path] = {}
+    for path in sorted(directory.glob("run_*_a20_ironclad.jsonl")):
+        match = ARTIFACT_NAME_RE.match(path.name)
+        if match is None:
+            raise ReportError(
+                f"{campaign_id}: artifact {path.name} does not match the "
+                f"capture naming convention")
+        seed = match.group("seed")
+        if seed in found:
+            raise ReportError(f"{campaign_id}: two artifacts name seed {seed}")
+        found[seed] = path
+    return found
+
+
 def collect_runs(artifact_root: Path, groups, role: str) -> tuple:
-    """Reopen every worker report and every artifact of the named groups."""
+    """Reopen every worker's run rows and every artifact of the named groups."""
     cohorts: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
     for group in groups:
@@ -461,25 +676,33 @@ def collect_runs(artifact_root: Path, groups, role: str) -> tuple:
         group_runs = 0
         group_bytes = 0
         finished: list[str] = []
+        statuses: list[str] = []
+        sources: list[str] = []
+        unaccounted = 0
         worker_hashes: list[dict[str, str]] = []
         for campaign_id in worker_ids:
             directory = artifact_root / campaign_id
-            report = read_json(directory / "report.json")
-            if report.get("report_format") != "STS-ORACLE-CAMPAIGN-REPORT v1":
+            evidence = load_worker_evidence(directory, campaign_id)
+            record = evidence["record"]
+            status = evidence["campaign_status"]
+            if status not in KNOWN_CAMPAIGN_STATUSES:
                 raise ReportError(
-                    f"{campaign_id}: unsupported campaign report format")
-            if report.get("campaign_id") != campaign_id:
+                    f"{campaign_id}: campaign status {status!r} is outside the "
+                    f"known vocabulary {sorted(KNOWN_CAMPAIGN_STATUSES)}")
+            if role in ROLES_REQUIRING_A_COMPLETE_CAMPAIGN and \
+                    status not in COMPLETE_CAMPAIGN_STATUSES:
                 raise ReportError(
-                    f"{campaign_id}: report names a different campaign")
-            if report.get("campaign_status") != "complete":
-                raise ReportError(f"{campaign_id}: campaign is not complete")
+                    f"{campaign_id}: a {role} cohort's campaign must have "
+                    f"finished its seed list; this one is {status!r}")
+            statuses.append(status)
+            sources.append(str(evidence["source"]))
             current = {
-                "schema_version": report.get("schema_version"),
-                "driver_version": report.get("driver_version"),
-                "pipeline_version": report.get("pipeline_version"),
-                "fork_jar_sha256": report.get("fork_jar_sha256"),
-                "policy": report.get("policy"),
-                "policy_seed": report.get("policy_seed"),
+                "schema_version": record.get("schema_version"),
+                "driver_version": record.get("driver_version"),
+                "pipeline_version": evidence["pipeline_version"],
+                "fork_jar_sha256": record.get("fork_jar_sha256"),
+                "policy": record.get("policy"),
+                "policy_seed": record.get("policy_seed"),
             }
             if provenance is None:
                 provenance = current
@@ -487,27 +710,57 @@ def collect_runs(artifact_root: Path, groups, role: str) -> tuple:
                 raise ReportError(
                     f"{campaign_id}: worker provenance differs from the rest "
                     f"of cohort {group}: {current} != {provenance}")
-            finished.append(str(report.get("finished_utc") or ""))
+            finished.append(evidence["finished_utc"])
             worker_hashes.append({
                 "campaign_id": campaign_id,
-                "report_sha256": sha256_file(directory / "report.json"),
+                "evidence_file": evidence["evidence_file"].name,
+                "evidence_sha256": sha256_file(evidence["evidence_file"]),
             })
-            for run in report.get("runs", []):
+
+            on_disk = worker_artifacts(directory, campaign_id)
+            rows_by_seed: dict[str, dict[str, Any]] = {}
+            for run in evidence["rows"]:
                 seed = str(run.get("seed", ""))
                 if not seed:
                     raise ReportError(f"{campaign_id}: a run row has no seed")
-                classification = str(run.get("classification", ""))
-                if classification not in KNOWN_CLASSIFICATIONS:
+                if seed in rows_by_seed:
                     raise ReportError(
-                        f"{campaign_id}/{seed}: unclassifiable run -- the "
-                        f"report says {classification!r}, outside the known "
-                        f"vocabulary {sorted(KNOWN_CLASSIFICATIONS)}")
-                artifact = directory / str(run.get("source_artifact", ""))
+                        f"{campaign_id}: two run rows name seed {seed}")
+                if seed not in on_disk:
+                    raise ReportError(
+                        f"{campaign_id}/{seed}: the run row names a capture "
+                        f"that is not on disk")
+                rows_by_seed[seed] = run
+
+            for seed, artifact in on_disk.items():
+                run = rows_by_seed.get(seed)
+                if run is None:
+                    # The capture the driver died on.  Real evidence -- the
+                    # retest sweep replays it -- but the campaign never wrote
+                    # a terminal, reach block or classification for it.
+                    run = {}
+                    unaccounted += 1
+                classification = run.get("classification")
+                if classification is not None:
+                    classification = str(classification)
+                    if classification not in KNOWN_CLASSIFICATIONS:
+                        raise ReportError(
+                            f"{campaign_id}/{seed}: unclassifiable run -- the "
+                            f"report says {classification!r}, outside the "
+                            f"known vocabulary "
+                            f"{sorted(KNOWN_CLASSIFICATIONS)}")
+                named = run.get("source_artifact")
+                if named is not None and str(named) != artifact.name:
+                    raise ReportError(
+                        f"{campaign_id}/{seed}: the run row names artifact "
+                        f"{named!r}, not {artifact.name}")
                 scan = scan_artifact(artifact)
-                if scan["sha256"] != str(run.get("source_artifact_sha256", "")):
+                recorded_hash = run.get("source_artifact_sha256")
+                if recorded_hash is not None and \
+                        scan["sha256"] != str(recorded_hash):
                     raise ReportError(
                         f"{campaign_id}/{seed}: source artifact hash drift")
-                validate_header(scan["header"], campaign_id, seed, report)
+                validate_header(scan["header"], campaign_id, seed, record)
                 pin = header_policy_pins(scan["header"])
                 pins.append(pin)
                 config = pin["policy_config"]
@@ -518,6 +771,8 @@ def collect_runs(artifact_root: Path, groups, role: str) -> tuple:
                     "group": group,
                     "campaign_id": campaign_id,
                     "seed": seed,
+                    "row_source": (evidence["source"] if rows_by_seed.get(seed)
+                                   else "artifact only"),
                     "outcome": str(run.get("outcome", "")),
                     "actions": int(run.get("actions", 0)),
                     "max_act": int(run.get("max_act") or 0),
@@ -536,22 +791,26 @@ def collect_runs(artifact_root: Path, groups, role: str) -> tuple:
                     "artifact": artifact.name,
                     "artifact_sha256": scan["sha256"],
                     "artifact_bytes": scan["bytes"],
-                    "policy": str(report.get("policy", "")),
+                    "policy": str(record.get("policy", "")),
                     "policy_config": config,
                     "boss_relic_policy": BOSS_RELIC_POLICY_CONFIGS.get(config),
-                    "capture_race_records": capture_race_record_count(
-                        run, f"{campaign_id}/{seed}"),
+                    "capture_race_records": (
+                        capture_race_record_count(run, f"{campaign_id}/{seed}")
+                        if classification is not None else None),
                 })
         distinct = sorted({json.dumps(pin, sort_keys=True) for pin in pins})
         cohorts.append({
             "group": group,
             "role": role,
             "workers": len(worker_ids),
-            "worker_reports": worker_hashes,
+            "worker_evidence": worker_hashes,
             "runs": group_runs,
             "artifact_bytes": group_bytes,
             "provenance": provenance or {},
             "capture_pins": [json.loads(pin) for pin in distinct],
+            "campaign_statuses": sorted(set(statuses)),
+            "row_sources": sorted(set(sources)),
+            "captures_with_no_completed_run_row": unaccounted,
             "newest_finished_utc": max(finished) if finished else None,
         })
     return cohorts, runs
@@ -561,6 +820,11 @@ def apply_classifications(runs, retest) -> None:
     for run in runs:
         entry = retest.get((run["campaign_id"], run["seed"]))
         if entry is None:
+            if run["capture_classification"] is None:
+                raise ReportError(
+                    f"{run['campaign_id']}/{run['seed']}: the campaign never "
+                    f"classified this capture and the retest sweep does not "
+                    f"cover it, so this tool cannot classify it at all")
             run["final_classification"] = run["capture_classification"]
             run["classification_source"] = "capture postprocess"
             run["retest_summary"] = None
@@ -578,14 +842,39 @@ def act_boss_rows(domains, act: int) -> list[str]:
         if row.get("act") == act and row.get("pool") == "BOSS")
 
 
+def act3_killed_identities(run) -> list[str]:
+    """The Act-3 boss identities one run's own records witness KILLED.
+
+    Act 3 has no boss chest, and the driver's `boss_kill_acts` cannot answer
+    this: it is filled by entering a `TreasureRoomBoss` room, and the capture's
+    own records show the act-2 chest's trailing MAP record already reading
+    `act: 3` -- so `3 in boss_kill_acts` is true of every run that merely
+    crossed into Act 3.  It is read artifact-side instead, from the ordered
+    distinct `act_boss` identities the capture carries in act 3:
+
+    * a LATER identity can only appear through `ProceedButton.goToDoubleBoss`
+      (`bossKey = bossList.get(0)`, the A20 double-boss handoff), which is
+      reached only off the first boss's death -- so every identity but the
+      last is witnessed killed;
+    * the last identity is witnessed killed exactly when the run is a victory.
+
+    That is the reading the S2.43 double-boss seam landed and the reading its
+    three victory captures and the Awakened-One death capture agree with.
+    """
+    bosses = list(run["act_bosses"].get("3") or [])
+    if not bosses:
+        return []
+    return bosses if run["victory"] else bosses[:-1]
+
+
 def depth_table(runs, act: int, boss_rows) -> dict[str, Any]:
     """Per-BOSS-row Act-N depth accounting, over clean runs only.
 
     A boss-reward claim is the BOSS_REWARD screen the driver latched for that
     act; the boss chest is `TreasureRoomBoss` in that act; the take/skip axis
     comes from the SHA-pinned boss-relic policy config the run's own header
-    names.  Act 3 has no boss chest, so its kill witness is the run's victory
-    flag -- exactly how the driver's own reach accounting reads it.
+    names.  Act 3's kill column comes from `act3_killed_identities` instead --
+    see its docstring for why the driver's own act set cannot answer it.
     """
     per_row = {
         boss: {
@@ -603,6 +892,7 @@ def depth_table(runs, act: int, boss_rows) -> dict[str, Any]:
     for run in runs:
         if run["final_classification"] != CLEAN_CLASSIFICATION:
             continue
+        killed_rows = set(act3_killed_identities(run)) if act == 3 else set()
         for boss in run["act_bosses"].get(str(act)) or []:
             if boss not in per_row:
                 unknown[boss] += 1
@@ -618,9 +908,9 @@ def depth_table(runs, act: int, boss_rows) -> dict[str, Any]:
                     cell["skip_cohort_runs"] += 1
                 else:
                     unattributed[str(run["policy_config"])] += 1
-            if act in run["boss_kill_acts"]:
+            if act != 3 and act in run["boss_kill_acts"]:
                 cell["boss_chest_runs"] += 1
-            killed = (run["victory"] if act == 3
+            killed = (boss in killed_rows if act == 3
                       else act in run["boss_kill_acts"])
             if killed:
                 cell["kill_runs"] += 1
@@ -638,10 +928,10 @@ def double_boss_runs(runs, final_act: int) -> list[dict[str, Any]]:
 
     Detection is artifact-side on purpose: the campaign report's
     `boss_kill_acts` is a SET of act numbers and structurally cannot express
-    two kills in one act (`campaign_driver.py` `_reach_fields`).  With no
-    Act-3 run in the consumed evidence this detector is unexercised by live
-    data; its behaviour is pinned by the synthetic fixtures in
-    `test_s2_report.py` rather than asserted from a live column here.
+    two kills in one act (`campaign_driver.py` `_reach_fields`).  A run that
+    reached the second boss and lost to it is reported too, and marked
+    `completed: false` -- design section 6 item 3 asks for COMPLETED
+    double-boss runs, so only the victories count against the bar.
     """
     hits = []
     for run in runs:
@@ -654,6 +944,8 @@ def double_boss_runs(runs, final_act: int) -> list[dict[str, Any]]:
                 "seed": run["seed"],
                 "bosses": list(bosses),
                 "victory": run["victory"],
+                "completed": bool(run["victory"]),
+                "outcome": run["outcome"],
             })
     return sorted(hits, key=lambda hit: (hit["campaign_id"], hit["seed"]))
 
@@ -723,18 +1015,28 @@ def event_coverage(domains, runs, event_dispositions, census
 
 def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
               retest_log: Path, dispositions_path: Path, registry_dir: Path,
-              prep_census_path: Path) -> dict[str, Any]:
+              prep_census_path: Path, depth_groups=(), iteration_groups=(),
+              preflight_groups=()) -> dict[str, Any]:
     domains = load_registry(registry_dir)
     retest = load_retest_log(retest_log)
-    run_dispositions, event_dispositions = load_dispositions(dispositions_path)
+    run_dispositions, event_dispositions, campaign_dispositions = \
+        load_dispositions(dispositions_path)
     census = load_prep_census(prep_census_path)
 
-    breadth_cohorts, breadth_runs = collect_runs(
-        artifact_root, breadth_groups, "breadth")
-    recapture_cohorts, recapture_runs = collect_runs(
-        artifact_root, recapture_groups, "recapture")
-    cohorts = breadth_cohorts + recapture_cohorts
-    runs = breadth_runs + recapture_runs
+    cohorts: list[dict[str, Any]] = []
+    runs: list[dict[str, Any]] = []
+    by_role: dict[str, list[dict[str, Any]]] = {}
+    for role, selected in (("breadth", breadth_groups),
+                           ("recapture", recapture_groups),
+                           ("depth", depth_groups),
+                           ("iteration", iteration_groups),
+                           ("preflight", preflight_groups)):
+        role_cohorts, role_runs = collect_runs(
+            artifact_root, list(selected), role)
+        cohorts += role_cohorts
+        runs += role_runs
+        by_role[role] = role_runs
+    breadth_runs = by_role["breadth"]
     index = {(run["campaign_id"], run["seed"]): run for run in runs}
     if len(index) != len(runs):
         raise ReportError("two consumed runs share a (campaign_id, seed)")
@@ -744,11 +1046,66 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
     }
 
     apply_classifications(runs, retest)
-    unmatched = sorted(key for key in retest if key not in index)
+    # A retest verdict for a campaign this invocation READ but for a seed it
+    # did not is a missing artifact and is fatal.  A verdict for a campaign
+    # outside the selected cohorts is not an error -- selecting a subset must
+    # not slander the rest -- but it is counted and rendered, so the default
+    # invocation's "the sweep and the cohorts cover the same corpus" property
+    # is a printed number rather than an assumption.
+    consumed_campaigns = {campaign_id for campaign_id, _seed in index}
+    unmatched = sorted(
+        key for key in retest
+        if key not in index and key[0] in consumed_campaigns)
     if unmatched:
         raise ReportError(
             f"the retest log classifies runs outside the consumed cohorts: "
             f"{unmatched[:5]}{'...' if len(unmatched) > 5 else ''}")
+    outside = sorted(
+        key for key in retest
+        if key not in index and key[0] not in consumed_campaigns)
+
+    # ---- campaign-level dispositions (the `iteration` role) ---------------
+    iteration_groups_read = sorted(
+        {cohort["group"] for cohort in cohorts if cohort["role"] == "iteration"})
+    missing_campaign = [group for group in iteration_groups_read
+                        if group not in campaign_dispositions]
+    if missing_campaign:
+        raise ReportError(
+            f"every iteration cohort needs an exact campaign disposition; "
+            f"missing: {missing_campaign}")
+    consumed_groups = {cohort["group"] for cohort in cohorts}
+    for group in iteration_groups_read:
+        item = campaign_dispositions[group]
+        if item["status"] != "superseded-by-recapture":
+            continue
+        target = str(item["superseded_by"])
+        if target not in consumed_groups:
+            raise ReportError(
+                f"campaign disposition {group}: superseded_by names {target}, "
+                f"which is not in the consumed evidence")
+        if target == group:
+            raise ReportError(
+                f"campaign disposition {group}: superseded_by names itself")
+        replacement = [run for run in runs if run["group"] == target]
+        if not replacement or any(
+                run["final_classification"] != CLEAN_CLASSIFICATION
+                for run in replacement):
+            raise ReportError(
+                f"campaign disposition {group}: superseded_by names {target}, "
+                f"whose own captures do not all read clean today")
+    stale_campaign = sorted(
+        group for group in set(campaign_dispositions)
+        if group not in iteration_groups_read and group in consumed_groups)
+    # A preflight cohort carries no divergence evidence, so it may not lean on
+    # a disposition: every one of its runs must read clean on both readings.
+    for run in by_role["preflight"]:
+        if run["final_classification"] != CLEAN_CLASSIFICATION or \
+                run["capture_classification"] != CLEAN_CLASSIFICATION:
+            raise ReportError(
+                f"{run['campaign_id']}/{run['seed']}: a preflight cohort's "
+                f"runs must be clean as captured and today, but this one "
+                f"reads {run['capture_classification']!r} / "
+                f"{run['final_classification']!r}")
 
     # ---- findings and dispositions ---------------------------------------
     findings: list[dict[str, Any]] = []
@@ -800,7 +1157,6 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
         })
 
     events = event_coverage(domains, runs, event_dispositions, census)
-    consumed_campaigns = {campaign_id for campaign_id, _seed in index}
     finding_keys = {
         (f["campaign_id"], f["seed"], f["classification"]) for f in findings
     }
@@ -861,7 +1217,7 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
         "classification_final": dict(sorted(breadth_final.items())),
         "reclassified_by_retest": reclassified,
         "capture_race_records": sum(
-            run["capture_race_records"] for run in breadth_runs),
+            run["capture_race_records"] or 0 for run in breadth_runs),
         "capture_race_runs": sum(
             1 for run in breadth_runs if run["capture_race_records"]),
         "captured_actions": sum(run["actions"] for run in breadth_runs),
@@ -880,7 +1236,8 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
     act2 = depth_table(runs, 2, act2_rows)
     act3 = depth_table(runs, 3, act3_rows)
     doubles = double_boss_runs(runs, 3)
-    first_bosses = sorted({hit["bosses"][0] for hit in doubles})
+    completed_doubles = [hit for hit in doubles if hit["completed"]]
+    first_bosses = sorted({hit["bosses"][0] for hit in completed_doubles})
 
     def rows_where(table, field):
         return sorted(boss for boss, cell in table["rows"].items()
@@ -895,6 +1252,7 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
         "rows_with_zero_diff_boss_reward_claim":
             rows_where(act2, "boss_reward_claim_runs"),
         "rows_with_zero_diff_boss_chest": rows_where(act2, "boss_chest_runs"),
+        "rows_with_boss_relic_pick": rows_where(act2, "take_cohort_runs"),
         "rows_with_take_witness": rows_where(act2, "take_cohort_runs"),
         "rows_with_skip_witness": rows_where(act2, "skip_cohort_runs"),
         "rows_with_onward_transition":
@@ -908,10 +1266,15 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
             if run["final_classification"] == CLEAN_CLASSIFICATION
             and 2 in run["boss_fight_acts"]),
     }
+    # Design section 6 item 2 reads per-row for the claim, the boss-chest pick
+    # and the onward transition, and cohort-wide for "both a take and at least
+    # one skip witnessed".  A take cohort's run IS the pick, so the per-row
+    # pick column is the take column read per row.
     item2["met"] = bool(
         act2_rows
         and all(cell["boss_reward_claim_runs"] > 0
                 and cell["boss_chest_runs"] > 0
+                and cell["take_cohort_runs"] > 0
                 and cell["onward_transition_runs"] > 0
                 for cell in act2["rows"].values())
         and item2["rows_with_take_witness"]
@@ -924,19 +1287,25 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
         "rows_witnessed_killed": rows_where(act3, "kill_runs"),
         "double_boss_runs": doubles,
         "double_boss_run_count": len(doubles),
-        "double_boss_shortfall_to_3": max(0, 3 - len(doubles)),
+        "completed_double_boss_runs": completed_doubles,
+        "completed_double_boss_run_count": len(completed_doubles),
+        "double_boss_shortfall_to_3": max(0, 3 - len(completed_doubles)),
         "double_boss_first_boss_identities": first_bosses,
         "double_boss_identity_shortfall_to_2": max(0, 2 - len(first_bosses)),
         "act3_entering_clean_runs": sum(
             1 for run in runs
             if run["final_classification"] == CLEAN_CLASSIFICATION
             and run["max_act"] >= 3),
+        "act3_victory_clean_runs": sum(
+            1 for run in runs
+            if run["final_classification"] == CLEAN_CLASSIFICATION
+            and run["victory"]),
         "detector_exercised_by_live_evidence": bool(doubles),
     }
     item3["met"] = bool(
         act3_rows
         and all(cell["kill_runs"] > 0 for cell in act3["rows"].values())
-        and len(doubles) >= 3 and len(first_bosses) >= 2)
+        and len(completed_doubles) >= 3 and len(first_bosses) >= 2)
 
     # ---- item 4: event depth ----------------------------------------------
     owed = [row for row in events if row["status"] == "OWED"]
@@ -964,6 +1333,7 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
             "capture_classification": run["capture_classification"],
             "final_classification": run["final_classification"],
             "classification_source": run["classification_source"],
+            "row_source": run["row_source"],
             "max_act": run["max_act"],
         } for run in runs),
         key=lambda entry: (entry["campaign_id"], entry["seed"]))
@@ -992,6 +1362,7 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
                 "sha256": sha256_file(dispositions_path),
                 "run_items": len(run_dispositions),
                 "event_row_items": len(event_dispositions),
+                "campaign_row_items": len(campaign_dispositions),
             },
             "prep_census": {
                 "path": prep_census_path.name,
@@ -1000,12 +1371,25 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
                 "depth_all_policies": census["depth"],
             },
             "newest_capture_finished_utc": newest,
+            "retest_verdicts_outside_consumed_cohorts": len(outside),
         },
         "evidence_totals": {
             "runs_consumed": len(runs),
+            "runs_by_role": {
+                role: len(role_runs) for role, role_runs in sorted(
+                    by_role.items())
+            },
+            "classification_as_captured": dict(sorted(
+                Counter(run["capture_classification"]
+                        or "(unclassified at capture)"
+                        for run in runs).items())),
             "classification_final": dict(sorted(
                 Counter(run["final_classification"]
                         for run in runs).items())),
+            "reclassified_by_retest": sum(
+                1 for run in runs
+                if run["capture_classification"]
+                != run["final_classification"]),
             "findings": len(findings),
         },
         "item1_breadth": item1,
@@ -1013,9 +1397,14 @@ def aggregate(artifact_root: Path, breadth_groups, recapture_groups,
         "item3_act3_depth": item3,
         "item4_event_depth": item4,
         "divergence_inventory": findings,
+        "campaign_dispositions": [
+            dict(campaign_dispositions[group], group=group)
+            for group in iteration_groups_read
+        ],
         "stale_dispositions": {
             "runs": [list(key) for key in stale_run],
             "event_rows": stale_event,
+            "campaign_rows": stale_campaign,
         },
         "artifact_manifest": manifest,
     }
@@ -1077,9 +1466,20 @@ def markdown(report: dict[str, Any]) -> str:
         "",
         "This is **evidence accounting, not a gate inference**. Every bar "
         "below is the number the inputs carry today; a bar with no evidence is "
-        "printed as a literal shortfall, never as a pending success. Items 5–7 "
-        "of the design section-6 bar belong to S2.46, S2.44 and S2.45 and are "
-        "outside this report's scope.",
+        "printed as a literal shortfall, never as a pending success — the "
+        "shortfall columns are unchanged from the run that printed four of "
+        "them, and only their numbers moved. Items 5–7 of the design "
+        "section-6 bar belong to S2.46, S2.44 and S2.45 and are outside this "
+        "report's scope.",
+        "",
+        "The cohorts are consumed under five **roles**: `breadth` (item 1), "
+        "`recapture` (the escape-window recaptures that supersede breadth "
+        "captures), `depth` (the S2.V2 cohorts carrying items 2 and 3, plus "
+        "the Mind Bloom directed captures), `iteration` (the "
+        "divergence-stopped waves that drove the day's fixes — every one "
+        "replays clean today and each carries an exact campaign-level "
+        "disposition), and `preflight` (fork-pin preflights, required clean on "
+        "both readings rather than dispositioned).",
         "",
         "Denominator: [../s2-design.md](../s2-design.md) section 6, S2-G2 "
         "items 1–4. Ledger row: [../s2-tasks.md](../s2-tasks.md) S2.43.",
@@ -1095,11 +1495,16 @@ def markdown(report: dict[str, Any]) -> str:
         f"{item1['open_findings']} open |",
         f"| Item 2 — Act-2 depth | **{verdict(item2['met'])}** | "
         f"{len(item2['rows_with_zero_diff_boss_reward_claim'])} of "
-        f"{act2_total} Act-2 BOSS rows carry a zero-diff boss-reward claim |",
+        f"{act2_total} Act-2 BOSS rows carry a zero-diff boss-reward claim, "
+        f"{len(item2['rows_with_boss_relic_pick'])} a boss-chest pick, "
+        f"{len(item2['rows_with_onward_transition'])} an act-2→3 transition |",
         f"| Item 3 — Act-3 depth | **{verdict(item3['met'])}** | "
         f"{len(item3['rows_witnessed_killed'])} of {act3_total} Act-3 BOSS "
-        f"rows witnessed killed, {item3['double_boss_run_count']} double-boss "
-        f"runs |",
+        f"rows witnessed killed, "
+        f"{item3['completed_double_boss_run_count']} completed double-boss "
+        f"runs over "
+        f"{len(item3['double_boss_first_boss_identities'])} first-boss "
+        f"identities |",
         f"| Item 4 — event depth | **{verdict(item4['met'])}** | "
         f"{item4['sighted_zero_diff']} sighted, "
         f"{item4['disposition_on_record']} dispositioned, "
@@ -1118,9 +1523,14 @@ def markdown(report: dict[str, Any]) -> str:
         f"{inputs['retest_log']['verdicts']} verdicts.",
         f"- Dispositions `{inputs['dispositions']['path']}` "
         f"(`{inputs['dispositions']['sha256'][:16]}…`): "
-        f"{inputs['dispositions']['run_items']} exact run items and "
-        f"{inputs['dispositions']['event_row_items']} event-row items, zero "
-        "wildcards.",
+        f"{inputs['dispositions']['run_items']} exact run items, "
+        f"{inputs['dispositions']['event_row_items']} event-row items and "
+        f"{inputs['dispositions']['campaign_row_items']} campaign-row items, "
+        "zero wildcards.",
+        f"- Retest verdicts naming a campaign outside the consumed cohorts: "
+        f"**{inputs['retest_verdicts_outside_consumed_cohorts']}** — at zero, "
+        "the sweep and the cohort selection cover exactly the same corpus, "
+        "which is printed rather than assumed.",
         f"- Sim-side census `{inputs['prep_census']['path']}` "
         f"(`{inputs['prep_census']['sha256'][:16]}…`): "
         f"{inputs['prep_census']['rows']:,} scanned rows over "
@@ -1128,24 +1538,41 @@ def markdown(report: dict[str, Any]) -> str:
         f"{inputs['prep_census']['max_floor']}.",
         "",
         "| Cohort | Role | Workers | Runs | Policy | Policy seed | Fork pin | "
-        "Driver | Pipeline | Schema |",
-        "|---|---|---:|---:|---|---:|---|---|---|---:|",
+        "Driver | Pipeline | Campaign status | Run rows from |",
+        "|---|---|---:|---:|---|---:|---|---|---|---|---|",
     ]
     for cohort in inputs["cohorts"]:
         prov = cohort["provenance"]
+        extra = cohort["captures_with_no_completed_run_row"]
+        sources = ", ".join(cohort["row_sources"])
+        if extra:
+            sources += f" (+{extra} capture stopped mid-seed)"
         lines.append(
             f"| {cohort['group']} | {cohort['role']} | {cohort['workers']} | "
             f"{cohort['runs']} | {prov.get('policy')} | "
             f"{prov.get('policy_seed')} | "
             f"`{str(prov.get('fork_jar_sha256'))[:8]}…` | "
-            f"{prov.get('driver_version')} | {prov.get('pipeline_version')} | "
-            f"{prov.get('schema_version')} |")
+            f"{prov.get('driver_version')} | "
+            f"{prov.get('pipeline_version') or 'n/a'} | "
+            f"{', '.join(cohort['campaign_statuses'])} | {sources} |")
     lines += [
         "",
-        "The fork pins deliberately differ across cohorts: the escape-window "
-        "recaptures were taken under the two successive holds that closed that "
-        "class, so collapsing them into one required aggregate pin would hide "
-        "the very fact the recapture evidence exists to record.",
+        "The fork pins deliberately differ across cohorts, and collapsing them "
+        "into one required aggregate pin would hide the very fact this "
+        "evidence exists to record: the breadth wave ran under the 2026-08-26 "
+        "redeploy, the escape-window recaptures under the two successive holds "
+        "that closed that class, the S2.V2 depth waves under the second of "
+        "those, and the last depth captures under the 2026-08-27 "
+        "SecretPortal playtime pin.",
+        "",
+        "A cohort whose campaign status is not `complete` is a wave the driver "
+        "stopped mid-seed — normal for the depth and iteration waves, since a "
+        "scripted line that desynchronises ends its campaign. Those workers "
+        "never reach the postprocess that writes `report.json`, so their run "
+        "rows come from `campaign_progress.json` and their classification can "
+        "only come from the retest sweep. The capture the driver died on has "
+        "no completed run row at all; it is still reopened, hashed and "
+        "classified, and the count is the parenthesised number above.",
         "",
         "### Scripted-policy pins, as the capture headers carry them",
         "",
@@ -1170,7 +1597,9 @@ def markdown(report: dict[str, Any]) -> str:
         "",
         f"- Distinct breadth seeds, counted from the artifacts themselves: "
         f"**{item1['distinct_breadth_seeds']:,}**; shortfall to 2,000: "
-        f"**{item1['seed_shortfall_to_2000']}**.",
+        f"**{item1['seed_shortfall_to_2000']}**. The `s243_breadth_top2` "
+        "cohort is folded in here: it exists because the instrument found "
+        "the original wave holding 1,998 full-run attempts, not 2,000.",
         f"- Full-run attempts — terminal outcome one of "
         f"`{'`, `'.join(item1['gameplay_terminal_outcomes'])}`: "
         f"**{item1['full_run_attempts']:,}**; shortfall to 2,000: "
@@ -1184,8 +1613,8 @@ def markdown(report: dict[str, Any]) -> str:
         f"**{'YES' if item1['mixed_policies'] else 'NO'}**.",
         f"- Classification as captured: "
         f"**{counts(item1['classification_as_captured'])}**.",
-        f"- Classification as read today, the retest sweep applied to "
-        f"{item1['reclassified_by_retest']} runs: "
+        f"- Classification as read today, the retest sweep moving "
+        f"{item1['reclassified_by_retest']} of these runs: "
         f"**{counts(item1['classification_final'])}**.",
         f"- Captured actions across the breadth cohorts: "
         f"**{item1['captured_actions']:,}** (a visible diagnostic; there is no "
@@ -1227,7 +1656,8 @@ def markdown(report: dict[str, Any]) -> str:
             named = (f"{recapture['campaign_id']} / {recapture['seed']} "
                      f"(`{recapture['artifact_sha256'][:12]}…`)")
             fork = f"`{str(recapture['fork_jar_sha256'])[:8]}…`"
-            races = str(recapture["capture_race_records"])
+            races = ("n/a" if recapture["capture_race_records"] is None
+                     else str(recapture["capture_race_records"]))
         else:
             named = disposition["reference"] if disposition else ""
             fork = ""
@@ -1249,20 +1679,48 @@ def markdown(report: dict[str, Any]) -> str:
         "settle-lag hold reaches zero.",
         "",
     ]
+    campaign_rows = report["campaign_dispositions"]
+    if campaign_rows:
+        lines += [
+            "### Iteration cohorts — the divergence-stopped waves, "
+            "dispositioned per campaign",
+            "",
+            "Every capture below replays clean on today's engine, so none of "
+            "them raises a run finding. What was superseded is a whole cohort "
+            "**seat**, not a (seed, classification) pair, so each carries an "
+            "exact campaign-level disposition instead: either the clean "
+            "successor that refilled the same seat — which the tool re-reads "
+            "from its own evidence set and refuses unless every one of that "
+            "cohort's captures is clean today — or the landed fix that closed "
+            "the divergence the wave found.",
+            "",
+            "| Cohort | Status | Named exactly | Reference |",
+            "|---|---|---|---|",
+        ]
+        for item in campaign_rows:
+            named = str(item.get("superseded_by") or "—")
+            lines.append(
+                f"| {item['group']} | {item['status']} | {named} | "
+                f"{item['reference']} |")
+        lines.append("")
+
     stale = report["stale_dispositions"]
-    if stale["runs"] or stale["event_rows"]:
+    if stale["runs"] or stale["event_rows"] or stale["campaign_rows"]:
         lines += [
             "**Dispositions no longer exercised** — the finding each one names "
             "is no longer non-clean (or the event row it covers is now "
-            "sighted). Remove them on the next triage pass; they are reported "
-            "rather than fatal so this dashboard still regenerates over "
-            "improved inputs.",
+            "sighted, or the cohort it covers is no longer read as an "
+            "iteration wave). Remove them on the next triage pass; they are "
+            "reported rather than fatal so this dashboard still regenerates "
+            "over improved inputs.",
             "",
         ]
         for key in stale["runs"]:
             lines.append(f"- run `{key[0]}` / `{key[1]}` / `{key[2]}`")
         for game_id in stale["event_rows"]:
             lines.append(f"- event row `{game_id}`")
+        for group in stale["campaign_rows"]:
+            lines.append(f"- campaign row `{group}`")
         lines.append("")
 
     lines += [
@@ -1278,7 +1736,7 @@ def markdown(report: dict[str, Any]) -> str:
         f"Act-2 boss: **{item2['act2_boss_fight_clean_runs']}**.",
         "",
         "| Act-2 BOSS row | Boss fights | Boss-reward claims | Boss chests | "
-        "Take cohort | Skip cohort | Act-2→3 transitions |",
+        "Boss-relic picks (take) | Skips | Act-2→3 transitions |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for boss in item2["registry_boss_rows"]:
@@ -1300,19 +1758,28 @@ def markdown(report: dict[str, Any]) -> str:
         f"**{len(item2['rows_with_zero_diff_boss_chest'])} of "
         f"{act2_total}**; missing: "
         f"**{missing(item2['registry_boss_rows'], item2['rows_with_zero_diff_boss_chest'])}**.",
+        f"- Act-2 BOSS rows with a zero-diff boss-chest boss-relic **pick**: "
+        f"**{len(item2['rows_with_boss_relic_pick'])} of {act2_total}**; "
+        f"missing: "
+        f"**{missing(item2['registry_boss_rows'], item2['rows_with_boss_relic_pick'])}**.",
         f"- Boss-relic **take** witnessed for: "
         f"**{', '.join(item2['rows_with_take_witness']) or 'no row'}**.",
         f"- Boss-relic **skip** witnessed for: "
         f"**{', '.join(item2['rows_with_skip_witness']) or 'no row'}**.",
         f"- Zero-diff act-2→3 transition witnessed for: "
         f"**{', '.join(item2['rows_with_onward_transition']) or 'no row'}**.",
+        f"- Boss-relic policy configs the tool could not attribute to a "
+        f"take/skip cohort: **{counts(item2['unattributed_boss_relic_policies'])}**.",
         f"- **Item 2: {verdict(item2['met'])}**",
         "",
-        "The depth cohorts this bar needs do not exist yet. S2.43's breadth "
-        "wave measured zero Act-2 boss fights across its whole cohort — the "
-        "escalation number that opened S2.V2 — so these rows fill from S2.V2's "
-        "scan output, and the accounting above then changes only in its "
-        "numbers.",
+        "The take/skip axis is read from the SHA-pinned policy config each "
+        "capture's own header names, never from a directory name: the "
+        "breadth/recapture waves ran the S2.42 `policy_bossrelic_take/skip` "
+        "pair, the S2.V2 depth waves the scripted follower's "
+        "`follower_sim_search{,_skip}.json`. This bar's per-row evidence is "
+        "the depth cohorts' — S2.43's breadth wave measured **zero** Act-2 "
+        "boss fights across all 2,000 attempts, which is the escalation "
+        "number that opened S2.V2 in the first place.",
         "",
         "## Item 3 — Act-3 depth",
         "",
@@ -1321,7 +1788,8 @@ def markdown(report: dict[str, Any]) -> str:
         "settlement zero-diff, covering ≥ 2 distinct first-boss identities).",
         "",
         f"- Clean runs that entered Act 3: "
-        f"**{item3['act3_entering_clean_runs']}**.",
+        f"**{item3['act3_entering_clean_runs']}**; clean runs that ended in "
+        f"victory: **{item3['act3_victory_clean_runs']}**.",
         "",
         "| Act-3 BOSS row | Boss fights | Kills witnessed |",
         "|---|---:|---:|",
@@ -1337,22 +1805,45 @@ def markdown(report: dict[str, Any]) -> str:
         f"- Act-3 BOSS rows witnessed killed zero-diff: "
         f"**{len(item3['rows_witnessed_killed'])} of {act3_total}**; missing: "
         f"**{missing(item3['registry_boss_rows'], item3['rows_witnessed_killed'])}**.",
-        f"- Completed double-boss runs: **{item3['double_boss_run_count']}**; "
-        f"shortfall to 3: **{item3['double_boss_shortfall_to_3']}**.",
-        f"- Distinct first-boss identities across those runs: "
+        f"- Completed double-boss runs: "
+        f"**{item3['completed_double_boss_run_count']}**; shortfall to 3: "
+        f"**{item3['double_boss_shortfall_to_3']}**. Runs that reached the "
+        f"second boss without completing: "
+        f"**{item3['double_boss_run_count'] - item3['completed_double_boss_run_count']}** "
+        "— reported, never counted toward the bar.",
+        f"- Distinct first-boss identities across the completed runs: "
         f"**{len(item3['double_boss_first_boss_identities'])}**; shortfall to "
         f"2: **{item3['double_boss_identity_shortfall_to_2']}**.",
         f"- **Item 3: {verdict(item3['met'])}**",
         "",
-        "**Instrument note, stated rather than hidden.** The campaign report's "
+        "| Double-boss run | Act-3 identities, in order | Outcome | Counts "
+        "toward the bar |",
+        "|---|---|---|---|",
+    ]
+    for hit in item3["double_boss_runs"]:
+        lines.append(
+            f"| {hit['campaign_id']} / {hit['seed']} | "
+            f"{' → '.join(hit['bosses'])} | `{hit['outcome']}` | "
+            f"{'YES' if hit['completed'] else 'no (lost to the second boss)'} |")
+    lines += [
+        "",
+        "**Instrument note, stated rather than hidden.** Neither half of this "
+        "bar can be read off the driver's own act sets. The campaign report's "
         "`boss_kill_acts` is a *set* of act numbers and structurally cannot "
-        "express two kills in one act, so double-boss detection here is "
+        "express two kills in one act, so double-boss detection is "
         "artifact-side: a run counts when its own records witness two distinct "
-        "Act-3 `act_boss` identities. No Act-3 run exists in the consumed "
-        "evidence, so that detector is **unexercised by live data**; its "
-        "behaviour is pinned by synthetic fixtures in the tool's unit tests "
-        "instead of being asserted here, and the column above is a measured "
-        "zero rather than a hard-wired false.",
+        "Act-3 `act_boss` identities, and it counts toward the bar only when "
+        "it also ends in victory. The per-row **kill** column is read the same "
+        "way and for a sharper reason: the captures show the Act-2 boss "
+        "chest's trailing MAP record already carrying `act: 3`, so "
+        "`3 in boss_kill_acts` is true of every run that merely crossed into "
+        "Act 3. A later Act-3 identity can only appear through the A20 "
+        "double-boss handoff, which is reached only off the first boss's "
+        "death, so every identity but the last is witnessed killed and the "
+        "last is witnessed killed exactly on a victory. Gold settlement is not "
+        "a separate column because it is not a separate assertion: each run "
+        "above replays clean to its run terminal, and `RunState.gold` is "
+        "compared at every one of those records.",
         "",
         "## Item 4 — event depth (the section 7.4 coverage join)",
         "",
@@ -1376,7 +1867,17 @@ def markdown(report: dict[str, Any]) -> str:
         "is not what this bar is about — hence the separate any-act column. "
         "The sim-side census column is the rare-event context S2.43's prep "
         "scan measured; it is reach evidence for scheduling directed captures, "
-        "never a substitute for an oracle sighting.",
+        "never a substitute for an oracle sighting. It is also an "
+        "Act-1-dominated scan (its policies rarely leave Act 1), so a zero "
+        "there is weak evidence about act 2/3 and the per-row dispositions say "
+        "so individually rather than leaning on the column.",
+        "",
+        "Design section 6 item 4 sanctions exactly two per-row alternatives to "
+        "a sighting, and every disposition below is one of them, written per "
+        "row with its own argument: `directed-capture-scheduled` or "
+        "`reachability-argument`. There is no wildcard status and no bulk "
+        "note — a row dispositioned as reachable must say what makes it "
+        "reachable and what would schedule it.",
         "",
         "| ID | Row | game_id | Pool | Acts | Act-2/3 sightings | Any-act "
         "sightings | Sim census rows | Status |",
@@ -1426,15 +1927,15 @@ def artifact_csv(manifest) -> str:
     writer.writerow([
         "role", "group", "campaign_id", "seed", "artifact", "artifact_bytes",
         "sha256", "outcome", "capture_classification", "final_classification",
-        "classification_source", "max_act",
+        "classification_source", "row_source", "max_act",
     ])
     for entry in manifest:
         writer.writerow([
             entry["role"], entry["group"], entry["campaign_id"], entry["seed"],
             entry["artifact"], entry["artifact_bytes"], entry["sha256"],
-            entry["outcome"], entry["capture_classification"],
+            entry["outcome"], entry["capture_classification"] or "",
             entry["final_classification"], entry["classification_source"],
-            entry["max_act"],
+            entry["row_source"], entry["max_act"],
         ])
     return output.getvalue()
 
@@ -1457,6 +1958,9 @@ def main(argv=None) -> int:
                         default=DEFAULT_ARTIFACT_ROOT)
     parser.add_argument("--breadth", action="append", dest="breadth")
     parser.add_argument("--recapture", action="append", dest="recapture")
+    parser.add_argument("--depth", action="append", dest="depth")
+    parser.add_argument("--iteration", action="append", dest="iteration")
+    parser.add_argument("--preflight", action="append", dest="preflight")
     parser.add_argument("--retest-log", type=Path, default=DEFAULT_RETEST_LOG)
     parser.add_argument("--dispositions", type=Path,
                         default=Path(__file__).with_name(
@@ -1476,6 +1980,9 @@ def main(argv=None) -> int:
             args.dispositions,
             args.registry,
             args.prep_census,
+            args.depth or list(DEFAULT_DEPTH_GROUPS),
+            args.iteration or list(DEFAULT_ITERATION_GROUPS),
+            args.preflight or list(DEFAULT_PREFLIGHT_GROUPS),
         )
         write_report(report, args.out_dir)
     except ReportError as exc:
