@@ -122,6 +122,16 @@ struct TranslatedRun {
     // `sorted()` iteration order (std::map) keeps the report deterministic.
     std::map<std::string, uint64_t> unknown_ids;
     uint64_t unknown_id_hits = 0;  // sum over unknown_ids values
+
+    // Post-victory ending-cinematic records skipped (S2.43 depth campaign):
+    // an A20 double-boss victory walks the "Spire Heart" taunt dialog
+    // (continue/attack/continue/sleep) BEFORE its victory terminal. The sim
+    // rightly models none of it (its run ends at the kill), the registry
+    // carries no row for it (Act 4 is S3 scope), and the follower glues the
+    // one-click screens -- so the tail is presentation, not state. Counted
+    // and skipped ONLY when the artifact's own terminal says victory; in any
+    // other artifact an unknown event id still aborts loudly.
+    int post_victory_ending_records = 0;
 };
 
 // Translate a JSONL file from disk. Throws TranslateError on drift; throws

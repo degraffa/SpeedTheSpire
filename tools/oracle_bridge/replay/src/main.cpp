@@ -587,6 +587,7 @@ struct Verdict {
     int obtain_race_records = 0;    // ...whose only diff was an obtain animation
     int escape_race_records = 0;    // ...the Smoke-Bomb escape-settlement race
     int preview_race_records = 0;   // ...a curse transform-preview cardRng burn
+    int post_victory_ending_records = 0;  // Spire-Heart cinematic tail skipped
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
 };
@@ -615,7 +616,18 @@ void print_pool_evidence(const std::string& seed_string, int floor,
 [[nodiscard]] Verdict replay_one(const std::string& path, const Options& opts) {
     Verdict v;
     const sts::translate::TranslatedRun run = sts::translate::translate_file(path);
-    const std::vector<ScreenInfo> screens = read_screens(path);
+    std::vector<ScreenInfo> screens = read_screens(path);
+    // The translator skips a victory artifact's trailing Spire-Heart ending
+    // cinematic (translate.hpp's field comment); the screen read-out walks the
+    // raw file and still counts those records, so drop the same tail here --
+    // it is at the end by construction (the terminal follows it directly).
+    if (run.post_victory_ending_records > 0 &&
+        screens.size() ==
+            run.records.size() +
+                static_cast<std::size_t>(run.post_victory_ending_records)) {
+        screens.resize(run.records.size());
+        v.post_victory_ending_records = run.post_victory_ending_records;
+    }
     if (screens.size() != run.records.size())
         throw std::runtime_error("screen/record count mismatch in " + path);
 
@@ -3121,6 +3133,10 @@ int main(int argc, char** argv) {
                         v.obtain_race_records, v.escape_race_records,
                         v.preview_race_records,
                         v.stop_reason.c_str());
+            if (v.post_victory_ending_records > 0)
+                std::printf("      %d post-victory ending record(s) skipped "
+                            "(the Spire Heart cinematic -- out of S2 scope)\n",
+                            v.post_victory_ending_records);
             // The frontier, always on its own line and never folded into the
             // stop -- see `Verdict`. "no divergence" is said out loud too: a
             // replay that stopped without ever disagreeing is a coverage gap in

@@ -454,6 +454,56 @@ TEST(Translator, AnActOneEventListIsRefusedInActTwo) {
         tr::TranslateError);
 }
 
+TEST(Translator, PostVictoryEndingCinematicIsSkippedAndCounted) {
+    // S2.43 depth campaign: an A20 double-boss VICTORY walks the "Spire
+    // Heart" taunt dialog before its terminal (s2v2_db47_b, STS128113/ps47,
+    // records 667-671). The registry rightly has no row (Act 4 is S3
+    // scope); with the artifact's own terminal saying victory the tail is
+    // presentation and is skipped with a count, never translated.
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 4u);
+    // The sample's action records carry no screen_state key at all
+    // (compact separators); insert one at the head of game_state.
+    std::string ending = lines[1];
+    const std::string anchor = "\"game_state\":{";
+    const auto pos = ending.find(anchor);
+    ASSERT_NE(pos, std::string::npos);
+    ending.insert(pos + anchor.size(),
+                  "\"screen_state\":{\"event_id\":\"Spire Heart\"},");
+    std::string victory = lines[3];
+    const auto opos = victory.find("\"outcome\":\"death\"");
+    ASSERT_NE(opos, std::string::npos);
+    victory.replace(opos, std::strlen("\"outcome\":\"death\""),
+                    "\"outcome\":\"victory\"");
+    const tr::TranslatedRun run = tr::translate_lines(
+        {lines[0], lines[1], ending, ending, victory}, "victory-tail");
+    EXPECT_EQ(run.records.size(), 1u);  // the ordinary record still lands
+    EXPECT_EQ(run.post_victory_ending_records, 2);
+}
+
+TEST(Translator, TheEndingCinematicWithoutAVictoryTerminalStillAborts) {
+    // The skip is gated on the artifact's own victory terminal: any other
+    // artifact showing an unregistered event id keeps the loud abort --
+    // an Act-4 entry in a key run must not be silently swallowed.
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 4u);
+    std::string ending = lines[1];
+    const std::string anchor = "\"game_state\":{";
+    const auto pos = ending.find(anchor);
+    ASSERT_NE(pos, std::string::npos);
+    ending.insert(pos + anchor.size(),
+                  "\"screen_state\":{\"event_id\":\"Spire Heart\"},");
+    const std::string st = "\"screen_type\":\"NONE\"";
+    const auto tpos = ending.find(st);
+    ASSERT_NE(tpos, std::string::npos);
+    ending.replace(tpos, st.size(), "\"screen_type\":\"EVENT\"");
+    // lines[3] is the sample's own DEATH terminal: the gate must not open.
+    EXPECT_THROW(
+        (void)tr::translate_lines({lines[0], ending, lines[3]},
+                                  "ending-no-victory"),
+        tr::TranslateError);
+}
+
 TEST(Translator, UnknownEventInMembershipListIsRefused) {
     std::vector<std::string> lines = read_lines(sample_path());
     ASSERT_GE(lines.size(), 2u);

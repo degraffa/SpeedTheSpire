@@ -1693,6 +1693,21 @@ TranslatedRun translate_lines(const std::vector<std::string>& lines,
     ctx.tolerate_ids = opts.tolerate_unknown_ids;
     ctx.unknown_ids = &run.unknown_ids;
     ctx.unknown_id_hits = &run.unknown_id_hits;
+
+    // Post-victory ending-cinematic gate (translate.hpp's field comment):
+    // active only when the artifact's own terminal record says victory.
+    bool victory_terminal = false;
+    for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
+        if (it->empty()) continue;
+        json last;
+        try { last = json::parse(*it); } catch (const json::parse_error&) {}
+        victory_terminal = last.is_object() &&
+                           last.value("record_kind", std::string{}) == "terminal" &&
+                           last.value("outcome", std::string{}) == "victory";
+        break;
+    }
+    bool in_ending_tail = false;
+
     int idx = 0;
     for (const std::string& line : lines) {
         ctx.record_idx = idx++;
@@ -1702,6 +1717,23 @@ TranslatedRun translate_lines(const std::vector<std::string>& lines,
             rec = json::parse(line);
         } catch (const json::parse_error& e) {
             throw std::runtime_error(loc(ctx) + " JSON parse error: " + e.what());
+        }
+        if (victory_terminal && rec.is_object() &&
+            rec.value("record_kind", std::string{}) == "action") {
+            const json* ss = nullptr;
+            if (auto sj = rec.find("state_json"); sj != rec.end() && sj->is_object()) {
+                if (auto gs = sj->find("game_state"); gs != sj->end() && gs->is_object()) {
+                    if (auto s = gs->find("screen_state"); s != gs->end() && s->is_object()) {
+                        ss = &*s;
+                    }
+                }
+            }
+            if (in_ending_tail ||
+                (ss && ss->value("event_id", std::string{}) == "Spire Heart")) {
+                in_ending_tail = true;
+                ++run.post_victory_ending_records;
+                continue;
+            }
         }
         translate_record(rec, ctx, run);
     }
