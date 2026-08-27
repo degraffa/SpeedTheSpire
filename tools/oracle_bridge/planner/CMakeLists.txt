@@ -19,6 +19,17 @@
 add_library(seed_scan_core STATIC src/seed_scan.cpp src/script.cpp)
 target_include_directories(seed_scan_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(seed_scan_core PUBLIC fuzz_core registry_generated)
+# S2.43 (STS100038): the STS-SCRIPT `index` field is the LIVE `choose N` space,
+# and Match and Keep's play board is the one event page where that space is
+# ordered by SCREEN POSITION rather than by board slot. The permutation that
+# relates the two already lives in the replay harness' header-only
+# `replay_mk_board` (../replay/src/mk_board.hpp), which this emitter now uses
+# instead of restating it -- both tools translate the same two spaces, in
+# opposite directions, so a second copy is a second place to rot. PRIVATE: the
+# header is an implementation detail of src/script.cpp, not of the planner's
+# public interface. The replay directory is added BEFORE this one in the root
+# CMakeLists, inside the same STS_BUILD_TESTS block.
+target_link_libraries(seed_scan_core PRIVATE replay_mk_board)
 target_compile_features(seed_scan_core PUBLIC cxx_std_20)
 add_dependencies(seed_scan_core registry_gen_headers)
 sts_set_warnings(seed_scan_core)

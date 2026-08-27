@@ -2514,6 +2514,77 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `STS108173__sim_search__ps0` (step 275, a two-relic treasure chest —
   `[Red Skull, Oddly Smooth Stone]`, the same latent stop one act deeper).
   An `ord` of 0 is provably unaffected in either convention.
+  **Depth-wave finding closed 2026-08-27 — STS100038's "Match and Keep!"
+  stop was an EMITTER index-space bug, not an engine divergence.** The
+  scripted line (`sim_search`, ps0) played 389 steps live with zero
+  desyncs, through both boss kills into Act 3, and stopped at step 390 on
+  the floor-36 board: the emitter derived `choose 10` for a screen
+  offering ten candidates. The flip-by-flip comparison of the capture's
+  last eight PLAY records against script steps 382–389 is what decided
+  the layer. The live game's `choice_list` walked `card6, card10` (miss),
+  `card7, card1` — **which MATCHED and left the list**, taking it from 12
+  entries to 10 — then `card9, card2` and `card9, card3` (misses,
+  revealing Feed/Headbutt/Bash); the sim, from the same deal, re-picked
+  `opt 7` and `opt 1` at steps 386/387, which its own `match_menu` would
+  have refused had that pair matched, and emitted `index 10` for `opt 10`
+  at step 390, i.e. it still saw twelve enabled slots with nothing taken.
+  Two boards that disagree about which pair matched are two boards
+  addressed in different index spaces — and the space is exactly the one
+  `mk_board.hpp` already documents. Nothing about the DEAL is anomalous
+  on either side: the live board's six identities read Feed (RARE),
+  Sever Soul (UNCOMMON), Headbutt (COMMON), Clumsy (curse), Bash
+  (`getStartCardForEvent`) and the unnamed matched pair (the second
+  curse), which is exactly `initializeCards()`'s ascension-≥15 arm
+  (`GremlinMatchGame.java:63-92`), and the five still-hidden slots are
+  precisely those five identities' second copies. `getOrderedCards()`
+  (`GremlinMatchGamePatch.java:24-29`) sorts `cards.group` by the screen
+  position stored at construction — `target_x = i % 4; target_y = i % 3;
+  position = target_x + 4 * target_y`, which is `placeCards`' own
+  arithmetic (`GremlinMatchGame.java:278-285`), giving
+  `[0,5,10,3,4,9,2,7,8,1,6,11]` — then drops what is no longer selectable
+  (`removeIf(c -> !c.isFlipped)`; a matched pair has already left
+  `cards.group` at `GremlinMatchGame.java:221-222`). The engine body is
+  RIGHT: `match_menu` publishes twelve options and enables
+  `board[i].taken == 0 && scratch1 != i`, the same SET one permutation
+  away. The follower is right too — `_match_event` sends `choose
+  <index>` because the emitter owns that space. What was wrong is
+  `script.cpp`'s derivation, which counted enabled options in BOARD-SLOT
+  order for every event including this one. **The failure is silent while
+  the numbers stay in range**: on a full board every slot is enabled, so
+  the emitted index IS the slot and the live driver flips the card at
+  that SCREEN POSITION instead — only the permutation's six fixed points
+  (0, 3, 4, 7, 8, 11) survive that. STS100038's live walk was therefore
+  flipping the wrong card from its FIRST flip (`opt 6` → screen position
+  2), and only surfaced at step 390 once the live board had shrunk by a
+  pair the sim never matched. Corrected in passing:
+  `mk_board.hpp`'s header said "eight of the twelve positions are wrong
+  under the identity mapping" — it is six, and a test now counts them. Fixed in the emitter (`event_live_choose_index`), which
+  ranks by `sts::replay::match_screen_position` on the play board (the
+  `replay_mk_board` INTERFACE target is now linked PRIVATE into
+  `seed_scan_core` rather than the permutation being restated) and keeps
+  the plain enabled-only count everywhere else. Pinned by
+  `SimSearchScriptMatchAndKeep.*` (4): the full board (all twelve slots,
+  with an explicit assertion that six of them move — the case the old
+  derivation got wrong yet never out of range), the STS100038
+  shrinking board (the ten offered slots in position order, `opt 10 →
+  index 5`, no emitted index reaching past a ten-candidate screen, and
+  `-1` for a card that left the board), the face-up-card compaction
+  composing with it in position order, and a no-regression pin on the
+  one-button pages plus The Addict's gold-gated generic path. **Sim
+  trajectories and scan rows do NOT move** — only the emitted `index`
+  field changes — but every already-emitted script containing a Match and
+  Keep! play screen is wrong and must be RE-EMITTED, STS100038's
+  included; its live capture is evidence of the bug, not of the seed.
+  The end-to-end confirmation this cannot supply offline is a directed
+  recapture of STS100038 against the re-emitted line: it should now walk
+  the whole board and past floor 36. One unrelated repair rode along
+  because it made the gate unreadable: `oracle_campaign_pipeline_python_test`
+  was RED on the base commit — b1.7.1 added `run_orchestrator`'s
+  `args.boss_reward_via_policy` read (`campaign_pipeline.py:761`) without
+  giving the hand-built `SimpleNamespace` in
+  `test_run_orchestrator_forwards_external_policy_arguments` the field, so
+  it raised `AttributeError`; the fixture now carries the flag's
+  `store_true` default.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool

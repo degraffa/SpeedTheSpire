@@ -1304,6 +1304,11 @@ class ExternalPolicyPipelineTest(unittest.TestCase):
     def test_run_orchestrator_forwards_external_policy_arguments(self):
         with tempfile.TemporaryDirectory() as root:
             cmd, config = self._policy_files(root)
+            # `boss_reward_via_policy` mirrors the `store_true` argparse
+            # default (campaign_pipeline.py:1679); `run_orchestrator` reads it
+            # unconditionally at :761. Added 2026-08-27 -- the b1.7.1 commit
+            # that introduced that read left this fixture behind, so the test
+            # raised AttributeError on master.
             args = SimpleNamespace(
                 game_dir="game", fork_jar="fork.jar", policy="external",
                 policy_seed=7, campaign_timeout=10.0, max_actions=100,

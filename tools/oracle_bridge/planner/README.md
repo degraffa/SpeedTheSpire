@@ -145,7 +145,7 @@ different card at the same index is the desync the follower must stop on):
 | `grid` / `grid_cancel` | `ctx` + `card`+`up`+`ord` | match in the grid's card list → `choose i`; cancel alias |
 | `choose_card` | `src` (pile) + `card`+`up`+`ord`+`index` | combat choice screens; identity join like `grid` |
 | `confirm` | — | the hand-select confirm (`proceed`) |
-| `event` / `neow` | `event` (game id), `opt` (full-list ordinal), `index` (**enabled-only** index — the `choose` command's own space, command_map.hpp's two-index-space note inverted) | `choose <index>` |
+| `event` / `neow` | `event` (game id), `opt` (full-list ordinal), `index` (**enabled-only** index — the `choose` command's own space, command_map.hpp's two-index-space note inverted; on Match and Keep's twelve-card board that space is ordered by SCREEN POSITION, not by board slot — see `script.cpp`'s `event_live_choose_index`) | `choose <index>` |
 | `open_chest` / `boss_open` | — | the `open` choice |
 | `boss_pick` / `boss_skip` | `relic` (game id) / — | match in `screen_state.relics` → `choose i`; `skip` |
 | `proceed` | `ctx` (advisory) | `proceed` |

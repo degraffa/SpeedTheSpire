@@ -39,10 +39,13 @@
 //      `cards.group[7]`; it names the card that landed in the 8th grid cell,
 //      which is `cards.group[10]`. Comparing the two index spaces directly is
 //      the single mistake this header exists to make impossible, and it is not
-//      a mistake a passing read-out would announce: eight of the twelve
-//      positions are wrong under the identity mapping, so it would fail loudly
-//      on real data -- but a read-out that only compared MULTISETS would pass
-//      while proving nothing about order at all.
+//      a mistake a passing read-out would announce: six of the twelve
+//      positions are wrong under the identity mapping (only 0, 3, 4, 7, 8 and
+//      11 are fixed points), so it would fail loudly on real data -- but a
+//      read-out that only compared MULTISETS would pass while proving nothing
+//      about order at all.
+//      (The count read "eight" until 2026-08-27, when the S2.43 STS100038
+//      finding next door made it load-bearing prose and a test counted it.)
 //
 //   2. THE LIST IS COMPACTED, AND CARRIES NO POSITION FOR A REVEALED CARD.
 //      `getOrderedCards()` copies `cards.group`, sorts by that stored position,

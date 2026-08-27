@@ -24,6 +24,8 @@
 #include "sts/engine/neow.hpp"        // NeowRewardType (claim-ordinal test)
 #include "sts/planner/script.hpp"  // S2.V2: the STS-SCRIPT emitter
 
+#include <cstddef>
+#include <cstdlib>
 #include <span>
 #include <string>
 #include <vector>
@@ -1107,4 +1109,175 @@ TEST(SimSearchScript, StepJsonDecodesAgainstTheStateNotTheAction) {
         err);
     EXPECT_TRUE(none.empty());
     EXPECT_FALSE(err.empty());
+}
+
+// --- the EVENT step's `index`: the live `choose N` space ---------------------
+//
+// S2.43, seed STS100038: a 389-step scripted line replayed live with zero
+// desyncs and then stopped at the floor-36 Match and Keep! board, because the
+// emitter derived `choose 10` for a screen that offered ten candidates. The
+// emitted `index` counted ENABLED BOARD SLOTS, but the live `choice_list` for
+// this one event page is `getOrderedCards()` -- the still-selectable cards
+// sorted by SCREEN POSITION (GremlinMatchGamePatch.java:24-29, the position
+// table [0,5,10,3,4,9,2,7,8,1,6,11] from `InitializeCardsPatch`, which is
+// GremlinMatchGame.java:278-285's own layout arithmetic). The two spaces are a
+// PERMUTATION apart, so the out-of-range `choose` was only the first index that
+// could not be silently misread: on a full board the wrong index is always in
+// range, and the live driver flips a different card the moment the sim picks a
+// slot that is not one of the permutation's six fixed points -- STS100038's
+// very first flip (`opt 6`, screen position 2) already was one.
+//
+// The tests below are the shape of that finding, not the seed: a full board
+// (where the identity mapping is maximally wrong yet never out of range), the
+// shrinking board that finally raised it, and the generic path it must not
+// disturb.
+namespace {
+
+// A controller parked on Match and Keep's play board with a hand-built deal.
+// `run_begin` supplies a well-formed run; only the dialog state is synthetic,
+// which is the whole point -- the emitted index must be a function of the
+// board, not of any seed.
+sts::engine::RunController AtMatchPlayBoard() {
+    sts::engine::RunController rc = sts::engine::run_begin(
+        sts::engine::seed_from_string("STS90001"), 20);
+    rc.phase = static_cast<uint8_t>(sts::engine::RunPhase::EVENT_DIALOG);
+    rc.event = sts::engine::EventDialogState{};
+    rc.event.event_id = static_cast<uint16_t>(EventId::MATCH_AND_KEEP);
+    rc.event.screen = 2;    // PLAY -- the twelve-card board
+    rc.event.scratch0 = 5;  // attempts left
+    rc.event.scratch1 = -1;  // nothing face up
+    // Six identities dealt twice, in board (`cards.group`) order.
+    const uint16_t ids[sts::engine::kMatchBoardSize] = {10, 11, 12, 13, 14, 15,
+                                                        10, 11, 12, 13, 14, 15};
+    for (int i = 0; i < sts::engine::kMatchBoardSize; ++i) {
+        rc.event.board[i].card_id = ids[i];
+    }
+    return rc;
+}
+
+// GremlinMatchGamePatch.InitializeCardsPatch's own comment: "If 0 is top left
+// and 11 is bottom right, the positions of the cards in the result array are:
+// [0, 5, 10, 3, 4, 9, 2, 7, 8, 1, 6, 11]". Restated here as a literal rather
+// than recomputed, so the test fails if the shared table is edited.
+constexpr int kScreenPosition[sts::engine::kMatchBoardSize] = {0, 5, 10, 3,
+                                                               4, 9, 2,  7,
+                                                               8, 1, 6,  11};
+
+long long IndexOf(const sts::engine::RunController& rc, uint8_t slot) {
+    std::string err;
+    const std::string step = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, slot), 0,
+        err);
+    EXPECT_FALSE(step.empty()) << err;
+    if (step.empty()) return -2;
+    EXPECT_NE(step.find("\"k\":\"event\""), std::string::npos);
+    EXPECT_NE(step.find("\"event\":\"Match and Keep!\""), std::string::npos);
+    const std::size_t at = step.find("\"index\":");
+    EXPECT_NE(at, std::string::npos);
+    if (at == std::string::npos) return -2;
+    return std::strtoll(step.c_str() + at + 8, nullptr, 10);
+}
+
+}  // namespace
+
+TEST(SimSearchScriptMatchAndKeep, FullBoardIndexIsScreenPositionNotBoardSlot) {
+    // Nothing matched, nothing face up: every slot is offered, so the live
+    // list is the twelve positions in order and slot i's `choose N` is simply
+    // its screen position. Eight of the twelve differ from the slot, which is
+    // exactly how far the old identity derivation was off while still emitting
+    // an in-range index on every single flip of a fresh board.
+    const sts::engine::RunController rc = AtMatchPlayBoard();
+    int moved = 0;
+    for (uint8_t slot = 0; slot < sts::engine::kMatchBoardSize; ++slot) {
+        EXPECT_EQ(IndexOf(rc, slot), kScreenPosition[slot])
+            << "board slot " << static_cast<int>(slot);
+        if (kScreenPosition[slot] != slot) ++moved;
+    }
+    // Six of the twelve slots are NOT fixed points of the permutation (the
+    // fixed ones are 0, 3, 4, 7, 8, 11 -- every i where i % 4 + 4 * (i % 3)
+    // lands back on i). Counted here so a table edit that quietly collapsed
+    // the mapping toward the identity fails even if every literal above were
+    // edited to match it.
+    EXPECT_EQ(moved, 6) << "the permutation must not have collapsed to the "
+                           "identity -- that is the bug this pins";
+}
+
+TEST(SimSearchScriptMatchAndKeep, TheShrinkingBoardIsTheSTS100038Stop) {
+    // The STS100038 shape at step 390: one pair already matched and gone, and
+    // no card face up. The live screen offers TEN candidates (`choose 0..9`),
+    // so any index >= 10 is the stop the campaign hit.
+    sts::engine::RunController rc = AtMatchPlayBoard();
+    rc.event.board[1].taken = 1;  // a matched pair has left the board
+    rc.event.board[7].taken = 1;
+    rc.event.scratch0 = 1;
+
+    // The offered slots, ascending by screen position -- `getOrderedCards()`
+    // computed by hand.
+    const int offered[10] = {0, 9, 6, 3, 4, 10, 8, 5, 2, 11};
+    for (int i = 0; i < 10; ++i) {
+        EXPECT_EQ(IndexOf(rc, static_cast<uint8_t>(offered[i])), i)
+            << "offered slot " << offered[i];
+    }
+    // Slot 10 is the one the campaign emitted as `index 10`; it is the SIXTH
+    // still-offered card (screen position 6), and every emitted index is now
+    // inside the live candidate list.
+    EXPECT_EQ(IndexOf(rc, 10), 5);
+    for (uint8_t slot = 0; slot < sts::engine::kMatchBoardSize; ++slot) {
+        const long long got = IndexOf(rc, slot);
+        EXPECT_LT(got, 10) << "slot " << static_cast<int>(slot)
+                           << " indexes past a ten-candidate live screen";
+    }
+    // A card that has left the board is not an option at all, and the emitter
+    // says so rather than guessing an index for it.
+    EXPECT_EQ(IndexOf(rc, 1), -1);
+    EXPECT_EQ(IndexOf(rc, 7), -1);
+}
+
+TEST(SimSearchScriptMatchAndKeep, TheFaceUpCardDropsOutOfTheLiveList) {
+    // `getOrderedCards()` also drops the attempt's FIRST pick: the game sets
+    // `isFlipped = false` at GremlinMatchGame.java:190 and it stays face up
+    // until the pair resolves. Both compactions have to compose in POSITION
+    // order, which the old board-order count could not do.
+    sts::engine::RunController rc = AtMatchPlayBoard();
+    rc.event.board[1].taken = 1;
+    rc.event.board[7].taken = 1;
+    rc.event.scratch1 = 0;  // slot 0 (screen position 0) is face up
+
+    EXPECT_EQ(IndexOf(rc, 0), -1);
+    const int offered[9] = {9, 6, 3, 4, 10, 8, 5, 2, 11};
+    for (int i = 0; i < 9; ++i) {
+        EXPECT_EQ(IndexOf(rc, static_cast<uint8_t>(offered[i])), i)
+            << "offered slot " << offered[i];
+    }
+}
+
+TEST(SimSearchScriptMatchAndKeep, TheOneButtonPagesAndOtherEventsAreUntouched) {
+    // The permutation applies to the twelve-card board and nothing else.
+    // Match and Keep's intro / rules / completion pages are one-button pages,
+    // and every other event's `index` stays the plain enabled-only ordinal.
+    sts::engine::RunController rc = AtMatchPlayBoard();
+    rc.event.screen = 0;  // INTRO
+    EXPECT_EQ(IndexOf(rc, 0), 0);
+
+    // The Addict greys out its 85-gold buy (city_events_i.cpp addict_menu,
+    // The Addict.java:30-32), so the live list drops option 0 and the two
+    // survivors shift down by one -- the generic path, unchanged.
+    rc.event = sts::engine::EventDialogState{};
+    rc.event.event_id = static_cast<uint16_t>(EventId::ADDICT);
+    rc.event.screen = 0;
+    rc.run.gold = 84;
+    std::string err;
+    const std::string poor = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 2), 0,
+        err);
+    ASSERT_FALSE(poor.empty()) << err;
+    EXPECT_NE(poor.find("\"opt\":2"), std::string::npos);
+    EXPECT_NE(poor.find("\"index\":1"), std::string::npos);
+    rc.run.gold = 85;
+    err.clear();
+    const std::string rich = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 2), 0,
+        err);
+    ASSERT_FALSE(rich.empty()) << err;
+    EXPECT_NE(rich.find("\"index\":2"), std::string::npos);
 }

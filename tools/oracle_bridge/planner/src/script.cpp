@@ -24,6 +24,12 @@
 #include "sts/planner/seed_scan.hpp"  // json_escape
 #include "sts/registry/game_ids.hpp"
 
+// The Match and Keep! group-index <-> screen-position permutation. Shared with
+// the replay harness rather than restated here: the two tools translate the
+// SAME two index spaces in opposite directions (capture -> sim there, sim ->
+// live here), and a second copy of the table is a second place for it to rot.
+#include "mk_board.hpp"
+
 namespace sts::planner {
 
 using engine::Action;
@@ -222,6 +228,70 @@ void put_claim(Json& j, const RunController& rc, uint8_t index) {
         if (def->steps[i].target == engine::StepTarget::CARD_TARGET) return true;
     }
     return false;
+}
+
+// --- the EVENT step's `index`: the live `choose N` space ---------------------
+//
+// The sim's event option ordinal is the FULL menu position; the live `choose N`
+// indexes CommunicationMod's `choice_list`, which is built from the ENABLED
+// buttons only (ChoiceScreenUtils.getEventScreenChoices). For every event but
+// one, "the live index" is therefore "how many enabled options precede this
+// one", and that is what the generic arm below computes.
+//
+// MATCH AND KEEP! IS THE ONE EXCEPTION, and it is the S2.43 STS100038 finding:
+// its play board is the single EVENT page whose `choose N` is not an option
+// ordinal at all. The fork's `getOrderedCards()`
+// (patches/GremlinMatchGamePatch.java:24-29) copies `cards.group`, sorts it by
+// the SCREEN POSITION stored once at construction --
+//     int target_x = i % 4;  int target_y = i % 3;
+//     position = target_x + 4 * target_y;
+// (`InitializeCardsPatch`, which is `placeCards`' own layout arithmetic,
+// GremlinMatchGame.java:278-285) -- and then drops the cards that are no longer
+// selectable (`removeIf(c -> !c.isFlipped)`; a matched pair has already left
+// `cards.group` at GremlinMatchGame.java:221-222). For group indices 0..11 that
+// position table is [0,5,10,3,4,9,2,7,8,1,6,11] -- a PERMUTATION, not the
+// identity. The run layer's option index is the BOARD SLOT (`cards.group`
+// index): `match_menu` publishes twelve options and enables
+// `board[i].taken == 0 && scratch1 != i`, which is exactly the same SET in the
+// other index space (`mk_board.hpp` owns the permutation, and
+// `command_map.hpp` applies it in the capture -> sim direction).
+//
+// Counting enabled slots in BOARD order therefore emits an index in the wrong
+// space, and the failure is silent while the numbers happen to stay in range:
+// on a full board every slot is enabled, so the emitted index IS the slot and
+// the live driver flips the card at that SCREEN POSITION instead. Only the
+// permutation's six fixed points (0, 3, 4, 7, 8, 11) survive that; a pick of
+// any other slot walks the two boards apart immediately. It surfaces much
+// later, as an out-of-range `choose`, once the live board has shrunk by a
+// matched pair the sim never matched -- which is what STS100038 showed at step
+// 390: `opt 10` emitted as `index 10` against a ten-candidate live screen,
+// after its very first flip (`opt 6`, screen position 2) had already gone to
+// the wrong card.
+[[nodiscard]] long long event_live_choose_index(
+    const RunController& rc, const engine::EventDialogMenu& menu,
+    uint8_t arg0) noexcept {
+    if (arg0 >= menu.count || !menu.enabled[arg0]) return -1;
+    long long rank = 0;
+    // Only the play board publishes twelve options; Match and Keep's intro,
+    // rules and completion pages are one-button pages and take the generic
+    // path below (as does every other event).
+    if (static_cast<registry::EventId>(rc.event.event_id) ==
+            registry::EventId::MATCH_AND_KEEP &&
+        menu.count == static_cast<uint8_t>(engine::kMatchBoardSize)) {
+        const int pos = sts::replay::match_screen_position(
+            static_cast<int>(arg0));
+        for (uint8_t i = 0; i < menu.count; ++i) {
+            if (menu.enabled[i] &&
+                sts::replay::match_screen_position(static_cast<int>(i)) < pos) {
+                ++rank;
+            }
+        }
+        return rank;
+    }
+    for (uint8_t i = 0; i < arg0; ++i) {
+        if (menu.enabled[i]) ++rank;
+    }
+    return rank;
 }
 
 }  // namespace
@@ -544,21 +614,19 @@ std::string script_step_json(const RunController& rc, Action a, uint32_t index,
                                   rc.event.event_id)));
             j.kv("opt", static_cast<long long>(arg0));
             // The live `choose N` indexes CommunicationMod's choice_list,
-            // which lists ENABLED buttons only; the sim ordinal is the
-            // full-list position. Publish both (command_map.hpp documents the
-            // two index spaces; this is the inverse translation).
+            // which lists ENABLED buttons only (and, on Match and Keep's play
+            // board, orders them by SCREEN POSITION rather than by board
+            // slot); the sim ordinal is the full-list position. Publish both
+            // -- `event_live_choose_index` above owns the translation and the
+            // reasoning, command_map.hpp documents the two index spaces, and
+            // this is the inverse direction.
             const engine::EventDialogImpl* impl =
                 engine::event_dialog_impl(rc.event.event_id);
             long long enabled_index = -1;
             if (impl != nullptr) {
                 engine::EventDialogMenu menu{};
                 impl->build_menu(rc, rc.event, menu);
-                if (arg0 < menu.count && menu.enabled[arg0]) {
-                    enabled_index = 0;
-                    for (uint8_t i = 0; i < arg0; ++i) {
-                        if (menu.enabled[i]) ++enabled_index;
-                    }
-                }
+                enabled_index = event_live_choose_index(rc, menu, arg0);
             }
             j.kv("index", enabled_index);
             break;
