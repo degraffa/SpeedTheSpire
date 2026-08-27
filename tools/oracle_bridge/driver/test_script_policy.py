@@ -497,6 +497,33 @@ class GlueRuleTest(unittest.TestCase):
         self.assertEqual(got, "potion discard 1")
         self.assertEqual(policy._script.cursor, 1)  # consumed, not glued
 
+    def test_an_untargeted_potion_accepts_the_unique_targeted_live_form(self):
+        # Sixth live witness (s2v2_db153_b, STS108107): the sim records
+        # Explosive Potion with t:-1; CommunicationMod expands it as
+        # `potion use 0 0`.
+        policy = self._policy_with([{"k": "potion", "slot": 0,
+                                     "potion": "Explosive Potion", "t": -1}])
+        state = {"available_commands": ["potion", "play", "end", "state"],
+                 "game_state": {"screen_type": "NONE",
+                                "potions": [{"id": "Explosive Potion"}],
+                                "screen_state": {}}}
+        got = policy.decide(decide_request(
+            "STS1", state, ["play 1", "end", "potion use 0 0"]))
+        self.assertEqual(got, "potion use 0 0")
+        self.assertEqual(policy._script.cursor, 1)
+
+    def test_an_untargeted_potion_with_two_live_targets_still_stops(self):
+        policy = self._policy_with([{"k": "potion", "slot": 0,
+                                     "potion": "Fire Potion", "t": -1}])
+        state = {"available_commands": ["potion", "end", "state"],
+                 "game_state": {"screen_type": "NONE",
+                                "potions": [{"id": "Fire Potion"}],
+                                "screen_state": {}}}
+        with self.assertRaises(spc.Divergence):
+            policy.decide(decide_request(
+                "STS1", state,
+                ["end", "potion use 0 0", "potion use 0 1"]))
+
     def test_exhausted_script_still_glues_a_trailing_one_click_dialog(self):
         policy = self._policy_with([{"k": "proceed", "ctx": "t"}])
         first = {"available_commands": ["proceed", "state"],

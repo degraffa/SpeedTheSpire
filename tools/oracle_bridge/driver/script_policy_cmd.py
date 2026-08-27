@@ -169,9 +169,25 @@ def _match_potion(step, state, candidates):
             f"{(live or {}).get('id')!r}, script says "
             f"{step.get('potion')!r}", step)
     target = step.get("t", -1)
-    cmd = f"potion use {slot}" if target is None or target < 0 \
-        else f"potion use {slot} {target}"
-    return _require(cmd, candidates, step, "potion use")
+    if target is None or target < 0:
+        # The sim recorded no target. CommunicationMod expands SOME
+        # untargeted potions with a target argument anyway (sixth live
+        # witness, divergence_STS108107_ps153: Explosive Potion is
+        # `potion use 0 0` live) -- accept the bare form, else a UNIQUE
+        # same-slot targeted form; two or more target variants would be a
+        # real target decision the sim failed to record, so that stops.
+        cmd = f"potion use {slot}"
+        if cmd in candidates:
+            return cmd
+        prefixed = [c for c in candidates
+                    if str(c).startswith(f"potion use {slot} ")]
+        if len(prefixed) == 1:
+            return prefixed[0]
+        raise Divergence(
+            f"untargeted potion use {slot} has no unique live form "
+            f"(candidates {prefixed or candidates})", step)
+    return _require(f"potion use {slot} {target}", candidates, step,
+                    "potion use")
 
 
 def _match_potion_discard(step, state, candidates):
