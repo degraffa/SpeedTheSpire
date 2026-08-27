@@ -647,6 +647,22 @@ void print_pool_evidence(const std::string& seed_string, int floor,
         pending_curse_transform_preview = false;
         const sts::translate::TranslatedRecord& rec = run.records[k];
         const ScreenInfo& s = screens[k];
+
+        // s2-design §5 trap 5 / S2.43: hand the capture's wall-clock playtime
+        // to the ONE rule that reads it, SecretPortal's getShrine gate
+        // (AbstractDungeon.java:1929-1933). Without it every Act-3 shrine draw
+        // past 800 s replays as the WRONG EVENT -- not because SecretPortal is
+        // missed, but because `tmp.get(rng.random(tmp.size() - 1))` (:1937)
+        // draws an index into a list one entry too short. The engine never
+        // advances this field; a capture that predates the fork's playtime
+        // anchor leaves it at the engine's 0.0f, i.e. the old pin.
+        //
+        // This record's playtime is the value at the state the command is
+        // issued FROM, so it lags the roll it feeds by the fraction of a
+        // second the room transition takes -- immaterial against an 800 s
+        // threshold, and the only alternative (the next record's value) lags
+        // in the other direction.
+        if (rec.has_playtime) rc.playtime_seconds = rec.playtime;
         const bool is_reward = s.screen_type == "COMBAT_REWARD" ||
                                s.screen_type == "CARD_REWARD";
 
@@ -2722,7 +2738,13 @@ struct EventVerdict {
 
         // 2. Selection, on the throwaway stream.
         const RngStream after_roll = rs.event_rng;
-        const uint16_t sim_id = generate_event(rs);
+        // The pre-entry record's wall clock feeds SecretPortal's getShrine
+        // gate (s2-design §5 trap 5 / S2.43) -- see replay_one's write-up.
+        // Absent on a pre-anchor capture, which keeps the engine's 0.0f pin.
+        const float playtime = run.records[k - 1].has_playtime
+                                   ? run.records[k - 1].playtime
+                                   : sts::engine::kUnmodelledPlaytimeSeconds;
+        const uint16_t sim_id = generate_event(rs, playtime);
         row.sim_id = sim_id;
         if (rs.event_rng.s0 != after_roll.s0 || rs.event_rng.s1 != after_roll.s1 ||
             rs.event_rng.counter != after_roll.counter) {

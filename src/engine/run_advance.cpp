@@ -1428,7 +1428,11 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
             rc.rest = RestSiteState{};
             rc.rewards = RewardScreen{};
             rc.rewards.open_card_item = kNoOpenCardReward;
-            const uint16_t event_id = generate_event(rc.run);
+            // rc.playtime_seconds is 0.0f on every simulator trajectory (the
+            // engine never advances it), so this is the trap-5 SecretPortal
+            // pin; an oracle replay sets it per record from the capture's
+            // `oracle.playtime`. See run_advance.hpp's member comment.
+            const uint16_t event_id = generate_event(rc.run, rc.playtime_seconds);
             rc.event = EventDialogState{};
             rc.event.event_id = event_id;
             const EventDialogImpl* impl = event_dialog_impl(event_id);

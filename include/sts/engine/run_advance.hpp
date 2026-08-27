@@ -135,6 +135,7 @@
 //     AbstractPlayer.initializeStarterDeck (:357-394): the run-setup ascension
 //     modifier order -- see the block comment on run_setup_max_hp below.
 
+#include <cstddef>  // offsetof (the S2.43 playtime-carve proof below RunController)
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -365,11 +366,26 @@ struct RunController {
     // consumption cursors. A monster room uses monster_list[monster_cursor], an
     // elite uses elite_list[elite_cursor], the boss uses boss_list[boss_cursor];
     // the cursor advances when the room is LEFT (nextRoomTransition remove(0)).
-    // The 4 bytes MonsterLists' 8-byte alignment (std::string_view) inserts
-    // here. Declared for the same reason as MonsterLists' own three pads -- see
-    // encounters.hpp; RunController is byte-hashed, and an undeclared gap is
-    // indeterminate, not zero.
-    uint8_t pad_lists_align[4]{};
+    // CardCrawlGame.playtime -- WALL-CLOCK seconds since the run started
+    // (CardCrawlGame.java:177) -- CARVED OUT OF THE 4 BYTES that MonsterLists'
+    // 8-byte alignment (std::string_view) inserts here and that used to be
+    // `pad_lists_align[4]` (S2.43, 2026-08-27). Those bytes were
+    // `ByteClass::PADDING` and `{}`-zeroed on every path that produces a
+    // RunController, so NO OFFSET MOVES, `sizeof(RunController)` is unchanged,
+    // and -- 0.0f being four zero bytes -- every controller that hashed a
+    // value before hashes the same value now. Same terms as the S2.13
+    // `event_flags_hi` carve (run_state.hpp) and the CombatState carve-outs.
+    //
+    // An INPUT, never advanced by the engine. The simulator has no clock and
+    // must not grow one (determinism in (seed, actions) is what everything
+    // else rests on), so this stays 0.0f for every simulator trajectory. The
+    // one rule that reads it is SecretPortal's getShrine gate
+    // (AbstractDungeon.java:1929-1933); an ORACLE REPLAY sets it per record
+    // from the capture's `oracle.playtime` so an Act-3 shrine draw reproduces
+    // the game's index. Full write-up: event_framework.hpp's PLAYTIME block.
+    //
+    // The offset/size arithmetic is ASSERTED below the struct, not trusted.
+    float playtime_seconds{0.0f};
     MonsterLists lists;
     uint8_t monster_cursor;
     uint8_t elite_cursor;
@@ -511,6 +527,21 @@ struct RunController {
 
 static_assert(std::is_trivially_copyable_v<RunController>,
               "RunController must be trivially copyable (POD batch entry)");
+
+// The S2.43 playtime carve (see the member's comment): it must land exactly
+// where `pad_lists_align[4]` did -- 4-aligned, 4 bytes wide, immediately ahead
+// of `lists` with no gap. If either assert fires, the carve does not fit and
+// the answer is to surface the extra storage deliberately, not to reorder
+// members.
+static_assert(sizeof(float) == 4,
+              "the playtime carve assumes a 4-byte float");
+static_assert(offsetof(RunController, playtime_seconds) % 4 == 0,
+              "playtime_seconds is not 4-aligned -- the S2.43 pad carve does "
+              "not fit; see the member's comment");
+static_assert(offsetof(RunController, playtime_seconds) + sizeof(float) ==
+                  offsetof(RunController, lists),
+              "the playtime carve must consume exactly the alignment slack "
+              "ahead of `lists` -- no gap may open behind it");
 
 // Native event combats reuse the ordinary combat constructor while preserving
 // the already-advanced floor streams and keeping RoomType::Event. The latter is

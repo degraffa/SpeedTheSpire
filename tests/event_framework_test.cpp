@@ -990,11 +990,14 @@ RunState fresh_act_state(int act, int64_t seed = kSeed, uint8_t ascension = 20) 
     return rs;
 }
 
-// Is `id` in the act's filtered shrine draw list?
-bool special_offered(const RunState& rs, uint16_t id) {
+// Is `id` in the act's filtered shrine draw list? The default playtime is the
+// engine's kUnmodelledPlaytimeSeconds, so every caller that does not name one
+// is asserting against the trap-5 SecretPortal pin.
+bool special_offered(const RunState& rs, uint16_t id,
+                     float playtime = kUnmodelledPlaytimeSeconds) {
     uint16_t pool[kShrineListCount + kSpecialListCount];
-    const int n =
-        build_shrine_pool(rs, pool, kShrineListCount + kSpecialListCount);
+    const int n = build_shrine_pool(rs, pool, kShrineListCount + kSpecialListCount,
+                                    playtime);
     for (int i = 0; i < n; ++i) {
         if (pool[i] == id) return true;
     }
@@ -1229,6 +1232,13 @@ TEST(S213DrawGates, SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond) {
     // SOLELY by the unmodelled wall-clock playtime -- a real behavioural
     // deviation, not an act exclusion. This test exists so that anyone who
     // "fixes" the act gate alone fails here rather than shipping a portal.
+    //
+    // S2.43 (2026-08-27) turned the hardcoded `false` into the Java's own
+    // predicate over an EXPLICIT playtime input; this test is unchanged
+    // because `special_offered` names no playtime and therefore asks at the
+    // engine's kUnmodelledPlaytimeSeconds, which is what every simulator
+    // trajectory uses. The clock half is exercised by
+    // S243SecretPortalPlaytimeGate below.
     for (int act : {1, 2, 3}) {
         RunState rs = only_special(act, 28);
         rs.gold = 9999;
@@ -1539,6 +1549,213 @@ TEST(S213CrossAct, AnActTwoQuestionMarkRoomSelectsACityRowAndCommitsIt) {
     EXPECT_EQ(event_dialog_impl(drawn) != nullptr, def->implemented)
         << "dispatch and the registry's implemented column disagree for id "
         << drawn;
+}
+
+// =============================================================================
+// S2.43 -- SecretPortal's wall-clock gate, and why it is an INDEX bug
+// =============================================================================
+//
+// `getShrine` draws `tmp.get(rng.random(tmp.size() - 1))`
+// (AbstractDungeon.java:1937). An entry the engine omits does not merely go
+// unseen: it SHORTENS the list, so `random(n - 1)` returns a different value
+// and a DIFFERENT event is drawn. SecretPortal is the only entry whose gate the
+// engine cannot evaluate on its own -- `CardCrawlGame.playtime >= 800.0f`
+// (:1929-1933) is wall clock -- so every Act-3 `?` room past 800 s resolved to
+// the wrong event while the gate was hardcoded false.
+//
+// The three fixtures below are LIVE ORACLE CAPTURES from the S2.43 depth
+// campaign, transcribed to the fields the draw actually reads. Each one is
+// asserted BOTH ways: what the game did, and what the engine did before the
+// gate took a playtime argument. The third is a sub-800 s control that pins the
+// gate SHUT -- an "always true in Act 3" pin is not merely unprincipled, it is
+// wrong, and this test is what says so.
+
+struct ShrineDrawFixture {
+    const char* seed;
+    int floor;            // the floor being ARRIVED at (already incremented)
+    int32_t gold;
+    int16_t hp;
+    int16_t max_hp;
+    uint8_t relic_count;
+    bool cursed;          // a removable curse in the master deck
+    bool leaving_shop;    // the room being LEFT was a ShopRoom
+    uint16_t event_membership;
+    uint8_t shrine_membership;
+    uint16_t special_membership;
+    uint64_t rng_s0;      // eventRng AS CAPTURED, before the ?-room roll
+    uint64_t rng_s1;
+    int32_t rng_counter;
+    float event_pity_monster;
+    float event_pity_shop;
+    float event_pity_treasure;
+    float playtime;       // oracle.playtime at the pre-entry record
+};
+
+// Every special except the named bits, and never NoteForYourself (A20).
+constexpr uint16_t kAllSpecials =
+    static_cast<uint16_t>((1u << kSpecialListCount) - 1u) &
+    static_cast<uint16_t>(~(1u << kNoteForYourselfBit));
+
+constexpr uint16_t special_bit(uint16_t id) {
+    return static_cast<uint16_t>(1u << (id - kSpecialListFirstId));
+}
+
+RunState shrine_draw_state(const ShrineDrawFixture& f) {
+    RunState rs{};
+    rs.act = 3;
+    rs.ascension = 20;
+    rs.floor = static_cast<uint16_t>(f.floor - 1);  // pre-increment; the roll bumps it
+    rs.gold = f.gold;
+    rs.hp = f.hp;
+    rs.max_hp = f.max_hp;
+    rs.relic_count = f.relic_count;
+    add_card(rs, CardId::ASCENDERS_BANE);  // never counts toward isCursed
+    if (f.cursed) add_card(rs, CardId::WRITHE);
+    rs.event_membership = f.event_membership;
+    rs.shrine_membership = f.shrine_membership;
+    rs.special_membership = f.special_membership;
+    rs.event_rng = RngStream{f.rng_s0, f.rng_s1, f.rng_counter, 0};
+    rs.event_pity_monster = f.event_pity_monster;
+    rs.event_pity_shop = f.event_pity_shop;
+    rs.event_pity_treasure = f.event_pity_treasure;
+    return rs;
+}
+
+// Walk the capture's own two steps: the committed ?-room roll off eventRng
+// (EventHelper.java:102 -- the ONE draw the stream keeps), then the selection
+// on the throwaway duplicate. Returns the drawn EventId.
+uint16_t replay_capture_shrine_draw(const ShrineDrawFixture& f, float playtime) {
+    RunState rs = shrine_draw_state(f);
+    ++rs.floor;  // AbstractDungeon.java:1741 (trap 7), before the roll
+    const EventRoomResult roll = event_room_roll(rs, f.leaving_shop);
+    EXPECT_EQ(roll, EventRoomResult::EVENT)
+        << f.seed << ": the capture entered an EventRoom, so the ?-roll must "
+                     "resolve to EVENT -- a mismatch means the fixture is wrong";
+    return generate_event(rs, playtime);
+}
+
+// STS108107, policy seed 153, arriving at Act-3 floor 36 out of a MonsterRoom.
+// Live game: The Woman in Blue. Deck curse: Injury (Writhe stands in -- the
+// gate reads CardType::CURSE, not the identity). playtime 924.34705 s.
+constexpr ShrineDrawFixture kWitnessSTS108107{
+    "STS108107", 36, 568, 104, 104, 11, /*cursed=*/true, /*leaving_shop=*/false,
+    /*event_membership=*/static_cast<uint16_t>((1u << 7) - 1u),
+    /*shrine_membership=*/static_cast<uint8_t>((1u << kShrineListCount) - 1u),
+    /*special_membership=*/
+    static_cast<uint16_t>(kAllSpecials & ~special_bit(19)),  // Bonfire drawn
+    /*s0=*/506932269598978548ULL,
+    /*s1=*/static_cast<uint64_t>(-6636442468291588717LL),
+    /*counter=*/8, 0.1f, 0.03f, 0.02f, /*playtime=*/924.34705f};
+
+// STS153269, policy seed 174, arriving at Act-3 floor 38 out of a SHOP.
+// Live game: Fountain of Cleansing. Deck curse: Writhe. playtime 960.92236 s.
+constexpr ShrineDrawFixture kWitnessSTS153269{
+    "STS153269", 38, 197, 97, 97, 12, /*cursed=*/true, /*leaving_shop=*/true,
+    /*event_membership=*/
+    static_cast<uint16_t>(((1u << 7) - 1u) & ~(1u << 6)),  // Winding Halls drawn
+    /*shrine_membership=*/static_cast<uint8_t>((1u << kShrineListCount) - 1u),
+    /*special_membership=*/kAllSpecials,
+    /*s0=*/static_cast<uint64_t>(-3276643556366113441LL),
+    /*s1=*/594380477818867936ULL,
+    /*counter=*/7, 0.2f, 0.06f, 0.04f, /*playtime=*/960.92236f};
+
+// STS111111, arriving at Act-3 floor 36 out of a MonsterRoom, at 710.1448 s --
+// BELOW the threshold. Live game: The Woman in Blue. No removable curse.
+constexpr ShrineDrawFixture kControlSTS111111{
+    "STS111111", 36, 384, 9, 75, 7, /*cursed=*/false, /*leaving_shop=*/false,
+    /*event_membership=*/static_cast<uint16_t>((1u << 7) - 1u),
+    /*shrine_membership=*/static_cast<uint8_t>((1u << kShrineListCount) - 1u),
+    /*special_membership=*/
+    static_cast<uint16_t>(kAllSpecials & ~special_bit(18) & ~special_bit(30)),
+    /*s0=*/8586465797636572180ULL,
+    /*s1=*/static_cast<uint64_t>(-1768814915137120042LL),
+    /*counter=*/10, 0.1f, 0.03f, 0.02f, /*playtime=*/710.1448f};
+
+TEST(S243SecretPortalPlaytimeGate, BothHalvesOfTheJavaTestAreLive) {
+    // `if (!(playtime >= 800.0f) || !id.equals("TheBeyond")) continue;`
+    // (:1929-1933). Act 3 is TheBeyond; the threshold is INCLUSIVE because the
+    // Java negates a `>=`.
+    RunState a3 = only_special(3, 28);
+    a3.gold = 9999;
+    EXPECT_FALSE(special_offered(a3, 28, 799.9999f)) << "below the threshold";
+    EXPECT_TRUE(special_offered(a3, 28, kSecretPortalPlaytimeSeconds))
+        << "800.0f exactly is inclusive";
+    EXPECT_TRUE(special_offered(a3, 28, 100000.0f));
+
+    for (int act : {1, 2}) {
+        RunState other = only_special(act, 28);
+        other.gold = 9999;
+        EXPECT_FALSE(special_offered(other, 28, 100000.0f))
+            << "act " << act << " is not TheBeyond at any clock";
+    }
+}
+
+TEST(S243SecretPortalPlaytimeGate, TheEngineDefaultIsStillTheTrapFivePin) {
+    // The simulator has no clock: RunController::playtime_seconds is 0.0f on
+    // every trajectory, so build_shrine_pool's default reproduces the pin the
+    // engine has always had. This is the guard that keeps a training run
+    // deterministic in (seed, actions).
+    EXPECT_FLOAT_EQ(kUnmodelledPlaytimeSeconds, 0.0f);
+    EXPECT_FLOAT_EQ(kSecretPortalPlaytimeSeconds, 800.0f);
+    RunController rc = run_begin(kSeed, 20);
+    EXPECT_FLOAT_EQ(rc.playtime_seconds, kUnmodelledPlaytimeSeconds)
+        << "run_begin must not invent a clock";
+    RunState a3 = only_special(3, 28);
+    a3.gold = 9999;
+    EXPECT_FALSE(special_offered(a3, 28));
+}
+
+TEST(S243SecretPortalPlaytimeGate, WitnessSTS108107DrawsTheWomanInBlue) {
+    // The live game drew The Woman in Blue (id 31) from a 14-entry list; the
+    // pinned engine drew Upgrade Shrine (id 16) from the 13-entry list its
+    // missing SecretPortal left behind. Same stream, same state, different
+    // LENGTH.
+    EXPECT_EQ(replay_capture_shrine_draw(kWitnessSTS108107,
+                                         kWitnessSTS108107.playtime),
+              static_cast<uint16_t>(EventId::THE_WOMAN_IN_BLUE));
+    EXPECT_EQ(replay_capture_shrine_draw(kWitnessSTS108107,
+                                         kUnmodelledPlaytimeSeconds),
+              static_cast<uint16_t>(EventId::UPGRADE_SHRINE))
+        << "the pre-S2.43 divergence, kept as the negative half of the witness";
+}
+
+TEST(S243SecretPortalPlaytimeGate, WitnessSTS153269DrawsFountainOfCleansing) {
+    // The live game drew Fountain of Cleansing (id 23) from a 15-entry list;
+    // the pinned engine drew Designer (id 20) from 14. Note that the shift is
+    // not a neighbourly one -- Designer sits three places AHEAD of Fountain, so
+    // "the list is off by one" does not describe the symptom; the drawn INDEX
+    // changes outright.
+    EXPECT_EQ(replay_capture_shrine_draw(kWitnessSTS153269,
+                                         kWitnessSTS153269.playtime),
+              static_cast<uint16_t>(EventId::FOUNTAIN_OF_CLEANSING));
+    EXPECT_EQ(replay_capture_shrine_draw(kWitnessSTS153269,
+                                         kUnmodelledPlaytimeSeconds),
+              static_cast<uint16_t>(EventId::DESIGNER))
+        << "the pre-S2.43 divergence, kept as the negative half of the witness";
+}
+
+TEST(S243SecretPortalPlaytimeGate, ControlSTS111111BelowThresholdIsUnchanged) {
+    // 710.1448 s: the gate is SHUT in the game too, so the engine's old pin was
+    // RIGHT here and must stay right. Both the captured clock and the engine's
+    // zero draw the live event.
+    EXPECT_EQ(replay_capture_shrine_draw(kControlSTS111111,
+                                         kControlSTS111111.playtime),
+              static_cast<uint16_t>(EventId::THE_WOMAN_IN_BLUE));
+    EXPECT_EQ(replay_capture_shrine_draw(kControlSTS111111,
+                                         kUnmodelledPlaytimeSeconds),
+              static_cast<uint16_t>(EventId::THE_WOMAN_IN_BLUE));
+}
+
+TEST(S243SecretPortalPlaytimeGate, AnActOnlyPinWouldBreakTheSubThresholdControl) {
+    // THE REASON THE CLOCK HAD TO BECOME AN INPUT rather than being approximated
+    // away. "Act 3 implies past 800 s" is false -- captured Act-3 arrivals run
+    // from ~520 s up -- and forcing the gate open at STS111111's floor 36 draws
+    // Golden Shrine (id 13) instead of the live The Woman in Blue.
+    EXPECT_EQ(replay_capture_shrine_draw(kControlSTS111111,
+                                         kSecretPortalPlaytimeSeconds),
+              static_cast<uint16_t>(EventId::GOLDEN_SHRINE))
+        << "an act-only pin is not a conservative approximation -- it is a "
+           "different, equally wrong draw";
 }
 
 }  // namespace

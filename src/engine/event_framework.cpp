@@ -383,7 +383,8 @@ int build_event_pool(const RunState& rs, uint16_t* out, int cap) noexcept {
     return n;
 }
 
-int build_shrine_pool(const RunState& rs, uint16_t* out, int cap) noexcept {
+int build_shrine_pool(const RunState& rs, uint16_t* out, int cap,
+                      float playtime_seconds) noexcept {
     const int act = static_cast<int>(rs.act);
     int n = 0;
     // tmp.addAll(shrineList) (:1884) -- unconditional, IN THE ACT'S LIST ORDER.
@@ -440,22 +441,29 @@ int build_shrine_pool(const RunState& rs, uint16_t* out, int cap) noexcept {
                 // `if (!(CardCrawlGame.playtime >= 800.0f) ||
                 //      !id.equals("TheBeyond")) continue;`
                 //
-                // PINNED FALSE IN EVERY ACT, and from S2.13 on the ACT HALF IS
-                // NO LONGER WHAT DOES THE WORK: in Act 3 `id.equals("TheBeyond")`
-                // is satisfied, so the `false` is carried SOLELY by the
-                // unmodelled wall-clock playtime. CardCrawlGame.playtime is
-                // real-time seconds since the run started (zeroed at
-                // AbstractDungeon.java:2600 in the Exordium floorNum <= 1
-                // block), and this engine has no clock at all.
+                // Written as the Java writes it, over an EXPLICIT playtime
+                // input rather than a hardcoded `false`. Both halves are live:
+                // the act half is act 3 (TheBeyond), the clock half is the
+                // caller's `playtime_seconds`, which every in-engine caller
+                // leaves at kUnmodelledPlaytimeSeconds (0.0f) -- so the
+                // simulator's own behaviour is exactly the trap-5 pin it has
+                // always had, and only an oracle replay feeding a capture's
+                // recorded `oracle.playtime` ever sees this arm turn true.
                 //
-                // That makes this a REAL BEHAVIOURAL DEVIATION, not an act
-                // exclusion: any Act-3 run past 800 s of wall clock offers
-                // SecretPortal in the game and never here. It is deliberate --
-                // modelling a clock would make the simulator nondeterministic
-                // in (seed, actions), which is the one property everything
-                // else rests on. Whoever ever models playtime must delete this
-                // pin; see the deferred-obligations row.
-                eligible = false;
+                // NOT an "you never see SecretPortal" deviation (S2.43,
+                // 2026-08-27): the draw is `tmp.get(rng.random(tmp.size()-1))`
+                // (:1937), so a missing entry shortens the list and moves the
+                // INDEX -- with the pin, EVERY Act-3 getShrine draw past 800 s
+                // of wall clock resolves to the wrong event. The header's
+                // PLAYTIME block carries the full write-up; the arithmetic is
+                // pinned by S243SecretPortalPlaytimeGate.* against two live
+                // witnesses and one sub-800 s negative control.
+                //
+                // The comparison is `>=` on a float, matching the Java's
+                // `!(playtime >= 800.0f)` negation (which also sends NaN to
+                // "not eligible", as this does).
+                eligible = rs.act == 3 &&
+                           playtime_seconds >= kSecretPortalPlaytimeSeconds;
                 break;
             default:
                 // Accursed Blacksmith, Bonfire Elementals, Lab,
@@ -480,9 +488,11 @@ namespace {
 // getShrine (:1882-1942): one rng.random(tmp.size()-1) index draw over the
 // filtered list, then removal from BOTH source lists. Returns 0 (no draw) on
 // an empty filtered list -- the documented defensive deviation (header).
-[[nodiscard]] uint16_t pick_shrine(RunState& rs, RngStream& rng) noexcept {
+[[nodiscard]] uint16_t pick_shrine(RunState& rs, RngStream& rng,
+                                   float playtime_seconds) noexcept {
     uint16_t tmp[kShrineListCount + kSpecialListCount];
-    const int n = build_shrine_pool(rs, tmp, kShrineListCount + kSpecialListCount);
+    const int n = build_shrine_pool(rs, tmp, kShrineListCount + kSpecialListCount,
+                                    playtime_seconds);
     if (n == 0) {
         return 0;
     }
@@ -507,7 +517,8 @@ namespace {
 // getEvent (:1944-1990): filtered tmp over eventList; EMPTY filtered tmp falls
 // through to getShrine (:1983-1985, a further draw on the same throwaway
 // stream); otherwise one index draw + eventList removal (:1987).
-[[nodiscard]] uint16_t pick_event(RunState& rs, RngStream& rng) noexcept {
+[[nodiscard]] uint16_t pick_event(RunState& rs, RngStream& rng,
+                                  float playtime_seconds) noexcept {
     uint16_t tmp[kEventListMaxCount];
     const int n = build_event_pool(rs, tmp, kEventListMaxCount);
     if (n == 0) {
@@ -516,7 +527,7 @@ namespace {
         // idol/HP gate can empty the filtered list earlier still. The extra
         // draw is invisible in rs.event_rng (throwaway stream) but it changes
         // WHICH id is selected, so it is pinned by test.
-        return pick_shrine(rs, rng);
+        return pick_shrine(rs, rng, playtime_seconds);
     }
     const int idx = random(rng, n - 1);
     const uint16_t id = tmp[idx];
@@ -530,7 +541,7 @@ namespace {
 
 }  // namespace
 
-uint16_t generate_event(RunState& rs) noexcept {
+uint16_t generate_event(RunState& rs, float playtime_seconds) noexcept {
     // EventRoom.onPlayerEntry:28 -- duplicate #2, built from the POST-commit
     // counter. The game's counter replay (Random.java:28-33) equals a struct
     // copy under the one-draw invariant; the local dies at return, so
@@ -545,14 +556,14 @@ uint16_t generate_event(RunState& rs) noexcept {
         // The emptiness checks here are on the RAW lists (:1866, :1869), not
         // the filtered tmp -- membership bitsets are exactly the raw lists.
         if (rs.shrine_membership != 0u || rs.special_membership != 0u) {
-            id = pick_shrine(rs, rng);
+            id = pick_shrine(rs, rng, playtime_seconds);
         } else if (rs.event_membership != 0u) {
-            id = pick_event(rs, rng);
+            id = pick_event(rs, rng, playtime_seconds);
         } else {
             return 0;  // "No events or shrines left" (:1872-1873)
         }
     } else {
-        id = pick_event(rs, rng);
+        id = pick_event(rs, rng, playtime_seconds);
         // The retVal == null re-draw (:1876-1878) is unreachable with a
         // complete registry: every key in every pool has a getEvent case.
     }

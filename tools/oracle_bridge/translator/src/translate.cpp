@@ -654,6 +654,8 @@ struct OracleAnchors {
     int64_t floor = 0;
     int64_t act = 0;
     int64_t ascension = 0;
+    float playtime = 0.0f;      // CardCrawlGame.playtime, seconds (0 if absent)
+    bool has_playtime = false;  // pre-2026-08-26 captures lack the field
 };
 
 [[nodiscard]] OracleAnchors parse_oracle(const json& j, const std::string& path, Ctx& ctx,
@@ -667,13 +669,25 @@ struct OracleAnchors {
     // anchors are cross-checked against stock top-level by the caller.
 
     // playtime (s2-design §5 trap 5): wall-clock seconds the fork records so a
-    // violated SecretPortal >= 800s pin is DETECTABLE. Deliberately never
-    // translated into RunState -- the sim has no playtime model, which is the
-    // whole deviation -- so the disposition is `oracle`: capture-side evidence
-    // read by the scorer only when a shrine-list divergence implicates the
-    // gate. A disposition mark, not a require(): pre-redeploy captures lack
-    // the field, and absence is legal.
-    fr.oracle("playtime");
+    // violated SecretPortal >= 800s pin is DETECTABLE. Still NEVER translated
+    // into RunState and still dispositioned `oracle` -- it is not save-parity
+    // state the differ compares, and the sim never advances it.
+    //
+    // S2.43 (2026-08-27) additionally READS it: it is the one input
+    // SecretPortal's getShrine gate needs, and a missing SecretPortal shortens
+    // getShrine's `tmp` and therefore moves the drawn INDEX, so without it
+    // every Act-3 shrine draw past 800 s replays as the wrong event. `--replay`
+    // hands it to `RunController::playtime_seconds` per record; see
+    // event_framework.hpp's PLAYTIME block.
+    //
+    // A disposition mark, not a require(): pre-redeploy captures lack the
+    // field, and absence is legal -- `has_playtime` stays false and the
+    // consumer keeps the engine's 0.0f (i.e. the pin).
+    if (const json* pt = fr.take("playtime")) {
+        a.playtime = as_f32(*pt, ctx, path + ".playtime");
+        a.has_playtime = true;
+    }
+    fr.oracle("playtime");  // the disposition tally, unchanged by the read above
 
     parse_streams(fr.require("streams"), path + ".streams", ctx, rs, cs);
     fr.mapped();
@@ -1537,6 +1551,8 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
                                      " (schema drift, translation aborted)");
             }
         };
+        out.playtime = anchors.playtime;
+        out.has_playtime = anchors.has_playtime;
         check("seed", stock_seed, anchors.seed);
         check("floor", stock_floor, anchors.floor);
         check("act", stock_act, anchors.act);

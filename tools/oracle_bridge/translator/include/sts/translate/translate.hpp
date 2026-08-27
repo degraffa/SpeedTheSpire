@@ -103,6 +103,18 @@ struct TranslatedRecord {
     bool in_combat = false;
     engine::RunState run{};
     engine::CombatState combat{};  // meaningful iff in_combat
+
+    // `oracle.playtime` -- CardCrawlGame.playtime, wall-clock seconds
+    // (s2-design §5 trap 5). NOT RunState: it is not save-parity state the
+    // differ compares, and the disposition stays `oracle`. It is surfaced here
+    // because it is an INPUT one rule needs -- SecretPortal's getShrine gate
+    // (AbstractDungeon.java:1929-1933) -- and a missing SecretPortal shortens
+    // getShrine's `tmp`, moving the drawn INDEX, so an Act-3 shrine draw past
+    // 800 s cannot be replayed without it (S2.43, 2026-08-27).
+    // `has_playtime` is false for pre-2026-08-26 captures, whose consumers
+    // keep the engine's 0.0f (the trap-5 pin).
+    float playtime = 0.0f;
+    bool has_playtime = false;
 };
 
 // A whole translated run (one JSONL file).

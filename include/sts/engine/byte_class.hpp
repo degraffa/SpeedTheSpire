@@ -429,8 +429,14 @@ inline constexpr ClassRow kRunControllerRows[] = {
                "audit 5: the entered room's kind"),
     STS_BC_ROW(RunController, combat_outcome, ByteClass::PUBLIC,
                "audit 5: how the last combat ended -- observed"),
-    STS_BC_ROW(RunController, pad_lists_align, ByteClass::PADDING,
-               "MonsterLists holds std::string_view, so it is 8-aligned"),
+    STS_BC_ROW(RunController, playtime_seconds, ByteClass::PUBLIC,
+               "audit 5: wall-clock seconds, shown on the player's own run "
+               "screen -- and an INPUT the engine never advances (0.0f on "
+               "every simulator trajectory; only an oracle replay sets it). "
+               "Took over what was pad_lists_align[4], the slack MonsterLists' "
+               "std::string_view 8-alignment inserts. Not separately encoded "
+               "in PublicView: it is the same value for a state and its "
+               "hidden twin, so it carries no hidden information"),
     STS_BC_SUB(RunController, lists, kMonsterListsTable, "audit 5 / 8.7"),
     STS_BC_ROW(RunController, monster_cursor, ByteClass::PUBLIC,
                "audit 5: the consumed-prefix length"),

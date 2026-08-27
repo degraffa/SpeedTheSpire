@@ -395,17 +395,48 @@ void event_flag_set(RunState& rs, uint16_t id) noexcept;
 //     2-3; Knowing Skull, N'loth and The Joust are act 2 ONLY -- N'loth's
 //     test is literally written twice against "TheCity" (:1915), which is one
 //     test, not two, so it is Act 2 and not "any act but 2". SecretPortal is
-//     pinned false in every act; see below.
+//     act 3 AND `playtime_seconds >= kSecretPortalPlaytimeSeconds`; see the
+//     PLAYTIME block below for why that argument exists at all.
 // Colosseum's row, derived from RunState alone. Identical arithmetic to
 // run_cur_row (run_advance.hpp) -- `floor - act_floor_base(act) - 1`, saturated
 // at the -1 pre-first-pick sentinel -- restated here because run_advance.hpp
 // includes THIS header. Pinned equal to run_cur_row by tier-2 test.
 [[nodiscard]] int event_map_row(const RunState& rs) noexcept;
 
+// --- PLAYTIME: the one non-(seed, actions) input the rules read ---------------
+//
+// `CardCrawlGame.playtime` (CardCrawlGame.java:177; zeroed at :599 and :1246,
+// restored from `saveFile.play_time` at :891) is WALL-CLOCK seconds since the
+// run started. Exactly one rule reads it: SecretPortal's getShrine gate,
+// `if (!(CardCrawlGame.playtime >= 800.0f) || !id.equals("TheBeyond")) continue;`
+// (AbstractDungeon.java:1929-1933).
+//
+// This engine has no clock, and giving it one would destroy determinism in
+// (seed, actions) -- the property everything else rests on. So playtime is an
+// EXPLICIT INPUT with a default of zero rather than a hardcoded `false`:
+//
+//   * every in-engine caller passes kUnmodelledPlaytimeSeconds (0.0f), which
+//     leaves the gate false in every act -- byte-for-byte the behaviour the
+//     s2-design §5 trap-5 pin has always had, and what
+//     `SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond` keeps pinned;
+//   * an ORACLE consumer replaying a capture passes the capture's recorded
+//     `oracle.playtime`, which makes the Act-3 draw reproduce the game exactly.
+//
+// Why that second door had to be opened (S2.43, 2026-08-27): the pin is not a
+// "you never see SecretPortal" deviation. `getShrine` draws
+// `tmp.get(rng.random(tmp.size() - 1))` (:1937) -- an ABSENT entry changes the
+// list LENGTH, so it changes the drawn INDEX, so it changes WHICH event every
+// Act-3 `?` room produces once the run passes 800 s. Two live witnesses and one
+// negative control are pinned in tests/event_framework_test.cpp
+// (S243SecretPortalPlaytimeGate.*).
+inline constexpr float kSecretPortalPlaytimeSeconds = 800.0f;
+inline constexpr float kUnmodelledPlaytimeSeconds = 0.0f;
+
 [[nodiscard]] int build_event_pool(const RunState& rs, uint16_t* out,
                                    int cap) noexcept;
-[[nodiscard]] int build_shrine_pool(const RunState& rs, uint16_t* out,
-                                    int cap) noexcept;
+[[nodiscard]] int build_shrine_pool(
+    const RunState& rs, uint16_t* out, int cap,
+    float playtime_seconds = kUnmodelledPlaytimeSeconds) noexcept;
 
 // EventRoom.onPlayerEntry (EventRoom.java:28) + AbstractDungeon.generateEvent
 // (:1864-1880): draws the shrine/event split (rng.random(1.0f) < shrineChance)
@@ -440,11 +471,18 @@ void event_flag_set(RunState& rs, uint16_t id) noexcept;
 // drawn WITHIN the current act -- they are restored at every crossing) AND
 // every surviving special filtered out. In Act 3 the filter is at its
 // strongest (FaceTrader is act-excluded, Knowing Skull / N'loth / The Joust
-// are act-2 only, SecretPortal is pinned false), so the state is constructible
+// are act-2 only, SecretPortal is false at the default zero playtime), so the
+// state is constructible
 // rather than impossible -- low probability, not zero. The deviation is
 // therefore a real behavioural difference from the game on a reachable state,
 // not a formality, and it is pinned by test rather than argued away.
-[[nodiscard]] uint16_t generate_event(RunState& rs) noexcept;
+//
+// `playtime_seconds` reaches only SecretPortal's gate inside build_shrine_pool
+// -- see the PLAYTIME block above. It defaults to the engine's zero, so every
+// simulator trajectory is unchanged by its existence.
+[[nodiscard]] uint16_t generate_event(
+    RunState& rs,
+    float playtime_seconds = kUnmodelledPlaytimeSeconds) noexcept;
 
 // --- The dialog framework ----------------------------------------------------
 
