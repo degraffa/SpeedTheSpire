@@ -36,6 +36,7 @@
 #include "sts/engine/interp.hpp"
 #include "sts/engine/monster_dispatch.hpp"
 #include "sts/engine/power_hooks.hpp"
+#include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/schema.hpp"
 #include "sts/registry/game_ids.hpp"
@@ -521,6 +522,95 @@ TEST(MonsterFramework, ConstructorBeforeHpBurnsAheadOfTheSetHpDraw) {
     const int32_t before = s.monster_hp_rng.counter;
     burn_unspawned_ctor_rolls(s, MonsterId::JAW_WORM);
     EXPECT_EQ(s.monster_hp_rng.counter - before, 1);
+}
+
+// --- the construct-all-then-init-all pre-pass, through the RUN LAYER's entry
+// --- point ------------------------------------------------------------------
+//
+// spawn_group_trace is the only spawn the run layer reaches a combat through
+// (run_advance.cpp's combat-begin step 6); spawn_group is what every other test
+// in the repo uses. The two must therefore agree exactly, and the half that used
+// to differ was invisible to all of them: monster_count. mark_group_constructed
+// writes a placeholder record into every kept slot before any init runs, but
+// every group-reading getMove BOUNDS ITS WALK BY monster_count -- so publishing
+// that count slot by slot, as the trace used to, left those records unreadable
+// and each member saw only slots [0, its own]. Live cost: the STS108173
+// Centurion (see city_normals_ii_test.cpp's spawn-trace pair).
+//
+// The state these two build is byte-comparable because both start from the same
+// value-initialised CombatState, so padding is zero on both sides.
+CombatState SeededGroupState(int64_t seed) {
+    CombatState s{};
+    s.player_hp = 60;
+    s.player_max_hp = 80;
+    s.monster_count = 0;
+    s.monster_hp_rng = from_seed(seed);
+    s.ai_rng = from_seed(seed);
+    s.card_random_rng = from_seed(seed);
+    return s;
+}
+
+TEST(MonsterFramework, SpawnTraceMatchesSpawnGroupWhenTheMaskKeepsEverything) {
+    // Three groups whose FIRST member reads the group at init, or would if the
+    // pre-pass were the other way round: the Centurion's aliveCount at slot 0
+    // (MonsterHelper.java:498-500), a Healer at slot 0 whose needToHeal sums the
+    // whole group (:553), and a control whose members read nothing.
+    const MonsterId pair[] = {MonsterId::CENTURION, MonsterId::HEALER};
+    const MonsterId mystics[] = {MonsterId::HEALER, MonsterId::SNECKO,
+                                 MonsterId::HEALER};
+    const MonsterId cultists[] = {MonsterId::CULTIST, MonsterId::CULTIST,
+                                  MonsterId::CULTIST};
+    const std::span<const MonsterId> groups[] = {
+        std::span<const MonsterId>(pair),
+        std::span<const MonsterId>(mystics),
+        std::span<const MonsterId>(cultists),
+    };
+    for (const std::span<const MonsterId>& g : groups) {
+        const uint16_t all = static_cast<uint16_t>((1u << g.size()) - 1u);
+        for (int64_t seed = 1; seed <= 40; ++seed) {
+            CombatState a = SeededGroupState(seed);
+            spawn_group(a, g);
+            CombatState b = SeededGroupState(seed);
+            spawn_group_trace(b, g, all);
+            EXPECT_EQ(0, std::memcmp(&a, &b, sizeof(CombatState)))
+                << "spawn_group and spawn_group_trace disagree for a mask that "
+                   "keeps every member -- group size "
+                << g.size() << ", seed " << seed;
+        }
+    }
+}
+
+TEST(MonsterFramework, SpawnTracePublishesTheKeptCountBeforeAnyInitRuns) {
+    // A discarded PICK candidate constructed AHEAD of the group: it burns its
+    // ctor's monster_hp_rng draw (one, the Cultist row declares no extras) and
+    // takes no slot, so the kept members still land at [0, 2) and monster_count
+    // is 2 from the first init onward -- not 1, then 2.
+    const MonsterId constructed[] = {MonsterId::CULTIST, MonsterId::CENTURION,
+                                     MonsterId::HEALER};
+    const MonsterId kept[] = {MonsterId::CENTURION, MonsterId::HEALER};
+    for (int64_t seed = 1; seed <= 40; ++seed) {
+        CombatState s = SeededGroupState(seed);
+        spawn_group_trace(s, std::span<const MonsterId>(constructed), 0b110u);
+        ASSERT_EQ(s.monster_count, 2);
+        EXPECT_EQ(s.monsters[0].monster_id,
+                  static_cast<uint16_t>(MonsterId::CENTURION));
+        EXPECT_EQ(s.monsters[1].monster_id,
+                  static_cast<uint16_t>(MonsterId::HEALER));
+
+        // The discard costs one HP draw and NO ai_rng draw, so the kept pair's
+        // move decisions must be the ones a plain two-member spawn makes.
+        CombatState ref = SeededGroupState(seed);
+        spawn_group(ref, std::span<const MonsterId>(kept));
+        EXPECT_EQ(s.ai_rng.counter, ref.ai_rng.counter);
+        EXPECT_EQ(s.monster_hp_rng.counter, ref.monster_hp_rng.counter + 1);
+        EXPECT_EQ(s.monsters[0].move_history[0],
+                  ref.monsters[0].move_history[0])
+            << "the Centurion behind a discarded candidate decided against a "
+               "different group than the same Centurion at slot 0 of two";
+        EXPECT_EQ(s.monsters[0].intent, ref.monsters[0].intent);
+        EXPECT_EQ(s.monsters[1].move_history[0],
+                  ref.monsters[1].move_history[0]);
+    }
 }
 
 }  // namespace

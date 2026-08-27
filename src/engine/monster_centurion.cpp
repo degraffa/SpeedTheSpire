@@ -47,7 +47,7 @@ void protect_or_fury(CombatState& s, MonsterState& m) noexcept {
     if (alive_count(s) > 1) {
         set_monster_move(m, kProtect, MonsterIntent::DEFEND);  // (:139-140,:155-156)
     } else {
-        // (:141-142,:157-158): setMove(FURY, ATTACK, damage.get(1).base,
+        // (:143-144,:159): setMove(FURY, ATTACK, damage.get(1).base,
         // furyHits, true) -- the `3, true` is the multi-hit TELEGRAPH; the three
         // hits themselves are the registry program's three DAMAGE steps.
         set_monster_move(m, kFury, MonsterIntent::ATTACK);

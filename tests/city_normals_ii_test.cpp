@@ -28,6 +28,7 @@
 //     monster's index -- and the Centurion's PROTECT reads the group.
 
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -1537,6 +1538,53 @@ TEST(CityNormalsII, CenturionAtSlotZeroCanOpenOnProtect) {
         << "a Centurion spawned ahead of a living Healer must be able to open "
            "on PROTECT -- if this fails, the spawn pre-pass regressed and the "
            "opening telegraph is being decided against an empty slot";
+}
+
+// THE SAME PROPERTY THROUGH THE ENTRY POINT THE RUN LAYER ACTUALLY USES, which
+// is the whole finding. The test above spawns with spawn_group; every combat in
+// a real run is spawned by spawn_group_trace (run_advance.cpp's combat-begin
+// step 6), and that one used to publish monster_count slot by slot. aliveCount
+// bounds its walk by monster_count, so the Centurion at slot 0 counted only
+// ITSELF, took Centurion.java:143-144's alone-arm and telegraphed FURY where the
+// game telegraphed PROTECT -- 3 x 7 damage instead of a 20-block
+// GainBlockRandomMonsterAction, and one ai_rng draw short from there on.
+//
+// LIVE WITNESS: S2.43 depth capture STS108173 (A20 Ironclad, floor 22, the
+// "Centurion and Healer" strong encounter). The whole-run differ read a constant
+// 21-hp player deficit from the first record after that monster turn; the run
+// replays zero-diff to its terminal with the pre-pass fixed.
+//
+// The pair-vs-solo comparison is what makes this non-tautological: with the
+// count grown incrementally the two columns are IDENTICAL for every seed,
+// because a slot-0 Centurion cannot tell a group of two from a group of one.
+TEST(CityNormalsII, CenturionAtSlotZeroOpensOnProtectThroughTheSpawnTrace) {
+    const MonsterId pair[] = {MonsterId::CENTURION, MonsterId::HEALER};
+    const MonsterId solo[] = {MonsterId::CENTURION};
+    int group_aware = 0;
+    for (int64_t seed = 1; seed <= 200; ++seed) {
+        CombatState a = MakeSeeded(seed, /*monsters=*/0);
+        spawn_group_trace(a, std::span<const MonsterId>(pair), 0b11u);
+        CombatState b = MakeSeeded(seed, /*monsters=*/0);
+        spawn_group_trace(b, std::span<const MonsterId>(solo), 0b1u);
+        ASSERT_EQ(a.monster_count, 2);
+        ASSERT_EQ(b.monster_count, 1);
+        const uint8_t with_ally = a.monsters[0].move_history[0];
+        const uint8_t alone = b.monsters[0].move_history[0];
+        if (with_ally == alone) {
+            continue;  // the SLASH arm, which reads no group at all
+        }
+        ++group_aware;
+        EXPECT_EQ(with_ally, r::kCenturionMoveProtect);
+        EXPECT_EQ(a.monsters[0].intent,
+                  static_cast<uint8_t>(r::MonsterIntent::DEFEND));
+        EXPECT_EQ(alone, r::kCenturionMoveFury);
+        EXPECT_EQ(b.monsters[0].intent,
+                  static_cast<uint8_t>(r::MonsterIntent::ATTACK));
+    }
+    EXPECT_GT(group_aware, 0)
+        << "no seed in 200 made a slot-0 Centurion decide differently with an "
+           "ally than alone -- spawn_group_trace is publishing monster_count "
+           "after the init that reads it, which is the STS108173 defect";
 }
 
 TEST(CityNormalsII, SnakePlantAndSneckoAreSoloGroups) {

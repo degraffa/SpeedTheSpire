@@ -1846,6 +1846,13 @@ namespace {
 // and drawing it early would reorder the stream. A placeholder is therefore the
 // exact available model, not a shortcut: the two readers ask only "is it there,
 // and is it whole", and at construction time the answer is yes to both.
+//
+// THE PLACEHOLDER IS ONLY HALF THE PRE-PASS. Every group reader bounds its walk
+// by state.monster_count, so a caller that writes the records here but publishes
+// the count incrementally hands those readers an EMPTY group -- the records exist
+// and are never looked at. Both callers therefore set monster_count to the full
+// group size before calling this, and neither may move it afterwards; see the
+// STS108173 note in spawn_group_trace for what the incremental version cost.
 void mark_group_constructed(CombatState& state, uint8_t count) noexcept {
     for (uint8_t i = 0; i < count && i < kMonsterCap; ++i) {
         MonsterState& m = state.monsters[i];
@@ -1913,7 +1920,6 @@ void burn_unspawned_ctor_rolls(CombatState& state, MonsterId id) noexcept {
 void spawn_group_trace(CombatState& state,
                        std::span<const MonsterId> constructed,
                        uint16_t kept_mask) noexcept {
-    state.monster_count = 0;
     // Same construct-all-then-init-all pre-pass as spawn_group (see
     // mark_group_constructed): the KEPT members are the group the game built, and
     // they occupy slots [0, kept). A discarded PICK candidate was constructed and
@@ -1925,16 +1931,48 @@ void spawn_group_trace(CombatState& state,
             ++kept;
         }
     }
+    assert(kept <= kMonsterCap &&
+           "spawn_group_trace: kept members exceed kMonsterCap");
+    // monster_count IS THE PRE-PASS. It is published in full BEFORE any init
+    // runs, exactly as spawn_group does it, because every group-reading getMove
+    // in the roster bounds its walk by monster_count -- alive_count
+    // (monster_centurion.cpp), need_to_heal (monster_healer.cpp),
+    // gremlin_leader_num_alive_gremlins and reptomancer_alive_count. Growing the
+    // count slot by slot, which this function used to do, made
+    // mark_group_constructed's placeholder records INVISIBLE to those walks: a
+    // member at slot k could only ever see slots [0, k], so only the LAST member
+    // of a group saw the group at all.
+    //
+    // That was a LIVE divergence, not a latent one, and the whole-run replay
+    // differ found it (S2.43 depth wave, seed STS108173 floor 22, the "Centurion
+    // and Healer" strong encounter): the Centurion is slot 0 of 2
+    // (MonsterHelper.java:498-500), so its opening rollMove read aliveCount == 1,
+    // took the alone-arm and telegraphed FURY where the game telegraphed PROTECT
+    // (Centurion.java:133-145). The engine then spent the whole first monster
+    // turn on 3 x 7 damage instead of a 20-block GainBlockRandomMonsterAction --
+    // 21 hp of drift on turn one, and one ai_rng draw short thereafter, because
+    // the block action's recipient roll never happened.
+    //
+    // It survived every test because the TESTS spawn through spawn_group, which
+    // has always published the count up front; only the run layer reaches a
+    // combat through spawn_group_trace (run_advance.cpp's combat-begin step 6).
+    // The two entry points now agree by construction, which is what
+    // MonsterFramework.SpawnTraceMatchesSpawnGroupWhenTheMaskKeepsEverything and
+    // MonsterFramework.SpawnTracePublishesTheKeptCountBeforeAnyInitRuns pin;
+    // CityNormalsII.CenturionAtSlotZeroOpensOnProtectThroughTheSpawnTrace pins
+    // the live consequence.
+    state.monster_count = kept;
     mark_group_constructed(state, kept);
+    uint8_t slot = 0;
     for (std::size_t i = 0; i < constructed.size(); ++i) {
         if ((kept_mask & (1u << i)) != 0u) {
-            assert(state.monster_count < kMonsterCap &&
+            assert(slot < kMonsterCap &&
                    "spawn_group_trace: kept members exceed kMonsterCap");
             const MonsterInitFn init = monster_init_fn(constructed[i]);
             assert(init != nullptr &&
                    "spawn_group_trace: no init fn for a kept member");
-            const uint8_t slot = state.monster_count++;
             init(state, slot);
+            ++slot;
         } else {
             burn_unspawned_ctor_rolls(state, constructed[i]);
         }

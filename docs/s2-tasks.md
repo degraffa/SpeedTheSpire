@@ -2585,6 +2585,58 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `test_run_orchestrator_forwards_external_policy_arguments` the field, so
   it raised `AttributeError`; the fixture now carries the flag's
   `store_true` default.
+  **2026-08-27 — depth-wave finding: the spawn pre-pass never reached the run
+  layer (`act2-hp-offset`).** Capture STS108173 (A20 Ironclad, policy
+  `sim_search_skip`) showed a constant 21-hp player deficit from seq 246, the
+  first record after the first monster turn of the floor-22 "Centurion and
+  Healer" fight, with every other run-level field equal. The `--combat`
+  instrument put the fork thirteen records earlier, at the combat's FIRST record
+  (seq 243): `monsters[0].move_history[0] 2 → 3` — the sim's Centurion had
+  telegraphed FURY where the game telegraphed PROTECT, which the run-level differ
+  cannot see because it compares `RunState`, and `RunState` carries no monsters.
+  Root cause: `spawn_group_trace` — the ONLY spawn the run layer reaches a combat
+  through (`run_advance.cpp` combat-begin step 6) — published `monster_count`
+  slot by slot (`state.monster_count++` per init), while `spawn_group`, which
+  every test in the repo uses, published it up front. `mark_group_constructed`'s
+  construct-all-then-init-all placeholder records were therefore INVISIBLE: every
+  group-reading `getMove` bounds its walk by `monster_count`, so a member at slot
+  k saw only slots [0, k] and only the LAST member of a group saw the group at
+  all. The Centurion is slot 0 of 2 (`MonsterHelper.java:498-500`), so its
+  opening `rollMove` read `aliveCount == 1`, took `Centurion.java:143-144`'s
+  alone-arm and spent the monster turn on 3 × 7 FURY damage instead of the
+  20-block `GainBlockRandomMonsterAction` (`Centurion.java:92-93`), also running
+  one `ai_rng` draw short because that action's recipient roll never happened —
+  the game builds every member before `MonsterGroup.init()` runs any of them
+  (`MonsterGroup.java:31-32`, `:62-64` → `AbstractMonster.init` `:712-714` →
+  `rollMove` `:465-467`). Fixed by publishing the kept count before the init
+  loop, so the two entry points agree by construction; the other three
+  init-time group readers (`need_to_heal`, `gremlin_leader_num_alive_gremlins`,
+  `reptomancer_alive_count`) are latent beneficiaries — of the live encounters
+  only the Centurion's is a wrong answer today, the Gremlin Leader being last in
+  its group and the Reptomancer's opener bypassing `canSpawn`. Tests:
+  `MonsterFramework.SpawnTraceMatchesSpawnGroupWhenTheMaskKeepsEverything`,
+  `MonsterFramework.SpawnTracePublishesTheKeptCountBeforeAnyInitRuns`,
+  `CityNormalsII.CenturionAtSlotZeroOpensOnProtectThroughTheSpawnTrace` (the
+  pair-vs-solo column, which the old code makes identical for all 200 seeds) —
+  all three verified RED on the pre-fix engine. STS108173 now replays **CLEAN,
+  255/255 records compared**, and its remaining `--combat` deltas are only the
+  documented translator conventions (`intent` carries `move_id`,
+  `translate.cpp:514,527`; `monster_attacks_queued` and
+  `cards_played_this_turn` unfilled). Scored against the other three
+  depth-campaign stops, measured before and after: STS128113 (floor 27) and
+  STS101166 (floor 20) were ALREADY replay-clean to their artifact ends — their
+  campaign stops are follower/policy-side, not divergences — and are byte
+  unchanged by the fix; STS103364's terminal-only divergence is byte-IDENTICAL
+  before and after (seq 509, 14 fields) and is **NOT** explained: its floor-35
+  combat is `--combat`-clean through record 508, and at the terminal the live
+  game is GAME_OVER at 0 hp while the sim is in COMBAT_REWARD at 8 hp
+  (= 2 + Burning Blood's 6) with relic counters reset and a full reward roll
+  (card_rng +9, treasure_rng +1, potion_rng +1) — the live death is a Spiker's
+  9 Thorns retaliating against a Bite played at 2 hp into a 3-hp Spiker, so the
+  open lead is the lethal-THORNS / combat-over adjudication (the S2.49 +
+  `survives_clear_post_combat` family), not the spawn pre-pass. WSL
+  `debug`/`asan`/`release` green; `check_stale_counts.sh` and
+  `check_doc_links.sh` clean.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool

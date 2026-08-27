@@ -441,7 +441,14 @@ void spawn_group(CombatState& state, std::span<const MonsterId> group) noexcept;
 // consumed either way and every kept monster's HP roll must sit at its
 // construction-order position (the STS01789 class). A discarded candidate is
 // never init()ed, so it draws NO ai_rng. Equivalent to spawn_group when the
-// mask keeps everything.
+// mask keeps everything -- INCLUDING the construct-all-then-init-all pre-pass:
+// monster_count is published at the KEPT total before the first init runs, so a
+// group-reading getMove (Centurion aliveCount, Healer needToHeal, Gremlin Leader
+// numAliveGremlins, Reptomancer canSpawn) sees the whole group from slot 0, the
+// way MonsterGroup.init() does (MonsterGroup.java:31-32 then :62-64). That
+// equivalence is not decorative: this is the ONLY entry point the run layer uses,
+// so a divergence here is invisible to every spawn_group-based test -- see the
+// STS108173 Centurion note in monster_dispatch.cpp.
 void spawn_group_trace(CombatState& state,
                        std::span<const MonsterId> constructed,
                        uint16_t kept_mask) noexcept;
