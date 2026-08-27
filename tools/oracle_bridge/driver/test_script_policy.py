@@ -512,17 +512,24 @@ class GlueRuleTest(unittest.TestCase):
         self.assertEqual(got, "potion use 0 0")
         self.assertEqual(policy._script.cursor, 1)
 
-    def test_an_untargeted_potion_with_two_live_targets_still_stops(self):
-        policy = self._policy_with([{"k": "potion", "slot": 0,
-                                     "potion": "Fire Potion", "t": -1}])
+    def test_an_untargeted_potion_with_many_targets_picks_the_lowest(self):
+        # Seventh witness (s2v2_skip_108173, floor 20): three monsters ->
+        # three target variants for a potion whose effect ignores the
+        # target. The lowest index is the deterministic canonical pick; a
+        # target that DID matter would diverge downstream and still stop.
+        policy = self._policy_with([{"k": "potion", "slot": 1,
+                                     "potion": "Explosive Potion",
+                                     "t": -1}])
         state = {"available_commands": ["potion", "end", "state"],
                  "game_state": {"screen_type": "NONE",
-                                "potions": [{"id": "Fire Potion"}],
+                                "potions": [{"id": "Block Potion"},
+                                            {"id": "Explosive Potion"}],
                                 "screen_state": {}}}
-        with self.assertRaises(spc.Divergence):
-            policy.decide(decide_request(
-                "STS1", state,
-                ["end", "potion use 0 0", "potion use 0 1"]))
+        got = policy.decide(decide_request(
+            "STS1", state,
+            ["end", "potion use 1 2", "potion use 1 0", "potion use 1 1"]))
+        self.assertEqual(got, "potion use 1 0")
+        self.assertEqual(policy._script.cursor, 1)
 
     def test_exhausted_script_still_glues_a_trailing_one_click_dialog(self):
         policy = self._policy_with([{"k": "proceed", "ctx": "t"}])

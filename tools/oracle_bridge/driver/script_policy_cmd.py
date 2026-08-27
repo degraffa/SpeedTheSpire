@@ -179,13 +179,20 @@ def _match_potion(step, state, candidates):
         cmd = f"potion use {slot}"
         if cmd in candidates:
             return cmd
-        prefixed = [c for c in candidates
-                    if str(c).startswith(f"potion use {slot} ")]
-        if len(prefixed) == 1:
+        prefixed = sorted(c for c in candidates
+                          if str(c).startswith(f"potion use {slot} "))
+        if prefixed:
+            # Seventh witness (skip_108173, floor 20): with several
+            # monsters alive the game offers one variant per target for a
+            # potion whose EFFECT ignores the target (Explosive hits all).
+            # The lowest-index variant is the deterministic canonical
+            # pick; if the target ever did matter, the sim's untargeted
+            # model would diverge downstream and the stop contract still
+            # catches it -- one step later, with the state named.
             return prefixed[0]
         raise Divergence(
-            f"untargeted potion use {slot} has no unique live form "
-            f"(candidates {prefixed or candidates})", step)
+            f"untargeted potion use {slot} has no live form "
+            f"(candidates {candidates})", step)
     return _require(f"potion use {slot} {target}", candidates, step,
                     "potion use")
 
