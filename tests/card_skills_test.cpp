@@ -409,6 +409,127 @@ TEST(CardSkillsArmaments, UpgradeChoiceMaskExcludesAlreadyUpgradedCards) {
     EXPECT_FALSE(m.can_choose[2]) << "an already-upgraded card is not a legal choice";
 }
 
+// ---------------------------------------------------------------------------
+// What an in-combat upgrade may and may not touch (S2.43 lead D, second root
+// cause). `AbstractCard.upgrade()` reaches the cost ONLY through
+// `upgradeBaseCost` (AbstractCard.java:725-735), which most cards never call --
+// PowerThrough.upgrade (PowerThrough.java:40-45) is upgradeName + upgradeBlock,
+// Bash.upgrade (Bash.java:54-60) is upgradeDamage + upgradeMagicNumber. Both
+// campaign witnesses are this defect: STS128113 ps27 floor 27 had Snecko's
+// Confusion roll a drawn Power Through to 2 (`costForTurn = cost = newCost`,
+// ConfusionPower.java:43 -- PERMANENT) and Warped Tongs upgrade it, and
+// STS101166 ps0 floor 20 had Armaments upgrade a Bash that Mummified Hand had
+// set to costForTurn 0 (the capture reads `Bash+(cost 0)` at seq 325).
+// ---------------------------------------------------------------------------
+
+TEST(CardUpgradeInCombat, ACombatPermanentCostSurvivesAnUpgradeThatKeepsTheCost) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::ARMAMENTS, /*upgrade=*/1);  // upgrade-all, no prompt
+    const CardPoolIndex pt = AddToHand(s, CardId::POWER_THROUGH);
+    // ConfusionPower.onCardDraw rolled 2: costForTurn AND cost, no marker.
+    s.card_pool[pt].cost_now = 2;
+
+    Play(s, 0);
+
+    EXPECT_EQ(s.card_pool[pt].upgrade, 1);
+    EXPECT_EQ(s.card_pool[pt].cost_now, 2)
+        << "Power Through's upgrade never calls upgradeBaseCost, so the "
+           "Confusion-written cost stands (live held 2; the engine held 1)";
+    EXPECT_FALSE(has_card_flag(s.card_pool[pt].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+TEST(CardUpgradeInCombat, AThisTurnZeroSurvivesAnUpgradeThatKeepsTheCost) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::ARMAMENTS, /*upgrade=*/1);
+    const CardPoolIndex bash = AddToHand(s, CardId::BASH);
+    // MummifiedHand.onUseCard's setCostForTurn(0): costForTurn only.
+    s.card_pool[bash].cost_now = 0;
+    s.card_pool[bash].flags = static_cast<uint16_t>(
+        s.card_pool[bash].flags |
+        card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+
+    Play(s, 0);
+
+    EXPECT_EQ(s.card_pool[bash].upgrade, 1);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 0)
+        << "Bash's upgrade never calls upgradeBaseCost -- the live capture reads "
+           "Bash+(cost 0) right after the Armaments pick";
+    EXPECT_TRUE(has_card_flag(s.card_pool[bash].flags,
+                              CardFlag::COST_MODIFIED_FOR_TURN))
+        << "still a this-turn value: the end-turn sweep must still revert it";
+}
+
+TEST(CardUpgradeInCombat, UpgradeBaseCostCarriesTheThisTurnDifferenceAcross) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::ARMAMENTS, /*upgrade=*/1);
+    // Dark Embrace: registry 2 -> 1, i.e. upgradeBaseCost(1) really is called.
+    const CardPoolIndex de = AddToHand(s, CardId::DARK_EMBRACE);
+    s.card_pool[de].cost_now = 1;  // a this-turn -1 off the base 2
+    s.card_pool[de].flags = static_cast<uint16_t>(
+        s.card_pool[de].flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+
+    Play(s, 0);
+
+    EXPECT_EQ(s.card_pool[de].upgrade, 1);
+    EXPECT_EQ(s.card_pool[de].cost_now, 0)
+        << "upgradeBaseCost keeps costForTurn - cost = -1 across the base move "
+           "2 -> 1 (AbstractCard.java:726-730)";
+    EXPECT_TRUE(has_card_flag(s.card_pool[de].flags,
+                              CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+TEST(CardUpgradeInCombat, PerInstanceRuntimeFlagBitsSurviveTheUpgrade) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::ARMAMENTS, /*upgrade=*/1);
+    const CardPoolIndex strike = AddToHand(s, CardId::STRIKE);
+    s.card_pool[strike].flags = static_cast<uint16_t>(
+        s.card_pool[strike].flags | card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
+
+    Play(s, 0);
+
+    EXPECT_EQ(s.card_pool[strike].upgrade, 1);
+    EXPECT_TRUE(has_card_flag(s.card_pool[strike].flags,
+                              CardFlag::FREE_TO_PLAY_ONCE))
+        << "upgrade() has no path to freeToPlayOnce; only the AUTHORED half of "
+           "the flag word is re-read from the upgraded registry row";
+}
+
+TEST(CardUpgradeInCombat, BloodForBloodUpgradeStaysRelativeToItsReducedCost) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::ARMAMENTS, /*upgrade=*/1);
+    const CardPoolIndex bfb = AddToHand(s, CardId::BLOOD_FOR_BLOOD);
+    s.card_pool[bfb].cost_now = 2;  // two hits taken: cost AND costForTurn are 2
+
+    Play(s, 0);
+
+    EXPECT_EQ(s.card_pool[bfb].cost_now, 1)
+        << "BloodForBlood.upgrade (:45-57) passes `this.cost - 1`, not a blind 3";
+    EXPECT_FALSE(has_card_flag(s.card_pool[bfb].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+// The moveToDeck half of the pile-move reset, through a real card: Warcry's
+// PutOnDeckAction is `hand.moveToDeck(c, false)`, i.e. Soul.update's DRAW_PILE
+// arm (piles.hpp).
+TEST(CardSkillsWarcry, PutBackOnTheDrawPileResetsTheThisTurnCost) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::WARCRY);                             // slot 0
+    const CardPoolIndex keep = AddToHand(s, CardId::BASH);    // slot 1
+    AddToDrawTop(s, CardId::DEFEND);
+    s.card_pool[keep].cost_now = 0;                           // Mummified Hand
+    s.card_pool[keep].flags = static_cast<uint16_t>(
+        s.card_pool[keep].flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+
+    Step(s, make_action(ActionVerb::PLAY_CARD, 0, 0));
+    Step(s, make_action(ActionVerb::CHOOSE, 0));  // put `keep` on top of draw
+
+    ASSERT_EQ(s.draw[s.draw_count - 1], keep);
+    EXPECT_EQ(s.card_pool[keep].cost_now, 2);
+    EXPECT_FALSE(has_card_flag(s.card_pool[keep].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
 // ===========================================================================
 // Havoc -- play top of draw free, exhaust it (PlayTopCardAction)
 // ===========================================================================

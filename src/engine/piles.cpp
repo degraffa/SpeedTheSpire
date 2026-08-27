@@ -50,6 +50,13 @@ void execute_empty_deck_shuffle(CombatState& s) noexcept {
         n = kDrawCap - s.draw_count;  // defensive clamp; unreachable in S1
     }
     std::copy(s.discard, s.discard + n, s.draw + s.draw_count);
+    // Soul.update's DRAW_PILE arm (reset_cost_for_turn's contract):
+    // EmptyDeckShuffleAction hands each card to souls.shuffle
+    // (EmptyDeckShuffleAction.java:55-58), whose group IS the draw pile, so
+    // every card that lands here takes a resetAttributes.
+    for (int i = 0; i < n; ++i) {
+        reset_cost_for_turn(s, s.discard[i]);
+    }
     s.draw_count = static_cast<uint8_t>(s.draw_count + n);
     s.discard_count = 0;
 
@@ -133,6 +140,10 @@ void reshuffle_all(CombatState& s) noexcept {
         moved = kDrawCap - s.draw_count;  // defensive clamp, as above
     }
     std::copy(s.discard, s.discard + moved, s.draw + s.draw_count);
+    // Same souls.shuffle -> DRAW_PILE resetAttributes as the shared body above.
+    for (int i = 0; i < moved; ++i) {
+        reset_cost_for_turn(s, s.discard[i]);
+    }
     s.draw_count = static_cast<uint8_t>(s.draw_count + moved);
     s.discard_count = 0;
 
@@ -280,6 +291,10 @@ bool file_card_from_limbo(CombatState& s, uint8_t pool_index, bool to_exhaust,
            "discard overflow (design doc §4.1: hard assert)");
     s.discard[s.discard_count] = pool_index;
     ++s.discard_count;
+    // UseCardAction's filing branch is `hand.moveToDiscardPile(targetCard)`
+    // (UseCardAction.java:126), i.e. Soul.update's DISCARD_PILE arm: the played
+    // card's this-turn cost reverts as it lands, mid-turn included.
+    reset_cost_for_turn(s, pool_index);
     return true;
 }
 
@@ -358,6 +373,12 @@ void discard_hand_at_end_of_turn(CombatState& s) noexcept {
                "discard overflow (design doc pile capacity)");
         s.discard[s.discard_count] = pi;
         ++s.discard_count;
+        // DiscardAction -> hand.moveToDiscardPile (DiscardAction.java:89), the
+        // same DISCARD_PILE arm. Redundant with the end-turn sweep that follows
+        // in the ordinary case and NOT redundant for a Runic-Pyramid-less hand
+        // whose sweep the pump runs first; stated here so the pile move owns
+        // its own reset wherever it is called from.
+        reset_cost_for_turn(s, pi);
     }
 }
 

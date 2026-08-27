@@ -181,6 +181,15 @@ enum class CardFlag : uint16_t {
 inline constexpr uint16_t kSavedBaseCostShift = 11u;
 inline constexpr uint16_t kSavedBaseCostMask = 0x3800u;
 
+// The bits a registry row AUTHORS (bits 0..5, the first six enumerators above);
+// everything from COST_MODIFIED_FOR_TURN up is per-INSTANCE runtime state that
+// no registry row can supply. An in-combat `AbstractCard.upgrade()` re-reads the
+// authored half from the upgraded row -- Apparition+ drops ETHEREAL
+// (Apparition.java:42), Blind+/Trip+ retarget -- and must leave the runtime half
+// alone: upgrade() has no path to freeToPlayOnce, purgeOnUse, exhaustOnUseOnce
+// or the cost bookkeeping. Any new AUTHORED bit must be added here.
+inline constexpr uint16_t kAuthoredCardFlagMask = 0x003Fu;
+
 [[nodiscard]] constexpr uint16_t card_flag_bit(CardFlag f) noexcept {
     return static_cast<uint16_t>(f);
 }

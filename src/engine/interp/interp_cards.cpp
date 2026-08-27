@@ -201,6 +201,8 @@ void draw_card_to_hand_or_discard(CombatState& s, CardPoolIndex pi) noexcept {
         s.hand[s.hand_count++] = pi;  // hand.addToTop == append
     } else if (s.discard_count < kDiscardCap) {
         s.discard[s.discard_count++] = pi;
+        // moveToDiscardPile -> Soul.update's DISCARD_PILE arm (piles.hpp).
+        reset_cost_for_turn(s, pi);
     }
 }
 
@@ -373,9 +375,35 @@ CardPoolIndex remove_from_hand(CombatState& s, uint8_t slot) noexcept {
     return c.upgrade == 0;
 }
 
-// Upgrade the pool instance in place (in-combat upgrade, ArmamentsAction:
-// c.upgrade() + applyPowers()). `upgrade` is a count; re-seed cost_now/flags from
-// the registry's upgraded row so the new cost/flags take effect (upgradeBaseCost).
+// Upgrade the pool instance in place (in-combat upgrade: ArmamentsAction,
+// Warped Tongs' UpgradeRandomCardAction, Apotheosis -- c.upgrade() +
+// applyPowers()). `upgrade` is a count.
+//
+// COST. `AbstractCard.upgrade()` is per-card, and the ONLY way it can touch the
+// cost is `upgradeBaseCost` (AbstractCard.java:725-735) -- which the great
+// majority of cards never call. PowerThrough.upgrade (PowerThrough.java:40-45)
+// is upgradeName + upgradeBlock and nothing else, so an upgrade of a Power
+// Through leaves BOTH `cost` and `costForTurn` exactly where they were.
+// Re-seeding cost_now from the registry row unconditionally clobbered that:
+// STS128113 ps27 floor 27 is the live witness -- Snecko's Confusion rolled the
+// drawn Power Through to 2 (a PERMANENT write, `costForTurn = cost = newCost`,
+// ConfusionPower.java:43), Warped Tongs then upgraded it, and the engine reset
+// it to the registry 1 while the game held 2. STS101166 ps0 floor 20 is the
+// same defect from the other side: Armaments upgraded a Bash that Mummified
+// Hand had set to costForTurn 0, and the live capture shows `Bash+(cost 0)`
+// where the engine showed 2.
+//
+// So the base cost moves only when the card really calls upgradeBaseCost, which
+// is exactly when the registry cost differs across the two upgrade levels (a
+// call with an unchanged argument is a behavioural no-op: diff is preserved and
+// re-applied to the same base). Blood for Blood is the one card whose argument
+// is RELATIVE to its current, combat-reduced cost rather than a literal
+// (BloodForBlood.java:45-57), so it keeps its own arm.
+//
+// FLAGS. Only the AUTHORED half is re-read from the upgraded row
+// (kAuthoredCardFlagMask, types.hpp): Apparition+ drops ETHEREAL, and nothing
+// in upgrade() can reach freeToPlayOnce / purgeOnUse / exhaustOnUseOnce or the
+// cost bookkeeping bits, which a blind re-seed silently wiped.
 void upgrade_instance(CombatState& s, CardPoolIndex pi) noexcept {
     CardInstance& c = s.card_pool[pi];
     const CardDef* def = card_def(static_cast<CardId>(c.card_id));
@@ -386,17 +414,66 @@ void upgrade_instance(CombatState& s, CardPoolIndex pi) noexcept {
         return;  // the POD encodes the count in u8; never wrap it to base
     }
     const CardId id = static_cast<CardId>(c.card_id);
+    const int old_base = instance_base_cost(s, pi);
+    const int old_cost_for_turn = static_cast<int>(c.cost_now);
+    const uint8_t old_upgrade = c.upgrade;
     ++c.upgrade;
+
+    // Authored bits from the new row; every per-instance runtime bit survives.
+    c.flags = static_cast<uint16_t>(
+        (card_flags(*def, c.upgrade) & kAuthoredCardFlagMask) |
+        (c.flags & static_cast<uint16_t>(~kAuthoredCardFlagMask)));
+
+    bool calls_upgrade_base_cost = false;
+    int new_base = old_base;
     if (id == CardId::BLOOD_FOR_BLOOD) {
-        // BloodForBlood.upgrade uses its CURRENT combat-reduced cost: untouched
-        // 4 -> 3, already-reduced n -> max(0,n-1), not a blind reset to 3.
-        if (c.cost_now > 0) {
-            --c.cost_now;
-        }
+        calls_upgrade_base_cost = true;
+        new_base = old_base < 4 ? old_base - 1 : 3;
     } else {
-        c.cost_now = card_cost(*def, c.upgrade);
+        const int reg_old = static_cast<int>(card_cost(*def, old_upgrade));
+        const int reg_new = static_cast<int>(card_cost(*def, c.upgrade));
+        if (reg_old != reg_new) {
+            calls_upgrade_base_cost = true;
+            new_base = reg_new;
+        }
     }
-    c.flags = card_flags(*def, c.upgrade);
+    if (!calls_upgrade_base_cost) {
+        return;  // cost and costForTurn are both untouched
+    }
+
+    // upgradeBaseCost (:726-734), verbatim: hold the costForTurn-minus-cost
+    // difference across the move, re-apply it only to a POSITIVE costForTurn,
+    // then clamp at zero.
+    const int diff = old_cost_for_turn - old_base;
+    int new_cost_for_turn = old_cost_for_turn;
+    if (old_cost_for_turn > 0) {
+        new_cost_for_turn = new_base + diff;
+    }
+    if (new_cost_for_turn < 0) {
+        new_cost_for_turn = 0;
+    }
+    if (new_base < 0) {
+        new_base = 0;  // BloodForBlood.upgrade's own post-clamp on cost (:50-52)
+    }
+    c.cost_now = static_cast<uint8_t>(new_cost_for_turn);
+
+    // Re-state the base-cost bookkeeping for the NEW base (types.hpp): cost_now
+    // alone carries it when the two are equal, otherwise the this-turn marker
+    // does, plus the saved base whenever it is not the registry row's.
+    c.flags = static_cast<uint16_t>(
+        c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+        ~card_flag_bit(CardFlag::SAVED_BASE_COST) & ~kSavedBaseCostMask);
+    if (new_cost_for_turn != new_base) {
+        c.flags = static_cast<uint16_t>(
+            c.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+        if (new_base != static_cast<int>(card_cost(*def, c.upgrade))) {
+            const uint16_t encoded = static_cast<uint16_t>(
+                static_cast<uint16_t>(new_base > 7 ? 7 : new_base)
+                << kSavedBaseCostShift);
+            c.flags = static_cast<uint16_t>(
+                c.flags | card_flag_bit(CardFlag::SAVED_BASE_COST) | encoded);
+        }
+    }
 }
 
 // Move discard slot `slot` to the top of the draw pile (Headbutt /
@@ -412,6 +489,8 @@ void discard_slot_to_draw_top(CombatState& s, uint8_t slot) noexcept {
     --s.discard_count;
     if (s.draw_count < kDrawCap) {
         s.draw[s.draw_count++] = pi;  // top of draw (draw[draw_count-1])
+        // moveToDeck -> Soul.update's DRAW_PILE arm (piles.hpp).
+        reset_cost_for_turn(s, pi);
         knowledge_on_place_top(s, pi);  // observer: Headbutt-style known top
     }
 }
@@ -513,6 +592,8 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
             const CardPoolIndex pi = remove_from_hand(s, slot);
             if (s.draw_count < kDrawCap) {
                 s.draw[s.draw_count++] = pi;
+                // Soul.update's DRAW_PILE arm (piles.hpp).
+                reset_cost_for_turn(s, pi);
                 knowledge_on_place_top(s, pi);  // observer: known top
             }
             break;
@@ -544,6 +625,10 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
                 }
                 s.draw[0] = pi;
                 ++s.draw_count;
+                // Soul.update's DRAW_PILE arm (piles.hpp). It does NOT clear
+                // the freeToPlayOnce grant made above: resetAttributes
+                // (:2035-2045) never mentions the field.
+                reset_cost_for_turn(s, pi);
                 knowledge_on_place_bottom(s, pi);  // observer: known bottom
             }
             break;
@@ -571,6 +656,8 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
             const CardPoolIndex pi = remove_from_hand(s, slot);
             if (s.discard_count < kDiscardCap) {
                 s.discard[s.discard_count++] = pi;
+                // Soul.update's DISCARD_PILE arm (piles.hpp).
+                reset_cost_for_turn(s, pi);
             }
             break;
         }

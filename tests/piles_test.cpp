@@ -23,6 +23,7 @@
 #include "gtest/gtest.h"
 
 #include "sts/engine/action_queue.hpp"
+#include "sts/engine/cards.hpp"  // card_def / card_cost / card_flags (cost reset)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/rng_jdk.hpp"
@@ -364,6 +365,123 @@ TEST(PilesDispatch, ExhaustOpcodeExhaustsThroughInterp) {
     EXPECT_EQ(s.hand_count, 2u);
     EXPECT_EQ(s.exhaust_count, 1u);
     EXPECT_EQ(s.exhaust[0], 71);
+}
+
+// --- resetAttributes at the PILE-MOVE boundary (S2.43 lead D) ---------------
+//
+// Soul.update's DRAW_PILE (Soul.java:205-212) and DISCARD_PILE (:213-221) arms
+// both call clearPowers() -> AbstractCard.resetAttributes (:2035-2045,
+// `costForTurn = cost`) on EVERY move into either pile, mid-turn included --
+// not only at the end-turn sweep and on exhaust, which is all the engine used
+// to wire.
+//
+// LIVE WITNESS, STS101166 ps0 floor 20 (s2v2_mindbloom_b capture): Mummified
+// Hand set a Bash to costForTurn 0 while it was in hand; the capture shows
+// `Bash+(cost 0)` in the discard pile at seq 330 and `Bash+(cost 2)` at seq
+// 331, with NO turn boundary between them (the one-record lag is the Soul's
+// animation). The card was then reshuffled out of an 8-card discard and drawn
+// back by Dark Embrace at cost 2, while the engine still held 0 and played it
+// on 0 energy -- the divergence the campaign stopped on.
+
+// A real registry-backed pool row (the pile tests above use bare indices).
+CardPoolIndex new_row(CombatState& s, CardId id, uint8_t upgrade = 0) {
+    uint8_t slot = 0;
+    while (slot < kCardPoolCap &&
+           s.card_pool[slot].card_id != static_cast<uint16_t>(CardId::NONE)) {
+        ++slot;
+    }
+    const CardDef* def = card_def(id);
+    s.card_pool[slot].card_id = static_cast<uint16_t>(id);
+    s.card_pool[slot].upgrade = upgrade;
+    s.card_pool[slot].cost_now = card_cost(*def, upgrade);
+    s.card_pool[slot].flags = card_flags(*def, upgrade);
+    return slot;
+}
+
+// MummifiedHand.onUseCard's `c.setCostForTurn(0)` (MummifiedHand.java:67):
+// costForTurn only, `cost` untouched -- so the this-turn marker goes on.
+void mummified_hand_zero(CombatState& s, CardPoolIndex pi) {
+    s.card_pool[pi].cost_now = 0;
+    s.card_pool[pi].flags = static_cast<uint16_t>(
+        s.card_pool[pi].flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+TEST(PilesCostReset, MummifiedHandCostZeroIsLostOnTheReshuffle) {
+    CombatState s = make_combat();
+    const CardPoolIndex bash = new_row(s, CardId::BASH, /*upgrade=*/1);
+    mummified_hand_zero(s, bash);
+    ASSERT_EQ(s.card_pool[bash].cost_now, 0u);
+
+    set_discard(s, {bash});
+    shuffle_discard_into_draw(s);
+
+    EXPECT_EQ(s.draw_count, 1u);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 2u)
+        << "souls.shuffle lands the card in the DRAW pile -> clearPowers -> "
+           "resetAttributes restores costForTurn = cost";
+    EXPECT_FALSE(has_card_flag(s.card_pool[bash].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+// The NEGATIVE control the fix must not break: a COMBAT-PERSISTENT reduction
+// moves AbstractCard.cost itself (modifyCostForCombat / updateCost /
+// ConfusionPower's `costForTurn = cost = newCost`), carries NO this-turn
+// marker, and resetAttributes therefore leaves it exactly where it is.
+TEST(PilesCostReset, CombatPersistentCostReductionSurvivesTheSameReshuffle) {
+    CombatState s = make_combat();
+    const CardPoolIndex bash = new_row(s, CardId::BASH, /*upgrade=*/1);
+    s.card_pool[bash].cost_now = 0;  // Corruption-style: cost AND costForTurn
+    ASSERT_FALSE(has_card_flag(s.card_pool[bash].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+
+    set_discard(s, {bash});
+    shuffle_discard_into_draw(s);
+
+    EXPECT_EQ(s.card_pool[bash].cost_now, 0u)
+        << "resetAttributes restores costForTurn from `cost`, which a permanent "
+           "writer has already moved -- the reduction must SURVIVE";
+}
+
+TEST(PilesCostReset, DeepBreathStyleFullReshuffleResetsToo) {
+    CombatState s = make_combat();
+    const CardPoolIndex bash = new_row(s, CardId::BASH, /*upgrade=*/1);
+    mummified_hand_zero(s, bash);
+    set_discard(s, {bash});
+
+    reshuffle_all(s);  // EmptyDeckShuffleAction + ShuffleAction(drawPile)
+
+    EXPECT_EQ(s.draw_count, 1u);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 2u);
+}
+
+// The other half of the witness: the mid-turn move INTO the discard pile. The
+// played card is filed by UseCardAction's `hand.moveToDiscardPile(targetCard)`
+// (UseCardAction.java:126), which is the DISCARD_PILE arm.
+TEST(PilesCostReset, MidTurnDiscardOfThePlayedCardResetsItsThisTurnCost) {
+    CombatState s = make_combat();
+    const CardPoolIndex bash = new_row(s, CardId::BASH, /*upgrade=*/1);
+    mummified_hand_zero(s, bash);
+
+    limbo_add(s, bash);
+    ASSERT_TRUE(file_card_from_limbo(s, bash, /*to_exhaust=*/false,
+                                     /*remove_only=*/false));
+
+    EXPECT_EQ(s.discard_count, 1u);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 2u);
+    EXPECT_FALSE(has_card_flag(s.card_pool[bash].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+TEST(PilesCostReset, EndOfTurnHandDiscardResetsAsThePileMoveNotOnlyTheSweep) {
+    CombatState s = make_combat();
+    const CardPoolIndex bash = new_row(s, CardId::BASH, /*upgrade=*/1);
+    mummified_hand_zero(s, bash);
+    set_hand(s, {bash});
+
+    discard_hand_at_end_of_turn(s);
+
+    EXPECT_EQ(s.discard_count, 1u);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 2u);
 }
 
 }  // namespace

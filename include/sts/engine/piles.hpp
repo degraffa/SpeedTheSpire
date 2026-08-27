@@ -160,13 +160,50 @@ bool file_card_from_limbo(CombatState& state, uint8_t pool_index,
 void flush_limbo_at_combat_over(CombatState& state) noexcept;
 
 // If pool row `pool_index` carries the COST_MODIFIED_FOR_TURN bit
-// (setCostForTurn -- Infernal Blade's generated attack), restore cost_now to the
-// registry cost for its upgrade level and clear the bit (AbstractCard.
-// resetAttributes:2035-2045, costForTurn = cost). Fired per-card by the end-turn
-// sweep (AbstractRoom.endTurn:397-405 -- draw/discard/hand) and on exhaust
-// (ExhaustCardEffect.update:41-43). A row without the bit is untouched -- Blood
-// for Blood's combat-persistent updateCost reductions modify `cost` itself in
-// the game and are therefore NOT reverted by resetAttributes.
+// (setCostForTurn -- Infernal Blade's generated attack, Mummified Hand's cost-0
+// pick), restore cost_now to the instance's combat BASE cost -- the
+// SAVED_BASE_COST payload when a permanent writer has moved it, otherwise the
+// registry cost for its upgrade level -- and clear the bit (AbstractCard.
+// resetAttributes:2035-2045, `costForTurn = cost`). A row without the bit is
+// untouched: Blood for Blood's and Corruption's combat-persistent reductions,
+// and Confusion's roll, all write `cost` itself in the game and so SURVIVE
+// resetAttributes. cost_now is the only field resetAttributes has to restore
+// here -- block/damage/magicNumber are recomputed from the registry row at play
+// time and damageTypeForTurn has no per-instance storage.
+//
+// WHERE IT FIRES. Three seams, not one:
+//   1. the end-turn sweep, per card of draw/discard/hand
+//      (AbstractRoom.endTurn:397-405);
+//   2. exhaust (ExhaustCardEffect.update:41-43);
+//   3. EVERY MOVE INTO THE DRAW OR DISCARD PILE, mid-turn included.
+// (3) is `Soul.update` (Soul.java:193-231): a card handed to a Soul lands
+// through the switch on its destination CardGroup's type, and the DRAW_PILE
+// (case 2, :205-212) and DISCARD_PILE (case 3, :213-221) arms both call
+// `clearPowers()` -> `resetAttributes()`. The switch-map class Soul$2 pins the
+// labels: MASTER_DECK 1, DRAW_PILE 2, DISCARD_PILE 3, EXHAUST_PILE 4 -- so the
+// master deck and the (Soul-less) exhaust pile get NO reset from this seam.
+// The Soul-routed movers are `CardGroup.moveToDiscardPile` (:836-841),
+// `moveToDeck` (:892-896), `moveToBottomOfDeck` (:898-902) and
+// EmptyDeckShuffleAction's per-card `souls.shuffle`
+// (EmptyDeckShuffleAction.java:55-58). `moveToHand` (:864-890) is NOT one of
+// them: it calls applyPowers, never clearPowers.
+//
+// NOT every append to those piles goes through a Soul: the MakeTempCard*
+// actions add through `ShowCardAndAddToDiscardEffect` / `ShowCardAndAddTo-
+// DrawPileEffect`, which call `discardPile.addToTop` / `drawPile.addToTop|
+// addToBottom|addToRandomSpot` directly (ShowCardAndAddToDiscardEffect.java:37,
+// ShowCardAndAddToDrawPileEffect.java:46-50). Those sites therefore do NOT
+// reset -- which is unobservable for the fresh copies they create but is the
+// reason this is wired per-site rather than at the array append.
+//
+// The Java's reset is animation-deferred (the Soul reaches its pile a beat
+// later), and the live capture shows exactly that one-record lag -- STS101166
+// floor 20 has `Bash+(cost 0)` in the discard at seq 330 and `Bash+(cost 2)` at
+// seq 331. The headless model collapses the animation, which is exact at every
+// action boundary: `Soul.isCarryingCard` (:233-246) returning false only
+// short-circuits to `isDone`, and the destination switch -- hence clearPowers --
+// still runs, so the reset lands even when the card has already been drawn out
+// again.
 void reset_cost_for_turn(CombatState& state, uint8_t pool_index) noexcept;
 
 }  // namespace sts::engine

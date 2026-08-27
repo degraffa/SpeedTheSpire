@@ -3010,6 +3010,106 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   fresh that turn; note `ConfusionPower.onCardDraw` writes nothing at all when
   the roll EQUALS the base cost, so a stale `costForTurn` survives it — the
   same reset gap in (i) is the first thing to rule in or out.
+
+  **2026-08-27 — LEAD D is CLOSED, and it was TWO root causes in one family:
+  card cost state that the engine wrote where the game does not, and did not
+  write where the game does.**
+  **(1) The pile-move `resetAttributes` (witness i).** Confirmed exactly as
+  the lead read it, and the live capture pins it INSIDE the artifact rather
+  than only past its end: STS101166 ps0 floor 20 shows `Bash+(cost 0)` in the
+  discard pile at seq 330 and `Bash+(cost 2)` at seq 331 — no turn boundary
+  between them, the one-record lag being the Soul's animation — and the same
+  0 → 2 step is visible twice more on `Clothesline` (seq 317→318, 321→322).
+  `Soul.update` (`Soul.java:193-231`) switches on the destination
+  CardGroup's type and calls `clearPowers()` → `resetAttributes`
+  (`:2035-2045`) in the DRAW_PILE (case 2, `:205-212`) and DISCARD_PILE
+  (case 3, `:213-221`) arms; the recovered switch-map `Soul$2` pins the
+  labels (MASTER_DECK 1, DRAW_PILE 2, DISCARD_PILE 3, EXHAUST_PILE 4), so the
+  master deck and the Soul-less exhaust pile get nothing from this seam.
+  `reset_cost_for_turn` is now wired at every Soul-routed mover —
+  `moveToDiscardPile` (`CardGroup.java:836-841`, i.e. `UseCardAction:126` and
+  `DiscardAction:89`), `moveToDeck` (`:892-896`), `moveToBottomOfDeck`
+  (`:898-902`) and EmptyDeckShuffleAction's per-card `souls.shuffle`
+  (`:55-58`) — and **deliberately NOT** at the `MakeTempCard*` sites, which
+  add through `ShowCardAndAddToDiscardEffect` / `ShowCardAndAddToDrawPile-
+  Effect` (`:37` / `:46-50`) with a bare `addToTop`/`addToBottom`/
+  `addToRandomSpot` and no Soul at all. `moveToHand` (`:864-890`) calls
+  applyPowers, never clearPowers, so a card returning to the HAND keeps its
+  this-turn cost. The combat-PERSISTENT writers are untouched by
+  construction, since `resetAttributes` restores `costForTurn` FROM `cost`:
+  Corruption/Blood for Blood/Confusion all move `cost` itself and carry no
+  this-turn marker.
+  **(2) `upgrade_instance` clobbered live cost state (witness ii, and half
+  of witness i).** Derived, not assumed: instrumenting the sim's hand at each
+  step shows STS128113 ps27 floor 27 holding `Power Through+ cost 1 flags 0`
+  where the live hand at seq 336 reads `Power Through+(c2)`. The player has
+  **Warped Tongs**, so the card was drawn (Snecko's Confusion rolled it to 2
+  — `costForTurn = cost = newCost`, `ConfusionPower.java:43`, PERMANENT) and
+  then upgraded; `AbstractCard.upgrade()` reaches the cost ONLY through
+  `upgradeBaseCost` (`:725-735`), and `PowerThrough.upgrade`
+  (`PowerThrough.java:40-45`) is upgradeName + upgradeBlock, so live kept 2
+  while the engine re-seeded `cost_now` from the registry row and got 1. The
+  same line explains the OTHER half of witness i: at STS101166 ps0 step 318
+  the engine showed `Bash+ cost 2` where the capture (seq 325) reads
+  `Bash+(c0)` — Armaments upgrading a Mummified-Handed Bash. The blind
+  re-seed also wiped the whole per-instance flag word (freeToPlayOnce,
+  purgeOnUse, exhaustOnUseOnce, the cost bookkeeping). Now: the base cost
+  moves only when the card really calls upgradeBaseCost — exactly when the
+  registry cost differs across the two levels, a call with an unchanged
+  argument being a behavioural no-op — the Java body is transcribed
+  (difference preserved, re-applied only to a positive `costForTurn`, clamped
+  at zero), Blood for Blood keeps its relative arm (`:45-57`,
+  `upgradeBaseCost(this.cost - 1)`), and only the AUTHORED half of the flag
+  word (`kAuthoredCardFlagMask`, types.hpp — Apparition+ dropping ETHEREAL is
+  the live case) is re-read.
+  **CONFUSION CORNER, pinned the way the Java reads it:** `onCardDraw` writes
+  NOTHING when the roll equals `card.cost`, so a this-turn cost would indeed
+  survive a redraw — but with (1) in place no card in the draw or discard
+  pile can still carry one, so the corner is now unreachable through a pile
+  move and the engine's existing equality behaviour is left exactly as it is.
+  **EVIDENCE.** Both captures `--replay` **CLEAN** — STS101166 332/332
+  records, STS128113 338/338, to their artifact ends, unchanged from before
+  the fix (they were clean before too: `--replay` compares RunState, and the
+  CombatState walk is `--combat`, a triage print the tool itself calls "never
+  a pass/fail signal", so neither verdict could ever have carried this
+  defect). The decisive evidence is therefore the re-emitted lines plus the
+  tests. **RE-EMISSION** (whole 21-row cohort, pre-fix vs post-fix on this
+  worktree, written to scratch — `_oracle_data` untouched): 16 rows
+  BYTE-IDENTICAL, **5 rows move** — `STS128113 ps27` fd97df15032dd833 →
+  4c3ce5bed4257125 (victory → max_floor 36, **no longer `--need-victory`**),
+  `STS128113 ps47` 7966b9fc7b734778 → 5c9aa99e871aa428 (→ floor 44, no longer
+  `--need-victory`), `STS101166 ps0` 205938794e73a158 → bc258b4ad4124933 (→
+  act 2 floor 25, no longer `--need-event MindBloom --min-act 3`),
+  `STS105835 ps317` d19125596ef21091 → 9cc317d55f73c9a6 (→ act 2 floor 33, no
+  longer `--need-boss-act 3`), and `STS181259 ps674` 71c879c633fbff46 →
+  846c53b414cfbe8c (still qualifies, floor 51). That is the E0 policy losing
+  the free damage it was buying with costs the game never offered — a policy
+  ceiling, not a content regression. **Three further cohort rows drift from
+  their ARCHIVED lines but are NOT this fix**: `STS103364 ps0`
+  (1efe0d8a6ee15602 archived vs 2baa4221451f764a on the pre-fix base sha, and
+  it already fails the Mind Bloom filter there), plus the two already-known
+  pre-existing NO-QUALIFY rows `STS108173 sim_search_skip ps0` and
+  `STS163083 ps359`, both byte-identical pre and post. Stage-A fixtures, the
+  twin suites and the whole tree are green and unmoved on all three presets
+  (2,690/2,690 each). Tests, nine of them verified RED on the pre-fix engine:
+  `PilesCostReset.MummifiedHandCostZeroIsLostOnTheReshuffle`,
+  `.DeepBreathStyleFullReshuffleResetsToo`,
+  `.MidTurnDiscardOfThePlayedCardResetsItsThisTurnCost`,
+  `.EndOfTurnHandDiscardResetsAsThePileMoveNotOnlyTheSweep`,
+  `CardSkillsWarcry.PutBackOnTheDrawPileResetsTheThisTurnCost`,
+  `CardUpgradeInCombat.ACombatPermanentCostSurvivesAnUpgradeThatKeepsTheCost`,
+  `.AThisTurnZeroSurvivesAnUpgradeThatKeepsTheCost`,
+  `.UpgradeBaseCostCarriesTheThisTurnDifferenceAcross`,
+  `.PerInstanceRuntimeFlagBitsSurviveTheUpgrade`; and the two NEGATIVES that
+  are green on both sides,
+  `PilesCostReset.CombatPersistentCostReductionSurvivesTheSameReshuffle` and
+  `CardUpgradeInCombat.BloodForBloodUpgradeStaysRelativeToItsReducedCost`.
+  **OPEN FOR THE OWNER:** the five moved lines are archived artifacts of a
+  now-superseded engine; re-capturing them (or retiring the four that no
+  longer qualify) is a campaign decision, not an engine one. And the
+  `--replay` blind spot named above is worth its own row: no acceptance
+  surface compares in-combat card COSTS against the capture, which is why a
+  whole cost-state family reached the depth wave undetected.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool
