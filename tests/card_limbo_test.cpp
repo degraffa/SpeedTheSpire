@@ -633,7 +633,7 @@ TEST(CardLimbo, QueuedAutoplayCancelsWhenItsSelectedTargetDies) {
 // both replay verbs create their copy SYNCHRONOUSLY inside the onUseCard
 // fan-out (power_double_tap.cpp / power_duplication.cpp call op_play_card
 // directly), so no queued item can outlive its row's filing. The copy's
-// stamped `misc` below is the proof the stamp resolved first. The leak stays
+// REPLAY_MISC_LINK below is the proof the stamp resolved first. The leak stays
 // because freeing buys nothing observable (the game's purged AbstractCard
 // simply becomes unreferenced) while making later free-slot scans reuse
 // rows -- a byte-visible, play-invisible churn. Bounded: one 160-row pool,
@@ -648,9 +648,11 @@ TEST(CardLimbo, PurgedReplayCopyLeaksItsStampedPoolRowByDesign) {
     ASSERT_TRUE(queue_card_play(s, 0, 0));
     pump(s);
 
-    // Both plays landed (8 + 8: each instance stamps only its OWN misc).
-    EXPECT_EQ(s.monsters[0].hp, 84);
-    EXPECT_EQ(s.card_pool[original].misc, 5) << "original stamped once";
+    // Both plays landed -- 8 then 13, ONE uuid-shared accumulator (see
+    // DoubleTap.ReplayedRampageReadsTheGrownMisc in card_uncommon_attacks_test).
+    EXPECT_EQ(s.monsters[0].hp, 79);
+    EXPECT_EQ(s.card_pool[original].misc, 10)
+        << "both ModifyDamageActions land on the uuid group's owning row";
     // The copy's row: occupied (the leak), stamped (its DAMAGE_RAMPAGE
     // resolved BEFORE the purge -- the FIFO order that retired the recorded
     // race), and a member of NO pile.
@@ -662,8 +664,10 @@ TEST(CardLimbo, PurgedReplayCopyLeaksItsStampedPoolRowByDesign) {
         }
     }
     ASSERT_GE(copy, 0) << "the purged copy's pool row must stay occupied";
-    EXPECT_EQ(s.card_pool[copy].misc, 5)
-        << "the copy's DAMAGE_RAMPAGE stamped its row before the purge filing";
+    EXPECT_TRUE(
+        has_card_flag(s.card_pool[copy].flags, CardFlag::REPLAY_MISC_LINK));
+    EXPECT_EQ(s.card_pool[copy].misc, original)
+        << "the copy's misc word is the link to the original, not a counter";
     const auto in_pile = [&](const CardPoolIndex* pile, uint8_t n) {
         for (uint8_t i = 0; i < n; ++i) {
             if (pile[i] == static_cast<CardPoolIndex>(copy)) return true;

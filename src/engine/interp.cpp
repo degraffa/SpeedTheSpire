@@ -226,11 +226,17 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::DAMAGE_UPGRADE_SCALE:
             return;  // baked into DAMAGE by card_play.cpp
         case Opcode::DAMAGE_RAMPAGE: {
-            const auto pi = static_cast<CardPoolIndex>(item.flags & 0xFFu);
+            const auto stamped = static_cast<CardPoolIndex>(item.flags & 0xFFu);
             const int increment = static_cast<int>(item.flags >> 8u);
-            if (pi >= kCardPoolCap) {
+            if (stamped >= kCardPoolCap) {
                 return;
             }
+            // ModifyDamageAction writes EVERY in-battle instance of the played
+            // card's uuid (ModifyDamageAction.java:26-33), and a replay copy
+            // shares that uuid -- so the accumulator is one number per uuid
+            // group, not per row. misc_group_row (interp.hpp) is that group's
+            // owning row; for an ordinary play it is `stamped` itself.
+            const CardPoolIndex pi = misc_group_row(s, stamped);
             CardInstance& c = s.card_pool[pi];
             op_damage(s, item.src, item.tgt,
                       item.amount + static_cast<int>(c.misc));

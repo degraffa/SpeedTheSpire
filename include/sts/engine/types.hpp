@@ -116,9 +116,35 @@ using RelicId = sts::registry::RelicId;
 //                 has moved AbstractCard.cost away from the registry row and a
 //                 later effect changes costForTurn only, bits 11..13 preserve
 //                 that combat base (all S1 card costs fit in three bits) so
-//                 resetAttributes restores the right value. Bits 14..15 remain
-//                 available to later card mechanics.
+//                 resetAttributes restores the right value. Bits 14 and 15 are
+//                 FREE_TO_PLAY_ONCE and REPLAY_MISC_LINK; the word is now full.
 //                 The encoding is private engine state, never authorable YAML.
+//   REPLAY_MISC_LINK -- (per-INSTANCE runtime bit, never authored in YAML)
+//                 THIS ROW IS A makeSameInstanceOf REPLAY COPY AND ITS `misc`
+//                 WORD IS NOT A COUNTER: it holds the CardPoolIndex of the row
+//                 that owns the uuid group's shared counter. Set only by
+//                 op_play_card's kPlayCardCopy arm, only for a card whose misc
+//                 IS such a counter (Rampage's ModifyDamageAction accumulator,
+//                 Ritual Dagger's run-persistent damage).
+//                 WHY IT EXISTS: DoubleTapPower.onUseCard / Necronomicon.
+//                 onUseCard build their copy with makeSameInstanceOf
+//                 (DoubleTapPower.java:50, AbstractCard.java:819-823), which
+//                 copies the stats AND THE uuid. Every mid-combat write to such
+//                 a counter goes through GetAllInBattleInstances.get(uuid)
+//                 (ModifyDamageAction.java:26-33, RitualDaggerAction.java:39-46),
+//                 which walks cardInUse + all five piles INCLUDING LIMBO
+//                 (GetAllInBattleInstances.java:12-38) -- so the original and
+//                 every live replay copy of it read and write ONE number, in
+//                 resolution order. CardInstance has no identity field and
+//                 CombatState has no room for one (sizeof is a schema event), so
+//                 the copy's own misc -- which the redirect makes dead storage --
+//                 carries the link instead. This is the AUTOPLAY_X_ENERGY
+//                 precedent: a transient purge copy's misc repurposed for the one
+//                 datum that copy needs. Read via misc_group_row (interp.hpp),
+//                 never directly; the link is stored ALREADY RESOLVED, so a copy
+//                 of a copy (Necronomicon re-firing on a Double Tap copy, which
+//                 its gate permits -- it has no !purgeOnUse conjunct) points at
+//                 the same root and no chasing is needed.
 //   FREE_TO_PLAY_ONCE -- (per-INSTANCE runtime bit, never authored in YAML)
 //                 AbstractCard.freeToPlayOnce. The card costs NO energy for its
 //                 next play and is playable regardless of the energy on hand:
@@ -149,6 +175,7 @@ enum class CardFlag : uint16_t {
     SAVED_BASE_COST = 1u << 10,
     // 11..13 are SAVED_BASE_COST's three-bit payload (kSavedBaseCostMask below).
     FREE_TO_PLAY_ONCE = 1u << 14,
+    REPLAY_MISC_LINK = 1u << 15,
 };
 
 inline constexpr uint16_t kSavedBaseCostShift = 11u;

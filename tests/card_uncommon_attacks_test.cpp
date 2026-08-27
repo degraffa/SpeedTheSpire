@@ -15,6 +15,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/powers.hpp"
+#include "sts/engine/relic_hooks.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
 
@@ -71,6 +72,23 @@ CardPoolIndex AddDrawTop(CombatState& s, CardId id, uint8_t upgrade = 0) {
     const CardPoolIndex pi = AddCard(s, id, upgrade);
     s.draw[s.draw_count++] = pi;
     return pi;
+}
+
+void GiveRelic(CombatState& s, RelicId id) {
+    s.relics[s.relic_count].relic_id = static_cast<uint16_t>(id);
+    s.relics[s.relic_count].counter = -1;
+    ++s.relic_count;
+}
+
+CardPoolIndex FindReplayCopy(const CombatState& s, CardId id,
+                             CardPoolIndex original) {
+    for (int pi = 0; pi < kCardPoolCap; ++pi) {
+        if (pi != original &&
+            s.card_pool[pi].card_id == static_cast<uint16_t>(id)) {
+            return static_cast<CardPoolIndex>(pi);
+        }
+    }
+    return static_cast<CardPoolIndex>(kCardPoolCap);
 }
 
 void AddPower(CombatState& s, uint8_t actor, PowerId id, int16_t amount) {
@@ -279,6 +297,134 @@ TEST(CardUncommonRampage, UpgradedInstanceScalesEight) {
     Play(s);
     EXPECT_EQ(s.monsters[0].hp, 76) << "second hit is 8+8";
     EXPECT_EQ(s.card_pool[pi].misc, 16);
+}
+
+// --- The makeSameInstanceOf uuid group (S2.43 campaign defect, 2026-08-27) ---
+//
+// Rampage.use queues DamageAction then ModifyDamageAction(this.uuid, magic)
+// (Rampage.java:36-39), and ModifyDamageAction.update writes EVERY card
+// GetAllInBattleInstances.get(uuid) returns (ModifyDamageAction.java:26-33),
+// a walk that covers cardInUse plus all five piles INCLUDING LIMBO
+// (GetAllInBattleInstances.java:12-38). DoubleTapPower.onUseCard builds its
+// replay with makeSameInstanceOf (DoubleTapPower.java:50), which copies the
+// stats AND the uuid (AbstractCard.java:819-823), and parks it in limbo (:51).
+// So the accumulator is ONE number shared by the original and its live copies:
+// the replay reads what the original's own ModifyDamageAction just wrote.
+//
+// LIVE GROUND TRUTH (oracle capture run_STS100009_a20_ironclad.jsonl, A20
+// Ironclad, floor 1, Cultist): the Cultist stands at 21/53 HP when a base
+// Rampage is played under a 1-stack Double Tap, and the combat ENDS on that
+// play -- 8 + 13 == 21 exactly. The engine used to snapshot misc into the copy
+// at copy time, which is BEFORE the original's ModifyDamageAction resolves
+// (resolve_card_play queues the program at step 4 and fires ON_USE_CARD at
+// step 5, mirroring AbstractPlayer.useCard:1369-1370), so it dealt 8 + 8 == 16
+// and left the Cultist alive on 5.
+TEST(DoubleTap, ReplayedRampageReadsTheGrownMisc) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/21);
+    AddPower(s, kActorPlayer, PowerId::DOUBLE_TAP, 1);
+    const CardPoolIndex pi = AddHand(s, CardId::RAMPAGE);
+
+    Play(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 0)
+        << "8 then 13 kills the capture's 21-HP Cultist on this very play";
+    EXPECT_EQ(s.card_pool[pi].misc, 10)
+        << "both ModifyDamageActions land on the uuid group's owning row";
+    const CardPoolIndex copy = FindReplayCopy(s, CardId::RAMPAGE, pi);
+    ASSERT_LT(copy, kCardPoolCap);
+    EXPECT_TRUE(
+        has_card_flag(s.card_pool[copy].flags, CardFlag::REPLAY_MISC_LINK));
+    EXPECT_EQ(s.card_pool[copy].misc, pi)
+        << "the copy's misc word is the link, not a second counter";
+}
+
+// The write-back half: the REPLAY's ModifyDamageAction also reaches the
+// original, which by then sits in the discard pile (GetAllInBattleInstances
+// walks discardPile too). A later play of the original therefore opens at
+// 8 + 10 == 18, not 8 + 5 == 13.
+TEST(DoubleTap, ReplayedRampageGrowthPersistsOnTheOriginalInstance) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/200);
+    AddPower(s, kActorPlayer, PowerId::DOUBLE_TAP, 1);
+    const CardPoolIndex pi = AddHand(s, CardId::RAMPAGE);
+
+    Play(s);
+    ASSERT_EQ(s.monsters[0].hp, 200 - 8 - 13);
+    ASSERT_EQ(s.card_pool[pi].misc, 10);
+
+    // Replay the original out of the discard pile, with no Double Tap left.
+    s.hand[s.hand_count++] = pi;
+    --s.discard_count;
+    s.player_energy = 6;
+    Play(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 200 - 8 - 13 - 18) << "third hit is 8+10";
+    EXPECT_EQ(s.card_pool[pi].misc, 15);
+}
+
+// Necronomicon's replay is the SAME machinery (Necronomicon.java:70-77 --
+// makeSameInstanceOf, purgeOnUse, front-of-queue autoplay), so it shared the
+// defect and shares the fix. Its gate is `costForTurn >= 2` with no
+// !purgeOnUse conjunct (:62), so the reachable shape is a cost-raised Rampage.
+TEST(Necronomicon, ReplayedRampageReadsTheGrownMisc) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/21);
+    GiveRelic(s, RelicId::NECRONOMICON);
+    const CardPoolIndex pi = AddHand(s, CardId::RAMPAGE);
+    s.card_pool[pi].cost_now = 2;  // `card.costForTurn >= 2` (:62)
+
+    Play(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 0) << "8 then 13, exactly as under Double Tap";
+    EXPECT_EQ(s.card_pool[pi].misc, 10);
+}
+
+// Ritual Dagger's growth is the same GetAllInBattleInstances write
+// (RitualDaggerAction.java:39-46), so a kill scored by the replay copy must
+// grow the ORIGINAL -- the S2.34 deviation this closes. The original is in the
+// exhaust pile by then (Ritual Dagger exhausts), which that walk also covers.
+// 20 HP: the original's 15 does not kill, the replay's 15 does.
+TEST(DoubleTap, ReplayedRitualDaggerKillGrowsTheOriginalInstance) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/20);
+    AddPower(s, kActorPlayer, PowerId::DOUBLE_TAP, 1);
+    const CardPoolIndex pi = AddHand(s, CardId::RITUAL_DAGGER);
+    s.card_pool[pi].misc = 15;  // the ctor's misc (RitualDagger.java:27-29)
+
+    Play(s);
+
+    EXPECT_LE(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.card_pool[pi].misc, 18)
+        << "the replay copy's kill grows the original, not the row that purges";
+    EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, pi));
+}
+
+// The negative: a replay copy is only linked when the card's misc IS a
+// uuid-shared counter. Strike keeps no counter and Searing Blow's scaling is
+// baked from its upgrade COUNT at queue time (card_play.cpp), not from misc --
+// so neither copy carries the link, and both plays deal the same number.
+TEST(DoubleTap, ReplayedNonAccumulatingAttacksAreUnlinkedAndDoNotGrow) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/200);
+    AddPower(s, kActorPlayer, PowerId::DOUBLE_TAP, 1);
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+    Play(s);
+    EXPECT_EQ(s.monsters[0].hp, 200 - 6 - 6) << "6 then 6, no accumulator";
+    EXPECT_EQ(s.card_pool[strike].misc, 0);
+    const CardPoolIndex strike_copy = FindReplayCopy(s, CardId::STRIKE, strike);
+    ASSERT_LT(strike_copy, kCardPoolCap);
+    EXPECT_FALSE(has_card_flag(s.card_pool[strike_copy].flags,
+                               CardFlag::REPLAY_MISC_LINK));
+    EXPECT_EQ(s.card_pool[strike_copy].misc, 0);
+
+    CombatState b = MakeCombat(/*energy=*/6, /*monster_hp=*/200);
+    AddPower(b, kActorPlayer, PowerId::DOUBLE_TAP, 1);
+    const CardPoolIndex blow = AddHand(b, CardId::SEARING_BLOW, /*upgrade=*/2);
+    Play(b);
+    EXPECT_EQ(b.monsters[0].hp, 200 - 21 - 21)
+        << "the upgrade-count scale is per play, not a growing counter";
+    EXPECT_EQ(b.card_pool[blow].misc, 0);
+    const CardPoolIndex blow_copy =
+        FindReplayCopy(b, CardId::SEARING_BLOW, blow);
+    ASSERT_LT(blow_copy, kCardPoolCap);
+    EXPECT_FALSE(has_card_flag(b.card_pool[blow_copy].flags,
+                               CardFlag::REPLAY_MISC_LINK));
 }
 
 TEST(CardUncommonRecklessCharge, MakesDazedAtRandomDrawSpotBaseAndUpgraded) {

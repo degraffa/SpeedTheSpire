@@ -48,9 +48,37 @@ void capture_purge_copy_x_energy(CombatState& s, CardPoolIndex pi,
         energy = 0;
     }
     s.card_pool[pi].misc = static_cast<uint16_t>(energy);
+    // The two misc overloads are mutually exclusive by construction (no X-cost
+    // card grows a uuid-shared counter), and this one wins the word if a future
+    // row ever managed both -- clearing the link keeps misc_group_row honest
+    // rather than letting it read an energy value as a pool index.
     s.card_pool[pi].flags = static_cast<uint16_t>(
-        s.card_pool[pi].flags |
+        (s.card_pool[pi].flags &
+         ~card_flag_bit(CardFlag::REPLAY_MISC_LINK)) |
         card_flag_bit(CardFlag::AUTOPLAY_X_ENERGY));
+}
+
+// Does this card's `misc` hold a mid-combat counter that the game grows through
+// GetAllInBattleInstances.get(uuid) -- i.e. a number a makeSameInstanceOf replay
+// copy SHARES with its original rather than snapshots? Exactly two rows qualify:
+// Rampage (DAMAGE_RAMPAGE, ModifyDamageAction.java:26-33) and Ritual Dagger
+// (RITUAL_DAGGER / initial_misc, RitualDaggerAction.java:39-46). Everything else
+// either leaves misc at zero or uses it as the transient AUTOPLAY_X_ENERGY
+// snapshot, which is per-copy by construction -- so the link is stamped only
+// here and every other replay copy's row stays byte-identical to before.
+[[nodiscard]] bool card_misc_is_uuid_shared(const CardDef& def,
+                                            uint8_t upgrade) noexcept {
+    if (def.initial_misc != 0) {
+        return true;  // Ritual Dagger: the ctor seeds it, the kill grows it
+    }
+    const CardEffectView eff = card_effect_steps(def, upgrade);
+    for (uint8_t k = 0; k < eff.count; ++k) {
+        const auto op = static_cast<Opcode>(eff.steps[k].op);
+        if (op == Opcode::DAMAGE_RAMPAGE || op == Opcode::RITUAL_DAGGER) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // --- CHOOSE_CARD helpers -----------------------------------------------------
@@ -441,6 +469,19 @@ void clone_card_to_hand(CombatState& s, CardPoolIndex src_pi) noexcept {
         return;  // pool exhausted (defensive; 160-row cap, design §4.2)
     }
     s.card_pool[slot] = s.card_pool[src_pi];
+    // makeStatEquivalentCopy, unlike makeSameInstanceOf, does NOT carry the uuid
+    // (AbstractCard.java:825-848 vs :819-823): the clone gets a fresh identity and
+    // a SNAPSHOT of the current baseDamage, then diverges. So if the source row is
+    // itself a replay copy whose misc is a group link, materialise the real value
+    // and drop the link. Unreachable today -- Dual Wield picks from the hand and a
+    // replay copy never leaves limbo -- but the row copy above would otherwise
+    // hand a pool index to a card that treats it as a counter.
+    if (has_card_flag(s.card_pool[slot].flags, CardFlag::REPLAY_MISC_LINK)) {
+        s.card_pool[slot].misc = s.card_pool[misc_group_row(s, src_pi)].misc;
+        s.card_pool[slot].flags = static_cast<uint16_t>(
+            s.card_pool[slot].flags &
+            ~card_flag_bit(CardFlag::REPLAY_MISC_LINK));
+    }
     const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
     if (s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = idx;
@@ -941,8 +982,32 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
         if (slot < 0) {
             return;  // pool exhausted (defensive; 160-row cap, design §4.2)
         }
+        const CardPoolIndex root = misc_group_row(s, pi);
         s.card_pool[slot] = s.card_pool[pi];
         pi = static_cast<CardPoolIndex>(slot);
+        // makeSameInstanceOf copies the uuid too (AbstractCard.java:819-823), so
+        // any counter this card grows mid-combat is SHARED with the original for
+        // as long as the copy is alive: ModifyDamageAction / RitualDaggerAction
+        // both write every instance GetAllInBattleInstances.get(uuid) finds, and
+        // that walk includes LIMBO, where this copy is about to sit
+        // (GetAllInBattleInstances.java:29-32). The plain row copy above cannot
+        // model that -- it snapshots the counter as it stands NOW, which is
+        // BEFORE the original's own play has grown it (resolve_card_play queues
+        // the card's program at step 4 and fires this ON_USE_CARD hook at step 5,
+        // exactly as AbstractPlayer.useCard:1369-1370 does), so a double-tapped
+        // Rampage would deal 8 then 8 instead of 8 then 13. Redirect the copy's
+        // counter reads and writes to the group's owning row instead; `root` is
+        // resolved BEFORE the copy so a copy of a copy (Necronomicon re-firing
+        // on a Double Tap copy) points at the same original.
+        const CardDef* copy_def =
+            card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+        if (copy_def != nullptr &&
+            card_misc_is_uuid_shared(*copy_def, s.card_pool[pi].upgrade)) {
+            s.card_pool[pi].misc = root;
+            s.card_pool[pi].flags = static_cast<uint16_t>(
+                s.card_pool[pi].flags |
+                card_flag_bit(CardFlag::REPLAY_MISC_LINK));
+        }
     }
     if ((flags & kPlayCardPurge) != 0u) {
         s.card_pool[pi].flags = static_cast<uint16_t>(

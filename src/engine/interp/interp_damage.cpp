@@ -1218,22 +1218,25 @@ void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 //       flight, the uuid group is exactly {the played card} (it sits in limbo
 //       as cardInUse while this action resolves, and it is this pool row).
 //
-// DELIBERATELY NOT MODELLED: a kill scored by a same-uuid REPLAY COPY (Double
-// Tap, or Necronomicon on a cost-raised dagger). The game's copy shares the
-// original's uuid (makeSameInstanceOf, AbstractCard.java:819-823), so its
-// kill grows the master card and the original instance; this engine's replay
-// copy is a fresh pool row with no uuid link back (CardInstance carries no
-// identity field, and adding one is CombatState storage no schema grant
-// covers), so such a kill grows only the transient copy, which purges. The
-// copy DOES inherit the original's current misc at copy time (op_play_card's
-// kPlayCardCopy copies the whole instance), so its DAMAGE is right; only the
-// growth's persistence is short. Registry row 131 carries the same note.
+// A KILL SCORED BY A SAME-UUID REPLAY COPY (Double Tap, or Necronomicon on a
+// cost-raised dagger) is now (b) as well, and was the standing deviation here
+// until 2026-08-27. The game's copy shares the original's uuid
+// (makeSameInstanceOf, AbstractCard.java:819-823), so its kill grows the master
+// card and the original instance -- and the engine's copy now redirects both its
+// base-damage read and its growth to the original's row through misc_group_row
+// (interp.hpp; the link rides CardFlag::REPLAY_MISC_LINK, no new storage). That
+// puts the growth on a master-deck row, which is what makes
+// sync_run_persistent_misc carry it into the run. Before the redirect the growth
+// landed on the transient copy and purged with it. Registry row 131 tracks this.
 void op_ritual_dagger(CombatState& s, uint8_t src, uint8_t tgt,
                       uint8_t source_index, int increase) noexcept {
     if (tgt >= kMonsterCap || source_index >= kCardPoolCap) {
         return;
     }
-    CardInstance& card = s.card_pool[source_index];
+    // The uuid group's owning row (interp.hpp misc_group_row): for an ordinary
+    // play, `source_index` itself; for a replay copy, the original instance,
+    // which is what GetAllInBattleInstances.get(uuid) reaches in the Java.
+    CardInstance& card = s.card_pool[misc_group_row(s, source_index)];
     op_damage(s, src, tgt, static_cast<int>(card.misc));
     if (s.monsters[tgt].hp > 0 || monster_half_dead(s.monsters[tgt]) ||
         monster_has_minion_power(s.monsters[tgt]) || increase <= 0) {

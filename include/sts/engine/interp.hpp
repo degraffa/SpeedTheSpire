@@ -782,9 +782,9 @@ enum class Opcode : uint16_t {
                               // CardDef.initial_misc != 0 (pool row i is
                               // master row i for the entry deck; the combat
                               // layer has no RunState -- combat_gold's
-                              // precedent). See op_ritual_dagger for the one
-                              // documented deviation (same-uuid replay-copy
-                              // kills).
+                              // precedent). A same-uuid REPLAY COPY reads and
+                              // grows the ORIGINAL's misc, not its own:
+                              // misc_group_row below (see op_ritual_dagger).
     CODEX = 74,               // CodexAction (CodexAction.java:22-64), queued
                               // by Nilry's Codex's onPlayerEndTurn. Prepared
                               // and intercepted at the action-queue head like
@@ -1972,6 +1972,39 @@ void discard_discovery_regens(CombatState& state, const ActionQueueItem& item,
 void prepare_codex_choice(CombatState& state, ActionQueueItem& item) noexcept;
 void resolve_codex_choice(CombatState& state, const ActionQueueItem& item,
                           uint8_t slot) noexcept;
+
+// --- Shared per-instance misc (the makeSameInstanceOf uuid group) ------------
+//
+// Which pool row owns the mid-combat counter `pi`'s card grows -- Rampage's
+// ModifyDamageAction accumulator (Rampage.java:36-39) and Ritual Dagger's
+// run-persistent damage (RitualDaggerAction.java:39-46). Both writes are
+// `for (AbstractCard c : GetAllInBattleInstances.get(this.uuid))`, and that
+// helper walks cardInUse plus ALL FIVE piles -- draw, discard, exhaust, LIMBO,
+// hand (GetAllInBattleInstances.java:12-38). A replay copy is
+// makeSameInstanceOf (AbstractCard.java:819-823): SAME uuid, sitting in limbo.
+// So the original and its live replay copies share ONE number, each play
+// reading the value the previous one left. That is exactly a single counter on
+// the row this returns.
+//
+// The link lives in the copy's own `misc` word behind CardFlag::REPLAY_MISC_LINK
+// (types.hpp says why there and nowhere else) and is stored already resolved, so
+// this is one hop, never a chase. Both guards below are defensive-only and fall
+// back to the row itself: an out-of-range index cannot be produced by
+// op_play_card, and the card_id check pins the link to a row still holding the
+// same card.
+[[nodiscard]] inline CardPoolIndex misc_group_row(const CombatState& state,
+                                                  CardPoolIndex pi) noexcept {
+    if (pi >= kCardPoolCap ||
+        !has_card_flag(state.card_pool[pi].flags, CardFlag::REPLAY_MISC_LINK)) {
+        return pi;
+    }
+    const uint16_t root = state.card_pool[pi].misc;
+    if (root >= kCardPoolCap ||
+        state.card_pool[root].card_id != state.card_pool[pi].card_id) {
+        return pi;
+    }
+    return static_cast<CardPoolIndex>(root);
+}
 
 // --- Dispatch ----------------------------------------------------------------
 // Execute one popped ActionQueueItem against `state`. One case per Opcode;

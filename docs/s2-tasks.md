@@ -2404,6 +2404,73 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   synthetic temp-tree fixtures only — the committed suite never reaches into
   `_oracle_data`). WSL `debug`/`asan`/`release` green;
   `check_stale_counts.sh` and `check_doc_links.sh` clean.
+  **2026-08-27 — the S2.V2 depth campaign's FIRST divergence is root-caused
+  and fixed in the engine: a double-tapped Rampage under-damaged by its own
+  growth step.** Seed STS100009, A20 Ironclad, floor 1, Cultist. The scripted
+  line and the live game played identically through the turn-2 Double
+  Tap → Rage → Rampage sequence and then parted: the game was on
+  COMBAT_REWARD (the Cultist dead) while the sim played on for two more
+  steps. The capture decides it arithmetically — its per-action `state_json`
+  shows the Cultist at **21/53 HP** with the play about to be issued (turn 1:
+  Bludgeon 53 → 21, then Battle Trance and Rage; turn 2: Double Tap, Rage,
+  then `play 1 0` = Rampage), and base Rampage under one Double Tap charge
+  deals **8 then 13 == 21 exactly**. The sim dealt 8 + 8 = 16 and left it on
+  5. ROOT CAUSE: Rampage's accumulator is per-**uuid**, not per-instance.
+  `Rampage.use` queues DamageAction then `ModifyDamageAction(this.uuid,
+  magicNumber)` (Rampage.java:36-39), and `ModifyDamageAction.update` writes
+  every card `GetAllInBattleInstances.get(uuid)` returns
+  (ModifyDamageAction.java:26-33) — a walk over cardInUse plus **all five
+  piles, limbo included** (GetAllInBattleInstances.java:12-38).
+  `DoubleTapPower.onUseCard` builds its replay with `makeSameInstanceOf`
+  (DoubleTapPower.java:50), which copies the stats **and the uuid**
+  (AbstractCard.java:819-823), and parks it in limbo (:51) — so the replay
+  reads the value the original's own ModifyDamageAction just wrote, and the
+  replay's write lands back on the original (which is in the discard by
+  then). The engine's replay copy was a fresh pool row that SNAPSHOTTED
+  `misc` at copy time, and copy time is strictly before the original's growth
+  resolves (`resolve_card_play` queues the program at step 4 and fires
+  ON_USE_CARD at step 5, mirroring AbstractPlayer.useCard:1369-1370). FIX:
+  `CardFlag::REPLAY_MISC_LINK` (bit 15, the last free bit of the existing
+  instance flags word) marks a replay copy whose `misc` is a link to the row
+  owning the uuid group's counter, and `misc_group_row` (interp.hpp)
+  redirects DAMAGE_RAMPAGE's and RITUAL_DAGGER's reads and writes through it.
+  **No CombatState field, no `sizeof` move, no schema event** — the
+  AUTOPLAY_X_ENERGY precedent (a transient purge copy's misc repurposed), and
+  the link is stored already-resolved so a copy of a copy points at the same
+  root. NECRONOMICON SHARED THE DEFECT and shares the fix: its replay is the
+  same `op_play_card(kPlayCardCopy | kPlayCardPurge | kPlayCardQueueFront)`
+  call (Necronomicon.java:70-77). The fix also DISCHARGES S2.34's standing
+  deviation at `op_ritual_dagger` ("a kill scored by a same-uuid replay copy
+  grows only the transient copy") — the growth now lands on the original,
+  which is a master-deck row, so `sync_run_persistent_misc` carries it into
+  the run; registry rows 45 and 131 are rewritten accordingly and
+  `cards_sidetable.json` re-generated (source hash only). EVIDENCE: the
+  regenerated `seed_scan --policies sim_search --policy-seeds 0` line for
+  STS100009 now reads `i=10 play Rampage` → `i=11 COMBAT_REWARD claim GOLD`,
+  where it previously read `i=11 end` → `i=12 play Bash`; the combat ends on
+  the Rampage play, exactly where the game ended it.
+  `replay_run_diff --replay` over the capture stays CLEAN (12/12 records,
+  0 diffs). Tests: `DoubleTap.ReplayedRampageReadsTheGrownMisc` (the capture's
+  21-HP kill, pinned at 8 then 13),
+  `DoubleTap.ReplayedRampageGrowthPersistsOnTheOriginalInstance`
+  (the write-back half — a later play of the original opens at 8+10),
+  `Necronomicon.ReplayedRampageReadsTheGrownMisc`,
+  `DoubleTap.ReplayedRitualDaggerKillGrowsTheOriginalInstance`, and the
+  negative `DoubleTap.ReplayedNonAccumulatingAttacksAreUnlinkedAndDoNotGrow`
+  (Strike and a Searing Blow+2 replay carry no link and grow nothing);
+  `CardLimbo.PurgedReplayCopyLeaksItsStampedPoolRowByDesign` was pinning the
+  old 8+8 reading and now pins 8+13 with the copy's link. The two other S2.V2
+  cohort lines that play Rampage — `STS100038__sim_search__ps0` (5 Rampage
+  plays) and `STS108107__sim_search__ps153` (21) — were already exact and are
+  unaffected: neither line plays Double Tap at all (checked, 0 occurrences in
+  each), and Necronomicon's gate is `card.costForTurn >= 2`
+  (Necronomicon.java:62), which a cost-1 Rampage cannot meet unmodified — so
+  in those runs the uuid group is the single played instance and the per-row
+  counter was already the per-uuid one. Plain repeated Rampage plays never
+  needed the redirect for the same reason, which is why
+  `CardUncommonRampage.BaseInstanceScalesFiveAfterEachPlay` (8 then 13 on one
+  instance) has been green throughout. Six-preset parity unchanged; no
+  committed trace moved.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool
