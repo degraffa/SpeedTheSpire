@@ -26,7 +26,10 @@
 #include <string>
 #include <vector>
 
+#include "sts/engine/action_queue.hpp"
+#include "sts/engine/cards.hpp"
 #include "sts/engine/event_framework.hpp"
+#include "sts/engine/monster_awakened_one.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/potions.hpp"
@@ -1890,4 +1893,188 @@ TEST(FuzzDriver, AnInterruptedShardResumesToAByteIdenticalSummary) {
     std::remove(log.c_str());
     std::remove(kv.c_str());
     std::remove(scratch(label + "_report_s1.txt").c_str());
+}
+
+// --- 8. the Curiosity hold (S2.V2's Awakened One discharge, 2026-08-27) ------
+//
+// PolicyKind::SIM_SEARCH_HOLD is SIM_SEARCH plus exactly one rule: while a live
+// monster owns PowerId::CURIOSITY, a POWER-card play is priced at what the tax
+// buys the boss. The rule was MEASURED HARMFUL (5 Awakened One kills against
+// SIM_SEARCH's 22 over the same 1,929-fight grid --
+// docs/verification/s2v2-sim-reach.md section 6), which is exactly why the
+// tests below pin two different things: that the rule really is the mechanic it
+// names, and that SIM_SEARCH cannot feel it.
+//
+// GROUND TRUTH, cited where it is used:
+//   CuriosityPower.java:42-47  onUseCard -- a POWER play grants the OWNER
+//                              `amount` Strength, and nothing else does.
+//   AwakenedOne.java:146,149   the ONLY applier: CuriosityPower(this, 2) at
+//                              ascension >= 19, (this, 1) below it. The owner
+//                              is the boss, so the encounter's two Cultists
+//                              (encounters.yaml id 58) never carry it.
+//   AwakenedOne.java:302-308   the Rebirth purge removes Curiosity by name, so
+//                              phase 2 does not tax at all.
+//   AwakenedOne.java:89        SS_AMT = 4, the widest multi-hit either phase
+//                              has, which is the per-turn multiplier on one
+//                              stack of Strength.
+
+namespace {
+
+// The Awakened One's board as a real fight starts it: the boss alone, its
+// pre-battle grants resolved. (The Cultists are omitted deliberately -- part of
+// the point below is that they contribute nothing to the tax.)
+engine::CombatState MakeAwakenedBoard() {
+    engine::CombatState s{};
+    s.player_hp = 60;
+    s.player_max_hp = 80;
+    s.player_energy = 3;
+    s.monster_count = 1;
+    s.monster_hp_rng = engine::from_seed(3);
+    s.ai_rng = engine::from_seed(3);
+    s.card_random_rng = engine::from_seed(3);
+    engine::awakened_one_init(s, 0);
+    engine::awakened_one_use_pre_battle_action(s, 0);
+    while (s.action_count > 0) {
+        const engine::ActionQueueItem it = s.action_queue[s.action_head];
+        s.action_head = static_cast<uint8_t>((s.action_head + 1) %
+                                             engine::kActionQueueCap);
+        --s.action_count;
+        engine::execute_opcode(s, it);
+    }
+    return s;
+}
+
+// Put `id` in hand slot `slot`, backed by its own card-pool row.
+void PutInHand(engine::CombatState& s, uint8_t slot, engine::CardId id) {
+    const auto pool = static_cast<engine::CardPoolIndex>(slot);
+    s.card_pool[pool].card_id = static_cast<uint16_t>(id);
+    s.card_pool[pool].upgrade = 0;
+    s.hand[slot] = pool;
+    if (slot >= s.hand_count) s.hand_count = static_cast<uint8_t>(slot + 1);
+}
+
+Move PlayMove(uint8_t hand_slot) {
+    Move m;
+    m.cat = MoveCat::PLAY_CARD;
+    m.action = engine::make_action(engine::ActionVerb::PLAY_CARD, hand_slot);
+    return m;
+}
+
+}  // namespace
+
+TEST(SimSearchCuriosityHold, TaxIsTheLiveCuriosityStackAndDiesWithTheRebirth) {
+    engine::CombatState s = MakeAwakenedBoard();
+    // The A20 amount is 2 (AwakenedOne.java:144-146). The tax is READ off the
+    // board, not assumed, so a change to that grant moves the rule with it.
+    EXPECT_EQ(sim_search_curiosity_tax(s), 2);
+
+    // The Rebirth purge names Curiosity (AwakenedOne.java:302-308): phase 2
+    // keeps the Strength phase 1 bought but stops taxing, so the rule must
+    // switch itself off exactly there.
+    engine::ActionQueueItem hit{};
+    hit.opcode = static_cast<uint16_t>(engine::Opcode::DAMAGE);
+    hit.src = engine::kActorPlayer;
+    hit.tgt = 0;
+    hit.amount = 1000;
+    hit.flags = engine::make_damage_flags(engine::DamageType::NORMAL);
+    engine::execute_opcode(s, hit);
+    ASSERT_LE(s.monsters[0].hp, 0) << "the half-death did not land";
+    EXPECT_EQ(sim_search_curiosity_tax(s), 0)
+        << "Curiosity is purged at the Rebirth (AwakenedOne.java:306)";
+
+    // And an empty board -- the shape every other combat in the game presents
+    // to this criterion -- never had it.
+    const engine::CombatState none{};
+    EXPECT_EQ(sim_search_curiosity_tax(none), 0);
+}
+
+TEST(SimSearchCuriosityHold, PricesPowerPlaysOnlyAndOnlyWhileTheTaxIsLive) {
+    engine::RunController rc = engine::run_begin(7, 20);
+    rc.phase = static_cast<uint8_t>(engine::RunPhase::COMBAT);
+    rc.room_type = static_cast<uint8_t>(engine::RoomType::Boss);
+    rc.combat = MakeAwakenedBoard();
+    PutInHand(rc.combat, 0, engine::CardId::INFLAME);  // POWER
+    PutInHand(rc.combat, 1, engine::CardId::STRIKE);   // ATTACK
+
+    // tax(2) * SS_AMT(4) * kRolloutTurnCap(20) * kEvalPlayerHp(300).
+    constexpr int64_t kExpected = 2 * 4 * 20 * 300;
+    EXPECT_EQ(sim_search_curiosity_penalty(rc, PlayMove(0)), kExpected);
+    // Only the card TYPE the Java tests (CuriosityPower.java:43) is charged.
+    EXPECT_EQ(sim_search_curiosity_penalty(rc, PlayMove(1)), 0);
+    Move end;
+    end.cat = MoveCat::END_TURN;
+    end.action = engine::make_action(engine::ActionVerb::END_TURN);
+    EXPECT_EQ(sim_search_curiosity_penalty(rc, end), 0);
+
+    // Outside combat there is no board to read, so there is no price.
+    engine::RunController out = rc;
+    out.phase = static_cast<uint8_t>(engine::RunPhase::MAP_CHOICE);
+    EXPECT_EQ(sim_search_curiosity_penalty(out, PlayMove(0)), 0);
+
+    // The same hand against a board with no Curiosity on it: the identical
+    // POWER play is free. That is the non-interference claim, at the price.
+    engine::RunController plain = rc;
+    plain.combat.monsters[0].power_count = 0;
+    EXPECT_EQ(sim_search_curiosity_penalty(plain, PlayMove(0)), 0);
+}
+
+TEST(SimSearchCuriosityHold, NeverFiresOutsideAnAwakenedOneFight) {
+    // The structural half of non-interference: nothing in the registry applies
+    // PowerId::CURIOSITY except AwakenedOne.usePreBattleAction, so on a line
+    // that never meets that boss the tax is zero at EVERY combat decision --
+    // and a zero tax cannot move a score. Walked over real SIM_SEARCH lines
+    // rather than argued from the registry, because the claim is about what the
+    // policy sees.
+    for (int64_t seed : {11, 12, 13}) {
+        engine::RunController rc = engine::run_begin(seed, 20);
+        PolicyRng rng(0xC0FFEEull + static_cast<uint64_t>(seed));
+        int combat_decisions = 0;
+        for (int step = 0; step < 300; ++step) {
+            if (rc.phase == static_cast<uint8_t>(engine::RunPhase::RUN_OVER)) {
+                break;
+            }
+            engine::RunActionMask mask;
+            engine::legal_actions(rc, mask);
+            Move moves[kMoveCap];
+            const size_t n = enumerate_moves(rc, mask, moves, kMoveCap);
+            if (n == 0) break;
+            if (rc.phase == static_cast<uint8_t>(engine::RunPhase::COMBAT)) {
+                ASSERT_EQ(sim_search_curiosity_tax(rc.combat), 0)
+                    << "seed " << seed << " step " << step;
+                ++combat_decisions;
+            }
+            const size_t i =
+                policy_pick(PolicyKind::SIM_SEARCH, rc, moves, n, rng);
+            engine::Action a = moves[i].action;
+            engine::StepResult res{};
+            engine::advance({&rc, 1}, {&a, 1}, {&res, 1});
+        }
+        EXPECT_GT(combat_decisions, 0)
+            << "seed " << seed << " never reached a combat -- vacuous";
+    }
+}
+
+TEST(SimSearchCuriosityHold, LeavesSimSearchTrajectoriesIdentical) {
+    // The behavioural half: on a line that never meets Curiosity the two kinds
+    // are the SAME policy, step for step. They are allowed to diverge only
+    // inside an Awakened One phase 1, which no line this shallow reaches.
+    for (int64_t seed : {11, 12, 13}) {
+        CaseId plain;
+        plain.run_seed = seed;
+        plain.ascension = 20;
+        plain.policy = PolicyKind::SIM_SEARCH;
+        plain.policy_seed = 0xC0FFEEull;
+        CaseId held = plain;
+        held.policy = PolicyKind::SIM_SEARCH_HOLD;
+
+        CaseResult a, b;
+        ASSERT_TRUE(run_case(plain, limits(600), nullptr, a, false));
+        ASSERT_TRUE(run_case(held, limits(600), nullptr, b, false));
+        EXPECT_EQ(a.final_hash, b.final_hash) << "seed " << seed;
+        ASSERT_EQ(a.trajectory.size(), b.trajectory.size()) << "seed " << seed;
+        for (size_t k = 0; k < a.trajectory.size(); ++k) {
+            ASSERT_EQ(a.trajectory[k].bits, b.trajectory[k].bits)
+                << "seed " << seed << " diverged at step " << k;
+        }
+    }
 }

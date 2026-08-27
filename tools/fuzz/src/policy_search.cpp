@@ -27,6 +27,15 @@
 //     playing under the information contract; GT0's player-information layer
 //     is not consulted and not affected.
 //
+//   * ONE NAMED-MECHANIC RULE INSIDE COMBAT, CARRIED BY A THIRD KIND: the
+//     CURIOSITY HOLD (S2.V2's Awakened One discharge, 2026-08-27), charged only
+//     by PolicyKind::SIM_SEARCH_HOLD. It is written in R4's never-take
+//     tradition -- a checkable criterion that NAMES the mechanic it defends
+//     against (Curiosity) -- and it was MEASURED HARMFUL: 5 Awakened One kills
+//     against SIM_SEARCH's 22 on the same 1,929-fight grid. It lives here as
+//     the executable form of that measurement, not as a default. See "the
+//     Curiosity hold" band below for the Java derivation and the A/B.
+//
 //   * MAP-NODE and EVENT-OPTION decisions consult the sim the same way at
 //     floor scale (rollout_floor_and_eval): resolve the rest of the floor
 //     behind the candidate with the deterministic completions and score the
@@ -176,6 +185,120 @@ constexpr int64_t kEvalVictory = 1'000'000'000'000;
 // still alive, so a stalemate rates far below any win).
 constexpr int kRolloutBudget = 400;
 constexpr uint16_t kRolloutTurnCap = 20;  // see complete_combat
+
+// --- the Curiosity hold (S2.V2's Awakened One discharge) ---------------------
+//
+// THE ONE COMBAT RULE THAT NAMES A MECHANIC. S2.V2's reach report closed with
+// exactly one unmet S2-G2 item-3 cell: 0 kills in 553 Awakened-One-first Act-3
+// boss fights, against 3/585 on the {Time Eater, Donu and Deca} pair. The
+// mechanism is not a lottery, it is a rule of this fight:
+//
+//   CuriosityPower.onUseCard (CuriosityPower.java:42-47) --
+//       `if (card.type == AbstractCard.CardType.POWER) { flash();
+//        addToBot(new ApplyPowerAction(this.owner, this.owner,
+//                 new StrengthPower(this.owner, this.amount), this.amount)); }`
+//   -- so every POWER card the PLAYER plays hands the power's OWNER `amount`
+//   Strength. The owner is the Awakened One itself
+//   (AwakenedOne.usePreBattleAction, AwakenedOne.java:146 grants
+//   `new CuriosityPower(this, 2)` at ascension >= 19, :149 grants 1 below it),
+//   which is why the two Cultists of encounters.yaml id 58 do NOT enter this
+//   rule: Curiosity is on the boss and grants Strength to the boss.
+//
+//   IT IS PAID FOR THE WHOLE FIGHT, NOT THE PHASE. The Rebirth purge
+//   (AwakenedOne.java:302-308) removes Curiosity by name -- so phase 2 stops
+//   TAXING -- but Strength is a BUFF and is not in the purge list, so every
+//   stack phase 1 bought is still on the boss through phase 2's 320 HP
+//   (A_9_STAGE_2_HP, :81, restored by changeState("REBIRTH") :214,:225).
+//
+//   AND IT IS MULTIPLIED BY THE MULTI-HIT MOVES. Strength is per HIT: phase 1's
+//   SOUL_STRIKE is SS_AMT = 4 hits (:89, takeTurn case 2 loops four DamageActions
+//   :169-172) and phase 2's TACKLE is TACKLE_AMT = 3 (:100, :199-203). Four is
+//   the widest, so one Curiosity stack is worth up to `amount * 4` extra damage
+//   on a single boss turn.
+//
+// THE PRICE THE RULE CHARGES. The hypothesis this rule encodes is that the
+// search cannot price the tax itself, because it is priced only inside the
+// rollout's own horizon: complete_combat stops at kRolloutTurnCap turns, while
+// the fight carries 320 + 320 HP across two phases at A>=9
+// (:80-81,:110-114,:214) with 15 Regenerate a turn from A19 (:145). On that
+// hypothesis the uncounted part is what compounds, so the hold prices ONE more
+// horizon of the tax:
+//
+//     penalty = amount * kCuriosityMaxHits * kRolloutTurnCap * kEvalPlayerHp
+//
+// which at the A20 amount of 2 is 2*4*20*300 = 48,000 -- above any ongoing-combat
+// score difference (a whole 80 HP player bar is 24,000; a live monster is 3,000),
+// and far BELOW kEvalCombatOver (1e9). That ordering is the rule's shape: hold
+// Powers, unless playing this one actually ENDS the fight.
+//
+// AND THE HYPOTHESIS IS FALSE, WHICH IS WHY THIS IS A SEPARATE POLICY KIND.
+// SIM_SEARCH's preview is an EXACT, OMNISCIENT engine advance and Curiosity is
+// a native power the engine applies inside it, so a rollout that reaches the
+// end of the fight -- and these fights end well inside twenty turns -- already
+// pays the whole tax. The penalty above therefore double-counts a cost the
+// evaluation has already charged, and it suppresses Powers the deck needs. That
+// is not a guess: on a paired 110-seed x 1,024 policy-seed grid (112,640 rows
+// each, 1,929 Awakened One boss fights each) SIM_SEARCH killed the boss 22
+// times and SIM_SEARCH_HOLD 5. The rule is kept, addressable and tested, as the
+// executable form of that measurement; the S2-G2 cohort schedules from
+// SIM_SEARCH. docs/verification/s2v2-sim-reach.md §6 has the numbers.
+//
+// THE CRITERION IS "A LIVE MONSTER OWNS CURIOSITY", not "the encounter is
+// Awakened One". It is checkable from the board, it is exactly the condition
+// under which the mechanic can fire, and it turns itself OFF at the Rebirth --
+// phase 2 no longer taxes. Nothing else in the registry ever applies
+// PowerId::CURIOSITY (powers.yaml id 108: its only applier is
+// AwakenedOne.usePreBattleAction), so even under SIM_SEARCH_HOLD the rule
+// cannot change a decision in any other combat -- pinned by
+// SimSearchCuriosityHold.NeverFiresOutsideAnAwakenedOneFight.
+constexpr int kCuriosityMaxHits = 4;  // SS_AMT (AwakenedOne.java:89)
+
+// Which kinds charge the hold. SIM_SEARCH and SIM_SEARCH_SKIP never do, so
+// every one of their decisions is byte-identical to the pre-rule engine.
+[[nodiscard]] constexpr bool kind_holds_powers(PolicyKind kind) noexcept {
+    return kind == PolicyKind::SIM_SEARCH_HOLD;
+}
+
+// The Strength ONE power play would hand a live monster right now: the stack
+// amount of the first live monster's CURIOSITY, else 0 (the rule is off).
+[[nodiscard]] int curiosity_tax(const engine::CombatState& cs) noexcept {
+    for (int i = 0; i < cs.monster_count && i < engine::kMonsterCap; ++i) {
+        const engine::MonsterState& mo = cs.monsters[i];
+        if (mo.monster_id == 0 || mo.hp <= 0) continue;
+        for (uint8_t p = 0; p < mo.power_count && p < engine::kPowerCap; ++p) {
+            if (mo.powers[p].power_id ==
+                    static_cast<uint16_t>(engine::PowerId::CURIOSITY) &&
+                mo.powers[p].amount > 0) {
+                return mo.powers[p].amount;
+            }
+        }
+    }
+    return 0;
+}
+
+// Does this candidate play a POWER-type card out of hand? (The only card type
+// CuriosityPower.onUseCard reacts to, :43.)
+[[nodiscard]] bool move_plays_a_power(const RunController& rc,
+                                      const Move& m) noexcept {
+    if (m.cat != MoveCat::PLAY_CARD && m.cat != MoveCat::PLAY_CARD_TARGET) {
+        return false;
+    }
+    const uint8_t slot = engine::action_arg0(m.action);
+    if (slot >= rc.combat.hand_count) return false;
+    const engine::CardInstance& ci = rc.combat.card_pool[rc.combat.hand[slot]];
+    const engine::CardDef* def =
+        engine::card_def(static_cast<CardId>(ci.card_id));
+    return def != nullptr && def->type == CardType::POWER;
+}
+
+[[nodiscard]] int64_t curiosity_penalty_for(const engine::CombatState& cs,
+                                            const RunController& rc,
+                                            const Move& m) noexcept {
+    const int tax = curiosity_tax(cs);
+    if (tax <= 0 || !move_plays_a_power(rc, m)) return 0;
+    return static_cast<int64_t>(tax) * kCuriosityMaxHits *
+           static_cast<int64_t>(kRolloutTurnCap) * kEvalPlayerHp;
+}
 
 // --- small helpers -----------------------------------------------------------
 
@@ -652,8 +775,18 @@ enum class GridWants : uint8_t { WORST, BEST };
 // `threat` flips the play weights to the block-first shape -- the same
 // under-attack switch greedy_policy.py runs off the intent banner, derived
 // here by the sim probe in complete_combat below.
+//
+// `hold_powers` is the Curiosity hold applied to the COMPLETION, so the tail
+// every candidate is completed with is the tail the policy will actually play.
+// Without it the preview would tax itself with power plays the real line then
+// never makes, and every candidate's score would be measured against a fight
+// that cannot happen. A held power ranks BELOW END_TURN (1) rather than being
+// removed: the completion then ends the turn instead, which is exactly the
+// hold. It is false in every combat where no live monster owns Curiosity, so
+// the completion is byte-identical to before outside that one fight.
 [[nodiscard]] int completion_rank(const RunController& rc, const Move& m,
-                                  bool threat) noexcept {
+                                  bool threat,
+                                  bool hold_powers = false) noexcept {
     switch (m.cat) {
         case MoveCat::PLAY_CARD:
         case MoveCat::PLAY_CARD_TARGET: {
@@ -664,6 +797,7 @@ enum class GridWants : uint8_t { WORST, BEST };
             const engine::CardDef* def =
                 engine::card_def(static_cast<CardId>(ci.card_id));
             if (def == nullptr) return 1000;
+            if (hold_powers && def->type == CardType::POWER) return 0;
             const StaticCardScore sc = static_card_score(*def, ci.upgrade);
             return threat ? 1000 + sc.damage + sc.block * 4
                           : 1000 + sc.damage * 4 + sc.block;
@@ -686,11 +820,19 @@ void apply_one(RunController& rc, Action a) noexcept;  // defined below
 // state, end the turn on the copy, read the HP delta (the sim IS the intent
 // banner, with none of the banner's display caveats) -- and plays block-first
 // while anything is actually going to hit. Returns the steps consumed.
-[[nodiscard]] int complete_combat(RunController& sim, int budget,
+[[nodiscard]] int complete_combat(PolicyKind kind, RunController& sim,
+                                 int budget,
                                  uint16_t turn_cap = kRolloutTurnCap) noexcept {
     int steps = 0;
     bool threat = false;
     uint32_t probed_turn = UINT32_MAX;
+    // The Curiosity hold, evaluated ONCE at entry and thereafter only while it
+    // is on. Nothing applies PowerId::CURIOSITY mid-combat (its only applier is
+    // usePreBattleAction), so the tax can only ever turn OFF -- at the Rebirth
+    // purge -- and a completion that entered without it can never acquire it.
+    // Under SIM_SEARCH / SIM_SEARCH_SKIP the flag is a compile-time false and
+    // this costs nothing at all.
+    bool hold_powers = kind_holds_powers(kind) && curiosity_tax(sim.combat) > 0;
     // The step budget alone does not bound COST: one END_TURN advance pumps
     // the whole monster phase, and a ten-monster spawner fight makes that the
     // expensive unit (measured: >4 s per searched action inside STS126146's
@@ -718,10 +860,11 @@ void apply_one(RunController& rc, Action a) noexcept;  // defined below
             threat = hp_after < sim.combat.player_hp;
             probed_turn = sim.combat.turn;
         }
+        if (hold_powers) hold_powers = curiosity_tax(sim.combat) > 0;
         size_t best_i = 0;
         int best_rank = 0;
         for (size_t i = 0; i < n; ++i) {
-            const int r = completion_rank(sim, moves[i], threat);
+            const int r = completion_rank(sim, moves[i], threat, hold_powers);
             if (i == 0 || r > best_rank) {
                 best_rank = r;
                 best_i = i;
@@ -828,9 +971,10 @@ constexpr int kMoveBudgetProduct = 24 * kRolloutBudget;
     return b < 64 ? 64 : b;
 }
 
-[[nodiscard]] int64_t rollout_and_eval(RunController& sim, int budget,
+[[nodiscard]] int64_t rollout_and_eval(PolicyKind kind, RunController& sim,
+                                       int budget,
                                        const EvalWeights& w) noexcept {
-    (void)complete_combat(sim, budget);
+    (void)complete_combat(kind, sim, budget);
     return eval_state(sim, w);
 }
 
@@ -858,7 +1002,7 @@ constexpr uint16_t kBossInnerTurnCap = 6;
 constexpr uint16_t kBossDeepTurns = 32;  // 2-ply only through the opening
 constexpr uint16_t kSearchTurns = 32;    // past this: static rank only
 
-[[nodiscard]] int64_t rollout_boss_and_eval(RunController& sim,
+[[nodiscard]] int64_t rollout_boss_and_eval(PolicyKind kind, RunController& sim,
                                             const EvalWeights& w) noexcept {
     if (sim.phase != static_cast<uint8_t>(RunPhase::COMBAT)) {
         return eval_state(sim, w);
@@ -873,8 +1017,17 @@ constexpr uint16_t kSearchTurns = 32;    // past this: static rank only
     for (size_t j = 0; j < n; ++j) {
         RunController sim2 = sim;
         apply_one(sim2, inner[j].action);
-        (void)complete_combat(sim2, kBossInnerRollout, kBossInnerTurnCap);
-        const int64_t s = eval_state(sim2, w);
+        (void)complete_combat(kind, sim2, kBossInnerRollout, kBossInnerTurnCap);
+        // The SECOND searched ply pays the Curiosity hold too. The Awakened One
+        // is a boss room with three live records at the bell (two Cultists and
+        // the boss), so this deepening IS active in the fight the rule exists
+        // for; leaving the inner ply untaxed would let a candidate score itself
+        // on a power play the outer ply is forbidden to make.
+        const int64_t s =
+            eval_state(sim2, w) -
+            (kind_holds_powers(kind)
+                 ? curiosity_penalty_for(sim.combat, sim, inner[j])
+                 : 0);
         if (s > best) best = s;
     }
     return best;
@@ -928,7 +1081,7 @@ constexpr int kFloorRolloutBudget = 600;
         }
         if (phase == RunPhase::COMBAT) {
             const int used =
-                complete_combat(sim, kFloorRolloutBudget - step);
+                complete_combat(kind, sim, kFloorRolloutBudget - step);
             step += used > 0 ? used - 1 : 0;
             if (used == 0) break;
             continue;
@@ -954,6 +1107,16 @@ constexpr int kFloorRolloutBudget = 600;
 
 }  // namespace
 
+int sim_search_curiosity_tax(const engine::CombatState& cs) noexcept {
+    return curiosity_tax(cs);
+}
+
+int64_t sim_search_curiosity_penalty(const RunController& rc,
+                                     const Move& m) noexcept {
+    if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT)) return 0;
+    return curiosity_penalty_for(rc.combat, rc, m);
+}
+
 size_t sim_search_pick(PolicyKind kind, const RunController& rc,
                        const Move* moves, size_t n, PolicyRng& rng) noexcept {
     const bool in_combat = rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
@@ -970,6 +1133,11 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
     const EvalWeights w{in_combat && potion_worth_spending(rc)
                             ? kEvalPotionHeldSpendable
                             : kEvalPotionHeld};
+    // The Curiosity hold's trigger for THIS decision, read once off the board.
+    // False for SIM_SEARCH / SIM_SEARCH_SKIP always, and for SIM_SEARCH_HOLD in
+    // every combat except an Awakened One's phase 1.
+    const bool hold_powers =
+        in_combat && kind_holds_powers(kind) && curiosity_tax(rc.combat) > 0;
     for (size_t i = 0; i < n; ++i) {
         if (in_combat) {
             // THE TURN RAMP -- a hard cost ceiling per fight, encoded in
@@ -981,7 +1149,7 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             // action cap or its livelock detector cheaply instead of
             // multiplying rollouts into a dead fight.
             if (rc.combat.turn > kSearchTurns) {
-                scores[i] = completion_rank(rc, moves[i], false);
+                scores[i] = completion_rank(rc, moves[i], false, hold_powers);
             } else {
                 RunController sim = rc;  // trivially-copyable snapshot
                 apply_one(sim, moves[i].action);
@@ -992,8 +1160,8 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
                             n <= kBossDeepMaxCandidates &&
                             live_monster_count(rc.combat) <=
                                 kBossDeepMaxLiveMonsters
-                        ? rollout_boss_and_eval(sim, w)  // 2-ply
-                        : rollout_and_eval(sim, rollout_budget_for(n), w);
+                        ? rollout_boss_and_eval(kind, sim, w)  // 2-ply
+                        : rollout_and_eval(kind, sim, rollout_budget_for(n), w);
                 // Hand-select screens: CONFIRM breaks exact evaluation TIES
                 // (+1 is far below any real difference; one HP is worth
                 // 300), so an indifferent toggle can never outrank plain
@@ -1005,6 +1173,13 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
                 // measured and carried in the S2.V2 reach report rather
                 // than hidden by a deeper special case.
                 if (moves[i].cat == MoveCat::CHOICE_CONFIRM) scores[i] += 1;
+            }
+            // The Curiosity hold on the SEARCHED ply (SIM_SEARCH_HOLD only).
+            // Subtracted after the rollout rather than folded into it, because
+            // it prices the tail the rollout's turn cap was assumed not to see
+            // -- the band above the helpers, and why that assumption is wrong.
+            if (hold_powers) {
+                scores[i] -= curiosity_penalty_for(rc.combat, rc, moves[i]);
             }
         } else if (moves[i].cat == MoveCat::MAP_NODE ||
                    moves[i].cat == MoveCat::MAP_BOSS ||

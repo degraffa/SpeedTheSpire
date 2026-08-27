@@ -927,23 +927,29 @@ TEST(SeedScanLimits, TheActionCapIsAThreeActBudget) {
 }
 
 // ---------------------------------------------------------------------------
-// S2.V2 -- the sim-consulting policy (SIM_SEARCH / SIM_SEARCH_SKIP) and the
-// STS-SCRIPT v1 emitter.
+// S2.V2 -- the sim-consulting policy (SIM_SEARCH / SIM_SEARCH_SKIP /
+// SIM_SEARCH_HOLD) and the STS-SCRIPT v1 emitter.
 // ---------------------------------------------------------------------------
 
 TEST(SimSearch, PolicyNamesRoundTripAndAreAppended) {
-    // The two new kinds are APPENDED (5 and 6) -- a renumber of the E0 kinds
-    // would silently relabel every existing scan row and cohort artifact.
+    // The new kinds are APPENDED (5, 6, and S2.V2's Awakened One discharge
+    // experiment at 7) -- a renumber of the E0 kinds would silently relabel
+    // every existing scan row and cohort artifact.
     EXPECT_EQ(static_cast<uint8_t>(PolicyKind::SIM_SEARCH), 5);
     EXPECT_EQ(static_cast<uint8_t>(PolicyKind::SIM_SEARCH_SKIP), 6);
+    EXPECT_EQ(static_cast<uint8_t>(PolicyKind::SIM_SEARCH_HOLD), 7);
     EXPECT_STREQ(sts::fuzz::policy_name(PolicyKind::SIM_SEARCH), "sim_search");
     EXPECT_STREQ(sts::fuzz::policy_name(PolicyKind::SIM_SEARCH_SKIP),
                  "sim_search_skip");
+    EXPECT_STREQ(sts::fuzz::policy_name(PolicyKind::SIM_SEARCH_HOLD),
+                 "sim_search_hold");
     PolicyKind k{};
     ASSERT_TRUE(sts::fuzz::policy_from_name("sim_search", k));
     EXPECT_EQ(k, PolicyKind::SIM_SEARCH);
     ASSERT_TRUE(sts::fuzz::policy_from_name("sim_search_skip", k));
     EXPECT_EQ(k, PolicyKind::SIM_SEARCH_SKIP);
+    ASSERT_TRUE(sts::fuzz::policy_from_name("sim_search_hold", k));
+    EXPECT_EQ(k, PolicyKind::SIM_SEARCH_HOLD);
 }
 
 TEST(SimSearch, ScanIsDeterministicIncludingTheTrajectory) {

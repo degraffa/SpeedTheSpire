@@ -21,14 +21,17 @@ report plus the named tests.
   three Act-2 registry bosses, each line continuing through the boss-relic
   pick and the act-2→3 transition into a playable Act-3 floor. The Mind
   Bloom directed-capture line is schedulable (21 stage-1 lines fired it).
-* **Item 3 is schedulable except for one registry row.** Three double-boss
-  victories exist over two distinct first-boss identities (Time Eater ×2,
-  Donu and Deca ×1), all on the {Time Eater, Donu and Deca} pair — so Time
-  Eater and Donu and Deca are witnessed killed. **Awakened One is not: 0
-  kills in 553 Awakened-first Act-3 boss fights** at a scale where the
-  other pair's conversion (3/585 = 0.51 %) predicts ~2.8. Per the row's own
-  instruction this is reported as a shortfall, not routed around; §6 has
-  the numbers and the mechanism hypothesis.
+* **Item 3 is schedulable, all three Act-3 rows** (§6 amended 2026-08-27).
+  Three double-boss victories exist over two distinct first-boss identities
+  (Time Eater ×2, Donu and Deca ×1), so Time Eater and Donu and Deca are
+  witnessed killed. Awakened One was first reported here as a shortfall —
+  0 kills in 553 fights — on the strength of the VICTORY probe; that probe
+  is wrong for this question, and against the exact one (`max_floor == 51`,
+  the A20 double-boss room) the unmodified `sim_search` kills the Awakened
+  One **22 times in 1,929 dedicated fights**. Seven kill triples are
+  scheduled in §5. §6 carries the correction, the seven-seed cohort, and
+  the paired A/B that falsified the mechanism hypothesis this report
+  originally offered.
 
 ## 1. What ran
 
@@ -47,6 +50,11 @@ Release preset (`win-release`, clang-cl), `seed_scan` at its S2.42 defaults
 The re-seeding waves are the sanctioned cherry-pick: a (seed, policy_seed)
 pair IS the cohort unit (design §6 item 3), and the one-draw tie-break gives
 one seed many distinct deterministic lines.
+
+The **2026-08-27 Awakened discharge campaign** is a separate, later wave set
+(a further **325,280 rows / 101,061,558 actions**) and is tabulated in §6
+rather than folded in here, so the four waves above keep meaning what they
+meant when they were run.
 
 ## 2. Measured reach
 
@@ -102,7 +110,10 @@ run-layer decisions are the b1.7.0 heuristics ported from
 R2's potion discipline (as evaluation hold-values), the `ACT_PROFILES`
 overlays, R4's boss-relic never-take list. `sim_search_skip` differs in
 exactly one rule — R4 answers SKIP — mirroring the SHA-pinned
-`policy_bossrelic_take/skip.json` cohort identities.
+`policy_bossrelic_take/skip.json` cohort identities. A third kind,
+`sim_search_hold` (added 2026-08-27), differs in exactly one other rule —
+the Curiosity hold — and exists only to carry §6.3's rejected experiment;
+nothing in this report's cohorts uses it.
 
 No wall clock, no floats, no unseeded randomness: every score is integer
 arithmetic, every bound (`kRolloutBudget`, `kRolloutTurnCap`, the 2-ply
@@ -174,34 +185,171 @@ completed A20 double-boss lines over two distinct first-boss identities:
 the ≥3-over-≥2 clause of item 3 is met. Time Eater and Donu and Deca are
 each witnessed killed (each victory kills both bosses of the pair).
 
+**Act-3 depth, Awakened One kills** (added 2026-08-27; filter `--min-floor 51
+--need-boss-id "Awakened One"`, policy `sim_search`). Each line kills the
+Awakened One on floor 50 and crosses into the A20 double-boss room on floor
+51, where it then dies to the second boss — so these are Act-3 boss-KILL
+lines, not victories. §6 has why `max_floor == 51` is the exact witness and
+why the victory probe is not. Seven triples over **seven distinct seeds**:
+
+| seed | policy | ps | act-3 first boss | second boss | steps | final_hash |
+|---|---|---|---|---|---|---|
+| STS193303 | sim_search | 106 | Awakened One | Time Eater | 582 | db8f14fb… |
+| STS153269 | sim_search | 174 | Awakened One | Donu and Deca | 791 | 6b2790e7… |
+| STS105835 | sim_search | 317 | Awakened One | Donu and Deca | 675 | 9011c1d7… |
+| STS168419 | sim_search | 343 | Awakened One | Donu and Deca | 593 | c6332750… |
+| STS163083 | sim_search | 359 | Awakened One | Time Eater | 594 | c89aaa97… |
+| STS130988 | sim_search | 478 | Awakened One | Time Eater | 707 | a0fa139a… |
+| STS181259 | sim_search | 674 | Awakened One | Donu and Deca | 623 | 71c879c6… |
+
+All seven were emitted individually under `--verify-determinism`
+(**7/7 scripts written, 0 mismatches**), and each script's own steps are the
+per-line proof: its floor-50 play targets name `AwakenedOne` and `Cultist`,
+its floor-51 play targets name `Donu`/`Deca` or `TimeEater`.
+
 **Mind Bloom directed capture** (filter
 `--need-event MindBloom --min-act 3`): STS101166 / sim_search / ps0
 (731 steps — also an Automaton take-kill line) and STS103364 / sim_search /
 ps0 (671 steps). 21 stage-1 lines fired Mind Bloom in Act 3; these two are
 the scheduled pair.
 
-## 6. The shortfall: Awakened One, and why it is reported rather than fixed
+## 6. Awakened One: the shortfall, and its discharge (2026-08-27)
 
-"Every Act-3 registry BOSS row witnessed killed" needs an Awakened One kill.
-The scan output cannot schedule one: **0 victories in 553 Awakened-One-first
-Act-3 boss fights** (waves V/W/X/Y/Z, 43,648 dedicated re-seed rows on the
-105 seeds whose Act-3 first boss is Awakened One), against 3/585 (0.51 %) on
-the {Time Eater, Donu and Deca} pair. At the pair's rate 553 fights predict
-~2.8 kills; observing zero (p ≈ 0.06 under that rate) plus the mechanism —
-Curiosity gains strength every time the player plays a Power, and this
-policy's widened R1 gate deliberately builds Power-carrying decks; the fight
-is 640+ HP over two phases with two Cultist adds, followed at A20 by a
-second boss on the same HP pool — says the miss is structural for this
-policy shape, not a lottery still worth buying tickets in.
+**What this section said first.** "Every Act-3 registry BOSS row witnessed
+killed" needs an Awakened One kill, and the S2.V2 scan reported it could not
+schedule one: 0 in 553 Awakened-One-first Act-3 boss fights (43,648 dedicated
+re-seed rows on 105 seeds), against 3/585 on the {Time Eater, Donu and Deca}
+pair. It offered a mechanism — Curiosity gains Strength on every Power the
+player plays, and the widened R1 gate builds Power-carrying decks — and named
+an Awakened-aware hold-Powers rule as the first option for the next session.
 
-Per the ledger row's own instruction ("if reach is insufficient for the
-bars even with deeper search, STOP and report — do not weaken the bar"),
-the Awakened One row is left explicitly unscheduled. The options the next
-session can weigh: an Awakened-aware variant of the one rule that feeds it
-(hold Powers in that fight — a checkable criterion in the R4 never-take
-tradition, since Curiosity names the rule it invalidates), more scale, or
-an owner disposition on the bar. Everything else in items 2–3 schedules
-from the output that exists today.
+**The cell is now discharged, and both halves of that account were wrong.**
+The 553 was a PROBE artifact, and the mechanism hypothesis is falsified by a
+paired measurement. Neither the policy nor the bar moved.
+
+### 6.1 The probe: `victory` is not "the Act-3 boss died"
+
+`--need-victory` and `--need-boss-kill-act 3` are the same clause, and that
+clause is `run_is_victory` — which at A20 means **both** Act-3 bosses, because
+the double-boss route puts a second boss on the same HP pool
+(ProceedButton.java:210-220, mirrored in `run_advance.cpp`'s
+`bosses_left_after_entry_pop == 2` branch). A line that kills the Awakened One
+and then dies to the Time Eater standing behind it is a witnessed Awakened One
+kill and is invisible to that probe. That is not a hypothetical: it is what
+every one of the twenty-two kills below does.
+
+The exact witness for the FIRST Act-3 boss is **`max_floor == 51`**:
+
+* The Act-3 map occupies floors 34–50 — `act_floor_base(3) == 34`
+  (`run_advance.hpp:826`) and the boss row sits at +16 — so no map node can
+  produce floor 51.
+* Floor 51 exists only as `goToDoubleBoss`'s synthetic `MapRoomNode(-1, 15)`,
+  reached only from the Act-3 boss room's proceed, and entered through a full
+  `nextRoomTransition` that does `++floorNum`.
+* So on a seed whose `boss_ids[act 3]` is Awakened One — that is
+  `boss_list[0]`, the first Act-3 boss room's encounter — `max_floor == 51`
+  means the Awakened One died.
+
+And it is checkable per line rather than argued: in every emitted script the
+floor-50 steps' play targets are `AwakenedOne` and `Cultist`, and the floor-51
+steps' are `Donu`/`Deca` or `TimeEater`.
+
+### 6.2 What ran, and the paired A/B
+
+| wave | cases | rows |
+|---|---|---|
+| pool regeneration | STS100000–STS199999 × `sim_search` × ps0, filtered `--need-boss-kill-act 2 --need-boss-id "Awakened One"` | 100,000 |
+| A/B arm A | the resulting 110 seeds × `sim_search` × ps0–1023 | 112,640 |
+| A/B arm B | the same 110 seeds × `sim_search_hold` × ps0–1023 | 112,640 |
+
+**325,280 rows / 101,061,558 actions**, release preset, same defaults as §1.
+The 110-seed pool is regenerated by the filter above rather than carried over
+from the stage-4 list; the breadth wave that produced it saw 25 Act-3 boss
+fights (Awakened One 9, Donu and Deca 9, Time Eater 7) and 0 kills of any of
+them, which is the honest ps0 base rate and why re-seeding is the instrument.
+
+Both arms are the SAME (seed, policy_seed) grid, so this is paired:
+
+| policy | rows | Awakened One fights | Awakened One KILLS (`max_floor==51`) | victories |
+|---|---|---|---|---|
+| `sim_search` (unchanged) | 112,640 | 1,929 | **22** (1.14 %) over 7 distinct seeds | 0 |
+| `sim_search_hold` | 112,640 | 1,929 | 5 (0.26 %) over 4 distinct seeds | 0 |
+
+27,743 of the 28,160 rows in the first shared block are byte-identical between
+the arms; the 417 that differ are Awakened One fights, which is the hold rule's
+whole footprint.
+
+**Item 3's Awakened One cell is met**: §5 schedules seven of those 22 lines,
+one per distinct seed, each `--verify-determinism` clean.
+
+### 6.3 The hold rule, implemented and rejected
+
+The report's first option was built exactly as described — a checkable
+criterion in R4's never-take tradition that names the mechanic it defends
+against. It is `PolicyKind::SIM_SEARCH_HOLD` (`policy_search.cpp`), and its
+trigger is a property of the board, not of the encounter: while a LIVE monster
+owns `PowerId::CURIOSITY` with a positive stack, a POWER-card play is charged
+`amount × 4 × 20 × 300` — the Strength one play hands the owner
+(CuriosityPower.java:42-47), times SS_AMT = 4, the widest multi-hit either
+phase has (AwakenedOne.java:89, :169-172; phase 2's TACKLE_AMT is 3), times one
+rollout horizon, in the evaluation's player-HP currency. At the A20 amount of 2
+(AwakenedOne.java:146) that is 48,000: above any ongoing-combat score
+difference, below `kEvalCombatOver`, so a Power that ENDS the fight is still
+played. The rule switches itself off at the Rebirth, because the purge removes
+Curiosity by name (AwakenedOne.java:302-308) while keeping the Strength it
+already bought — phase 2 no longer taxes. The encounter's two Cultists never
+enter it: Curiosity's owner is the boss and it grants Strength to the boss.
+
+**It is not the default, because it makes things worse: 5 kills against 22 on
+the identical grid.** The reason is visible in the numbers rather than guessed
+at. `sim_search`'s preview is an EXACT, omniscient engine advance, and Curiosity
+is a native power the engine applies inside it, so a rollout that reaches the
+end of the fight — and these fights end well inside the twenty-turn cap —
+already charges the entire tax. The hold's penalty therefore double-counts a
+cost the evaluation has already paid, and suppresses the scaling the deck needs
+to move 320 + 320 HP through 15 Regenerate a turn. The seed that carries the
+base arm hardest (STS153269, 12 of the 22 kills) loses every one of them under
+the hold.
+
+The rule is kept as a third `PolicyKind` rather than deleted, so the
+measurement is a command anyone can re-run and `sim_search` is provably
+untouched by it — pinned by `SimSearchCuriosityHold.*` (fuzz_test): the
+criterion and its A20 amount, its death at the Rebirth, the price charged for
+POWER plays only, the tax being zero at every combat decision of a
+non-Awakened line, and `sim_search` / `sim_search_hold` producing
+byte-identical trajectories where the rule cannot fire. All nine §5 Act-2
+cohort triples replay to their exact committed `final_hash` on the amended
+engine.
+
+### 6.4 What is still unwon
+
+**Zero victories in 3,858 Awakened One fights across both arms.** What the
+Awakened-first seeds cannot do is the SECOND boss: a run arrives on floor 51
+having spent its HP pool on 640 HP over two phases, and the Time Eater or
+Donu and Deca standing there finishes it. That is a statement about the A20
+double-boss follow-on, not about the Awakened One, and it does not touch item
+3 — which asks for the registry BOSS row witnessed killed, and has it seven
+times over. The ≥3-double-boss-victories clause was already met in §5 by the
+{Time Eater, Donu and Deca} pair.
+
+To regenerate any of this:
+
+```bash
+# the pool (act-3 first boss is Awakened One, and the line gets there)
+seed_scan --seeds STS100000-STS199999 --policies sim_search --policy-seeds 0 \
+          --need-boss-kill-act 2 --need-boss-id "Awakened One" \
+          --seed-list pool.txt --out w1.tsv
+# the kill hunt (and the A/B, with --policies sim_search_hold).
+# --policy-seeds is a COMMA LIST, not a range -- build it:
+ps=$(seq 0 1023 | paste -sd,)
+seed_scan --seed-file pool.txt --policies sim_search --policy-seeds "$ps" \
+          --min-floor 51 --need-boss-id "Awakened One" \
+          --script-dir scripts --verify-determinism --out hunt.tsv
+```
+
+(Both waves were actually run sharded across 16 release-preset processes,
+splitting the seed range and the policy-seed list respectively; the shards are
+independent, so the union is the same set of rows.)
 
 ## 7. Known limits of this instrument
 

@@ -3174,7 +3174,10 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   Awakened One — 0 kills in 553 Awakened-first Act-3 boss fights** (43,648
   dedicated re-seed rows) against 3/585 on the Time-Eater/Donu-and-Deca
   pair; report §6 carries the mechanism hypothesis (Curiosity feeds on the
-  policy's own power-taking) and the options for the next session. Known
+  policy's own power-taking) and the options for the next session.
+  *(Superseded by the dated note at the end of this Log: that 0 was the
+  VICTORY probe, which at A20 requires the second boss too — the cell is
+  discharged and seven kill triples are scheduled.)* Known
   limit carried in §7: 4.7 % of rows livelock in an optional-hand-select
   toggle oscillation (reproducer STS100007/ps0), documented at the CONFIRM
   tie-bias in policy_search.cpp. Named tests: `SimSearch.*` +
@@ -3191,6 +3194,37 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   launched (registered as `oracle_script_policy_python_test`). Six presets
   green; counts re-derived by `ctest -N | tail -1` at land time, not
   restated here.
+  **2026-08-27 (later) — the Awakened One cell is DISCHARGED, and the
+  shortfall above was a PROBE artifact, not a reach failure.** Report §6 is
+  rewritten in place as the discharge account. `--need-victory` /
+  `--need-boss-kill-act 3` is `run_is_victory`, which at A20 means BOTH
+  Act-3 bosses; a line that kills the Awakened One and then dies to the
+  second boss on the same HP pool is invisible to it. The exact witness for
+  the FIRST Act-3 boss is `max_floor == 51` — the Act-3 map ends at floor 50
+  (`act_floor_base(3) == 34` + 16) and floor 51 exists only as
+  `goToDoubleBoss`'s synthetic node, entered through the `++floorNum` room
+  transition off the boss room's proceed. Against that probe the UNMODIFIED
+  `sim_search` kills the Awakened One **22 times in 1,929 dedicated fights**
+  over 7 distinct seeds; **seven kill triples are scheduled in report §5**,
+  each `--verify-determinism` clean and each script's own floor-50/51 play
+  targets naming `AwakenedOne` then the second boss. The report's suggested
+  fix was also built and then REJECTED on measurement: the Awakened-aware
+  hold-Powers rule is `PolicyKind::SIM_SEARCH_HOLD` (value 7, appended) —
+  while a live monster owns `PowerId::CURIOSITY` a POWER play costs
+  `amount × SS_AMT(4) × 20 × 300` (CuriosityPower.java:42-47;
+  AwakenedOne.java:146 for the A20 amount 2, :89 for SS_AMT, :302-308 for
+  the Rebirth purge that switches the rule off) — and on the SAME
+  110-seed × 1,024-policy-seed grid it scored **5 kills against
+  `sim_search`'s 22**. The search's preview is an exact omniscient engine
+  advance and Curiosity is native inside it, so the rollout already charges
+  the tax and the rule double-counts it. Kept as its own kind so
+  `sim_search` is provably untouched and the falsifying A/B is re-runnable.
+  Campaign: **325,280 rows / 101.06M actions**, release preset. All nine §5
+  Act-2 cohort triples replay to their exact committed `final_hash`. New
+  tests: `SimSearchCuriosityHold.*` (fuzz_test, 4 cases) plus the extended
+  `SimSearch.PolicyNamesRoundTripAndAreAppended`. Still unwon and reported
+  as such: **0 victories in 3,858 Awakened One fights** across both arms —
+  the A20 double-boss follow-on, not the Awakened One, is what is unbeaten.
 
 ### S2-G2 `[ ]` **Gate: S2 verified (unblocks training Phase T4)** — tag `s2-g2-verified`
 **Deps:** S2.41–S2.49, S2.V2, S2-G1

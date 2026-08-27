@@ -82,7 +82,25 @@ enum class PolicyKind : uint8_t {
     // identity, the sim-side mirror of policy_bossrelic_skip.json).
     SIM_SEARCH = 5,
     SIM_SEARCH_SKIP = 6,
-    COUNT = 7,
+    // S2.V2's Awakened One discharge experiment (2026-08-27). SIM_SEARCH plus
+    // exactly ONE extra rule -- the CURIOSITY HOLD (see below and
+    // policy_search.cpp): while a live monster owns PowerId::CURIOSITY, a
+    // POWER-card play is priced at what the tax buys the boss beyond the
+    // rollout's horizon, which in practice holds every Power until the Rebirth
+    // purge lifts it. Everything else, R4's boss-relic identity included, is
+    // SIM_SEARCH's.
+    //
+    // IT IS A SEPARATE KIND, NOT A CHANGE TO SIM_SEARCH, and that is the whole
+    // point: the rule was MEASURED HARMFUL. On a paired 110-seed x 1,024
+    // policy-seed grid (112,640 rows each, 1,929 Awakened One boss fights each)
+    // SIM_SEARCH killed the boss 22 times and this kind 5 -- so the report's
+    // §6 mechanism hypothesis is falsified, and the cohort schedules from
+    // SIM_SEARCH. Keeping the rule as its own kind makes SIM_SEARCH provably
+    // untouched (SimSearchCuriosityHold.LeavesSimSearchTrajectoriesIdentical)
+    // and keeps the falsifying A/B a command anyone can re-run instead of a
+    // number in a document. See docs/verification/s2v2-sim-reach.md §6.
+    SIM_SEARCH_HOLD = 7,
+    COUNT = 8,
 };
 
 [[nodiscard]] const char* policy_name(PolicyKind k) noexcept;
@@ -185,13 +203,41 @@ static_assert(kMoveCap >= 163);
 [[nodiscard]] size_t policy_pick(PolicyKind kind, const engine::RunController& rc,
                                  const Move* moves, size_t n, PolicyRng& rng) noexcept;
 
-// The SIM_SEARCH / SIM_SEARCH_SKIP decision body (policy_search.cpp).
-// policy_pick dispatches here; exposed so the planner's tests can drive it
-// directly. Same purity contract as policy_pick: deterministic given
-// (kind, rc, moves, rng state), exactly one rng draw per call.
+// The SIM_SEARCH / SIM_SEARCH_SKIP / SIM_SEARCH_HOLD decision body
+// (policy_search.cpp). policy_pick dispatches here; exposed so the planner's
+// tests can drive it directly. Same purity contract as policy_pick:
+// deterministic given (kind, rc, moves, rng state), exactly one rng draw per
+// call.
 [[nodiscard]] size_t sim_search_pick(PolicyKind kind,
                                      const engine::RunController& rc,
                                      const Move* moves, size_t n,
                                      PolicyRng& rng) noexcept;
+
+// --- the Curiosity hold (S2.V2's Awakened One discharge, 2026-08-27) ---------
+//
+// SIM_SEARCH_HOLD's one extra combat rule, exposed so the directed tests can
+// pin the CRITERION itself instead of inferring it from a decision. The
+// derivation from the Java lives above the helpers in policy_search.cpp; the
+// measured verdict on the rule is on PolicyKind::SIM_SEARCH_HOLD above.
+//
+// `sim_search_curiosity_tax(cs)` IS the trigger, and it is a property of the
+// BOARD, not of the policy: the Strength that one POWER card play would hand a
+// live monster right now -- the stack amount of PowerId::CURIOSITY on the first
+// live monster that owns it, which is what CuriosityPower.onUseCard
+// (CuriosityPower.java:42-47) applies. It returns 0, meaning the rule cannot
+// fire, in every combat in the game except an Awakened One's phase 1: the
+// power's only applier anywhere is AwakenedOne.usePreBattleAction
+// (AwakenedOne.java:144-150, amount 2 from ascension 19), and the Rebirth purge
+// removes it by name (:302-308).
+[[nodiscard]] int sim_search_curiosity_tax(const engine::CombatState& cs) noexcept;
+
+// The score the hold subtracts from candidate `m` in state `rc` UNDER
+// SIM_SEARCH_HOLD: 0 unless the tax above is live AND `m` plays a POWER card
+// out of hand, otherwise `tax * 4 (SS_AMT) * 20 (the rollout turn cap) * 300
+// (one player HP)` -- one more rollout horizon of the damage the tax buys the
+// boss. This function reports the rule's price for any state; only
+// SIM_SEARCH_HOLD ever charges it.
+[[nodiscard]] int64_t sim_search_curiosity_penalty(
+    const engine::RunController& rc, const Move& m) noexcept;
 
 }  // namespace sts::fuzz
