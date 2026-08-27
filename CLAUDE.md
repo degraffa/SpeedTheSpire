@@ -127,8 +127,29 @@ leaves Act 1, so the S3 baseline is the runs/sec + run-steps/sec *pair*, see
 and the owner-directed deviation closures **S2.48** (live-purse stolen-gold
 ordering; 121 standing-deviation dispositions now retestable) and **S2.49**
 (attacker-side cancel of a dying/half-dead owner's queued non-THORNS hits).
-Open next in that ledger: **S2.43** oracle campaigns (fully unblocked), then
-**S2.46**, then gate **S2-G2**, which unblocks training Phase T4.
+**S2-G2 complete** (tag `s2-g2-verified`, 2026-08-27): the S2.43 depth
+campaign ran end to end in one day — S2.V2's sim-consulting scripted
+driver (turn-local search over engine snapshots; the first three-act A20
+wins any instrument here produced) drove live captures through the
+STS-POLICY-IO follower against the playtime-pinned fork (pin
+`ABD95268…`), and every S2-G2 bar item is MET with linked evidence in
+[verification/s2-verification.md](docs/verification/s2-verification.md):
+2,000 breadth attempts zero-untriaged, every Act-2 boss claim + relic
+pick + transition zero-diff (take and skip), all three Act-3 bosses
+witnessed killed with THREE complete double-boss victories over two
+first-boss identities, the event coverage join closed with exact
+dispositions, and the proactive audit at twenty-one families. The
+campaign's divergence harvest is the headline: eleven engine/emitter
+root causes (replay-copy shared misc, the spawn pre-pass, lethal-thorns
+terminal adjudication, pile-move cost reset, the SecretPortal wall-clock
+gate's pool-index shift, the double-boss handoff bossKey, Egg offer
+previews, halfDead fan-out, Neow claim ordinals, Match-and-Keep and
+Library index spaces) plus six follower seams and b1.7.1's
+`--boss-reward-via-policy`, all landed with named regressions the same
+day. A three-act CI corpus (incl. both double-boss victories) now
+replays zero-diff in every preset. **Training Phase T4 is unblocked**
+([docs/training-tasks.md](docs/training-tasks.md) T4.1); S3 planning
+opens as its own fresh exercise.
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
 in [docs/stage-b-tasks.md](docs/stage-b-tasks.md) and

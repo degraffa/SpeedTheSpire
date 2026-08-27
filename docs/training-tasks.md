@@ -611,8 +611,11 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   repo: yes** — the PublicView/leak-suite work lands there under full
   conventions, in its own worktree (explicit exception to the two-repo
   rule).
-  **Deps:** S2, GT0 **Acceptance:** twin + tripwire suites green over S2
-  phases; an S1-era shard loads and trains under the extended schema.
+  **Deps:** S2 (**satisfied 2026-08-27** — simulator tag `s2-g2-verified`;
+  the bar's evidence is the simulator repo's
+  docs/verification/s2-verification.md), GT0 **Acceptance:** twin +
+  tripwire suites green over S2 phases; an S1-era shard loads and trains
+  under the extended schema.
   **Log:** —
 
 - **T4.2** `[ ]` **V2 re-fit + pre-registered re-baseline.** V2 on real

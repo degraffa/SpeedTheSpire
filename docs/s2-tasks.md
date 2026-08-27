@@ -3944,13 +3944,32 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   as such: **0 victories in 3,858 Awakened One fights** across both arms —
   the A20 double-boss follow-on, not the Awakened One, is what is unbeaten.
 
-### S2-G2 `[ ]` **Gate: S2 verified (unblocks training Phase T4)** — tag `s2-g2-verified`
+### S2-G2 `[x]` **Gate: S2 verified (unblocks training Phase T4)** — tag `s2-g2-verified`
 **Deps:** S2.41–S2.49, S2.V2, S2-G1
 The design §6 S2-G2 bar, checked literally, every item with linked
 evidence. Then: update CLAUDE.md "Current state"; notify the training
 ledger (T4.1's `Deps: S2` is this tag); S3 planning opens as its own fresh
 exercise (not claimed here).
-**Log:** —
+**Log:** 2026-08-27 — GATE TAKEN, tag `s2-g2-verified`. The bar's
+item-by-item answer is
+[verification/s2-verification.md](verification/s2-verification.md)
+(S2.46): items 1–4 MET on the S2.43 dashboard's regeneration-stable
+numbers (breadth 2,000 full-run attempts / 0 untriaged / 0 open; all
+three Act-2 BOSS rows claim+pick+transition zero-diff with take AND skip
+witnessed; all three Act-3 rows witnessed killed and THREE complete A20
+double-boss victories over two first-boss identities, every capture
+CLEAN; 31/40 event rows sighted + 9 exact dispositions, 0 OWED), item 5
+MET (proactive audit: twenty-one families, one hundred one named
+regressions, executable audit PASS), item 6 MET (S2.44's registered
+tier-4 family, RESULT PASS), item 7 MET with its premise's falsification
+recorded (S2.45: per-step and per-combat floors hold; the S3 baseline is
+the runs/sec + run-steps/sec pair). The depth evidence was produced by
+the S2.V2 sim-consulting scripted driver against the playtime-pinned
+fork (pin `ABD95268…`), and the campaign's divergence harvest — eleven
+engine/emitter root causes, six follower/driver seams, one fork
+contract pin, all landed 2026-08-27 with named regressions — is the
+gate's real product beside the bar. CLAUDE.md updated; T4.1's Dep
+annotated in the training ledger. S3 planning NOT claimed here.
 
 ## Parallelism map
 
