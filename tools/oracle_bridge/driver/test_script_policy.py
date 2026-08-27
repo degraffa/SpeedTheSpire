@@ -432,6 +432,42 @@ class GlueRuleTest(unittest.TestCase):
         self.assertEqual(got, "confirm")
         self.assertEqual(policy._script.cursor, 1)
 
+    def test_potion_discards_do_not_make_a_proceed_screen_a_decision(self):
+        # divergence_STS100439_ps0: the post-rest campfire aftermath offers
+        # `potion discard 0/1` beside its leave-`proceed`; the sim recorded
+        # nothing there and the next step is the boss edge.
+        policy = self._policy_with([{"k": "map_boss"}])
+        rest = {"available_commands": ["potion", "proceed", "state"],
+                "game_state": {"screen_type": "REST",
+                               "choice_list": [],
+                               "screen_state": {}}}
+        got = policy.decide(decide_request(
+            "STS1", rest, ["potion discard 0", "potion discard 1",
+                           "proceed"]))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 0)  # nothing consumed
+        boss = {"available_commands": ["choose", "state"],
+                "game_state": {"screen_type": "MAP",
+                               "choice_list": ["boss"],
+                               "screen_state": {"boss_available": True}}}
+        got = policy.decide(decide_request("STS1", boss, ["choose 0"]))
+        self.assertEqual(policy._script.cursor, 1)
+
+    def test_a_scripted_potion_discard_still_matches_before_the_glue(self):
+        policy = self._policy_with([{"k": "potion_discard", "slot": 1},
+                                    {"k": "map_boss"}])
+        rest = {"available_commands": ["potion", "proceed", "state"],
+                "game_state": {"screen_type": "REST",
+                               "choice_list": [],
+                               "screen_state": {},
+                               "potions": [{"id": "Block Potion"},
+                                           {"id": "Fire Potion"}]}}
+        got = policy.decide(decide_request(
+            "STS1", rest, ["potion discard 0", "potion discard 1",
+                           "proceed"]))
+        self.assertEqual(got, "potion discard 1")
+        self.assertEqual(policy._script.cursor, 1)  # consumed, not glued
+
     def test_exhausted_script_still_glues_a_trailing_one_click_dialog(self):
         policy = self._policy_with([{"k": "proceed", "ctx": "t"}])
         first = {"available_commands": ["proceed", "state"],

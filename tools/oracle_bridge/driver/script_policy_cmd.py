@@ -28,15 +28,21 @@ steps.
 
 GLUE COMMANDS (the two known granularity seams, both driver-visible facts
 rather than improvisation):
-  * a state whose ONLY legal candidate is `proceed` answers `proceed`
+  * a state whose ONLY PROGRESS candidate is `proceed` answers `proceed`
     without consuming a script step -- the sim had no decision to record
-    where the live game shows a confirmation-only screen;
+    where the live game shows a confirmation-only screen. "Progress"
+    excludes the always-available `potion discard N` side actions (third
+    live witness, divergence_STS100439_ps0: the post-rest campfire screen
+    offers two potion discards beside its leave-`proceed` whenever the
+    belt is non-empty -- as does any other screen); a scripted
+    `potion_discard` still matches FIRST and is consumed, so the sim's
+    own discards are never glued past;
   * a GRID whose `confirm_up` is set (the game's own signal that a selection
     is committable; see campaign_driver.expand_legal_actions's B5.2 note)
     answers `proceed` without consuming a step when the next step is not
     another pick on the same grid -- the sim's grid pick is one action where
     the live grid wants pick-then-confirm;
-  * a screen whose ONLY legal candidate is a single `choose` answers it
+  * a screen whose ONLY PROGRESS candidate is a single `choose` answers it
     without consuming a step -- the collapsed one-click dialog (first live
     witness: the s2v2_take campaign's divergence_STS100009_ps0 at Neow's
     opening `talk`). The engine deliberately collapses no-state-change
@@ -370,13 +376,24 @@ def match_step(step, state, candidates):
                      "(this policy never emits it)", step)
 
 
+def progress_candidates(candidates):
+    """Candidates minus the always-available `potion discard N` side
+    actions (module header, glue rule 1): CommunicationMod advertises them
+    on any screen while the belt is non-empty, and they never gate
+    progress. A scripted `potion_discard` matches BEFORE any glue rule
+    consults this filter, so the sim's own discards are never glued past."""
+    return [c for c in candidates
+            if not str(c).startswith("potion discard")]
+
+
 def is_sole_choice_glue(candidates):
     """Glue rule 3 -- the collapsed one-click dialog (module header): the
-    screen's ONLY legal candidate is a single `choose`, so there is no
+    screen's ONLY PROGRESS candidate is a single `choose`, so there is no
     decision to make and the sim-emitted line recorded none. Evaluated only
     AFTER the script's next step failed to match this state (match-first),
     so a scripted single-option choice is consumed rather than glued past."""
-    return len(candidates) == 1 and str(candidates[0]).startswith("choose ")
+    progress = progress_candidates(candidates)
+    return len(progress) == 1 and str(progress[0]).startswith("choose ")
 
 
 def is_grid_confirm_glue(state, candidates):
@@ -467,7 +484,8 @@ class ScriptPolicy:
             try:
                 cmd = match_step(step, state, candidates)
             except Divergence as exc:
-                if len(candidates) == 1 and candidates[0] == "proceed":
+                progress = progress_candidates(candidates)
+                if len(progress) == 1 and progress[0] == "proceed":
                     return "proceed"  # confirmation-only screen: glue rule 1
                 if is_grid_confirm_glue(state, candidates):
                     return "proceed"  # pick-then-confirm seam: glue rule 2
@@ -478,7 +496,8 @@ class ScriptPolicy:
             return cmd
         # Script exhausted: trailing confirmation-only screens still glue
         # (the run's terminal can sit behind one); anything else is a desync.
-        if len(candidates) == 1 and candidates[0] == "proceed":
+        progress = progress_candidates(candidates)
+        if len(progress) == 1 and progress[0] == "proceed":
             return "proceed"
         if is_grid_confirm_glue(state, candidates):
             return "proceed"

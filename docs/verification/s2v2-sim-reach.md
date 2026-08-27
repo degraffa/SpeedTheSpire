@@ -235,4 +235,7 @@ from the output that exists today.
   `proceed`/`confirm` whose live state offers neither alias is consumed
   without emitting — the game auto-advances where the sim steps (the
   blessing click opens the MAP directly) — with a real desync still
-  stopping on the following step.
+  stopping on the following step. Glue rules 1 and 3 read the PROGRESS
+  candidates — the always-available `potion discard N` side actions are
+  excluded (third witness, divergence_STS100439_ps0: the post-rest
+  campfire aftermath), while a scripted `potion_discard` matches first.

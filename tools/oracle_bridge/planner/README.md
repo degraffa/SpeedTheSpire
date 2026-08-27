@@ -155,7 +155,9 @@ The follower consumes steps strictly in order; its only three glue commands
 (a confirmation-only screen; the GRID pick-then-confirm seam; a collapsed
 one-click dialog whose sole candidate is a single `choose` — Neow's opening
 `talk` and the vestigial-click event class the engine collapses) never
-advance the script cursor; one SKIP rule covers the mirror seam (a
+advance the script cursor — "sole" reads the PROGRESS candidates, i.e. the
+always-available `potion discard N` side actions are excluded, while a
+scripted `potion_discard` still matches first; one SKIP rule covers the mirror seam (a
 scripted `proceed`/`confirm` whose live state offers neither alias — the
 game auto-advanced where the sim stepped — is consumed without emitting,
 and a real desync still stops on the following step). **Any other
