@@ -1308,6 +1308,7 @@ class ExternalPolicyPipelineTest(unittest.TestCase):
                 game_dir="game", fork_jar="fork.jar", policy="external",
                 policy_seed=7, campaign_timeout=10.0, max_actions=100,
                 seeds_per_launch=50, fresh=False,
+                boss_reward_via_policy=False,
                 policy_cmd=cmd, policy_config=config)
             with mock.patch.object(
                     campaign_pipeline.subprocess, "Popen") as popen:
@@ -1318,6 +1319,16 @@ class ExternalPolicyPipelineTest(unittest.TestCase):
             self.assertIn("--policy-cmd", command)
             self.assertEqual(os.path.abspath(cmd),
                              command[command.index("--policy-cmd") + 1])
+            self.assertNotIn("--boss-reward-via-policy", command)
+            # b1.7.1: the flag forwards when set.
+            args.boss_reward_via_policy = True
+            with mock.patch.object(
+                    campaign_pipeline.subprocess, "Popen") as popen:
+                popen.return_value.wait.return_value = 0
+                campaign_pipeline.run_orchestrator(
+                    args, "external-cmd", "seeds.txt")
+            self.assertIn("--boss-reward-via-policy",
+                          popen.call_args[0][0])
             self.assertIn("--policy-config", command)
             self.assertEqual(
                 os.path.abspath(config),
