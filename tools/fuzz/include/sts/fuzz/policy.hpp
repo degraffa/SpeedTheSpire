@@ -69,7 +69,20 @@ enum class PolicyKind : uint8_t {
     GREEDY_BLOCK = 2,   // E0: maximize block, then damage
     HOARD_GOLD = 3,     // E0: claim gold, refuse cards, keep potions
     ALWAYS_EVENT = 4,   // E0: steer the map away from combat nodes
-    COUNT = 5,
+    // S2.V2: the sim-consulting scripted driver (s2-design §6's sanctioned
+    // escalation). Deterministic and weight-free like the E0 policies, but a
+    // different CLASS of generator: combat decisions run a bounded turn-local
+    // search over engine snapshots (copy the controller, advance the copy,
+    // score the resulting state -- policy_search.cpp), and run-layer decisions
+    // are the b1.7.0 survival heuristics (greedy_policy.py R1-R4 +
+    // ACT_PROFILES) ported onto the sim's structs. The ONLY stochastic input
+    // is the shared one-draw tie-break from PolicyRng, so a case is still a
+    // pure function of its CaseId. The _SKIP variant differs in exactly one
+    // rule: R4's boss-relic pick answers SKIP (the S2-G2 item-2 skip-cohort
+    // identity, the sim-side mirror of policy_bossrelic_skip.json).
+    SIM_SEARCH = 5,
+    SIM_SEARCH_SKIP = 6,
+    COUNT = 7,
 };
 
 [[nodiscard]] const char* policy_name(PolicyKind k) noexcept;
@@ -171,5 +184,14 @@ static_assert(kMoveCap >= 163);
 // (kind, rc, moves, rng state).
 [[nodiscard]] size_t policy_pick(PolicyKind kind, const engine::RunController& rc,
                                  const Move* moves, size_t n, PolicyRng& rng) noexcept;
+
+// The SIM_SEARCH / SIM_SEARCH_SKIP decision body (policy_search.cpp).
+// policy_pick dispatches here; exposed so the planner's tests can drive it
+// directly. Same purity contract as policy_pick: deterministic given
+// (kind, rc, moves, rng state), exactly one rng draw per call.
+[[nodiscard]] size_t sim_search_pick(PolicyKind kind,
+                                     const engine::RunController& rc,
+                                     const Move* moves, size_t n,
+                                     PolicyRng& rng) noexcept;
 
 }  // namespace sts::fuzz

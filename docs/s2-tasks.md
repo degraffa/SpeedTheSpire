@@ -2839,7 +2839,7 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   green; counts re-derived by `ctest -N | tail -1` at land time, not
   restated here.
 
-- **S2.V2** `[ ]` **Sim-consulting scripted driver + depth pre-scan (the
+- **S2.V2** `[x]` **Sim-consulting scripted driver + depth pre-scan (the
   sanctioned §8 escalation).** Opened 2026-08-27 on the measured condition
   design §6's driver-risk paragraph names: S2.43's breadth wave put the
   b1.7.0 TE.1 family at 0 Act-2 boss fights in 2,000 A20 attempts
@@ -2876,7 +2876,81 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   the event filter) for the deferred-row capture; the script-following
   policy_cmd unit-tested against recorded protocol dumps WITHOUT
   launching the game; six presets green.
-  **Log:** —
+  **Log:** 2026-08-27 — landed, and the escalation instrument delivers all
+  but ONE cell of the depth bars. Report:
+  [verification/s2v2-sim-reach.md](verification/s2v2-sim-reach.md).
+  (a) **`PolicyKind::SIM_SEARCH`/`SIM_SEARCH_SKIP`** (values 5–6, appended;
+  PolicyKind is not in the stage-b shared-namespace table, recorded here) —
+  `tools/fuzz/src/policy_search.cpp`: combat is a 1-ply search over
+  `RunController` snapshots completed by a deterministic threat-aware static
+  tail to COMBAT END (a one-turn horizon was measured first and could not
+  see a power's payoff), 2-ply through a boss fight's opening under hard
+  breadth/turn/board gates; map nodes and event options are scored by a
+  one-floor rollout (the Python's label word-buckets have no sim-side
+  labels to read); the rest is the b1.7.0 `greedy_policy.py` port — R1
+  (widened by an Act-2+ standout clause, two-screens invariant preserved by
+  reading the same rewards item at both screens), R2 as evaluation
+  hold-values, `ACT_PROFILES`, R4's never-take list with the `_skip`
+  identity differing in exactly that one rule, and `boss_chest.seen`
+  breaking the open/skip 2-cycle a deterministic argmax would otherwise
+  livelock in (first smoke scan measured exactly that, two floor-17
+  LIVELOCK rows). A run-layer NO-OP GUARD proves the winning candidate
+  mutates the controller on a snapshot before the tie-break — found live by
+  the scan itself: Drug Dealer's two-pick grid advertises the first-picked
+  card and re-picking it is a documented engine no-op
+  (`city_events_i.cpp`), which a uniform-random policy escapes by luck and
+  an argmax repeats forever (STS90069/ps0, NO_PROGRESS at step 216).
+  Integer arithmetic only, every bound a constant, one tie-break draw per
+  decision. (b) **`seed_scan --script-dir`** + the **STS-SCRIPT v1**
+  emitter (`sts/planner/script.hpp`/`script.cpp`, schema normative in the
+  planner README): every filter-hitting triple's pass-A trajectory
+  re-decoded against the states it was taken in — screen kind + stable
+  identity (card game id + upgrades + same-identity ordinal, reward-row
+  kind + payload id, map column + symbol, the event `choose` index
+  translated into the game's ENABLED-ONLY space per command_map's
+  two-index-space note) — and refused unless the replay reproduces the
+  row's `final_hash`; `--verify-determinism` compares trajectories too.
+  (c) **`script_policy_cmd.py`**, the STS-POLICY-IO v1 follower in the
+  `survival_policy_cmd` mould (config-driven script dir, SHA-pinned like
+  every external policy): match-first with exactly two non-consuming glue
+  rules (confirmation-only screens; the GRID pick-then-confirm seam), and
+  on ANY other mismatch it writes a `script_divergence` record and exits 3
+  — the driver's FatalEnvironmentDrift path stops the campaign; a desync is
+  capture evidence, never routed around. **Measured, frozen build, 107,424
+  rows / 32.96M actions** (release, A20): stage-1 breadth 40,000 fresh
+  seeds — Act-1 boss kill **37.23 %** (E0 0.12 %, live b1.7.0 2.5 %),
+  Act-2 fight 3.83 %, Act-2 kill 0.36 % covering all three registry bosses;
+  re-seeded depth pass **19.6 % Act-2 kill**; skip cohort 51 Act-2 kills;
+  and **three complete A20 double-boss victories** — STS128113/ps27,
+  STS128113/ps47 (Time Eater first), STS108107/ps153 (Donu and Deca first)
+  — the first three-act wins any instrument in this repo has produced.
+  Determinism: 2,000-row `--verify-determinism` sweep over both policies
+  plus per-triple verification of all 14 cohort scripts, zero mismatches.
+  The 14-triple cohort (report §5) covers: every Act-2 boss killed with
+  relic TAKE and act-2→3 crossing (two lines each), one SKIP kill per
+  Act-2 boss, the three victories (≥3 double-boss over ≥2 first-boss
+  identities — met), and two Act-3 Mind Bloom lines for the deferred
+  directed capture. **The one unschedulable cell, reported not weakened:
+  Awakened One — 0 kills in 553 Awakened-first Act-3 boss fights** (43,648
+  dedicated re-seed rows) against 3/585 on the Time-Eater/Donu-and-Deca
+  pair; report §6 carries the mechanism hypothesis (Curiosity feeds on the
+  policy's own power-taking) and the options for the next session. Known
+  limit carried in §7: 4.7 % of rows livelock in an optional-hand-select
+  toggle oscillation (reproducer STS100007/ps0), documented at the CONFIRM
+  tie-bias in policy_search.cpp. Named tests: `SimSearch.*` +
+  `SimSearchScript.*` (seed_scan_test), the re-seated
+  `FuzzPolicy.BossChestPreferenceIsScoredRatherThanLeftToTheTieBreak`
+  (E0 loop bounded at SIM_SEARCH; the sim pair pinned on a staged
+  RELIC_SELECT with REAL actions, because the no-op guard correctly
+  demotes fake ones), and `test_script_policy.py` — 14 Python tests, the
+  centerpiece round-tripping ≥400 recorded decisions from ≥8 committed
+  corpus runs (`tests/golden/oracle_corpus/act1_a20_50.tar.gz`) through
+  derived identity steps back to the exact captured commands, plus
+  synthetic PROTOCOL §3.8 BOSS_REWARD states, divergence/exit-3/record
+  tests, glue-rule cursor pins, and strict-config pins — game never
+  launched (registered as `oracle_script_policy_python_test`). Six presets
+  green; counts re-derived by `ctest -N | tail -1` at land time, not
+  restated here.
 
 ### S2-G2 `[ ]` **Gate: S2 verified (unblocks training Phase T4)** — tag `s2-g2-verified`
 **Deps:** S2.41–S2.49, S2.V2, S2-G1

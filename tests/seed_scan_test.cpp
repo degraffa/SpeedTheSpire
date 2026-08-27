@@ -20,6 +20,7 @@
 #include "sts/planner/seed_scan.hpp"
 
 #include "sts/engine/event_framework.hpp"
+#include "sts/planner/script.hpp"  // S2.V2: the STS-SCRIPT emitter
 
 #include <string>
 #include <vector>
@@ -918,4 +919,111 @@ TEST(SeedScanLimits, TheActionCapIsAThreeActBudget) {
     // silent revert to 4000 is exactly the regression that would make a future
     // Act-3 reach measurement read as a policy failure.
     EXPECT_GE(ScanLimits{}.max_actions, 12000u);
+}
+
+// ---------------------------------------------------------------------------
+// S2.V2 -- the sim-consulting policy (SIM_SEARCH / SIM_SEARCH_SKIP) and the
+// STS-SCRIPT v1 emitter.
+// ---------------------------------------------------------------------------
+
+TEST(SimSearch, PolicyNamesRoundTripAndAreAppended) {
+    // The two new kinds are APPENDED (5 and 6) -- a renumber of the E0 kinds
+    // would silently relabel every existing scan row and cohort artifact.
+    EXPECT_EQ(static_cast<uint8_t>(PolicyKind::SIM_SEARCH), 5);
+    EXPECT_EQ(static_cast<uint8_t>(PolicyKind::SIM_SEARCH_SKIP), 6);
+    EXPECT_STREQ(sts::fuzz::policy_name(PolicyKind::SIM_SEARCH), "sim_search");
+    EXPECT_STREQ(sts::fuzz::policy_name(PolicyKind::SIM_SEARCH_SKIP),
+                 "sim_search_skip");
+    PolicyKind k{};
+    ASSERT_TRUE(sts::fuzz::policy_from_name("sim_search", k));
+    EXPECT_EQ(k, PolicyKind::SIM_SEARCH);
+    ASSERT_TRUE(sts::fuzz::policy_from_name("sim_search_skip", k));
+    EXPECT_EQ(k, PolicyKind::SIM_SEARCH_SKIP);
+}
+
+TEST(SimSearch, ScanIsDeterministicIncludingTheTrajectory) {
+    // The acceptance bar's claim, made at unit scale: a SIM_SEARCH case is a
+    // pure function of its CaseId -- rows byte-identical AND the recorded
+    // action trajectory (the script emitter's input) identical. The search
+    // consults the engine on snapshots, so any hidden stochastic input or
+    // uninitialized read in its rollouts would surface here.
+    const ScanCase c = MakeCase("STS90001", PolicyKind::SIM_SEARCH, 3);
+    std::vector<sts::engine::Action> ta;
+    std::vector<sts::engine::Action> tb;
+    const ScanRow a = sts::planner::scan_case(c, SmallLimits(), {}, &ta);
+    const ScanRow b = sts::planner::scan_case(c, SmallLimits(), {}, &tb);
+    EXPECT_EQ(sts::planner::row_to_tsv(a), sts::planner::row_to_tsv(b));
+    ASSERT_EQ(ta.size(), tb.size());
+    for (size_t i = 0; i < ta.size(); ++i) {
+        ASSERT_EQ(ta[i].bits, tb[i].bits) << "trajectory diverged at " << i;
+    }
+    EXPECT_GT(ta.size(), 0u);
+    EXPECT_EQ(static_cast<uint32_t>(ta.size()), a.actions);
+}
+
+TEST(SimSearchScript, EmitsOneStepPerActionAndVerifiesTheReplay) {
+    const ScanCase c = MakeCase("STS90001", PolicyKind::SIM_SEARCH, 3);
+    std::vector<sts::engine::Action> traj;
+    const ScanRow row = sts::planner::scan_case(c, SmallLimits(), {}, &traj);
+    ASSERT_GT(traj.size(), 0u);
+
+    const sts::planner::ScriptEmit a = sts::planner::emit_script(
+        row.seed.value, row.seed.text, row.ascension, "sim_search", 3, traj,
+        "action_cap", row.final_hash);
+    ASSERT_TRUE(a.ok) << a.error;
+    // One header line plus exactly one step per action.
+    ASSERT_EQ(a.lines.size(), traj.size() + 1);
+    EXPECT_NE(a.lines[0].find("\"format\":\"STS-SCRIPT v1\""),
+              std::string::npos);
+    EXPECT_NE(a.lines[0].find("\"seed\":\"STS90001\""), std::string::npos);
+    // The opening decision of every run is Neow's blessing: the first step
+    // must decode as a screen-kind step, never as a bare index.
+    EXPECT_NE(a.lines[1].find("\"phase\":\"NEOW\""), std::string::npos);
+    EXPECT_NE(a.lines[1].find("\"k\":\"neow\""), std::string::npos);
+
+    // Emission is deterministic: byte-identical on a second pass.
+    const sts::planner::ScriptEmit b = sts::planner::emit_script(
+        row.seed.value, row.seed.text, row.ascension, "sim_search", 3, traj,
+        "action_cap", row.final_hash);
+    ASSERT_TRUE(b.ok);
+    ASSERT_EQ(a.lines.size(), b.lines.size());
+    for (size_t i = 0; i < a.lines.size(); ++i) {
+        ASSERT_EQ(a.lines[i], b.lines[i]) << "script line " << i;
+    }
+}
+
+TEST(SimSearchScript, RefusesATrajectoryThatDoesNotReproduceTheHash) {
+    // The replay-fidelity check is what makes a script file evidence rather
+    // than hope: a final_hash the replay does not land on aborts emission.
+    const ScanCase c = MakeCase("STS90001", PolicyKind::SIM_SEARCH, 3);
+    std::vector<sts::engine::Action> traj;
+    (void)sts::planner::scan_case(c, SmallLimits(), {}, &traj);
+    ASSERT_GT(traj.size(), 0u);
+    const sts::planner::ScriptEmit bad = sts::planner::emit_script(
+        sts::engine::seed_from_string("STS90001"), "STS90001", 20,
+        "sim_search", 3, traj, "action_cap", 0xDEADBEEFull);
+    EXPECT_FALSE(bad.ok);
+    EXPECT_NE(bad.error.find("hash"), std::string::npos);
+}
+
+TEST(SimSearchScript, StepJsonDecodesAgainstTheStateNotTheAction) {
+    // The same CHOOSE arg0 must decode differently by screen: at Neow's
+    // blessing it is a blessing index; the decode is state-driven.
+    sts::engine::RunController rc = sts::engine::run_begin(
+        sts::engine::seed_from_string("STS90001"), 20);
+    std::string err;
+    const std::string step = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 2), 0,
+        err);
+    ASSERT_FALSE(step.empty()) << err;
+    EXPECT_NE(step.find("\"k\":\"neow\""), std::string::npos);
+    EXPECT_NE(step.find("\"index\":2"), std::string::npos);
+    // A CHOOSE in a terminal phase is not decodable and says so.
+    rc.phase = static_cast<uint8_t>(sts::engine::RunPhase::RUN_OVER);
+    err.clear();
+    const std::string none = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 0), 1,
+        err);
+    EXPECT_TRUE(none.empty());
+    EXPECT_FALSE(err.empty());
 }

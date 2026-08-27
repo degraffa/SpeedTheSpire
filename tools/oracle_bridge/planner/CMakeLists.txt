@@ -16,7 +16,7 @@
 # (registry/ids.hpp for EventId, registry/event_table.hpp for the static_assert
 # that fails the build when events.yaml gains a row), which fuzz_core already
 # exposes PUBLIC -- named again here so the dependency is not accidental.
-add_library(seed_scan_core STATIC src/seed_scan.cpp)
+add_library(seed_scan_core STATIC src/seed_scan.cpp src/script.cpp)
 target_include_directories(seed_scan_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(seed_scan_core PUBLIC fuzz_core registry_generated)
 target_compile_features(seed_scan_core PUBLIC cxx_std_20)

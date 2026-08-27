@@ -28,6 +28,8 @@ const char* policy_name(PolicyKind k) noexcept {
         case PolicyKind::GREEDY_BLOCK: return "greedy_block";
         case PolicyKind::HOARD_GOLD: return "hoard_gold";
         case PolicyKind::ALWAYS_EVENT: return "always_event";
+        case PolicyKind::SIM_SEARCH: return "sim_search";
+        case PolicyKind::SIM_SEARCH_SKIP: return "sim_search_skip";
         case PolicyKind::COUNT: break;
     }
     return "?";
@@ -814,6 +816,11 @@ size_t policy_pick(PolicyKind kind, const RunController& rc, const Move* moves, 
     assert(n > 0);
     if (kind == PolicyKind::RANDOM) {
         return rng.below(static_cast<uint32_t>(n));
+    }
+    if (kind == PolicyKind::SIM_SEARCH || kind == PolicyKind::SIM_SEARCH_SKIP) {
+        // The sim-consulting policy (S2.V2) is a different class of generator
+        // and lives in its own translation unit; see policy_search.cpp.
+        return sim_search_pick(kind, rc, moves, n, rng);
     }
 
     // Argmax with uniform tie-break. ONE rng draw per decision regardless of

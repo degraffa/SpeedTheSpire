@@ -1653,10 +1653,15 @@ TEST(FuzzPolicy, BossChestPreferenceIsScoredRatherThanLeftToTheTieBreak) {
         EXPECT_EQ(pick_between(PolicyKind::HOARD_GOLD, MoveCat::BOSS_CHEST_PROCEED,
                                MoveCat::BOSS_CHEST_OPEN, pseed),
                   MoveCat::BOSS_CHEST_PROCEED);
-        // Once open, every heuristic but one PICKS. Skip is a reversible screen
-        // close that re-advertises `open`, so a policy scoring it ABOVE pick
-        // would sit in the open/skip 2-cycle (s242-deep-reach §7).
-        for (uint8_t p = 1; p < static_cast<uint8_t>(PolicyKind::COUNT); ++p) {
+        // Once open, every E0 heuristic but one PICKS. Skip is a reversible
+        // screen close that re-advertises `open`, so a policy scoring it ABOVE
+        // pick would sit in the open/skip 2-cycle (s242-deep-reach §7). The
+        // loop is bounded at SIM_SEARCH (S2.V2): the sim-consulting kinds read
+        // the REAL rc.run.boss_chest state, which this synthetic two-move
+        // harness does not stage -- their chest behaviour is pinned on a
+        // staged chest below.
+        for (uint8_t p = 1; p < static_cast<uint8_t>(PolicyKind::SIM_SEARCH);
+             ++p) {
             const auto kind = static_cast<PolicyKind>(p);
             if (kind == PolicyKind::GREEDY_BLOCK) continue;
             EXPECT_EQ(pick_between(kind, MoveCat::BOSS_CHEST_SKIP,
@@ -1664,6 +1669,75 @@ TEST(FuzzPolicy, BossChestPreferenceIsScoredRatherThanLeftToTheTieBreak) {
                       MoveCat::BOSS_CHEST_PICK)
                 << policy_name(kind);
         }
+    }
+
+    // S2.V2: the sim-consulting cohort pair, on a STAGED RELIC_SELECT chest
+    // (three takeable offers). The TAKE identity picks; the SKIP identity --
+    // the sim-side mirror of policy_bossrelic_skip.json -- skips; and after a
+    // skip (`seen` latched) NEITHER identity re-opens, which is the state
+    // that breaks the open/skip 2-cycle for a deterministic argmax.
+    {
+        // REAL actions, not the synthetic bits the E0 harness uses: the sim
+        // policies carry a run-layer no-op guard that proves the winning
+        // candidate MUTATES the controller on a snapshot, so a fake action
+        // the engine ignores is (correctly) demoted. The staged chest is a
+        // legal RELIC_SELECT with three takeable offers.
+        const auto pick_real = [&](PolicyKind kind, MoveCat lo_cat,
+                                   engine::Action lo, MoveCat hi_cat,
+                                   engine::Action hi, uint64_t pseed) {
+            Move moves[2];
+            moves[0].cat = lo_cat;
+            moves[0].action = lo;
+            moves[1].cat = hi_cat;
+            moves[1].action = hi;
+            PolicyRng rng(pseed);
+            return moves[policy_pick(kind, rc, moves, 2, rng)].cat;
+        };
+        const engine::Action pick_a =
+            engine::make_action(engine::ActionVerb::CHOOSE, 0);
+        const engine::Action skip_a = engine::make_action(
+            engine::ActionVerb::CHOOSE, engine::kChooseCancelGrid);
+        const engine::Action open_a = engine::make_action(
+            engine::ActionVerb::CHOOSE, engine::kChooseOpenChest);
+        const engine::Action proceed_a = engine::make_action(
+            engine::ActionVerb::CHOOSE, engine::kChooseProceed);
+        rc.phase = static_cast<uint8_t>(engine::RunPhase::BOSS_TREASURE);
+        rc.room_type = static_cast<uint8_t>(engine::RoomType::TreasureBoss);
+        rc.run.boss_chest.seen = 1;
+        rc.run.boss_chest.relics[0] =
+            static_cast<uint16_t>(engine::RelicId::BLACK_STAR);
+        rc.run.boss_chest.relics[1] =
+            static_cast<uint16_t>(engine::RelicId::COFFEE_DRIPPER);
+        rc.run.boss_chest.relics[2] =
+            static_cast<uint16_t>(engine::RelicId::PHILOSOPHERS_STONE);
+        for (uint64_t pseed = 1; pseed <= 8; ++pseed) {
+            rc.run.boss_chest.screen =
+                static_cast<uint8_t>(engine::BossChestScreen::RELIC_SELECT);
+            EXPECT_EQ(pick_real(PolicyKind::SIM_SEARCH,
+                                MoveCat::BOSS_CHEST_SKIP, skip_a,
+                                MoveCat::BOSS_CHEST_PICK, pick_a, pseed),
+                      MoveCat::BOSS_CHEST_PICK);
+            EXPECT_EQ(pick_real(PolicyKind::SIM_SEARCH_SKIP,
+                                MoveCat::BOSS_CHEST_SKIP, skip_a,
+                                MoveCat::BOSS_CHEST_PICK, pick_a, pseed),
+                      MoveCat::BOSS_CHEST_SKIP);
+            // seen == 1: leaving beats re-opening, in both identities --
+            // the state that breaks the open/skip 2-cycle.
+            rc.run.boss_chest.screen =
+                static_cast<uint8_t>(engine::BossChestScreen::CLOSED);
+            EXPECT_EQ(pick_real(PolicyKind::SIM_SEARCH,
+                                MoveCat::BOSS_CHEST_OPEN, open_a,
+                                MoveCat::BOSS_CHEST_PROCEED, proceed_a,
+                                pseed),
+                      MoveCat::BOSS_CHEST_PROCEED);
+            EXPECT_EQ(pick_real(PolicyKind::SIM_SEARCH_SKIP,
+                                MoveCat::BOSS_CHEST_OPEN, open_a,
+                                MoveCat::BOSS_CHEST_PROCEED, proceed_a,
+                                pseed),
+                      MoveCat::BOSS_CHEST_PROCEED);
+        }
+        // Restore the pristine controller for the blocks below.
+        rc = engine::run_begin(7, 20);
     }
 
     // greedy_block scores skip EQUAL to pick, which is what makes

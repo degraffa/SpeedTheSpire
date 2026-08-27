@@ -16,6 +16,11 @@
 # covers -- the transient screen-flow fields live only on the controller.
 add_library(fuzz_core STATIC
     src/policy.cpp
+    # S2.V2: the sim-consulting policy (SIM_SEARCH / SIM_SEARCH_SKIP) -- a
+    # bounded turn-local search over engine snapshots plus the b1.7.0
+    # run-layer heuristic port. Its own TU because it pulls in far more of
+    # the engine surface than the E0 scorers do.
+    src/policy_search.cpp
     src/fuzz_run.cpp
     src/coverage.cpp
     src/repro.cpp

@@ -687,6 +687,16 @@ add_test(
 set_tests_properties(oracle_campaign_pipeline_python_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
 
+# S2.V2 script-following policy (STS-SCRIPT v1 follower). Stdlib-only; the
+# matcher's evidence is the committed compressed corpus (recorded protocol
+# dumps re-derived to identity steps and round-tripped) plus synthetic
+# BOSS_REWARD states -- the game is never launched.
+add_test(
+    NAME oracle_script_policy_python_test
+    COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_script_policy.py)
+set_tests_properties(oracle_script_policy_python_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
+
 # TE.1 standing-deviation shape checker (stdlib-only synthetic diffs).
 add_test(
     NAME oracle_standing_triage_python_test

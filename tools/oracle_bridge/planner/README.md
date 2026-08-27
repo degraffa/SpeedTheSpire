@@ -88,6 +88,77 @@ ends as `ACTION_CAP` — which in a depth scan reads as a *policy* failure while
 actually being the tool's own truncation. The summary prints the `ACTION_CAP`
 count next to the reach numbers so the artifact is visible rather than inferred.
 
+## The sim-consulting policies and the scripted line (S2.V2)
+
+S2.43's breadth wave measured the b1.7.0 driver family at **0 Act-2 boss
+fights in 2,000 live A20 attempts**, the exact trigger for design §6's
+sanctioned escalation. S2.V2 adds the two pieces the escalation names:
+
+**`sim_search` / `sim_search_skip`** (`--policies`) are the sim-consulting
+policies (`tools/fuzz/src/policy_search.cpp`): combat decisions run a bounded
+1-ply search over engine snapshots (2-ply through a boss fight's opening),
+map-node and event-option decisions are scored by a one-floor rollout, and the
+remaining run-layer decisions are the b1.7.0 survival heuristics ported from
+`greedy_policy.py` (R1/R2/R4 + `ACT_PROFILES`). Deterministic and weight-free:
+integer arithmetic only, every bound a constant, the single stochastic input
+the shared one-draw tie-break from `policy_seed`. The `_skip` variant differs
+in exactly one rule — R4's boss-relic pick answers SKIP — mirroring the
+`policy_bossrelic_take/skip.json` cohort identities. The search preview is
+deliberately omniscient (it advances copies of the real controller); the
+product is a scripted LINE for a capture to replay, not an agent under the
+information contract.
+
+**`--script-dir <dir>`** writes an **STS-SCRIPT v1** file for every row that
+hits the filter — the scripted action line the live script follower
+(`tools/oracle_bridge/driver/script_policy_cmd.py`) replays over STS-POLICY-IO
+v1. Emission re-drives the row's pass-A trajectory from `run_begin`, decodes
+every action against the state it was taken in, and refuses to write a file
+whose replay does not land on the row's `final_hash`. Under
+`--verify-determinism` the trajectory is re-derived and compared too.
+
+### STS-SCRIPT v1 (normative schema)
+
+JSON Lines. Line 1 is the header:
+
+```json
+{"format":"STS-SCRIPT v1","seed":"STS00001","seed_int":1790050543751,
+ "ascension":20,"policy":"sim_search","policy_seed":0,"engine_schema":8,
+ "steps":186,"final_hash":"e8dfee586097dab7","end_reason":"run_over",
+ "victory":false,"max_act":2,"max_floor":19}
+```
+
+then one object per decision: `{"i":N,"floor":N,"act":N,"phase":"...",
+"k":"<kind>", ...identity...}`. The identity vocabulary is what a live driver
+can match against a CommunicationMod dump — **stable identity, never a bare
+sim index** (an index mismatch that names the same card is presentation; a
+different card at the same index is the desync the follower must stop on):
+
+| `k` | identity fields | live join |
+|---|---|---|
+| `play` | `card` (game id), `up` (upgrade count), `ord` (n-th same-identity copy in hand order), `t` (monster index, −1 untargeted), `tmon` (monster game id, advisory) | n-th matching card in `combat_state.hand` → `play <slot> [t]` |
+| `end` | — | `end` |
+| `potion` / `potion_discard` | `slot`, `potion` (game id), `t` | slot must hold that potion → `potion use/discard <slot> [t]` |
+| `map` / `map_boss` | `x` (column), `sym` (node symbol) | node with that x/symbol in `next_nodes` → `choose i`; boss → `choose 0` |
+| `claim` | `rtype` (reward_type), `id` (relic/potion game id when carried), `ord` (n-th row of same type) | n-th matching `rewards[]` row → `choose i` |
+| `take_card` / `skip_card` / `sing` | `card`+`up`+`ord` / — / — | match in `screen_state.cards` → `choose i`; `skip`; the bowl row |
+| `rest` | `opt` (`rest`/`smith`/`lift`/`toke`/`dig`/`recall`) | choice_list entry of that name |
+| `grid` / `grid_cancel` | `ctx` + `card`+`up`+`ord` | match in the grid's card list → `choose i`; cancel alias |
+| `choose_card` | `src` (pile) + `card`+`up`+`ord`+`index` | combat choice screens; identity join like `grid` |
+| `confirm` | — | the hand-select confirm (`proceed`) |
+| `event` / `neow` | `event` (game id), `opt` (full-list ordinal), `index` (**enabled-only** index — the `choose` command's own space, command_map.hpp's two-index-space note inverted) | `choose <index>` |
+| `open_chest` / `boss_open` | — | the `open` choice |
+| `boss_pick` / `boss_skip` | `relic` (game id) / — | match in `screen_state.relics` → `choose i`; `skip` |
+| `proceed` | `ctx` (advisory) | `proceed` |
+| `shop` | `index` (raw) | never emitted by the sim-consulting policies (they buy nothing); decode-completeness only |
+
+The follower consumes steps strictly in order; its only two glue commands
+(a confirmation-only screen, and the GRID pick-then-confirm seam) never
+advance the script cursor, and **any other mismatch stops the run as
+divergent** — a desync is capture evidence for Stage-B triage, never
+something to route around. `script_policy_cmd.py`'s module header carries the
+stop contract; its unit tests round-trip the schema against the committed
+corpus of recorded dumps.
+
 ## `--min-hit-count` inverts for a depth cohort
 
 The rule above exists because the capture is driven by a **different** policy
@@ -103,7 +174,7 @@ most of an Act-3 cohort for a robustness property its consumer does not use.
 
 ### What the policy column does and does not mean
 
-`fuzz::PolicyKind` (the sim's five) and the driver's `--policy` family
+`fuzz::PolicyKind` (the sim's seven) and the driver's `--policy` family
 (`random-legal` / `greedy` / `script` / `external`+config) are **different
 families**. A triple naming `greedy_damage` names a *sim* policy; the oracle
 campaign cannot execute it. The triple asserts that **a scripted line of that
@@ -113,6 +184,14 @@ that reading deliberately rather than building a correspondence between the two
 families, which would have meant a new `PolicyKind` in the one file S2.41 is
 concurrently editing. The cohort file's own `#` header says so, so a consumer
 cannot pick it up without meeting the caveat.
+
+**S2.V2 closes the gap for the sim-consulting policies specifically**: a
+`sim_search`/`sim_search_skip` triple emitted with `--script-dir` carries its
+complete decision sequence as an STS-SCRIPT v1 file, and the live campaign
+replays that exact line through `script_policy_cmd.py` — so for THOSE triples
+the policy column is executable after all, through the script rather than
+through a policy correspondence. Triples of the E0 policies keep the
+provenance-only reading above.
 
 ## `--min-hit-count` is the whole point
 

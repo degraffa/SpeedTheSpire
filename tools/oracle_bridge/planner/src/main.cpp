@@ -23,7 +23,11 @@
 #include <string_view>
 #include <vector>
 
+#include <algorithm>
+#include <filesystem>
+
 #include "sts/engine/seed_string.hpp"
+#include "sts/planner/script.hpp"
 #include "sts/planner/seed_scan.hpp"
 #include "sts/registry/encounter_table.hpp"
 #include "sts/registry/game_ids.hpp"
@@ -84,6 +88,16 @@ void usage() {
         "                            is provenance for the reachability claim.\n"
         "                            See the README.\n"
         "  --summary <path>          aggregate report (default: stderr)\n"
+        "  --script-dir <dir>        S2.V2: write an STS-SCRIPT v1 file (the\n"
+        "                            scripted action line -- see the README's\n"
+        "                            schema section) for every row that HITS\n"
+        "                            the filter, one file per (seed, policy,\n"
+        "                            policy_seed) triple. The directory is\n"
+        "                            created if missing. Each script is the\n"
+        "                            row's pass-A trajectory re-decoded\n"
+        "                            against the states it was taken in, and\n"
+        "                            its replay is verified against the row's\n"
+        "                            final hash before the file is written.\n"
         "  --progress                per-1000-row progress to stderr\n"
         "\n"
         "FILTERS (a row hits when ALL of these hold)\n"
@@ -296,6 +310,7 @@ int main(int argc, char** argv) {
     std::string out_path;
     std::string seed_list_path;
     std::string cohort_list_path;
+    std::string script_dir;
     std::string summary_path;
     bool progress = false;
     bool verify_determinism = false;
@@ -398,6 +413,8 @@ int main(int argc, char** argv) {
             filter.need_boss = true;
         } else if (a == "--cohort-list") {
             cohort_list_path = need_value(argc, argv, i);
+        } else if (a == "--script-dir") {
+            script_dir = need_value(argc, argv, i);
         } else if (a == "--need-victory") {
             filter.need_victory = true;
         } else if (a == "--min-act") {
@@ -466,8 +483,18 @@ int main(int argc, char** argv) {
     }
     if (format == Format::TSV) *out << sts::planner::tsv_header() << '\n';
 
+    if (!script_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(script_dir, ec);
+        if (ec) {
+            die("cannot create --script-dir '" + script_dir + "': " +
+                ec.message());
+        }
+    }
+
     ScanSummary summary;
     summary.seeds = seeds.size();
+    uint64_t scripts_written = 0;
     // Insertion order is the scan order, so the seed list comes out in the same
     // order the seeds were given rather than sorted by hash.
     std::vector<std::string> qualifying;
@@ -497,12 +524,17 @@ int main(int argc, char** argv) {
                 c.policy = policy;
                 c.policy_seed = pseed;
 
-                const ScanRow row = sts::planner::scan_case(c, limits,
-                                                            track_relics);
+                std::vector<sts::engine::Action> trajectory;
+                const bool want_trajectory = !script_dir.empty();
+                const ScanRow row = sts::planner::scan_case(
+                    c, limits, track_relics,
+                    want_trajectory ? &trajectory : nullptr);
                 const std::string text = sts::planner::row_to_text(row, format);
                 if (verify_determinism) {
-                    const ScanRow again =
-                        sts::planner::scan_case(c, limits, track_relics);
+                    std::vector<sts::engine::Action> trajectory_b;
+                    const ScanRow again = sts::planner::scan_case(
+                        c, limits, track_relics,
+                        want_trajectory ? &trajectory_b : nullptr);
                     if (sts::planner::row_to_text(again, format) != text) {
                         ++determinism_mismatches;
                         std::fprintf(stderr,
@@ -510,12 +542,57 @@ int main(int argc, char** argv) {
                                      text.c_str(),
                                      sts::planner::row_to_text(again, format).c_str());
                     }
+                    if (want_trajectory &&
+                        (trajectory_b.size() != trajectory.size() ||
+                         !std::equal(trajectory.begin(), trajectory.end(),
+                                     trajectory_b.begin(),
+                                     [](sts::engine::Action x,
+                                        sts::engine::Action y) {
+                                         return x.bits == y.bits;
+                                     }))) {
+                        ++determinism_mismatches;
+                        std::fprintf(stderr,
+                                     "seed_scan: DETERMINISM MISMATCH "
+                                     "(trajectory) %s %s %llu\n",
+                                     seed.text.c_str(),
+                                     sts::fuzz::policy_name(policy),
+                                     static_cast<unsigned long long>(pseed));
+                    }
                 }
                 *out << text << '\n';
                 summary.add(row);
-                if (!cohort_list_path.empty() &&
-                    sts::planner::row_hits(row, filter)) {
+                const bool hits = sts::planner::row_hits(row, filter);
+                if (!cohort_list_path.empty() && hits) {
                     cohort.push_back(sts::planner::cohort_triple(row));
+                }
+                if (!script_dir.empty() && hits) {
+                    const sts::planner::ScriptEmit emit =
+                        sts::planner::emit_script(
+                            row.seed.value, row.seed.text, row.ascension,
+                            sts::fuzz::policy_name(row.policy),
+                            row.policy_seed, trajectory,
+                            sts::fuzz::end_reason_name(row.end_reason),
+                            row.final_hash);
+                    if (!emit.ok) {
+                        die("script emission failed for " + row.seed.text +
+                            " " + sts::fuzz::policy_name(row.policy) + " ps" +
+                            std::to_string(row.policy_seed) + ": " +
+                            emit.error);
+                    }
+                    const std::string name =
+                        row.seed.text + "__" +
+                        sts::fuzz::policy_name(row.policy) + "__ps" +
+                        std::to_string(row.policy_seed) + ".script.jsonl";
+                    const std::filesystem::path p =
+                        std::filesystem::path(script_dir) / name;
+                    std::ofstream sf(p);
+                    if (!sf) die("cannot write script '" + p.string() + "'");
+                    for (const std::string& line : emit.lines) {
+                        sf << line << '\n';
+                    }
+                    sf.flush();
+                    if (!sf) die("failed writing script '" + p.string() + "'");
+                    ++scripts_written;
                 }
                 seed_rows.push_back(row);
                 ++rows_done;
@@ -659,6 +736,10 @@ int main(int argc, char** argv) {
     }
     report += header;
     if (!cohort_header.empty()) report += cohort_header;
+    if (!script_dir.empty()) {
+        report += "scripts_written=" + std::to_string(scripts_written) +
+                  " into " + script_dir + "\n";
+    }
     if (verify_determinism) {
         report += "determinism_mismatches=" + std::to_string(determinism_mismatches) +
                   "\n";

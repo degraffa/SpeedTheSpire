@@ -321,7 +321,8 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
 }  // namespace
 
 ScanRow scan_case(const ScanCase& c, const ScanLimits& lim,
-                  const std::vector<registry::RelicId>& relic_targets) {
+                  const std::vector<registry::RelicId>& relic_targets,
+                  std::vector<engine::Action>* trajectory_out) {
     ScanRow row;
     row.seed = c.seed;
     row.ascension = c.ascension;
@@ -365,6 +366,9 @@ ScanRow scan_case(const ScanCase& c, const ScanLimits& lim,
     for (int i = 0; i < kMaxActs; ++i) row.boss_ids[i] = w.boss_ids[i];
     row.relic_obs = std::move(w.relics);
     row.fail_kind = fuzz::fail_kind_name(result.failure.kind);
+    if (trajectory_out != nullptr) {
+        *trajectory_out = std::move(result.trajectory);
+    }
     return row;
 }
 

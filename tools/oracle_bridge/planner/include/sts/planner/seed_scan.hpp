@@ -310,9 +310,15 @@ struct ScanLimits {
 // `relic_targets` (the targets only ADD observation; no engine stream or
 // policy decision reads them). `relic_targets` become row.relic_obs in the
 // same order.
+//
+// `trajectory_out` (S2.V2): when non-null, receives pass A's complete action
+// list -- the input the STS-SCRIPT emitter (script.hpp) replays and decodes.
+// Purely an extra output; the scan itself is byte-identical with or without
+// it.
 [[nodiscard]] ScanRow scan_case(
     const ScanCase& c, const ScanLimits& lim = {},
-    const std::vector<registry::RelicId>& relic_targets = {});
+    const std::vector<registry::RelicId>& relic_targets = {},
+    std::vector<engine::Action>* trajectory_out = nullptr);
 
 // --- Filtering ---------------------------------------------------------------
 
