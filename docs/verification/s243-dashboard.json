@@ -1,0 +1,2013 @@
+{
+  "divergence_inventory": [
+    {
+      "artifact_sha256": "085193ba9f7b82b131554eab70cd984662355c3fc88c041781b13b740fc5d123",
+      "campaign_id": "s243_breadth_rand.worker-007-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_rand.worker-007-of-008",
+        "classification": "part",
+        "note": "NOT a defect. The replay stops at the combat-reward row Cauldron's deferred onEquip assembles; the harness names the owner explicitly (`deferred_reward_screen_owner`). The live capture also measured a previously unrecorded hidden RNG burn -- combatRewardScreen.open() constructs a full 3-card reward (+9 cardRng plus blizz bookkeeping) that Cauldron then deletes from view -- now recorded in the row-107 provenance. Discharge belongs to the Egg-trio onEquip reward-screen preview-pass plumbing row, not to this campaign.",
+        "reference": "registry/relics.yaml row 107 (Cauldron) -- documented-deferred onEquip",
+        "seed": "STS430130",
+        "status": "standing-deviation"
+      },
+      "group": "s243_breadth_rand",
+      "retest_first_divergence": "seq=36 floor=3 screen=COMBAT_REWARD (7 fields) -- the stop above is DOWNSTREAM of this",
+      "role": "breadth",
+      "seed": "STS430130",
+      "superseding_recapture": null
+    },
+    {
+      "artifact_sha256": "e08498dd67d67839c77ea8116dc1d9badb745c13eb535609ce02fcc7ba461494",
+      "campaign_id": "s243_breadth_skip.worker-001-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-001-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432280",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_skip.worker-004-of-004",
+          "seed": "STS432280"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=85 floor=11 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS432280",
+      "superseding_recapture": {
+        "artifact": "run_STS432280_a20_ironclad.jsonl",
+        "artifact_sha256": "dd2ff15a0a8b4dcdd728a1e8621764e3e4e8f7293388952c1f0def91eb861a3a",
+        "campaign_id": "s243_recap_skip.worker-004-of-004",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS432280"
+      }
+    },
+    {
+      "artifact_sha256": "e93e292beda80aea84615f269349fea3fe01ac076329e9f2dc5d30bccae563b2",
+      "campaign_id": "s243_breadth_skip.worker-001-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-001-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432456",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_skip.worker-002-of-004",
+          "seed": "STS432456"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=141 floor=8 screen=GAME_OVER (8 fields)",
+      "role": "breadth",
+      "seed": "STS432456",
+      "superseding_recapture": {
+        "artifact": "run_STS432456_a20_ironclad.jsonl",
+        "artifact_sha256": "c7a567b8e27da236b5a96f1a174326cc58134138b550dd0e890ea69f93e55084",
+        "campaign_id": "s243_recap_skip.worker-002-of-004",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS432456"
+      }
+    },
+    {
+      "artifact_sha256": "d5c07fd5e767b49c5f33894ac9815b7d593bf47a5c5fd1ba0b5e6dc4d766e2fe",
+      "campaign_id": "s243_breadth_skip.worker-001-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-001-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432616",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_skip.worker-002-of-002",
+          "seed": "STS432616"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=68 floor=6 screen=HAND_SELECT (46 fields) -- the stop above is DOWNSTREAM of this",
+      "role": "breadth",
+      "seed": "STS432616",
+      "superseding_recapture": {
+        "artifact": "run_STS432616_a20_ironclad.jsonl",
+        "artifact_sha256": "26ad51eeccca7ad29bcffd7f28144f65a38ccea981ec92e7a06580f6c2182c57",
+        "campaign_id": "s243_recap2_skip.worker-002-of-002",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS432616"
+      }
+    },
+    {
+      "artifact_sha256": "cfd3b7d05854188a77390f394eb026e45a19c78a88616566b9f9062d8fa98f9e",
+      "campaign_id": "s243_breadth_skip.worker-002-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-002-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432737",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_skip.worker-002-of-004",
+          "seed": "STS432737"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=196 floor=11 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS432737",
+      "superseding_recapture": {
+        "artifact": "run_STS432737_a20_ironclad.jsonl",
+        "artifact_sha256": "f9069dc53f3dafddf858b21896eb9916fa53febe86c60853680ffe76a2a64f9b",
+        "campaign_id": "s243_recap_skip.worker-002-of-004",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS432737"
+      }
+    },
+    {
+      "artifact_sha256": "7c7ab86b7d6bdc1a7fa64479f94328a014c16a4c8aabf0947243094d1aa68d59",
+      "campaign_id": "s243_breadth_skip.worker-003-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-003-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432226",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_skip.worker-003-of-004",
+          "seed": "STS432226"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=12 floor=1 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS432226",
+      "superseding_recapture": {
+        "artifact": "run_STS432226_a20_ironclad.jsonl",
+        "artifact_sha256": "6018e3ccda9852edcb4d63bf2768ab1c0549b10e19ddd648b6d0ec83e183150b",
+        "campaign_id": "s243_recap_skip.worker-003-of-004",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "noop_wedge",
+        "seed": "STS432226"
+      }
+    },
+    {
+      "artifact_sha256": "e618f8cdc695a3287a3b4ff5afb3336ba7bacc26e5a1e07f075907070bb92752",
+      "campaign_id": "s243_breadth_skip.worker-003-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-003-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432530",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_skip.worker-001-of-002",
+          "seed": "STS432530"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=76 floor=6 screen=NONE (45 fields)",
+      "role": "breadth",
+      "seed": "STS432530",
+      "superseding_recapture": {
+        "artifact": "run_STS432530_a20_ironclad.jsonl",
+        "artifact_sha256": "f5438bc8ff06bc4bfa51f80503a4ba140a57a0ad282460ca52d9e43c6efcb29b",
+        "campaign_id": "s243_recap2_skip.worker-001-of-002",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS432530"
+      }
+    },
+    {
+      "artifact_sha256": "dd4f41a1b6dbccab311a422c60e8dfcd93e95719df0861920a4cb94167a2b88f",
+      "campaign_id": "s243_breadth_skip.worker-006-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-006-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432165",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_skip.worker-002-of-004",
+          "seed": "STS432165"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=12 floor=1 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS432165",
+      "superseding_recapture": {
+        "artifact": "run_STS432165_a20_ironclad.jsonl",
+        "artifact_sha256": "c97f56927f507008f62dbddb5e890937477d6be95dd979895cbb39bce4760cdd",
+        "campaign_id": "s243_recap_skip.worker-002-of-004",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS432165"
+      }
+    },
+    {
+      "artifact_sha256": "33ecdbbdd26b68863832b31a782c544a09668b51ad8e14f403a0b9a9a2298636",
+      "campaign_id": "s243_breadth_skip.worker-006-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-006-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432365",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_skip.worker-001-of-004",
+          "seed": "STS432365"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=144 floor=11 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS432365",
+      "superseding_recapture": {
+        "artifact": "run_STS432365_a20_ironclad.jsonl",
+        "artifact_sha256": "dadae986bc9ea50303956c2bd6b5d38d578833c6a6574fe4292419523d386ce4",
+        "campaign_id": "s243_recap_skip.worker-001-of-004",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS432365"
+      }
+    },
+    {
+      "artifact_sha256": "d0004bfe831d1e53144f7ebbd036c3860ee3855edc63f92af7207e6dae7d9ba0",
+      "campaign_id": "s243_breadth_skip.worker-008-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-008-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432031",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_skip.worker-001-of-004",
+          "seed": "STS432031"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=93 floor=8 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS432031",
+      "superseding_recapture": {
+        "artifact": "run_STS432031_a20_ironclad.jsonl",
+        "artifact_sha256": "e406241715d98c15b76294f47df530d7a0f6612f96ab030aa35d27c045b6e2c0",
+        "campaign_id": "s243_recap_skip.worker-001-of-004",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "noop_wedge",
+        "seed": "STS432031"
+      }
+    },
+    {
+      "artifact_sha256": "979ef054d638e4ac430c9ed9145bb704a7925afcf65b3f11a01f775af1af8b20",
+      "campaign_id": "s243_breadth_skip.worker-008-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_skip.worker-008-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS432655",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_skip.worker-001-of-004",
+          "seed": "STS432655"
+        }
+      },
+      "group": "s243_breadth_skip",
+      "retest_first_divergence": "seq=79 floor=6 screen=GRID (40 fields) -- the stop above is DOWNSTREAM of this",
+      "role": "breadth",
+      "seed": "STS432655",
+      "superseding_recapture": {
+        "artifact": "run_STS432655_a20_ironclad.jsonl",
+        "artifact_sha256": "ae343c40450cc8767ed015f8f47b0fc59fc0c5db1733128ac4efc0772d72c32f",
+        "campaign_id": "s243_recap_skip.worker-001-of-004",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS432655"
+      }
+    },
+    {
+      "artifact_sha256": "753a1e5aa75463f1acfed8ed6111adce1bb1ea66ce75f433e884112de1c00868",
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_take.worker-002-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS431073",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_take.worker-001-of-006",
+          "seed": "STS431073"
+        }
+      },
+      "group": "s243_breadth_take",
+      "retest_first_divergence": "seq=12 floor=1 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS431073",
+      "superseding_recapture": {
+        "artifact": "run_STS431073_a20_ironclad.jsonl",
+        "artifact_sha256": "ab32bc0e524f9c6208941517ccc3a9a7be2b966495566569db01cae6f1a7cf3b",
+        "campaign_id": "s243_recap_take.worker-001-of-006",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS431073"
+      }
+    },
+    {
+      "artifact_sha256": "d054c35e7c3cebbca9cfe6804cf3e728e4fe26616259750a95c38a437190e7e2",
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_take.worker-002-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS431105",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_take.worker-002-of-006",
+          "seed": "STS431105"
+        }
+      },
+      "group": "s243_breadth_take",
+      "retest_first_divergence": "seq=66 floor=5 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS431105",
+      "superseding_recapture": {
+        "artifact": "run_STS431105_a20_ironclad.jsonl",
+        "artifact_sha256": "3cd734a64c39e681b35bbf48cc24afb71526d2f98a40833530d39a9eacbde26d",
+        "campaign_id": "s243_recap_take.worker-002-of-006",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS431105"
+      }
+    },
+    {
+      "artifact_sha256": "e96bbcb1b6b0dd726390f647e47649ce366ebf9c4de90bc6ca4894ce04e0b714",
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_take.worker-002-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS431433",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_take.worker-005-of-006",
+          "seed": "STS431433"
+        }
+      },
+      "group": "s243_breadth_take",
+      "retest_first_divergence": "seq=100 floor=10 screen=COMBAT_REWARD (2 fields)",
+      "role": "breadth",
+      "seed": "STS431433",
+      "superseding_recapture": {
+        "artifact": "run_STS431433_a20_ironclad.jsonl",
+        "artifact_sha256": "48e9fd29420d5675e5ec260804601a87c84bfe5fae4ef3c00ee27e93fd7b72fb",
+        "campaign_id": "s243_recap_take.worker-005-of-006",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS431433"
+      }
+    },
+    {
+      "artifact_sha256": "5ebccd4efe44d36f6432c72f8b1d2adc950e4805660d45e4a33193e65297fa7f",
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_take.worker-002-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS431537",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_take.worker-002-of-003",
+          "seed": "STS431537"
+        }
+      },
+      "group": "s243_breadth_take",
+      "retest_first_divergence": "seq=80 floor=6 screen=CARD_REWARD (42 fields)",
+      "role": "breadth",
+      "seed": "STS431537",
+      "superseding_recapture": {
+        "artifact": "run_STS431537_a20_ironclad.jsonl",
+        "artifact_sha256": "c77a22b390e67418821d489b6a3dd335d96aa0638a7168af4393c255ae647070",
+        "campaign_id": "s243_recap2_take.worker-002-of-003",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS431537"
+      }
+    },
+    {
+      "artifact_sha256": "2a26fb1adeb728d7ad8ccc0ff01e3ec7a077fb58f4388e3db5a4ebd62d83ed3a",
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_take.worker-002-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS431657",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_take.worker-003-of-003",
+          "seed": "STS431657"
+        }
+      },
+      "group": "s243_breadth_take",
+      "retest_first_divergence": "seq=87 floor=6 screen=NONE (42 fields) -- the stop above is DOWNSTREAM of this",
+      "role": "breadth",
+      "seed": "STS431657",
+      "superseding_recapture": {
+        "artifact": "run_STS431657_a20_ironclad.jsonl",
+        "artifact_sha256": "83b8de1da35ce72e2b17301d98b72162afe0179c20a03accbc1b9a23800b13fc",
+        "campaign_id": "s243_recap2_take.worker-003-of-003",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS431657"
+      }
+    },
+    {
+      "artifact_sha256": "bd9ff176834e9e5db3dc7db01356b88dc1403ec6b169c0edd02709cbf205daab",
+      "campaign_id": "s243_breadth_take.worker-003-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_take.worker-003-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS431170",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_take.worker-001-of-003",
+          "seed": "STS431170"
+        }
+      },
+      "group": "s243_breadth_take",
+      "retest_first_divergence": "seq=86 floor=7 screen=NONE (46 fields)",
+      "role": "breadth",
+      "seed": "STS431170",
+      "superseding_recapture": {
+        "artifact": "run_STS431170_a20_ironclad.jsonl",
+        "artifact_sha256": "a4a44e4b4f25df005a4bd29a425a6e35be90331f195d560b5dc746371ed3371d",
+        "campaign_id": "s243_recap2_take.worker-001-of-003",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS431170"
+      }
+    },
+    {
+      "artifact_sha256": "d286398562e4e61cb393fdf13e854a34c6f9f0c81d7a10394c12f9aea51aa81b",
+      "campaign_id": "s243_breadth_take.worker-003-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_take.worker-003-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS431250",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_take.worker-004-of-006",
+          "seed": "STS431250"
+        }
+      },
+      "group": "s243_breadth_take",
+      "retest_first_divergence": "seq=12 floor=1 screen=COMBAT_REWARD (1 field)",
+      "role": "breadth",
+      "seed": "STS431250",
+      "superseding_recapture": {
+        "artifact": "run_STS431250_a20_ironclad.jsonl",
+        "artifact_sha256": "4db4edde306da2cada4d58e6d729d2dda909084a6bba511fc13aa41382d99a00",
+        "campaign_id": "s243_recap_take.worker-004-of-006",
+        "capture_race_records": 2,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS431250"
+      }
+    },
+    {
+      "artifact_sha256": "dc476a295df1f1ef7e498a026aebbc9f8ec14bdbbb73d916842b9ffdbdaeed4b",
+      "campaign_id": "s243_breadth_take.worker-007-of-008",
+      "capture_classification": "state_divergence",
+      "classification": "part",
+      "classification_source": "retest sweep",
+      "disposition": {
+        "campaign_id": "s243_breadth_take.worker-007-of-008",
+        "classification": "part",
+        "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+        "seed": "STS431590",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap_take.worker-001-of-006",
+          "seed": "STS431590"
+        }
+      },
+      "group": "s243_breadth_take",
+      "retest_first_divergence": "seq=111 floor=6 screen=CARD_REWARD (43 fields)",
+      "role": "breadth",
+      "seed": "STS431590",
+      "superseding_recapture": {
+        "artifact": "run_STS431590_a20_ironclad.jsonl",
+        "artifact_sha256": "00c909f4cb148db27a22aa653c48d799f80e0bc15fd6506770911c41f7abff08",
+        "campaign_id": "s243_recap_take.worker-001-of-006",
+        "capture_race_records": 1,
+        "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+        "outcome": "death",
+        "seed": "STS431590"
+      }
+    },
+    {
+      "artifact_sha256": "2e0da07719f6b70037f0706603a5c11e5302d38ebe258c70d0686c3b13e100bf",
+      "campaign_id": "s243_recap_skip.worker-003-of-004",
+      "capture_classification": "state_divergence",
+      "classification": "state_divergence",
+      "classification_source": "capture postprocess",
+      "disposition": {
+        "campaign_id": "s243_recap_skip.worker-003-of-004",
+        "classification": "state_divergence",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+        "seed": "STS432530",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_skip.worker-001-of-002",
+          "seed": "STS432530"
+        }
+      },
+      "group": "s243_recap_skip",
+      "retest_first_divergence": null,
+      "role": "recapture",
+      "seed": "STS432530",
+      "superseding_recapture": {
+        "artifact": "run_STS432530_a20_ironclad.jsonl",
+        "artifact_sha256": "f5438bc8ff06bc4bfa51f80503a4ba140a57a0ad282460ca52d9e43c6efcb29b",
+        "campaign_id": "s243_recap2_skip.worker-001-of-002",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS432530"
+      }
+    },
+    {
+      "artifact_sha256": "c32abdc73105ed1d06605725cb0daa1167f7b3192cfef98628b9da84cdc5f588",
+      "campaign_id": "s243_recap_skip.worker-004-of-004",
+      "capture_classification": "state_divergence",
+      "classification": "state_divergence",
+      "classification_source": "capture postprocess",
+      "disposition": {
+        "campaign_id": "s243_recap_skip.worker-004-of-004",
+        "classification": "state_divergence",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+        "seed": "STS432616",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_skip.worker-002-of-002",
+          "seed": "STS432616"
+        }
+      },
+      "group": "s243_recap_skip",
+      "retest_first_divergence": null,
+      "role": "recapture",
+      "seed": "STS432616",
+      "superseding_recapture": {
+        "artifact": "run_STS432616_a20_ironclad.jsonl",
+        "artifact_sha256": "26ad51eeccca7ad29bcffd7f28144f65a38ccea981ec92e7a06580f6c2182c57",
+        "campaign_id": "s243_recap2_skip.worker-002-of-002",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS432616"
+      }
+    },
+    {
+      "artifact_sha256": "2fedf3e95a88f957e61bc092f5aaa3210dfd8d14ce0c21c15657147ae555a021",
+      "campaign_id": "s243_recap_take.worker-002-of-006",
+      "capture_classification": "state_divergence",
+      "classification": "state_divergence",
+      "classification_source": "capture postprocess",
+      "disposition": {
+        "campaign_id": "s243_recap_take.worker-002-of-006",
+        "classification": "state_divergence",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+        "seed": "STS431657",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_take.worker-003-of-003",
+          "seed": "STS431657"
+        }
+      },
+      "group": "s243_recap_take",
+      "retest_first_divergence": null,
+      "role": "recapture",
+      "seed": "STS431657",
+      "superseding_recapture": {
+        "artifact": "run_STS431657_a20_ironclad.jsonl",
+        "artifact_sha256": "83b8de1da35ce72e2b17301d98b72162afe0179c20a03accbc1b9a23800b13fc",
+        "campaign_id": "s243_recap2_take.worker-003-of-003",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS431657"
+      }
+    },
+    {
+      "artifact_sha256": "cbfb24bb70520e26fd425366c2dd7d0af432baf4d219aaac987fd4318b46eb72",
+      "campaign_id": "s243_recap_take.worker-003-of-006",
+      "capture_classification": "state_divergence",
+      "classification": "state_divergence",
+      "classification_source": "capture postprocess",
+      "disposition": {
+        "campaign_id": "s243_recap_take.worker-003-of-006",
+        "classification": "state_divergence",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+        "seed": "STS431170",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_take.worker-001-of-003",
+          "seed": "STS431170"
+        }
+      },
+      "group": "s243_recap_take",
+      "retest_first_divergence": null,
+      "role": "recapture",
+      "seed": "STS431170",
+      "superseding_recapture": {
+        "artifact": "run_STS431170_a20_ironclad.jsonl",
+        "artifact_sha256": "a4a44e4b4f25df005a4bd29a425a6e35be90331f195d560b5dc746371ed3371d",
+        "campaign_id": "s243_recap2_take.worker-001-of-003",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS431170"
+      }
+    },
+    {
+      "artifact_sha256": "f0537b3485d69065e2812809d3596f444079a293675e756cc2accbc8e27fe41c",
+      "campaign_id": "s243_recap_take.worker-006-of-006",
+      "capture_classification": "state_divergence",
+      "classification": "state_divergence",
+      "classification_source": "capture postprocess",
+      "disposition": {
+        "campaign_id": "s243_recap_take.worker-006-of-006",
+        "classification": "state_divergence",
+        "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+        "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+        "seed": "STS431537",
+        "status": "superseded-by-recapture",
+        "superseded_by": {
+          "campaign_id": "s243_recap2_take.worker-002-of-003",
+          "seed": "STS431537"
+        }
+      },
+      "group": "s243_recap_take",
+      "retest_first_divergence": null,
+      "role": "recapture",
+      "seed": "STS431537",
+      "superseding_recapture": {
+        "artifact": "run_STS431537_a20_ironclad.jsonl",
+        "artifact_sha256": "c77a22b390e67418821d489b6a3dd335d96aa0638a7168af4393c255ae647070",
+        "campaign_id": "s243_recap2_take.worker-002-of-003",
+        "capture_race_records": 0,
+        "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+        "outcome": "death",
+        "seed": "STS431537"
+      }
+    }
+  ],
+  "evidence_totals": {
+    "classification_final": {
+      "clean": 1999,
+      "part": 19,
+      "state_divergence": 5
+    },
+    "findings": 24,
+    "runs_consumed": 2023
+  },
+  "format": "STS-S2-VERIFICATION-REPORT v1",
+  "inputs": {
+    "artifact_bytes_consumed": 4031391633,
+    "artifact_roll_up_sha256": "2dcb397e7a467d9eae94bd2aff6f520af161f7af7eeb6b5278165c912719b880",
+    "artifact_root": "D:\\STS_BG_Mod\\_oracle_data\\campaigns",
+    "artifacts_consumed": 2023,
+    "cohorts": [
+      {
+        "artifact_bytes": 425156593,
+        "capture_pins": [
+          {
+            "policy": "random-legal",
+            "policy_cmd_sha256": null,
+            "policy_config": null,
+            "policy_config_sha256": null,
+            "policy_seed": 1234
+          }
+        ],
+        "group": "s243_breadth_rand",
+        "newest_finished_utc": "2026-08-26T05:10:09.695385Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "9BC4BF6A76F57C78E69B4A355D8BA1A2B2A7698E3A30B1619AC70EABCB714555",
+          "pipeline_version": "b5.4.0",
+          "policy": "random-legal",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "breadth",
+        "runs": 500,
+        "worker_reports": [
+          {
+            "campaign_id": "s243_breadth_rand.worker-001-of-008",
+            "report_sha256": "213071982437690c9e63bc42339c6c237c9c432deba23a1f9442fdddf2924064"
+          },
+          {
+            "campaign_id": "s243_breadth_rand.worker-002-of-008",
+            "report_sha256": "fd42721d68e72b7807dfd452a2492eb28d5447c9242c5507b27397801a9e2c80"
+          },
+          {
+            "campaign_id": "s243_breadth_rand.worker-003-of-008",
+            "report_sha256": "629f89a7ea96c85fbc62c6b4c056494ce7b1ccde471a18904ee8cb6651aef831"
+          },
+          {
+            "campaign_id": "s243_breadth_rand.worker-004-of-008",
+            "report_sha256": "578a1c8ecc65e796386c60d9895f667d78f244783ed0e1c89872717b1a82e215"
+          },
+          {
+            "campaign_id": "s243_breadth_rand.worker-005-of-008",
+            "report_sha256": "e7e68ce589c0855eac65d5e8e3695b49d941b3df59a9cd9a7355a42aa33a8c72"
+          },
+          {
+            "campaign_id": "s243_breadth_rand.worker-006-of-008",
+            "report_sha256": "ea8c1463b4f268fe29f942372fc36f4c778ccfd663498ae667846a18decbe667"
+          },
+          {
+            "campaign_id": "s243_breadth_rand.worker-007-of-008",
+            "report_sha256": "9aa2c2f9eb456af0251d84cbd28839a4e6177b73bfb0c2f2b338b24a47ff4591"
+          },
+          {
+            "campaign_id": "s243_breadth_rand.worker-008-of-008",
+            "report_sha256": "2fd76edb93aea1b2ee585df1842f5f260dc180d7698b1ff9f2536763df5aaa73"
+          }
+        ],
+        "workers": 8
+      },
+      {
+        "artifact_bytes": 1769749437,
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "5694B7B3FE8C3DE124AE3ABC2F21424CF3D7B492B017024DC62B6350A6C0FBBC",
+            "policy_config": "policy_bossrelic_take.json",
+            "policy_config_sha256": "B4E8C46418341F344A3481F2A137856A17799C4ADEA83E8FDE99F13674244F91",
+            "policy_seed": 1234
+          }
+        ],
+        "group": "s243_breadth_take",
+        "newest_finished_utc": "2026-08-26T05:59:35.809875Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "9BC4BF6A76F57C78E69B4A355D8BA1A2B2A7698E3A30B1619AC70EABCB714555",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "breadth",
+        "runs": 750,
+        "worker_reports": [
+          {
+            "campaign_id": "s243_breadth_take.worker-001-of-008",
+            "report_sha256": "5f2f175432587b54446c09718ecb87796c6c86d882034ef8f24bd95aec8714e5"
+          },
+          {
+            "campaign_id": "s243_breadth_take.worker-002-of-008",
+            "report_sha256": "7a6ae9821da53e868fea313cfd5f40a8e52269953754d7c6ab6ce4711baa2745"
+          },
+          {
+            "campaign_id": "s243_breadth_take.worker-003-of-008",
+            "report_sha256": "6e7800b528be472694f4745d63a2b706c62c51f3b14891599c0c97039eb51a51"
+          },
+          {
+            "campaign_id": "s243_breadth_take.worker-004-of-008",
+            "report_sha256": "f287bd762b862a6575f29501ffea6d89ccc376d5acd4035aded37e93579e82e3"
+          },
+          {
+            "campaign_id": "s243_breadth_take.worker-005-of-008",
+            "report_sha256": "4677851f187e6281841adfb7b964ac331eaa35fa8145f99a8c79b77b4284938a"
+          },
+          {
+            "campaign_id": "s243_breadth_take.worker-006-of-008",
+            "report_sha256": "4d3ea73df01b998ee55a8d12029ba7ce8911cd97e75c3624dbef2254a717e47c"
+          },
+          {
+            "campaign_id": "s243_breadth_take.worker-007-of-008",
+            "report_sha256": "45affc65ac85530055f16208c475968c8b72ba6869651859d2dcff84b878c6d6"
+          },
+          {
+            "campaign_id": "s243_breadth_take.worker-008-of-008",
+            "report_sha256": "9c71b74f9732c293c9d061a3e968fda63401a6f2362704ebb427e8b259166e6c"
+          }
+        ],
+        "workers": 8
+      },
+      {
+        "artifact_bytes": 1777276375,
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "5694B7B3FE8C3DE124AE3ABC2F21424CF3D7B492B017024DC62B6350A6C0FBBC",
+            "policy_config": "policy_bossrelic_skip.json",
+            "policy_config_sha256": "C516F616C20C2E94AD6EEDC743492DD16BF9037627E48EC385AFF585106ADBDC",
+            "policy_seed": 1234
+          }
+        ],
+        "group": "s243_breadth_skip",
+        "newest_finished_utc": "2026-08-26T06:53:26.274590Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "9BC4BF6A76F57C78E69B4A355D8BA1A2B2A7698E3A30B1619AC70EABCB714555",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "breadth",
+        "runs": 750,
+        "worker_reports": [
+          {
+            "campaign_id": "s243_breadth_skip.worker-001-of-008",
+            "report_sha256": "d6a3b3e30e2dad307ce0ff78f7a17b524cb25a1999dc8a77ea2c216a3e820da4"
+          },
+          {
+            "campaign_id": "s243_breadth_skip.worker-002-of-008",
+            "report_sha256": "c422a41dd72fa3759a3918d87d485958ff881b50d9e3df8d2261051b7c9df3cc"
+          },
+          {
+            "campaign_id": "s243_breadth_skip.worker-003-of-008",
+            "report_sha256": "f49de56d48533ac19242b891bf6777202ea7f09d3e029697955b708642af34d5"
+          },
+          {
+            "campaign_id": "s243_breadth_skip.worker-004-of-008",
+            "report_sha256": "e1dd272e6e689ece9e4eb26767fbda6a3d1ea823613d4f31a9da4ac80a199d60"
+          },
+          {
+            "campaign_id": "s243_breadth_skip.worker-005-of-008",
+            "report_sha256": "63eaa4f5e4086b912742c9f2f3e3a90108d36105fa02985e15c8f28142d9a97c"
+          },
+          {
+            "campaign_id": "s243_breadth_skip.worker-006-of-008",
+            "report_sha256": "70c9e234fda111c9d7a688cecdefbdb305b9308d4a7c7a1da38947637888f9cd"
+          },
+          {
+            "campaign_id": "s243_breadth_skip.worker-007-of-008",
+            "report_sha256": "73a583a994d8bfba67a47218de8afb5e4751a1e09c03c6e7212e84424211c377"
+          },
+          {
+            "campaign_id": "s243_breadth_skip.worker-008-of-008",
+            "report_sha256": "b2d05d6e95607a2347d3671bb99041717255f2fe448989ccc5a77ca17432ca3c"
+          }
+        ],
+        "workers": 8
+      },
+      {
+        "artifact_bytes": 22641554,
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "5694B7B3FE8C3DE124AE3ABC2F21424CF3D7B492B017024DC62B6350A6C0FBBC",
+            "policy_config": "policy_bossrelic_take.json",
+            "policy_config_sha256": "B4E8C46418341F344A3481F2A137856A17799C4ADEA83E8FDE99F13674244F91",
+            "policy_seed": 1234
+          }
+        ],
+        "group": "s243_recap_take",
+        "newest_finished_utc": "2026-08-26T07:55:45.719398Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "recapture",
+        "runs": 8,
+        "worker_reports": [
+          {
+            "campaign_id": "s243_recap_take.worker-001-of-006",
+            "report_sha256": "94a6cf4dcb7e13dc09dd2be532bc2de421b93727e1bec98d1b066d261ecdc566"
+          },
+          {
+            "campaign_id": "s243_recap_take.worker-002-of-006",
+            "report_sha256": "b7519e030adcdea13b4b8aed30cb78695032d29f0cdb5f1b3047230784cb2745"
+          },
+          {
+            "campaign_id": "s243_recap_take.worker-003-of-006",
+            "report_sha256": "347600fba903afa422b8a64b23d319856d518305f37e777d64b9061238ba8e81"
+          },
+          {
+            "campaign_id": "s243_recap_take.worker-004-of-006",
+            "report_sha256": "41561cec22ef39426ab8922ce540d8bcb9d67c5b1a850ce77d605f6b920dc095"
+          },
+          {
+            "campaign_id": "s243_recap_take.worker-005-of-006",
+            "report_sha256": "87744e68abae2317a8b46e6cc59ec8628401d23ddc11b42b8b8f09209c5e8402"
+          },
+          {
+            "campaign_id": "s243_recap_take.worker-006-of-006",
+            "report_sha256": "8e93d487b45b1ed23d19d6813c45d9798e6ad59f2d6cfc9f451a6fa57cd30e64"
+          }
+        ],
+        "workers": 6
+      },
+      {
+        "artifact_bytes": 24026897,
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "5694B7B3FE8C3DE124AE3ABC2F21424CF3D7B492B017024DC62B6350A6C0FBBC",
+            "policy_config": "policy_bossrelic_skip.json",
+            "policy_config_sha256": "C516F616C20C2E94AD6EEDC743492DD16BF9037627E48EC385AFF585106ADBDC",
+            "policy_seed": 1234
+          }
+        ],
+        "group": "s243_recap_skip",
+        "newest_finished_utc": "2026-08-26T08:06:38.360220Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "AD4C44D17D99AC464D31FC37F15705BDCDA1FD4F5A4BCCA25D59DC188D647122",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "recapture",
+        "runs": 10,
+        "worker_reports": [
+          {
+            "campaign_id": "s243_recap_skip.worker-001-of-004",
+            "report_sha256": "eafe4e70de52c6521863f47ab1cf57a3c98458d028761d0c74f5efccc4bb8a5a"
+          },
+          {
+            "campaign_id": "s243_recap_skip.worker-002-of-004",
+            "report_sha256": "a6cfce654018817d2dc6413173b3836a49c2512376164477b4a069ddb3110d97"
+          },
+          {
+            "campaign_id": "s243_recap_skip.worker-003-of-004",
+            "report_sha256": "4cd57d79b78a7496b1dbb2ced6a4cc85060609b079d1e236b876f8e8926b8b84"
+          },
+          {
+            "campaign_id": "s243_recap_skip.worker-004-of-004",
+            "report_sha256": "811d8d6ed9f3239cec1a29c23abac019d70f5713c7d764f0053bfbe7739db61f"
+          }
+        ],
+        "workers": 4
+      },
+      {
+        "artifact_bytes": 8263821,
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "5694B7B3FE8C3DE124AE3ABC2F21424CF3D7B492B017024DC62B6350A6C0FBBC",
+            "policy_config": "policy_bossrelic_take.json",
+            "policy_config_sha256": "B4E8C46418341F344A3481F2A137856A17799C4ADEA83E8FDE99F13674244F91",
+            "policy_seed": 1234
+          }
+        ],
+        "group": "s243_recap2_take",
+        "newest_finished_utc": "2026-08-26T08:24:25.082648Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "recapture",
+        "runs": 3,
+        "worker_reports": [
+          {
+            "campaign_id": "s243_recap2_take.worker-001-of-003",
+            "report_sha256": "a92cedf5381d407602f01739bde06066ef92d73d9deda8256dfc2b168a75dbe9"
+          },
+          {
+            "campaign_id": "s243_recap2_take.worker-002-of-003",
+            "report_sha256": "582bae87b46fca6860b05bbae73fbfb9502cf2d5bf576d231dda0a588bbc6720"
+          },
+          {
+            "campaign_id": "s243_recap2_take.worker-003-of-003",
+            "report_sha256": "b1f074424a7deecb6e8914826dc1c188bb408d39835d2d4add775f92e0a72584"
+          }
+        ],
+        "workers": 3
+      },
+      {
+        "artifact_bytes": 4276956,
+        "capture_pins": [
+          {
+            "policy": "external",
+            "policy_cmd_sha256": "5694B7B3FE8C3DE124AE3ABC2F21424CF3D7B492B017024DC62B6350A6C0FBBC",
+            "policy_config": "policy_bossrelic_skip.json",
+            "policy_config_sha256": "C516F616C20C2E94AD6EEDC743492DD16BF9037627E48EC385AFF585106ADBDC",
+            "policy_seed": 1234
+          }
+        ],
+        "group": "s243_recap2_skip",
+        "newest_finished_utc": "2026-08-26T08:25:53.031236Z",
+        "provenance": {
+          "driver_version": "b1.7.0",
+          "fork_jar_sha256": "370CBFA8151A13D408A4657EFA81055B90A89F94BC317610AE1930376089C6B3",
+          "pipeline_version": "b5.4.0",
+          "policy": "external",
+          "policy_seed": 1234,
+          "schema_version": 1
+        },
+        "role": "recapture",
+        "runs": 2,
+        "worker_reports": [
+          {
+            "campaign_id": "s243_recap2_skip.worker-001-of-002",
+            "report_sha256": "ad439827f3b7a8fff294e036f6cdc673e3ef978d048a33ec2292a0e8669a9a23"
+          },
+          {
+            "campaign_id": "s243_recap2_skip.worker-002-of-002",
+            "report_sha256": "b9bba56267a49f2fc1996e89ab000494364219fc7986b15975c18a473eedf67b"
+          }
+        ],
+        "workers": 2
+      }
+    ],
+    "dispositions": {
+      "event_row_items": 0,
+      "path": "s243_dispositions.json",
+      "run_items": 24,
+      "sha256": "936a06fbb3f3a9b36b030de7b3a5e5bdb89d3e7ca4dc2f373042983c6dab99d9"
+    },
+    "newest_capture_finished_utc": "2026-08-26T08:25:53.031236Z",
+    "prep_census": {
+      "actions": 18960088,
+      "depth_all_policies": {
+        "fight": {
+          "act1": 5632,
+          "act2": 0,
+          "act3": 0
+        },
+        "kill": {
+          "act1": 259,
+          "act2": 0,
+          "act3": 0
+        }
+      },
+      "failures": 0,
+      "max_floor": 31,
+      "path": "scan_s243_prep.txt",
+      "rows": 200000,
+      "seeds": 20000,
+      "sha256": "41812c14f49bccb0718b8572f04ee1361b48bb903b892cbef26fd0497cd23db9"
+    },
+    "retest_log": {
+      "path": "s243_resweep5.log",
+      "sha256": "5e61590a2fc7b1800b50deb3d8a7c40e7d2e61684ce2836c00eba515958103b4",
+      "verdicts": 94
+    }
+  },
+  "item1_breadth": {
+    "breadth_runs": 2000,
+    "capture_race_records": 62,
+    "capture_race_runs": 58,
+    "captured_actions": 236218,
+    "classification_as_captured": {
+      "clean": 1906,
+      "state_divergence": 94
+    },
+    "classification_final": {
+      "clean": 1981,
+      "part": 19
+    },
+    "distinct_breadth_seeds": 2000,
+    "full_run_attempts": 1998,
+    "full_run_shortfall_to_2000": 2,
+    "gameplay_terminal_outcomes": [
+      "act1_boss_reward",
+      "death",
+      "victory"
+    ],
+    "met": false,
+    "mixed_policies": true,
+    "non_gameplay_terminal_runs": [
+      {
+        "campaign_id": "s243_breadth_skip.worker-008-of-008",
+        "outcome": "noop_wedge",
+        "seed": "STS432031"
+      },
+      {
+        "campaign_id": "s243_breadth_skip.worker-008-of-008",
+        "outcome": "noop_wedge",
+        "seed": "STS432655"
+      }
+    ],
+    "open_findings": 0,
+    "policies": [
+      "external",
+      "random-legal"
+    ],
+    "policy_identities": [
+      "external:policy_bossrelic_skip.json",
+      "external:policy_bossrelic_take.json",
+      "random-legal"
+    ],
+    "reclassified_by_retest": 94,
+    "seed_shortfall_to_2000": 0,
+    "untriaged_findings": 0,
+    "zero_open": true,
+    "zero_untriaged": true
+  },
+  "item2_act2_depth": {
+    "act2_boss_fight_clean_runs": 0,
+    "act2_entering_clean_runs": 19,
+    "met": false,
+    "per_row": {
+      "Automaton": {
+        "boss_chest_runs": 0,
+        "boss_fight_runs": 0,
+        "boss_reward_claim_runs": 0,
+        "kill_runs": 0,
+        "onward_transition_runs": 0,
+        "skip_cohort_runs": 0,
+        "take_cohort_runs": 0
+      },
+      "Champ": {
+        "boss_chest_runs": 0,
+        "boss_fight_runs": 0,
+        "boss_reward_claim_runs": 0,
+        "kill_runs": 0,
+        "onward_transition_runs": 0,
+        "skip_cohort_runs": 0,
+        "take_cohort_runs": 0
+      },
+      "Collector": {
+        "boss_chest_runs": 0,
+        "boss_fight_runs": 0,
+        "boss_reward_claim_runs": 0,
+        "kill_runs": 0,
+        "onward_transition_runs": 0,
+        "skip_cohort_runs": 0,
+        "take_cohort_runs": 0
+      }
+    },
+    "registry_boss_rows": [
+      "Automaton",
+      "Champ",
+      "Collector"
+    ],
+    "rows_with_onward_transition": [],
+    "rows_with_skip_witness": [],
+    "rows_with_take_witness": [],
+    "rows_with_zero_diff_boss_chest": [],
+    "rows_with_zero_diff_boss_reward_claim": [],
+    "unattributed_boss_relic_policies": {},
+    "unknown_boss_identities": {}
+  },
+  "item3_act3_depth": {
+    "act3_entering_clean_runs": 0,
+    "detector_exercised_by_live_evidence": false,
+    "double_boss_first_boss_identities": [],
+    "double_boss_identity_shortfall_to_2": 2,
+    "double_boss_run_count": 0,
+    "double_boss_runs": [],
+    "double_boss_shortfall_to_3": 3,
+    "met": false,
+    "per_row": {
+      "Awakened One": {
+        "boss_chest_runs": 0,
+        "boss_fight_runs": 0,
+        "boss_reward_claim_runs": 0,
+        "kill_runs": 0,
+        "onward_transition_runs": 0,
+        "skip_cohort_runs": 0,
+        "take_cohort_runs": 0
+      },
+      "Donu and Deca": {
+        "boss_chest_runs": 0,
+        "boss_fight_runs": 0,
+        "boss_reward_claim_runs": 0,
+        "kill_runs": 0,
+        "onward_transition_runs": 0,
+        "skip_cohort_runs": 0,
+        "take_cohort_runs": 0
+      },
+      "Time Eater": {
+        "boss_chest_runs": 0,
+        "boss_fight_runs": 0,
+        "boss_reward_claim_runs": 0,
+        "kill_runs": 0,
+        "onward_transition_runs": 0,
+        "skip_cohort_runs": 0,
+        "take_cohort_runs": 0
+      }
+    },
+    "registry_boss_rows": [
+      "Awakened One",
+      "Donu and Deca",
+      "Time Eater"
+    ],
+    "rows_witnessed_killed": [],
+    "unknown_boss_identities": {}
+  },
+  "item4_event_depth": {
+    "act2_3_registry_event_rows": 40,
+    "disposition_on_record": 0,
+    "met": false,
+    "owed": 25,
+    "owed_rows": [
+      "Match and Keep!",
+      "Golden Shrine",
+      "Upgrade Shrine",
+      "Accursed Blacksmith",
+      "Bonfire Elementals",
+      "Designer",
+      "Duplicator",
+      "FaceTrader",
+      "Fountain of Cleansing",
+      "Knowing Skull",
+      "Lab",
+      "N'loth",
+      "NoteForYourself",
+      "SecretPortal",
+      "The Joust",
+      "WeMeetAgain",
+      "Colosseum",
+      "Vampires",
+      "Falling",
+      "MindBloom",
+      "The Moai Head",
+      "Mysterious Sphere",
+      "SensoryStone",
+      "Tomb of Lord Red Mask",
+      "Winding Halls"
+    ],
+    "rows": [
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 890,
+        "disposition": null,
+        "game_id": "Match and Keep!",
+        "id": 12,
+        "name": "MATCH_AND_KEEP",
+        "pool": "SHRINE",
+        "sim_prep_census_rows": 4449,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 148,
+        "disposition": null,
+        "game_id": "Golden Shrine",
+        "id": 13,
+        "name": "GOLDEN_SHRINE",
+        "pool": "SHRINE",
+        "sim_prep_census_rows": 3342,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 2,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 117,
+        "disposition": null,
+        "game_id": "Transmorgrifier",
+        "id": 14,
+        "name": "TRANSMORGRIFIER",
+        "pool": "SHRINE",
+        "sim_prep_census_rows": 3507,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_take.worker-003-of-008",
+          "seed": "STS431626"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 2,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 158,
+        "disposition": null,
+        "game_id": "Purifier",
+        "id": 15,
+        "name": "PURIFIER",
+        "pool": "SHRINE",
+        "sim_prep_census_rows": 4436,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-008-of-008",
+          "seed": "STS432567"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 125,
+        "disposition": null,
+        "game_id": "Upgrade Shrine",
+        "id": 16,
+        "name": "UPGRADE_SHRINE",
+        "pool": "SHRINE",
+        "sim_prep_census_rows": 4492,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 4,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 324,
+        "disposition": null,
+        "game_id": "Wheel of Change",
+        "id": 17,
+        "name": "WHEEL_OF_CHANGE",
+        "pool": "SHRINE",
+        "sim_prep_census_rows": 3469,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_take.worker-008-of-008",
+          "seed": "STS431071"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 117,
+        "disposition": null,
+        "game_id": "Accursed Blacksmith",
+        "id": 18,
+        "name": "ACCURSED_BLACKSMITH",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 3434,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 189,
+        "disposition": null,
+        "game_id": "Bonfire Elementals",
+        "id": 19,
+        "name": "BONFIRE_ELEMENTALS",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 3985,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Designer",
+        "id": 20,
+        "name": "DESIGNER",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 2,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Duplicator",
+        "id": 21,
+        "name": "DUPLICATOR",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 4,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2
+        ],
+        "any_act_sightings_clean": 193,
+        "disposition": null,
+        "game_id": "FaceTrader",
+        "id": 22,
+        "name": "FACE_TRADER",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 4008,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 11,
+        "disposition": null,
+        "game_id": "Fountain of Cleansing",
+        "id": 23,
+        "name": "FOUNTAIN_OF_CLEANSING",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 707,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Knowing Skull",
+        "id": 24,
+        "name": "KNOWING_SKULL",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 1,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 55,
+        "disposition": null,
+        "game_id": "Lab",
+        "id": 25,
+        "name": "LAB",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 3580,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "N'loth",
+        "id": 26,
+        "name": "NLOTH",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 4,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "NoteForYourself",
+        "id": 27,
+        "name": "NOTE_FOR_YOURSELF",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "SecretPortal",
+        "id": 28,
+        "name": "SECRET_PORTAL",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "The Joust",
+        "id": 29,
+        "name": "THE_JOUST",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 6,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 142,
+        "disposition": null,
+        "game_id": "WeMeetAgain",
+        "id": 30,
+        "name": "WE_MEET_AGAIN",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 3249,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 2,
+        "acts": [
+          1,
+          2,
+          3
+        ],
+        "any_act_sightings_clean": 148,
+        "disposition": null,
+        "game_id": "The Woman in Blue",
+        "id": 31,
+        "name": "THE_WOMAN_IN_BLUE",
+        "pool": "SPECIAL",
+        "sim_prep_census_rows": 3350,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-006-of-008",
+          "seed": "STS432405"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 4,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 4,
+        "disposition": null,
+        "game_id": "Addict",
+        "id": 32,
+        "name": "ADDICT",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_take.worker-004-of-008",
+          "seed": "STS431619"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 6,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 6,
+        "disposition": null,
+        "game_id": "Back to Basics",
+        "id": 33,
+        "name": "BACK_TO_BASICS",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_take.worker-004-of-008",
+          "seed": "STS431619"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 2,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 2,
+        "disposition": null,
+        "game_id": "Beggar",
+        "id": 34,
+        "name": "BEGGAR",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-003-of-008",
+          "seed": "STS432354"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Colosseum",
+        "id": 35,
+        "name": "COLOSSEUM",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 4,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 4,
+        "disposition": null,
+        "game_id": "Cursed Tome",
+        "id": 36,
+        "name": "CURSED_TOME",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-005-of-008",
+          "seed": "STS432204"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 2,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 2,
+        "disposition": null,
+        "game_id": "Drug Dealer",
+        "id": 37,
+        "name": "DRUG_DEALER",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_take.worker-007-of-008",
+          "seed": "STS431342"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 2,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 2,
+        "disposition": null,
+        "game_id": "Forgotten Altar",
+        "id": 38,
+        "name": "FORGOTTEN_ALTAR",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_take.worker-003-of-008",
+          "seed": "STS431626"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 4,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 4,
+        "disposition": null,
+        "game_id": "Ghosts",
+        "id": 39,
+        "name": "GHOSTS",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-001-of-008",
+          "seed": "STS432432"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 4,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 4,
+        "disposition": null,
+        "game_id": "Masked Bandits",
+        "id": 40,
+        "name": "MASKED_BANDITS",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-003-of-008",
+          "seed": "STS432354"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 3,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 3,
+        "disposition": null,
+        "game_id": "Nest",
+        "id": 41,
+        "name": "NEST",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-003-of-008",
+          "seed": "STS432354"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 2,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 2,
+        "disposition": null,
+        "game_id": "The Library",
+        "id": 42,
+        "name": "THE_LIBRARY",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_skip.worker-001-of-008",
+          "seed": "STS432432"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 6,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 6,
+        "disposition": null,
+        "game_id": "The Mausoleum",
+        "id": 43,
+        "name": "THE_MAUSOLEUM",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "sighted-zero-diff",
+        "witness": {
+          "campaign_id": "s243_breadth_take.worker-004-of-008",
+          "seed": "STS431619"
+        }
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          2
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Vampires",
+        "id": 44,
+        "name": "VAMPIRES",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Falling",
+        "id": 45,
+        "name": "FALLING",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "MindBloom",
+        "id": 46,
+        "name": "MIND_BLOOM",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "The Moai Head",
+        "id": 47,
+        "name": "THE_MOAI_HEAD",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Mysterious Sphere",
+        "id": 48,
+        "name": "MYSTERIOUS_SPHERE",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "SensoryStone",
+        "id": 49,
+        "name": "SENSORY_STONE",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Tomb of Lord Red Mask",
+        "id": 50,
+        "name": "TOMB_OF_LORD_RED_MASK",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      },
+      {
+        "act2_3_sightings_clean": 0,
+        "acts": [
+          3
+        ],
+        "any_act_sightings_clean": 0,
+        "disposition": null,
+        "game_id": "Winding Halls",
+        "id": 51,
+        "name": "WINDING_HALLS",
+        "pool": "EVENT",
+        "sim_prep_census_rows": 0,
+        "status": "OWED",
+        "witness": null
+      }
+    ],
+    "sighted_zero_diff": 15
+  },
+  "stale_dispositions": {
+    "event_rows": [],
+    "runs": []
+  }
+}

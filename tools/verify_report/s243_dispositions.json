@@ -1,0 +1,290 @@
+{
+  "event_rows": [],
+  "format": "STS-S2-DIVERGENCE-DISPOSITIONS v1",
+  "items": [
+    {
+      "campaign_id": "s243_breadth_rand.worker-007-of-008",
+      "classification": "part",
+      "note": "NOT a defect. The replay stops at the combat-reward row Cauldron's deferred onEquip assembles; the harness names the owner explicitly (`deferred_reward_screen_owner`). The live capture also measured a previously unrecorded hidden RNG burn -- combatRewardScreen.open() constructs a full 3-card reward (+9 cardRng plus blizz bookkeeping) that Cauldron then deletes from view -- now recorded in the row-107 provenance. Discharge belongs to the Egg-trio onEquip reward-screen preview-pass plumbing row, not to this campaign.",
+      "reference": "registry/relics.yaml row 107 (Cauldron) -- documented-deferred onEquip",
+      "seed": "STS430130",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-001-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432280",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_skip.worker-004-of-004",
+        "seed": "STS432280"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-001-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432456",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_skip.worker-002-of-004",
+        "seed": "STS432456"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-001-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432616",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_skip.worker-002-of-002",
+        "seed": "STS432616"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-002-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432737",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_skip.worker-002-of-004",
+        "seed": "STS432737"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-003-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432226",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_skip.worker-003-of-004",
+        "seed": "STS432226"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-003-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432530",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_skip.worker-001-of-002",
+        "seed": "STS432530"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-006-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432165",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_skip.worker-002-of-004",
+        "seed": "STS432165"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-006-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432365",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_skip.worker-001-of-004",
+        "seed": "STS432365"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-008-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432031",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_skip.worker-001-of-004",
+        "seed": "STS432031"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_skip.worker-008-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS432655",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_skip.worker-001-of-004",
+        "seed": "STS432655"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS431073",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_take.worker-001-of-006",
+        "seed": "STS431073"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS431105",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_take.worker-002-of-006",
+        "seed": "STS431105"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS431433",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_take.worker-005-of-006",
+        "seed": "STS431433"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS431537",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_take.worker-002-of-003",
+        "seed": "STS431537"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_take.worker-002-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS431657",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_take.worker-003-of-003",
+        "seed": "STS431657"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_take.worker-003-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (370CBFA8...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS431170",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_take.worker-001-of-003",
+        "seed": "STS431170"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_take.worker-003-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS431250",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_take.worker-004-of-006",
+        "seed": "STS431250"
+      }
+    },
+    {
+      "campaign_id": "s243_breadth_take.worker-007-of-008",
+      "classification": "part",
+      "note": "Smoke-Bomb escape-window CAPTURE artifact: the fork held ready_for_command through the 2.5 s escape animation, so the recorded state is mid-animation and this old capture keeps its PART verdict by design -- it is superseded evidence, not a live finding. The class was closed at the source and the seed recaptured under a later fork pin (AD4C44D1...); the recapture named above is the evidence, and the dashboard prints its own replay-recognized capture-race count rather than assuming it.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, fully discharged",
+      "seed": "STS431590",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap_take.worker-001-of-006",
+        "seed": "STS431590"
+      }
+    },
+    {
+      "campaign_id": "s243_recap_skip.worker-003-of-004",
+      "classification": "state_divergence",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+      "seed": "STS432530",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_skip.worker-001-of-002",
+        "seed": "STS432530"
+      }
+    },
+    {
+      "campaign_id": "s243_recap_skip.worker-004-of-004",
+      "classification": "state_divergence",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+      "seed": "STS432616",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_skip.worker-002-of-002",
+        "seed": "STS432616"
+      }
+    },
+    {
+      "campaign_id": "s243_recap_take.worker-002-of-006",
+      "classification": "state_divergence",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+      "seed": "STS431657",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_take.worker-003-of-003",
+        "seed": "STS431657"
+      }
+    },
+    {
+      "campaign_id": "s243_recap_take.worker-003-of-006",
+      "classification": "state_divergence",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+      "seed": "STS431170",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_take.worker-001-of-003",
+        "seed": "STS431170"
+      }
+    },
+    {
+      "campaign_id": "s243_recap_take.worker-006-of-006",
+      "classification": "state_divergence",
+      "note": "First-round recapture, taken under the isEscaping hold (AD4C44D1...) BEFORE the endBattle settle-lag hold closed the rest of the window. Superseded by the round-2 recapture named above, which replays clean with zero race records.",
+      "reference": "docs/s2-tasks.md S2.43 -- escape-window class, round 1 of 2",
+      "seed": "STS431537",
+      "status": "superseded-by-recapture",
+      "superseded_by": {
+        "campaign_id": "s243_recap2_take.worker-002-of-003",
+        "seed": "STS431537"
+      }
+    }
+  ]
+}

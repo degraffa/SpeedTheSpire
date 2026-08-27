@@ -2358,6 +2358,52 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   §7.4 event-depth coverage join — schedules from S2.V2's scan output;
   the deterministic dashboard is dispatched now over the breadth
   artifacts and extends to the depth cohorts when they exist.
+  **2026-08-27 — the Acceptance-line dashboard LANDED**, over the breadth
+  evidence: `tools/verify_report/generate_s2_report.py`, the B5.4 sibling,
+  writing [verification/s243-dashboard.md](verification/s243-dashboard.md)
+  plus `.json`, `s243-event-coverage.csv` and `s243-artifact-manifest.csv`
+  from one no-argument run whose defaults name today's cohorts; the raw
+  captures stay uncommitted (§7.3) and the manifest's per-artifact SHA-256
+  is what pins them. It reopens and hashes **2,023 artifacts / 4.03 GB**
+  (three breadth groups + the four recapture groups), and regeneration over
+  unchanged inputs is byte-identical — checked, plus a roll-up hash over the
+  sorted (campaign, seed, sha256) triples. Verdicts as generated: item 1
+  UNMET, item 2 UNMET, item 3 UNMET, item 4 UNMET, every one a *literal
+  shortfall*, never an inference. Item 1 reads 2,000 distinct seeds, three
+  pinned policy identities, 0 untriaged and 0 open from the classifications
+  AS READ (report.json 1,906 clean + 94 state_divergence, layered under
+  `s243_resweep5.log`'s 94 verdicts → 1,981 clean + 19 part), with all 19
+  dispositioned exactly in `s243_dispositions.json` (24 items, zero
+  wildcards): STS430130 → Cauldron row-107 standing deviation, and each of
+  the 18 escape-window artifacts → a NAMED recapture the tool re-reads from
+  its own evidence set and refuses to accept unless the seed matches and its
+  own classification is clean. **Two numbers this task's prose did not carry
+  and the instrument surfaced:** the breadth cohort holds **1,998** full-run
+  attempts, not 2,000 — STS432031 and STS432655 ended `noop_wedge`, both in
+  the escape-window class and STS432031 still wedging after recapture (the
+  B5.4 rule that a non-gameplay terminal is not a full-run attempt, applied
+  here as an exclusion + a listed shortfall rather than B5.4's abort); and
+  the 13 round-1 recaptures still carry 1–2 replay-recognized capture-race
+  records each, only the five round-2 (`370CBFA8…`) ones reaching zero, so
+  the "zero race records" reading belongs to the settle-lag jar specifically
+  — the dashboard prints the count per named recapture instead of asserting
+  it. Item 4's coverage join is real evidence, not a placeholder: of the 40
+  Act-2/3 registry event rows, **15 are sighted in act 2 or 3 inside clean
+  runs** (11 Act-2 EVENT bodies plus Purifier/Transmorgrifier/Wheel of
+  Change and The Woman in Blue) and **25 are OWED**, the five rare specials
+  (Designer, Duplicator, Knowing Skull, N'loth, The Joust) among them —
+  each with a nonzero sim-side census count, so they are scan-schedulable
+  rather than unreachable; an Act-1 draw of a cross-act row is
+  reported in a separate any-act column and deliberately does not satisfy
+  the bar. Items 2/3 render per-BOSS-row zeroes with the missing rows named;
+  double-boss detection is a real artifact-side detector (two distinct Act-3
+  `act_boss` identities in one run, since `boss_kill_acts` is a set and
+  cannot express it) pinned by synthetic fixtures and reported as
+  unexercised by live data rather than shipped as a hard-wired false.
+  Tests: `verify_report_s2_python_test` (`tools/verify_report/test_s2_report.py`,
+  synthetic temp-tree fixtures only — the committed suite never reaches into
+  `_oracle_data`). WSL `debug`/`asan`/`release` green;
+  `check_stale_counts.sh` and `check_doc_links.sh` clean.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool

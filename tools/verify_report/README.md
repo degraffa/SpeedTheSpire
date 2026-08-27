@@ -56,6 +56,83 @@ codegen supplies the rows, and the join refuses a tier-2 report whose registry
 shape has drifted. `a20.yaml` has no `game_id`, so those rows report `n/a`
 rather than manufacturing a sighting.
 
+## `generate_s2_report.py` — S2.43 dashboard (design §6 S2-G2 items 1–4)
+
+The S2 sibling of the B5.4 dashboard. One deterministic no-argument
+invocation reopens every artifact of the S2.43 oracle campaigns, applies the
+retest classification sweep, joins the registry, and writes the committed
+report under `docs/verification/`:
+
+```bat
+C:\Python39\python.exe tools\verify_report\generate_s2_report.py
+```
+
+Outputs: `s243-dashboard.md`, `s243-dashboard.json`,
+`s243-event-coverage.csv` (the §7.4 event join) and
+`s243-artifact-manifest.csv` (every consumed artifact's SHA-256). Re-running
+over unchanged inputs rewrites all four byte for byte; the report also carries
+a roll-up hash over the sorted (campaign, seed, sha256) triples, so a changed
+artifact moves one visible number. The raw captures stay uncommitted (design
+B §7.3) — the manifest is what pins them.
+
+The no-argument defaults name today's cohorts: the three breadth groups
+`s243_breadth_rand` / `_take` / `_skip`, the four escape-window recapture
+groups `s243_recap_*` / `s243_recap2_*`, `s243_resweep5.log` as the retest
+sweep, and the `s243_prep` seed-scan summary as the sim-side rare-event
+census, all under the fixed `D:\STS_BG_Mod\_oracle_data` root. Repeated
+`--breadth` / `--recapture` flags select a different aggregate;
+`--retest-log`, `--prep-census`, `--dispositions`, `--registry`,
+`--artifact-root` and `--out-dir` move the rest. Cohort membership comes from
+each group's own `parallel_group.json`, never from a directory glob. The S2
+depth cohorts join through the same flags when S2.V2's scan output schedules
+them; nothing about the accounting changes but its numbers.
+
+**What it will not do.** It never infers a bar. Items 2 and 3 have no cohort
+yet, so they render as literal shortfalls naming the missing registry BOSS
+rows — the B5.4 "literal shortfall" tradition, and the reason double-boss
+detection is a real artifact-side detector (two distinct Act-3 `act_boss`
+identities in one run) pinned by synthetic fixtures rather than a column
+hard-wired false under a comment naming a future task. It also fails loudly
+rather than bucketing: an artifact whose hash drifts, whose header does not
+identify it as this campaign's A20 Ironclad run, whose records disagree about
+their own `act`, whose classification is outside the known vocabulary, or
+whose `event_id` is neither a registry row nor one of the explicitly
+allowlisted non-registry ids, aborts the report.
+
+Dispositions live in `s243_dispositions.json` (format
+`STS-S2-DIVERGENCE-DISPOSITIONS v1`) and are exact, never wildcards. Two
+lists, because two different things are dispositioned: `items` keys a run
+finding by (campaign_id, seed, classification), and `event_rows` keys design
+§6 item 4's per-row alternative to a sighting by a registry `game_id`. The
+`superseded-by-recapture` status must name the replacement capture, which the
+tool then verifies against its own evidence set — same seed, present, and its
+own current classification clean — and whose replay-recognized capture-race
+count it prints rather than assumes.
+
+Four rules differ from `generate_report.py`, deliberately:
+
+1. **Classification is layered.** A worker `report.json` carries the
+   capture-time verdict; a retest sweep log carries the current one for the
+   runs it covers. The sweep wins where it speaks. Both totals are rendered,
+   so a triage wave's effect is visible rather than overwritten.
+2. **Provenance is per cohort.** Worker provenance must agree *within* a
+   group; the groups' fork pins are expected to differ, because the
+   escape-window class was closed over two successive fork holds and
+   collapsing the pins would hide that.
+3. **A non-gameplay terminal is excluded, not fatal.** B5.4 raises; this tool
+   drops the run from the full-run count, lists it by seed and outcome, and
+   keeps going — a dashboard whose job is printing shortfalls cannot abort on
+   one.
+4. **A stale disposition is reported, not fatal.** The dashboard must
+   regenerate over improving inputs: when a sibling task makes a
+   dispositioned run replay clean, the output is a rendered "no longer
+   exercised" row. An *untriaged* finding still counts against the bar, which
+   is the half that protects the gate.
+
+Unit tests: `test_s2_report.py`, registered as `verify_report_s2_python_test`.
+Every fixture is a synthetic temp-directory campaign tree — the committed
+suite never touches the oracle data root.
+
 ## Compressed CI corpus (B5.4)
 
 `build_ci_corpus.py` deterministically curates exactly 50 distinct,

@@ -701,6 +701,18 @@ add_test(
 set_tests_properties(verify_report_python_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/verify_report")
 
+# S2.43 deterministic dashboard (design s2 section 6, S2-G2 items 1-4). The
+# fixtures are synthetic temp-directory campaign trees: the committed suite
+# must never reach for the uncommitted oracle data root (stage-b design 7.3),
+# so these pin behaviour -- loud failure on an unclassifiable artifact, exact
+# disposition naming, hash/determinism round-trip, shortfall rendering -- and
+# never a day's campaign numbers.
+add_test(
+    NAME verify_report_s2_python_test
+    COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_s2_report.py)
+set_tests_properties(verify_report_s2_python_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/verify_report")
+
 # B5.4 pure sim-side CI replay over the committed compressed 50-seed corpus.
 # The Python wrapper uses only stdlib gzip/tar support to verify hashes and
 # extract safe members; the real replay_run_diff binary performs every state
