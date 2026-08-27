@@ -46,6 +46,15 @@ rather than improvisation):
     it cannot steer the run. Match-first still holds: a single-option
     choice the sim DID record is consumed, never glued past, and a genuine
     desync surfaces at the next screen with the cursor unmoved.
+One SKIP rule mirrors the seam in the other direction (second live
+witness, same first campaign, step 2 of the same run): the sim records a
+`proceed`/`confirm` where the live game auto-advances (Neow's blessing
+click opens the MAP directly; the sim leaves the event with an explicit
+proceed). A scripted proceed-kind step whose state offers NEITHER alias
+can never match any candidate, so it is consumed without emitting a
+command and matching retries the next step against the same state. A real
+desync is still caught: the following step will not match either, and the
+divergence record lands one step later with the mismatch named.
 Anything else that fails to match stops the run, by design.
 
 CONFIG (`--config <json>`), strict like survival_policy_cmd:
@@ -445,6 +454,15 @@ class ScriptPolicy:
         # two glue rules answer -- so a scripted proceed/confirm is consumed
         # rather than glued past, and the glue can never advance the cursor.
         step = self._script.peek()
+        # SIM-ONLY PROCEED SKIP (module header): a proceed-kind step with
+        # neither alias legal can never match this or any state's candidate
+        # list -- the live game auto-advanced where the sim stepped.
+        while (step is not None
+               and step.get("k") in ("proceed", "confirm")
+               and "proceed" not in candidates
+               and "confirm" not in candidates):
+            self._script.consume()
+            step = self._script.peek()
         if step is not None:
             try:
                 cmd = match_step(step, state, candidates)

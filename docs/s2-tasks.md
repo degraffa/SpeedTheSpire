@@ -2918,7 +2918,9 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `divergence_STS100009_ps0` at Neow's opening `talk`, exactly the stop
   contract doing its job — the collapsed one-click dialog whose sole
   candidate is a single `choose`, the vestigial-click class the engine
-  deliberately collapses), and
+  deliberately collapses; plus the mirror-seam SKIP rule from the same
+  run's step 2, a scripted `proceed`/`confirm` with neither alias legal
+  consumed without emitting where the game auto-advances), and
   on ANY other mismatch it writes a `script_divergence` record and exits 3
   — the driver's FatalEnvironmentDrift path stops the campaign; a desync is
   capture evidence, never routed around. **Measured, frozen build, 107,424

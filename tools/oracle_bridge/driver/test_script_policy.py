@@ -391,6 +391,47 @@ class GlueRuleTest(unittest.TestCase):
             policy.decide(decide_request("STS1", state,
                                          ["choose 0", "choose 1"]))
 
+    def test_sim_only_proceed_is_skipped_when_the_game_auto_advances(self):
+        # Skip-rule witness (divergence at step 2 of the first campaign):
+        # the sim leaves Neow with an explicit proceed; the live blessing
+        # click opens the MAP directly.
+        policy = self._policy_with([
+            {"k": "proceed", "ctx": "neow"},
+            {"k": "map", "x": 1, "sym": "M"}])
+        state = {"available_commands": ["choose", "return", "state"],
+                 "game_state": {"screen_type": "MAP",
+                                "choice_list": ["x=1", "x=4"],
+                                "screen_state": {"next_nodes": [
+                                    {"x": 1, "symbol": "M"},
+                                    {"x": 4, "symbol": "?"}]}}}
+        got = policy.decide(decide_request(
+            "STS1", state, ["choose 0", "choose 1", "return"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 2)  # proceed skipped + map
+
+    def test_proceed_skip_does_not_mask_a_real_desync(self):
+        policy = self._policy_with([
+            {"k": "proceed", "ctx": "neow"},
+            {"k": "rest", "opt": "rest"}])
+        state = {"available_commands": ["choose", "state"],
+                 "game_state": {"screen_type": "EVENT",
+                                "choice_list": ["a", "b"],
+                                "screen_state": {"event_id": "X"}}}
+        with self.assertRaises(spc.Divergence):
+            policy.decide(decide_request("STS1", state,
+                                         ["choose 0", "choose 1"]))
+        self.assertEqual(policy._script.cursor, 1)  # stopped ON the rest step
+
+    def test_scripted_proceed_with_a_live_confirm_alias_still_matches(self):
+        # The skip rule must not fire when either alias is legal.
+        policy = self._policy_with([{"k": "confirm", "ctx": "hand"}])
+        state = {"available_commands": ["confirm", "state"],
+                 "game_state": {"screen_type": "HAND_SELECT",
+                                "screen_state": {}}}
+        got = policy.decide(decide_request("STS1", state, ["confirm"]))
+        self.assertEqual(got, "confirm")
+        self.assertEqual(policy._script.cursor, 1)
+
     def test_exhausted_script_still_glues_a_trailing_one_click_dialog(self):
         policy = self._policy_with([{"k": "proceed", "ctx": "t"}])
         first = {"available_commands": ["proceed", "state"],

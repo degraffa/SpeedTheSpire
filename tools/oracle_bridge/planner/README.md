@@ -155,8 +155,11 @@ The follower consumes steps strictly in order; its only three glue commands
 (a confirmation-only screen; the GRID pick-then-confirm seam; a collapsed
 one-click dialog whose sole candidate is a single `choose` — Neow's opening
 `talk` and the vestigial-click event class the engine collapses) never
-advance the script cursor, and **any other mismatch stops the run as
-divergent** — a desync is capture evidence for Stage-B triage, never
+advance the script cursor; one SKIP rule covers the mirror seam (a
+scripted `proceed`/`confirm` whose live state offers neither alias — the
+game auto-advanced where the sim stepped — is consumed without emitting,
+and a real desync still stops on the following step). **Any other
+mismatch stops the run as divergent** — a desync is capture evidence for Stage-B triage, never
 something to route around. `script_policy_cmd.py`'s module header carries the
 stop contract; its unit tests round-trip the schema against the committed
 corpus of recorded dumps.

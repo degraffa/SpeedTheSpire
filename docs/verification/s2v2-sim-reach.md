@@ -230,4 +230,9 @@ from the output that exists today.
   screen whose only legal candidate is a single `choose` — the collapsed
   one-click dialog (Neow's opening `talk`; the Woman in Blue / Sensory
   Stone vestigial-click class the engine deliberately collapses) — is
-  answered without consuming a step, match-first still applying.
+  answered without consuming a step, match-first still applying; and one
+  SKIP rule for the mirror seam (step 2 of the same run): a scripted
+  `proceed`/`confirm` whose live state offers neither alias is consumed
+  without emitting — the game auto-advances where the sim steps (the
+  blessing click opens the MAP directly) — with a real desync still
+  stopping on the following step.
