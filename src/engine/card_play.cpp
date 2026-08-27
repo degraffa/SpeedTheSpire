@@ -515,8 +515,24 @@ bool card_can_use(const CombatState& s, CardPoolIndex pool_index,
     const bool selected_enemy_target =
         kind == CardTargetKind::ENEMY ||
         kind == CardTargetKind::SELF_AND_ENEMY;
+    // AbstractCard.cardPlayable's first conjunct (AbstractCard.java:855):
+    //     (target == ENEMY || target == SELF_AND_ENEMY) && m != null && m.isDying
+    // -- `m.isDying`, THE BARE FIELD, not isDeadOrEscaped(). A halfDead monster
+    // (a Darkling holding the room open through Life Link, an Awakened One
+    // between phases) is at 0 HP and is NOT dying, so it does NOT veto the play
+    // here: canUse returns true, GameActionManager runs the entire onPlayCard
+    // fan-out -- player powers, monster powers, RELICS, stance, blights, the
+    // three pile walks, ++cardsPlayedThisTurn (:214-247) -- and only THEN, at
+    // :263-282, notices the dead target, pulls the card out of limbo and skips
+    // useCard. Rejecting the play at this gate instead silently skips that whole
+    // fan-out. Witnessed by S2.43 seed STS105835 floor 35: a Necronomicon replay
+    // of Sever Soul+ aimed at the Darkling its own first hit had just made
+    // halfDead still counted for Velvet Choker, and the sim's counter ran one
+    // behind the live game's for the rest of the run. The dead-target block
+    // itself lives in resolve_card_play below, on the isDeadOrEscaped predicate
+    // the Java uses THERE.
     if (selected_enemy_target && target < s.monster_count &&
-        s.monsters[target].hp <= 0) {
+        monster_is_dying(s.monsters[target])) {
         return false;
     }
     return card_can_use_without_target(s, pool_index, autoplay);

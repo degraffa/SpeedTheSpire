@@ -43,6 +43,13 @@
 //     but the randomBoolean draw (Random.java:83-86 -- one nextFloat, counter++)
 //     STILL HAPPENS for every non-RARE card; only `c.rarity != RARE`
 //     short-circuits it. Getting this wrong desyncs cardRng.
+//   * The OFFER PREVIEW pass, the SAME loop's else-arm (:1474-1476): every card
+//     the upgrade roll did NOT take runs `for (r : player.relics)
+//     r.onPreviewObtainCard(c)`, and the RewardItem(CardColor) constructor
+//     (RewardItem.java:157-161) repeats it over the whole item. The only three
+//     overrides of that method in the game are the eggs, so the net is: an egg
+//     owner's card reward SHOWS its matching-type offers already upgraded.
+//     Consumes no RNG; modelled by apply_offer_previews (combat_rewards.cpp).
 //   * Gold: boss = 100 + miscRng.random(-5,5), MathUtils.round(x0.75f) at A13+
 //     (AbstractRoom.java:291-296); elite = treasureRng.random(25,35) (:316);
 //     plain monster = treasureRng.random(10,20) (:324). TRAP 18: boss gold is
@@ -441,7 +448,14 @@ inline constexpr float kColorlessRareChance = 0.3f;
 //     no-dupe loop (:1407-1412) redraws FROM THE SAME rarity, one cardRng
 //     draw per attempt, compared against everything already in this item.
 //   * NO upgrade pass: getColorlessRewardCards has no cardUpgradedChance
-//     block, so a colourless offer is never upgraded in any act.
+//     block, so the ROLL never upgrades a colourless offer in any act.
+//   * ...but the OFFER PREVIEW still runs. RewardItem(CardColor) does not
+//     merely call the generator: its body (RewardItem.java:152-162) then walks
+//     every card of the item through every owned relic's onPreviewObtainCard,
+//     and it does so for the COLORLESS arm too. A Molten/Toxic/Frozen Egg
+//     owner's Sensory Stone therefore offers its matching-type memory card
+//     already upgraded. Modelled by apply_offer_previews (combat_rewards.cpp);
+//     it consumes no RNG.
 // numCards = 3 through every changeNumberOfCardsInReward (:1383-1386):
 // Question Card +1, Busted Crown -2, same overrides as the red roller.
 // Adds nothing when the relic-modified count is <= 0.

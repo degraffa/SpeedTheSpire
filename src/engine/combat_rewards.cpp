@@ -127,6 +127,81 @@ CardId draw_from_pool(RngStream& card_rng, RewardCardRarity rarity) noexcept {
     return PotionId::NONE;
 }
 
+// AbstractRelic.onPreviewObtainCard (AbstractRelic.java:471-472) is an empty
+// default, and the game has exactly THREE overrides -- FrozenEgg2 / MoltenEgg2 /
+// ToxicEgg2, each `onPreviewObtainCard(c) { onObtainCard(c); }`. Nothing else in
+// the source overrides it, which is what makes the fan-out below egg-gated
+// rather than generic over onObtainCard: Ceramic Fish and Darkstone Periapt DO
+// override onObtainCard, and a generic pass would pay the fish +9 gold and the
+// periapt +6 max HP for cards the player has not taken and may never take.
+[[nodiscard]] bool relic_previews_obtain_card(RelicId id) noexcept {
+    switch (id) {
+        case RelicId::FROZEN_EGG:
+        case RelicId::MOLTEN_EGG:
+        case RelicId::TOXIC_EGG:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// The OFFER preview pass, run once over a freshly rolled CARDS item.
+//
+// TWO Java sites do this, and both run on every card reward the game builds:
+//
+//   * AbstractDungeon.getRewardCards's tail (AbstractDungeon.java:1469-1477) --
+//     the else-arm of the random-upgrade branch, `for (r : player.relics)
+//     r.onPreviewObtainCard(c)`, reached by every card the cardUpgradedChance
+//     roll did NOT upgrade (the upgraded ones `continue` past it, and the eggs'
+//     `!upgraded` guard would make the call a no-op for them anyway);
+//   * the RewardItem(CardColor) constructor (RewardItem.java:152-162), which
+//     walks EVERY card of the item it just built through EVERY owned relic --
+//     unconditionally, and for the COLORLESS flavour too, whose
+//     getColorlessRewardCards has no upgrade pass of its own.
+//
+// The net of the two is exactly this: after the item is rolled, every offer on
+// it is run through the owned eggs. So an egg owner's reward screen SHOWS its
+// matching-type cards already upgraded, which is what the player picks from --
+// not merely what they end up holding. Consumes no RNG and touches nothing but
+// the offer's upgrade bits.
+//
+// MISSING UNTIL 2026-08-27, and witnessed by the S2.43 depth campaign: seed
+// STS193303 floor 38, a Toxic Egg owner whose live CARD_REWARD read `Power
+// Through+ / Flex+ / Clothesline` -- both SKILLs upgraded, the ATTACK not --
+// while the sim offered an unupgraded Power Through. The egg pass DID exist,
+// but only at the CLAIM site (apply_egg_preview_to_open_offers below), which
+// covers the other direction: an egg claimed WHILE a reward screen is already
+// open. The two are different Java sites and the engine now has both.
+//
+// The guarded onObtainCard body is REUSED over a scratch CardInstance -- the
+// same device apply_egg_preview_to_open_offers uses, and for the same reason:
+// preview and obtain-time upgrade can then never drift apart. The eggs' bodies
+// read only (type, upgrade), so the scratch row is the whole of what they see.
+void apply_offer_previews(RunState& rs, RunRewardItem& item) noexcept {
+    for (uint8_t r = 0; r < rs.relic_count; ++r) {
+        const auto rid = static_cast<RelicId>(rs.relics[r].relic_id);
+        if (!relic_previews_obtain_card(rid)) {
+            continue;
+        }
+        const RelicOnObtainCardFn fn = relic_on_obtain_card_fn(rid);
+        if (fn == nullptr) {
+            continue;
+        }
+        for (uint8_t j = 0; j < item.card_count && j < kRewardCardCap; ++j) {
+            const CardDef* def =
+                card_def(static_cast<CardId>(item.card_ids[j]));
+            if (def == nullptr) {
+                continue;
+            }
+            CardInstance scratch{};
+            scratch.card_id = item.card_ids[j];
+            scratch.upgrade = item.card_upgrades[j];
+            fn(rs, scratch, *def);
+            item.card_upgrades[j] = scratch.upgrade;
+        }
+    }
+}
+
 // AbstractDungeon.getRewardCards (AbstractDungeon.java:1423-1479), one CARD
 // reward item. Adds nothing when the relic-modified count is <= 0
 // (addCardToRewards only adds a non-empty RewardItem, AbstractRoom.java:573-578).
@@ -229,6 +304,9 @@ void roll_card_reward_item(RunState& rs, RoomType room,
     }
 
     item.card_count = static_cast<uint8_t>(num);
+    // The owned relics' onPreviewObtainCard fan-out over the finished offer
+    // (AbstractDungeon.java:1474-1476 + RewardItem.java:157-161). No RNG.
+    apply_offer_previews(rs, item);
     push_item(s) = item;
 }
 
@@ -361,8 +439,11 @@ void roll_colorless_card_reward_item(RunState& rs, RewardScreen& s) noexcept {
     }
 
     // NO upgrade pass: getColorlessRewardCards (:1381-1421) has no
-    // cardUpgradedChance block in any act.
+    // cardUpgradedChance block in any act. The PREVIEW pass still runs -- it is
+    // the RewardItem(CardColor) constructor's (RewardItem.java:152-162), which
+    // does not care which of the two generators filled `this.cards`.
     item.card_count = static_cast<uint8_t>(num);
+    apply_offer_previews(rs, item);
     push_item(s) = item;
 }
 
@@ -620,18 +701,13 @@ namespace {
 // EGG-SPECIFIC, not generic over onObtainCard bodies: Ceramic Fish and
 // Darkstone Periapt have onObtainCard overrides but the AbstractRelic no-op
 // onEquip -- a generic pass would pay the fish +9 gold for cards the player
-// never took. The three ids below are the complete S1 set whose Java onEquip
-// carries the walk (the only relics overriding onPreviewObtainCard are the
-// three egg files).
+// never took. The three ids are the complete S1 set whose Java onEquip carries
+// the walk, and they coincide with the three onPreviewObtainCard overrides for
+// the obvious reason: each egg's onEquip is a loop over the open screen calling
+// its OWN onPreviewObtainCard. One predicate, one reason -- see
+// relic_previews_obtain_card above, which the OFFER-CREATION pass shares.
 [[nodiscard]] bool relic_equip_previews_open_offers(RelicId id) noexcept {
-    switch (id) {
-        case RelicId::FROZEN_EGG:
-        case RelicId::MOLTEN_EGG:
-        case RelicId::TOXIC_EGG:
-            return true;
-        default:
-            return false;
-    }
+    return relic_previews_obtain_card(id);
 }
 
 void apply_egg_preview_to_open_offers(RunState& rs, RewardScreen& s,

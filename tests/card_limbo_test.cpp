@@ -797,6 +797,83 @@ TEST(CardLimbo, DoubleTapReplayIsRevalidatedAgainstVelvetChoker) {
     EXPECT_EQ(s.player_energy, 5);
 }
 
+// --- The HALF-DEAD target is not a DYING target -----------------------------
+//
+// AbstractCard.cardPlayable's first conjunct (AbstractCard.java:855) reads
+// `m.isDying`, the bare field -- NOT isDeadOrEscaped(). A halfDead monster (a
+// Darkling holding the room open through Life Link, an Awakened One between
+// phases) sits at 0 HP with isDying FALSE (Darkling.java:201-231 sets halfDead
+// and never calls super.die()), so canUse says YES and GameActionManager runs
+// the ENTIRE onPlayCard fan-out -- player powers, monster powers, RELICS,
+// stance, blights, the three pile walks, ++cardsPlayedThisTurn
+// (GameActionManager.java:214-247) -- before its own dead-target block at
+// :263-282 notices isDeadOrEscaped() and throws the play away without useCard.
+//
+// The two tests below are the same split the escaped-enemy pair above pins,
+// one notch earlier: there the card reaches the split, here it must not be
+// stopped BEFORE the split by a gate the Java does not have.
+TEST(CardLimbo, HalfDeadTargetPassesCanUseAndStillRunsTheFanOut) {
+    CombatState s = MakeCombat(6, 100);
+    GiveRelic(s, RelicId::VELVET_CHOKER);
+    s.relics[0].counter = 0;
+    s.monster_count = 2;
+    s.monsters[0].hp = 0;                         // halfDead implies hp == 0
+    s.monsters[0].flags |= kMonsterFlagHalfDead;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 100;
+    s.monsters[1].max_hp = 100;
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+
+    EXPECT_TRUE(card_can_use(s, strike, /*target=*/0, /*autoplay=*/false))
+        << "cardPlayable reads isDying, and a halfDead monster is not dying";
+
+    ASSERT_TRUE(queue_card_play(s, 0, /*target=*/0));
+    pump(s);
+
+    EXPECT_EQ(s.relics[0].counter, 1)
+        << "the onPlayCard relic fan-out runs before the dead-target split";
+    EXPECT_EQ(s.cards_played_this_turn, 1);
+    EXPECT_EQ(s.monsters[0].hp, 0) << "useCard is still skipped -- no damage";
+    EXPECT_EQ(s.player_energy, 6) << "and no energy is spent";
+    ASSERT_EQ(s.hand_count, 1) << "a hand card is not in limbo, so it stays";
+    EXPECT_EQ(s.hand[0], strike);
+    EXPECT_EQ(s.discard_count, 0);
+}
+
+// The witnessed shape, S2.43 seed STS105835 floor 35 (three Darklings, Velvet
+// Choker + Necronomicon): a 2-cost attack whose FIRST hit half-kills its target
+// is replayed by Necronomicon into that now-halfDead target. The replay copy
+// deals nothing -- but it still counts, and the live game's Velvet Choker read
+// 2 where the sim read 1, then stayed exactly one behind for the remaining ~190
+// captured actions.
+TEST(CardLimbo, NecronomiconReplayIntoItsOwnHalfDeathStillCountsThePlay) {
+    CombatState s = MakeCombat(6, 100);
+    s.flags |= kCombatFlagCannotLose;   // Darkling.die's veto reads this
+    GiveRelic(s, RelicId::NECRONOMICON);
+    GiveRelic(s, RelicId::VELVET_CHOKER);
+    s.relics[1].counter = 0;
+    s.monster_count = 2;
+    s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::DARKLING);
+    s.monsters[0].hp = 10;              // Clothesline's 12 half-kills it
+    s.monsters[0].max_hp = 50;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::DARKLING);
+    s.monsters[1].hp = 50;
+    s.monsters[1].max_hp = 50;
+    const CardPoolIndex clothesline = AddHand(s, CardId::CLOTHESLINE);
+
+    ASSERT_TRUE(queue_card_play(s, 0, /*target=*/0));
+    pump(s);
+
+    EXPECT_TRUE(monster_half_dead(s.monsters[0]));
+    EXPECT_FALSE(monster_is_dying(s.monsters[0]));
+    EXPECT_EQ(s.relics[1].counter, 2)
+        << "the original AND the Necronomicon replay each fire onPlayCard";
+    EXPECT_EQ(s.cards_played_this_turn, 2);
+    EXPECT_EQ(s.monsters[0].hp, 0) << "the replay itself deals nothing";
+    EXPECT_EQ(s.limbo_count, 0) << "the purge copy is removed, never filed";
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, clothesline));
+}
+
 TEST(CardLimbo, EscapedEnemySuppressionExcludesSelfAndEnemyCards) {
     CombatState enemy = MakeCombat(6, 100);
     enemy.monster_count = 2;

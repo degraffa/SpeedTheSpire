@@ -1451,5 +1451,138 @@ TEST(RewardEggPreview, ANonPreviewingOnObtainRelicLeavesTheOffersAlone) {
     }
 }
 
+// --- The OTHER egg preview site: OFFER CREATION ------------------------------
+//
+// The three tests above cover the egg arriving while a screen is already open.
+// The far commoner direction is the egg already held when the reward ROLLS, and
+// the game previews there too -- twice over, in fact:
+//   * AbstractDungeon.getRewardCards's tail (AbstractDungeon.java:1474-1476),
+//     the else-arm of the cardUpgradedChance branch, and
+//   * the RewardItem(CardColor) constructor (RewardItem.java:157-161), which
+//     walks the whole item unconditionally and covers the COLORLESS flavour
+//     whose generator has no upgrade pass at all.
+// So an egg owner's reward SCREEN shows its matching-type cards upgraded -- the
+// player picks from an upgraded offer, they do not merely end up holding one.
+//
+// Act 1 is the clean instrument: cardUpgradedChance is 0.0f there
+// (Exordium.java:107), so every `1` in card_upgrades came from the egg.
+//
+// Witnessed by the S2.43 depth campaign, seed STS193303 floor 38: a Toxic Egg
+// owner's live CARD_REWARD read `Power Through+ / Flex+ / Clothesline` -- the
+// two SKILLs upgraded, the ATTACK not -- against a sim offering an unupgraded
+// Power Through.
+TEST(RewardOfferPreview, AHeldEggUpgradesItsTypeInTheOFFERAndSpendsNoRng) {
+    struct Case {
+        RelicId egg;
+        CardType type;
+    };
+    const Case cases[] = {{RelicId::MOLTEN_EGG, CardType::ATTACK},
+                          {RelicId::TOXIC_EGG, CardType::SKILL},
+                          {RelicId::FROZEN_EGG, CardType::POWER}};
+    // 32 seeds x 3 offers: enough draws that every one of the three CardTypes
+    // shows up in the red reward pool, which the per-egg vacuity guard below
+    // requires (a POWER offer is the scarce one -- eight seeds produced none).
+    constexpr int64_t kFirstSeed = 41;
+    constexpr int kSeedCount = 32;
+
+    for (const Case& c : cases) {
+        int upgraded_total = 0;
+        for (int64_t seed = kFirstSeed; seed < kFirstSeed + kSeedCount;
+             ++seed) {
+            RunState control = make_run(seed);
+            RewardScreen cs{};
+            roll_setup_item_card_reward(control, RoomType::Monster, cs);
+            ASSERT_EQ(cs.count, 1);
+
+            RunState egg = make_run(seed);
+            give_relics(egg, {c.egg});
+            RewardScreen es{};
+            roll_setup_item_card_reward(egg, RoomType::Monster, es);
+            ASSERT_EQ(es.count, 1);
+
+            EXPECT_TRUE(streams_equal(control.card_rng, egg.card_rng))
+                << "the preview fan-out consumes no RNG (seed " << seed << ")";
+            ASSERT_EQ(es.items[0].card_count, cs.items[0].card_count);
+            for (uint8_t j = 0; j < es.items[0].card_count; ++j) {
+                ASSERT_EQ(es.items[0].card_ids[j], cs.items[0].card_ids[j])
+                    << "identities are untouched (seed " << seed << ")";
+                EXPECT_EQ(cs.items[0].card_upgrades[j], 0)
+                    << "Act 1 cardUpgradedChance is 0.0f";
+                const CardDef* def =
+                    card_def(static_cast<CardId>(es.items[0].card_ids[j]));
+                ASSERT_NE(def, nullptr);
+                const int want = def->type == c.type ? 1 : 0;
+                EXPECT_EQ(es.items[0].card_upgrades[j], want)
+                    << "seed " << seed << " offer " << static_cast<int>(j)
+                    << " egg " << static_cast<int>(c.egg);
+                upgraded_total += want;
+            }
+        }
+        EXPECT_GT(upgraded_total, 0)
+            << "the corpus must actually exercise the branch for egg "
+            << static_cast<int>(c.egg);
+    }
+}
+
+// The COLORLESS flavour (Sensory Stone). getColorlessRewardCards has no
+// upgrade pass in any act, but RewardItem(CardColor)'s constructor loop does
+// not care which generator filled `cards` -- so a held egg still upgrades the
+// offer, and it is the ONLY thing that can.
+TEST(RewardOfferPreview, ColorlessOffersTakeTheEggPreviewToo) {
+    const int64_t seeds[] = {61, 62, 63, 64, 65, 66, 67, 68};
+    int upgraded_total = 0;
+    for (const int64_t seed : seeds) {
+        RunState control = make_run(seed);
+        RewardScreen cs{};
+        roll_colorless_card_reward_item(control, cs);
+        ASSERT_EQ(cs.count, 1);
+
+        RunState egg = make_run(seed);
+        give_relics(egg, {RelicId::TOXIC_EGG});
+        RewardScreen es{};
+        roll_colorless_card_reward_item(egg, es);
+        ASSERT_EQ(es.count, 1);
+
+        EXPECT_TRUE(streams_equal(control.card_rng, egg.card_rng));
+        ASSERT_EQ(es.items[0].card_count, cs.items[0].card_count);
+        for (uint8_t j = 0; j < es.items[0].card_count; ++j) {
+            ASSERT_EQ(es.items[0].card_ids[j], cs.items[0].card_ids[j]);
+            EXPECT_EQ(cs.items[0].card_upgrades[j], 0)
+                << "the colourless roller never upgrades on its own";
+            const CardDef* def =
+                card_def(static_cast<CardId>(es.items[0].card_ids[j]));
+            ASSERT_NE(def, nullptr);
+            const int want = def->type == CardType::SKILL ? 1 : 0;
+            EXPECT_EQ(es.items[0].card_upgrades[j], want)
+                << "seed " << seed << " offer " << static_cast<int>(j);
+            upgraded_total += want;
+        }
+    }
+    EXPECT_GT(upgraded_total, 0);
+}
+
+// Negative control, the offer-creation twin of the claim-site one above: a
+// relic with an onObtainCard body but the AbstractRelic no-op
+// onPreviewObtainCard must not touch the offer -- and must not be PAID for
+// cards nobody has taken.
+TEST(RewardOfferPreview, CeramicFishAndPeriaptDoNotPreviewTheOffer) {
+    for (const RelicId rid : {RelicId::CERAMIC_FISH,
+                              RelicId::DARKSTONE_PERIAPT}) {
+        RunState rs = make_run(43);
+        give_relics(rs, {rid});
+        const int32_t gold_before = rs.gold;
+        const int16_t max_hp_before = rs.max_hp;
+        RewardScreen s{};
+        roll_setup_item_card_reward(rs, RoomType::Monster, s);
+        ASSERT_EQ(s.count, 1);
+        for (uint8_t j = 0; j < s.items[0].card_count; ++j) {
+            EXPECT_EQ(s.items[0].card_upgrades[j], 0)
+                << "relic " << static_cast<int>(rid);
+        }
+        EXPECT_EQ(rs.gold, gold_before);
+        EXPECT_EQ(rs.max_hp, max_hp_before);
+    }
+}
+
 }  // namespace
 }  // namespace sts::engine

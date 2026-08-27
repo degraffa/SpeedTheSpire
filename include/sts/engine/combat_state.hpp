@@ -943,29 +943,42 @@ inline constexpr uint32_t kMonsterFlagHalfDead = 1u << 25;
 
 // --- Liveness predicates ------------------------------------------------------
 // The game's monster liveness is NOT `hp > 0`, and it is NOT ONE predicate --
-// it is two, and they DISAGREE on halfDead. That disagreement is the whole
+// it is THREE, and they DISAGREE on halfDead. That disagreement is the whole
 // mechanism behind the Darkling's REINCARNATE and the Awakened One's REBIRTH:
 //
 //   AbstractCreature.isDeadOrEscaped   (:780-790) = isDying || halfDead || isEscaping
 //   MonsterGroup.areMonstersBasicallyDead (:90-95) = isDying ||             isEscaping
+//   AbstractCard.cardPlayable            (:854-860) = isDying
 //
 // A halfDead monster is therefore OUT for targeting and IN for the fight: it
 // cannot be hit or chosen at random, yet it is queued, takes its turn, loses
 // block and runs start-of-turn powers -- which is how it ever reaches the turn
-// that revives it.
+// that revives it. And it is IN for card PLAYABILITY too, which is the third
+// sense: cardPlayable's first conjunct reads the bare `m.isDying` field, so a
+// card aimed at a halfDead monster still passes canUse and still runs the whole
+// onPlayCard fan-out before GameActionManager's own dead-target block
+// (GameActionManager.java:263-282) throws the play away without useCard.
 //
-// This engine models isDying as hp <= 0 (die() and SuicideAction both zero HP),
-// isEscaping/escaped as kMonsterFlagEscaped, and halfDead as
-// kMonsterFlagHalfDead. halfDead IMPLIES hp == 0 (the Java only ever sets it on
-// the hp <= 0 branch), which is the pleasant part: it makes
-// monster_dead_or_escaped ALREADY EXACT for isDeadOrEscaped with no edit, so
-// every targeting caller stayed correct when the split landed. Only the
-// basically-dead sense needed a new predicate.
+// This engine models isDying as `hp <= 0 && !halfDead` (die() and SuicideAction
+// both zero HP; the Darkling / Awakened One halfDead branch zeroes HP WITHOUT
+// setting isDying, Darkling.java:201-231), isEscaping/escaped as
+// kMonsterFlagEscaped, and halfDead as kMonsterFlagHalfDead. halfDead IMPLIES
+// hp == 0 (the Java only ever sets it on the hp <= 0 branch), which is the
+// pleasant part: it makes monster_dead_or_escaped ALREADY EXACT for
+// isDeadOrEscaped with no edit, so every targeting caller stayed correct when
+// the split landed. The other two senses each need their own predicate.
 [[nodiscard]] inline bool monster_escaped(const MonsterState& m) noexcept {
     return (m.flags & kMonsterFlagEscaped) != 0u;
 }
 [[nodiscard]] inline bool monster_half_dead(const MonsterState& m) noexcept {
     return (m.flags & kMonsterFlagHalfDead) != 0u;
+}
+// AbstractCreature.isDying, on its own. The CARD-PLAYABILITY sense
+// (AbstractCard.cardPlayable:854-860): a halfDead monster is NOT dying, so it
+// does not veto a play the way a genuinely dead one does. Use ONLY where the
+// Java reads the bare field; anything that AIMS wants monster_dead_or_escaped.
+[[nodiscard]] inline bool monster_is_dying(const MonsterState& m) noexcept {
+    return m.hp <= 0 && !monster_half_dead(m);
 }
 // AbstractCreature.isDeadOrEscaped (:780-790). The TARGETING sense: a halfDead
 // monster counts as DEAD. Use for anything that picks or aims at a monster --
@@ -977,7 +990,7 @@ inline constexpr uint32_t kMonsterFlagHalfDead = 1u << 25;
 // halfDead monster counts as ALIVE. Use for combat-over, the monster turn
 // queue, applyPreTurnLogic, and the end-of-round power walks.
 [[nodiscard]] inline bool monster_basically_dead(const MonsterState& m) noexcept {
-    return (m.hp <= 0 && !monster_half_dead(m)) || monster_escaped(m);
+    return monster_is_dying(m) || monster_escaped(m);
 }
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);

@@ -2840,6 +2840,120 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   replacement seat beside STS101166 (unchanged: hash `205938794e73a158`,
   max_floor 44). WSL `debug`/`asan`/`release` green; `check_stale_counts.sh`
   and `check_doc_links.sh` clean.
+  **Two more depth-wave divergences closed 2026-08-27, from unrelated
+  families: a held EGG upgrades the reward OFFER, and a halfDead target is
+  not a DYING target.**
+  **(B) STS193303 ps106, step 430, floor 38.** The line takes `Power
+  Through`+0 from a CARD_REWARD the live game rendered `power through+ /
+  flex+ / clothesline` — both SKILLs upgraded, the ATTACK not, with `Toxic
+  Egg 2` held. NOT the `cardUpgradedChance` roll, which the engine already
+  read right (`TheBeyond.java:81`, `asc >= 12 ? 0.25f : 0.5f`, so 0.25 at
+  A20 — and S2.44's per-act tier-4 row passes because the RATE was never
+  wrong); a rate cannot split an offer by card TYPE. ROOT CAUSE: the game
+  previews a card reward through every owned relic's `onPreviewObtainCard`
+  at ASSEMBLY, at two sites the engine had neither of —
+  `AbstractDungeon.getRewardCards`'s tail (`AbstractDungeon.java:1474-1476`,
+  the else-arm of the upgrade branch, reached by every card the roll did not
+  take) and the `RewardItem(CardColor)` constructor
+  (`RewardItem.java:152-162`), which walks the whole item unconditionally and
+  is the ONLY preview the COLORLESS flavour gets since
+  `getColorlessRewardCards` has no upgrade pass at all.
+  `AbstractRelic.onPreviewObtainCard` (`:471-472`) is an empty default with
+  exactly THREE overrides in the whole source — `FrozenEgg2` / `MoltenEgg2` /
+  `ToxicEgg2`, each `onPreviewObtainCard(c) { onObtainCard(c); }` — so the
+  observable net is that an egg owner's reward SCREEN shows its
+  matching-type offers already upgraded. The engine had an egg preview pass,
+  but only the OTHER direction: `apply_egg_preview_to_open_offers`, the
+  claim-site walk for an egg acquired while a screen is already open
+  (wave3-followup, discharging the "Egg trio onEquip reward-screen preview
+  pass" row) — one of the game's two sites, and the rarer one. FIX:
+  `apply_offer_previews` (`combat_rewards.cpp`) at the tail of BOTH
+  `roll_card_reward_item` and `roll_colorless_card_reward_item`, egg-gated by
+  a shared `relic_previews_obtain_card` the claim-site gate now delegates to,
+  replaying the guarded `onObtainCard` bodies over a scratch `CardInstance`
+  so preview and obtain-time upgrade cannot drift. It is **egg-gated, not
+  generic over `onObtainCard`**: Ceramic Fish and Darkstone Periapt override
+  that method but not the preview, and a generic pass would pay +9 gold and
+  +6 max HP for cards nobody has taken. Consumes NO RNG. **The RUN STATE was
+  already right and no trajectory moves** — `reward_take_card` walks
+  `add_card_to_master_deck`, whose `on_obtain_card` fan-out upgraded the card
+  at OBTAIN time, so only the OFFER's `card_upgrades` bits were wrong (a
+  `RunState` group the differ compares whenever a CARD_REWARD screen is
+  attested, and what the live script matcher joins on). Registry rows 57 / 58 /
+  59 amended (the Frozen Egg row carries the derivation; the other two
+  point at it). Tests:
+  `RewardOfferPreview.AHeldEggUpgradesItsTypeInTheOFFERAndSpendsNoRng`
+  (three eggs x 32 seeds against an egg-less control: identities and every
+  stream position byte-equal, upgrade set exactly to the egg's CardType, with
+  a per-egg vacuity guard),
+  `RewardOfferPreview.ColorlessOffersTakeTheEggPreviewToo`, and the negative
+  `RewardOfferPreview.CeramicFishAndPeriaptDoNotPreviewTheOffer`.
+  **(C) STS105835 ps317, seq 489, floor 35** — the full 682-action line, the
+  Awakened One killed live, differ verdict `state_divergence` on exactly ONE
+  field: `relics[6].counter` (**Velvet Choker**) reading live 2 / sim 1 from
+  seq 489 and staying exactly one behind for the remaining ~190 actions. The
+  play at seq 488 is `Sever Soul+` into Darkling slot 0 at 28 hp; 31 damage
+  half-kills it, and **Necronomicon** (slot 4) then replays the copy into the
+  now-halfDead Darkling. Live counted the replay; the sim did not. ROOT
+  CAUSE: `AbstractCard.cardPlayable`'s first conjunct
+  (`AbstractCard.java:855`) reads **`m.isDying`, the bare field**, not
+  `isDeadOrEscaped()`. A halfDead Darkling is at 0 hp with `isDying` FALSE
+  (`Darkling.java:201-231` sets `halfDead` and never calls `super.die()`), so
+  `canUse` says YES, and `GameActionManager.getNextAction` runs the ENTIRE
+  onPlayCard fan-out — player powers, monster powers, RELICS, stance,
+  blights, the three pile walks, `++cardsPlayedThisTurn` (`:214-247`) —
+  before its OWN dead-target block at `:263-282` notices `isDeadOrEscaped()`,
+  pulls the card out of limbo and skips `useCard`. The engine's `card_can_use`
+  rejected on `hp <= 0`, which swallows the whole fan-out one step too early.
+  This is the THIRD liveness sense, and it had no predicate: `combat_state.hpp`
+  now spells `monster_is_dying` (`hp <= 0 && !half_dead`) beside
+  `monster_dead_or_escaped` (targeting, halfDead counts DEAD) and
+  `monster_basically_dead` (in-the-fight, halfDead counts ALIVE, now expressed
+  as `is_dying || escaped`). **`legal_actions` is unaffected** — its per-target
+  row is separately gated on `!monster_dead_or_escaped`, the game's reticle
+  test — so the only surface that moves is `resolve_card_play`'s dequeue-time
+  revalidation, i.e. baked-target autoplays: Necronomicon, Double Tap,
+  Distilled Chaos, Havoc, Mayhem. Tests:
+  `CardLimbo.HalfDeadTargetPassesCanUseAndStillRunsTheFanOut` and
+  `CardLimbo.NecronomiconReplayIntoItsOwnHalfDeathStillCountsThePlay` (the
+  witnessed shape end to end, Clothesline half-killing a Darkling and its own
+  replay landing on the corpse), both verified RED on the pre-fix predicate
+  (counter 1, `cards_played_this_turn` 1) and GREEN after (2 / 2).
+  **EVIDENCE.** `replay_run_diff --replay`: STS105835 goes from 5 diff
+  records to ONE — 680 of 681 compared records zero-diff, the whole seq
+  489-492 `relics[6].counter` block gone; what remains is seq 680, the
+  terminal `screen 'COMPLETE'` record the run layer does not model
+  (`command_map.hpp:1795`), byte-identical to the pre-fix log and therefore
+  untouched by either fix. STS193303 replays **CLEAN, 444/444 records** to
+  its artifact end. **RE-EMISSION: one line, and it is presentation-only.**
+  All 19 archived cohort lines re-emitted on the fixed engine: every
+  `final_hash` is unchanged and 18 files are byte-identical;
+  `STS193303__sim_search__ps106` changes on exactly TWO lines — step 430
+  `Power Through` and step 510 `Impervious`, both SKILLs, both `up` 0 → 1 —
+  which is the stopped step reading the live screen's answer. (The two
+  NO-QUALIFY rows in that sweep, `STS108173 sim_search_skip ps0` and
+  `STS163083 sim_search ps359`, are pre-existing: their rescan rows are byte
+  identical to the archived ones and `lines_v2/` already lacked both files.)
+  **LEAD D is NOT explained and stays open**, checked rather than assumed:
+  `STS128113__sim_search__ps27` and `STS101166__sim_search__ps0` re-emit BYTE
+  IDENTICAL and both still replay clean to their artifact ends, so neither
+  fix touches them. What the captures do pin, for whoever takes them: (i)
+  STS101166 ps0 step 325 — the sim plays a `Bash+` that the live game holds
+  at cost 2 with 0 energy. It is the card the `Dark Embrace` draw pulls back
+  after the Armaments exhaust, out of a reshuffle of an 8-card discard, and
+  `Mummified Hand` had set it to cost 0 while it was in hand. The live reset
+  is `Soul.update`'s DRAW_PILE and DISCARD_PILE arms (`Soul.java:199-220`),
+  which call `clearPowers()` → `AbstractCard.resetAttributes`
+  (`:2035-2045`, `costForTurn = cost`) on **every** move into either pile,
+  mid-turn included; the engine's `reset_cost_for_turn` (`piles.cpp:67`) is
+  wired only to the end-turn sweep and to exhaust, so a card discarded
+  mid-turn keeps its per-turn cost. Fixing that moves pile-move semantics and
+  wants its own task. (ii) STS128113 ps27 step 328 — under Snecko-applied
+  Confusion the live `Power Through+` costs 2 with 1 energy left, so the sim
+  is one energy up or one cost down on a hand whose five cards were all drawn
+  fresh that turn; note `ConfusionPower.onCardDraw` writes nothing at all when
+  the roll EQUALS the base cost, so a stale `costForTurn` survives it — the
+  same reset gap in (i) is the first thing to rule in or out.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool
