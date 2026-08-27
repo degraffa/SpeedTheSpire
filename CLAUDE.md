@@ -21,10 +21,15 @@ provenance). [docs/stage-a-design.md](docs/stage-a-design.md) and
 - **Build system**: CMake ≥ 3.21, C++20. GoogleTest + Google Benchmark via
   `FetchContent` — no external package manager. Granted extras: nlohmann/json
   (tools-only), PyYAML (codegen-only).
-- **Dev environment**: WSL2, Ubuntu 24.04 (distro `Ubuntu-2404`, installed on
-  the `E:` drive — NVMe, not the system drive — set as the default WSL
-  distro). GCC 13 / Clang 18 / CMake 3.28 / Ninja installed. Default WSL user
-  is `alex` with passwordless sudo.
+- **Dev environment**: WSL2, Ubuntu 24.04 (distro `Ubuntu-2404`, installed at
+  `E:\WSL\Ubuntu-2404` — set as the default WSL distro). GCC 13 / Clang 18 /
+  CMake 3.28 / Ninja installed. Default WSL user is `alex` with passwordless
+  sudo. **`E:` is a 5400rpm 2.5" HDD (ST1000LM024), not an SSD** — an earlier
+  version of this file claimed it was NVMe, which was wrong. Every WSL build,
+  `ctest` run and `FetchContent` unpack therefore lands on spinning rust; the
+  NVMe on this box is `D:` (Samsung 970 EVO 500GB), which holds the repo.
+  Relocating the distro to an SSD is the single largest available build-time
+  win — treat any WSL-side timing measured before that move as HDD-bound.
 - **Build/test** (conventions §6 has the full form):
   ```bash
   cmake --preset debug        # or release, asan
