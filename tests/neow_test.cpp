@@ -26,6 +26,7 @@
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_deck.hpp"
+#include "sts/engine/seed_string.hpp"
 #include "sts/registry/game_ids.hpp"
 
 using namespace sts::engine;
@@ -432,6 +433,68 @@ TEST(NeowPayout, ThreeSmallPotionsAlsoRollAndDiscardTheSetupItemCardRow) {
         EXPECT_NE(rc.rewards.items[i].kind,
                   static_cast<uint8_t>(RewardItemKind::CARDS));
     }
+}
+
+// S2.43 (2026-08-27) -- THE STS100075 TRIO, PINNED TO LITERALS. The test above
+// derives its expectation from get_random_potion, so it cannot catch a wrong
+// POOL or a wrong OVERLOAD; this one names the three potions outright, from a
+// hand-run of the Java on the seed the depth campaign stopped on.
+//
+// NeowReward.activate(), case THREE_SMALL_POTIONS (NeowReward.java:268-283):
+//     for (int i = 0; i < 3; ++i)
+//         getCurrRoom().addPotionToRewards(PotionHelper.getRandomPotion());
+// PotionHelper.getRandomPotion() (PotionHelper.java:169-172) is the NO-ARG
+// flat overload -- `potions.get(AbstractDungeon.potionRng.random(size - 1))`,
+// one draw, uniform over the whole class pool, NO tier gate and none of
+// AbstractDungeon.returnRandomPotion's rejection sampling (AbstractDungeon.java
+// :825-850, which is the OTHER overload and belongs to combat drops). Nothing
+// de-duplicates, so a repeat is legal -- it simply does not happen here.
+// `potions` is PotionHelper.getPotions(IRONCLAD, false) (PotionHelper.java:
+// 86-153): BloodPotion, ElixirPotion, HeartOfIron, then the 30 shared entries
+// in insertion order = 33 rows, which is registry/potions.yaml's id order, so
+// pool index i is PotionId(i + 1).
+//
+// potionRng is `new Random(Settings.seed)` at generateSeeds (AbstractDungeon
+// .java:398-407) and NOTHING between run start and the floor-0 blessing draws
+// from it, so the blessing's three draws are draws 1..3 of the stream:
+//     random(32) = 10 -> pool[10] = "Weak Potion"
+//     random(32) =  8 -> pool[ 8] = "Strength Potion"
+//     random(32) = 27 -> pool[27] = "CultistPotion"
+// The trio is [Weak, Strength, Cultist] -- three DISTINCT ids, which is what
+// makes this seed the one that exposed the script emitter's kind-vs-identity
+// ordinal bug (seed_scan_test's ClaimOrdinalIsAnIdentityOrdinalNotAKindOrdinal).
+TEST(NeowPayout, STS100075ThreePotionTrioMatchesTheHandRunJava) {
+    const int64_t seed = seed_from_string("STS100075");
+    ASSERT_EQ(seed, 62651821553375LL);
+
+    RunController rc = run_begin(seed, kA20);
+    // The premise of the derivation: the blessing is the FIRST potionRng
+    // consumer of the run.
+    ASSERT_EQ(rc.run.potion_rng.counter, 0);
+    // ...and this seed really does offer the blessing at index 1, which is the
+    // option the campaign's sim_search line took.
+    ASSERT_EQ(rc.neow.option_type[1],
+              static_cast<uint8_t>(NeowRewardType::THREE_SMALL_POTIONS));
+
+    step(rc, choose(1));
+
+    ASSERT_EQ(rc.rewards.count, 3);
+    const PotionId want[3] = {PotionId::WEAK_POTION, PotionId::STRENGTH_POTION,
+                              PotionId::CULTIST_POTION};
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(rc.rewards.items[i].kind,
+                  static_cast<uint8_t>(RewardItemKind::POTION));
+        EXPECT_EQ(rc.rewards.items[i].id, static_cast<uint16_t>(want[i])) << i;
+    }
+    EXPECT_EQ(rc.run.potion_rng.counter, 3);
+
+    // The three pool indices themselves, re-taken off an independent stream --
+    // this is the half that would move if the POOL ORDER ever drifted from
+    // PotionHelper.getPotions(IRONCLAD, false).
+    RngStream p = from_seed(seed);
+    EXPECT_EQ(random(p, kPotionPoolSize - 1), 10);
+    EXPECT_EQ(random(p, kPotionPoolSize - 1), 8);
+    EXPECT_EQ(random(p, kPotionPoolSize - 1), 27);
 }
 
 TEST(NeowPayout, PotionRewardScreenClaimsThroughTheOrdinaryDoor) {

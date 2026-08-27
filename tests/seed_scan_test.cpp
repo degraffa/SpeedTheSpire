@@ -19,9 +19,12 @@
 
 #include "sts/planner/seed_scan.hpp"
 
+#include "sts/engine/combat_rewards.hpp"  // RewardItemKind (claim-ordinal test)
 #include "sts/engine/event_framework.hpp"
+#include "sts/engine/neow.hpp"        // NeowRewardType (claim-ordinal test)
 #include "sts/planner/script.hpp"  // S2.V2: the STS-SCRIPT emitter
 
+#include <span>
 #include <string>
 #include <vector>
 
@@ -1004,6 +1007,84 @@ TEST(SimSearchScript, RefusesATrajectoryThatDoesNotReproduceTheHash) {
         "sim_search", 3, traj, "action_cap", 0xDEADBEEFull);
     EXPECT_FALSE(bad.ok);
     EXPECT_NE(bad.error.find("hash"), std::string::npos);
+}
+
+// S2.43 (2026-08-27) -- THE CLAIM ORDINAL IS AN IDENTITY ORDINAL.
+//
+// A claim step emits `rtype` + `id` + `ord`, and the live matcher
+// (driver/script_policy_cmd.py `_match_claim` -> `_reward_row_matches` ->
+// `_nth_index`) resolves it by filtering the dump's rewards[] on rtype AND
+// payload id and taking the ord-th survivor. `ord` counted rows of the same
+// KIND instead, which indexes a different list the moment two same-kind rows
+// carry different ids -- and Neow's three-potion blessing is exactly that
+// shape (three POTION rows, three distinct ids).
+//
+// STS100075 is the depth campaign's witness: the trio is
+// [Weak Potion, Strength Potion, CultistPotion] (neow_test's
+// STS100075ThreePotionTrioMatchesTheHandRunJava pins it off the Java), the
+// line claims row 1, and the old kind ordinal emitted ord=1 for the ONLY
+// Strength Potion on the screen. The follower asked for the second one, found
+// none, and reported a divergence with the sim and the game in agreement.
+TEST(SimSearchScript, ClaimOrdinalIsAnIdentityOrdinalNotAKindOrdinal) {
+    sts::engine::RunController rc = sts::engine::run_begin(
+        sts::engine::seed_from_string("STS100075"), 20);
+    ASSERT_EQ(rc.neow.option_type[1],
+              static_cast<uint8_t>(sts::engine::NeowRewardType::
+                                       THREE_SMALL_POTIONS));
+    sts::engine::StepResult res{};
+    sts::engine::Action open =
+        sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 1);
+    sts::engine::advance(std::span<sts::engine::RunController>(&rc, 1),
+                         std::span<const sts::engine::Action>(&open, 1),
+                         std::span<sts::engine::StepResult>(&res, 1));
+    ASSERT_EQ(rc.rewards.count, 3);
+
+    // Row 1 is the screen's only Strength Potion, so its identity ordinal is 0
+    // even though its kind ordinal is 1.
+    std::string err;
+    const std::string s1 = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 1), 1,
+        err);
+    ASSERT_FALSE(s1.empty()) << err;
+    EXPECT_NE(s1.find("\"k\":\"claim\""), std::string::npos) << s1;
+    EXPECT_NE(s1.find("\"rtype\":\"POTION\""), std::string::npos) << s1;
+    EXPECT_NE(s1.find("\"id\":\"Strength Potion\""), std::string::npos) << s1;
+    EXPECT_NE(s1.find("\"ord\":0"), std::string::npos) << s1;
+
+    // Row 2 likewise: distinct id, so ordinal 0, not 2.
+    const std::string s2 = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 2), 2,
+        err);
+    ASSERT_FALSE(s2.empty()) << err;
+    EXPECT_NE(s2.find("\"id\":\"CultistPotion\""), std::string::npos) << s2;
+    EXPECT_NE(s2.find("\"ord\":0"), std::string::npos) << s2;
+
+    // A GENUINE duplicate still gets a rising ordinal -- the disambiguator the
+    // field exists for is intact. Forcing the identities is legitimate here:
+    // this is a claim-EMITTER test, and the roll that produced them is pinned
+    // by the engine-side test named above.
+    rc.rewards.items[1].id = rc.rewards.items[0].id;
+    const std::string dup = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 1), 1,
+        err);
+    ASSERT_FALSE(dup.empty()) << err;
+    EXPECT_NE(dup.find("\"id\":\"Weak Potion\""), std::string::npos) << dup;
+    EXPECT_NE(dup.find("\"ord\":1"), std::string::npos) << dup;
+
+    // And a kind with NO payload identity emits no `id`, so the matcher joins
+    // on rtype alone and the ordinal stays a kind ordinal: an identity-less
+    // row must not be reordered by this change. GOLD is that kind.
+    rc.rewards.items[0].kind =
+        static_cast<uint8_t>(sts::engine::RewardItemKind::GOLD);
+    rc.rewards.items[1].kind =
+        static_cast<uint8_t>(sts::engine::RewardItemKind::GOLD);
+    const std::string gold = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, 1), 1,
+        err);
+    ASSERT_FALSE(gold.empty()) << err;
+    EXPECT_NE(gold.find("\"rtype\":\"GOLD\""), std::string::npos) << gold;
+    EXPECT_EQ(gold.find("\"id\":"), std::string::npos) << gold;
+    EXPECT_NE(gold.find("\"ord\":1"), std::string::npos) << gold;
 }
 
 TEST(SimSearchScript, StepJsonDecodesAgainstTheStateNotTheAction) {

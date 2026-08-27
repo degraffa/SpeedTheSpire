@@ -2471,6 +2471,49 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `CardUncommonRampage.BaseInstanceScalesFiveAfterEachPlay` (8 then 13 on one
   instance) has been green throughout. Six-preset parity unchanged; no
   committed trace moved.
+  **2026-08-27 — the STS100075 Neow-potion divergence is a PHANTOM: the
+  engine was right and the SCRIPT EMITTER's claim ordinal was wrong.** The
+  S2.V2 line stopped at step 1 with "reward screen has no #1 POTION row (id
+  'Strength Potion')" while the game offered three POTION rows, which reads
+  as a potion-identity divergence and is not one. Derived from the Java, not
+  the capture: `NeowReward.activate()` case `THREE_SMALL_POTIONS`
+  (`NeowReward.java:268-283`) makes three `PotionHelper.getRandomPotion()`
+  calls — the NO-ARG flat overload, `potions.get(potionRng.random(size-1))`,
+  one draw each, no tier gate and none of `AbstractDungeon
+  .returnRandomPotion`'s rejection sampling (`AbstractDungeon.java:825-850`,
+  the *other* overload, which belongs to combat drops) — over
+  `PotionHelper.getPotions(IRONCLAD,false)` (`PotionHelper.java:86-153`, 33
+  entries = `registry/potions.yaml` id order), with no de-duplication.
+  `potionRng` is `new Random(Settings.seed)` at `generateSeeds`
+  (`AbstractDungeon.java:398-407`) and nothing spends it before floor 0, so
+  STS100075's blessing is draws 1..3: indices **10, 8, 27 → [Weak Potion,
+  Strength Potion, CultistPotion]**, three DISTINCT ids — exactly what the
+  sim produced (`potion_rng.counter == 3`, rows in that order), so the trio
+  never differed and 159a7bf (`equip-trio`) is innocent: its only `neow.cpp`
+  hunk is an unreachable `GRID_DUPLICATE` assert arm, and it cannot reach a
+  potion draw that precedes the card roll it changed. The real defect is in
+  `tools/oracle_bridge/planner/src/script.cpp` `put_claim`, which emitted
+  `ord` as an ordinal among rows of the same KIND while emitting an `id`
+  beside it — and the live matcher (`driver/script_policy_cmd.py`
+  `_match_claim`/`_reward_row_matches`) filters on rtype AND id and takes
+  the ord-th survivor, as `_match_take_card`, `hand_ordinal` and
+  `deck_ordinal` all do for cards. Claiming POTION row 1 of three distinct
+  ids therefore asked for the *second* Strength Potion on a screen holding
+  one. Fixed to an identity ordinal (rows with no payload identity — GOLD,
+  STOLEN_GOLD, CARD, the keys — emit no `id`, so the kind IS the identity
+  and their ordinals are unchanged). Pinned by
+  `NeowPayout.STS100075ThreePotionTrioMatchesTheHandRunJava` (literal trio +
+  pool indices, the roll-independent half the existing
+  `ThreeSmallPotionsAlsoRollAndDiscardTheSetupItemCardRow` cannot see) and
+  `SimSearchScript.ClaimOrdinalIsAnIdentityOrdinalNotAKindOrdinal` (both
+  distinct-id rows, a forced duplicate still rising, GOLD unchanged).
+  **Emitter-only: no sim trajectory, `final_hash` or committed trace moves.**
+  Scope of re-emission — of the 14 emitted lines exactly TWO carry a
+  POTION/RELIC claim with `ord > 0` and so need a re-emit for the corrected
+  field: `STS100075__sim_search__ps0` (step 1) and
+  `STS108173__sim_search__ps0` (step 275, a two-relic treasure chest —
+  `[Red Skull, Oddly Smooth Stone]`, the same latent stop one act deeper).
+  An `ord` of 0 is provably unaffected in either convention.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool

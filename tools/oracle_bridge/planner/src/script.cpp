@@ -166,8 +166,24 @@ void put_offer_card(Json& j, const RunController& rc, uint8_t slot) {
 }
 
 // claim step: the reward row's kind, payload identity, and the ordinal among
-// rows of the SAME kind (the dump's rewards[] is index-parallel with the
-// sim's items[], but the identity join is what survives a cosmetic reorder).
+// rows of the SAME IDENTITY -- the dump's rewards[] is index-parallel with the
+// sim's items[], but the identity join is what survives a cosmetic reorder.
+//
+// S2.43 (2026-08-27): this ordinal used to count rows of the same KIND, which
+// contradicted the `id` emitted beside it and made the pair unfollowable. The
+// live matcher (driver/script_policy_cmd.py `_match_claim` /
+// `_reward_row_matches`) filters the dump's rewards[] by rtype AND payload id
+// and then takes the ord-th SURVIVOR, exactly as `_match_take_card`,
+// hand_ordinal and deck_ordinal do for cards; a kind ordinal indexes a
+// different list, so any screen whose earlier same-kind rows carry a DIFFERENT
+// id emitted an ord the follower could not resolve. Neow's three-potion
+// blessing is the canonical shape: three POTION rows with three distinct ids,
+// claim row 1 -> kind ordinal 1, but only ONE row bears that id, so the
+// follower's `_nth_index(..., 1)` returned None and the line died on a
+// PHANTOM divergence ("reward screen has no #1 POTION row") with the sim and
+// the game in perfect agreement. Rows with no payload identity (GOLD,
+// STOLEN_GOLD, CARDS, the keys) emit no `id`, the matcher then joins on rtype
+// alone, and the kind IS the identity -- so their ordinal is unchanged.
 void put_claim(Json& j, const RunController& rc, uint8_t index) {
     j.kv("k", "claim");
     if (index >= rc.rewards.count || index >= engine::kRewardItemCap) {
@@ -177,6 +193,10 @@ void put_claim(Json& j, const RunController& rc, uint8_t index) {
     const engine::RunRewardItem& item = rc.rewards.items[index];
     const auto kind = static_cast<engine::RewardItemKind>(item.kind);
     j.kv("rtype", reward_kind_text(kind));
+    // The two kinds whose row carries a payload identity -- and so the two for
+    // which `id` is emitted and the ordinal must be an IDENTITY ordinal.
+    const bool has_id = kind == engine::RewardItemKind::RELIC ||
+                        kind == engine::RewardItemKind::POTION;
     if (kind == engine::RewardItemKind::RELIC) {
         j.kv("id", sts::registry::relic_game_id(
                        static_cast<sts::registry::RelicId>(item.id)));
@@ -186,7 +206,10 @@ void put_claim(Json& j, const RunController& rc, uint8_t index) {
     }
     int ord = 0;
     for (uint8_t i = 0; i < index; ++i) {
-        if (rc.rewards.items[i].kind == item.kind) ++ord;
+        const engine::RunRewardItem& o = rc.rewards.items[i];
+        if (o.kind != item.kind) continue;
+        if (has_id && o.id != item.id) continue;
+        ++ord;
     }
     j.kv("ord", ord);
 }
