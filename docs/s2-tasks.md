@@ -2327,6 +2327,19 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `s243_recap_seeds.txt`) — zero open, zero wildcards. The collided
   first-round recap postprocess was re-run in a clean window (all 10
   workers exit 0, zero untriaged). Six presets green.
+  **2026-08-27 — the §8 escalation decision is TAKEN: S2.V2.** The
+  deciding number is measured, not assumed: 0 Act-2 boss fights in 2,000
+  breadth attempts under the b1.7.0 TE.1 family, and sim-side Act-2/3
+  reach structurally 0 for the E0 policies — so a
+  `seed_scan --need-boss-kill-act 2` cohort over existing policies has an
+  EMPTY candidate set and seed-targeted directed captures have nothing to
+  target from. The alternative named at the last session therefore
+  collapses to the sanctioned escalation, and **S2.V2 is opened** (row
+  before the gate). What this task still owes — the item-2/3 depth
+  cohorts, the Mind Bloom directed capture (deferred row above), and the
+  §7.4 event-depth coverage join — schedules from S2.V2's scan output;
+  the deterministic dashboard is dispatched now over the breadth
+  artifacts and extends to the depth cohorts when they exist.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool
@@ -2762,8 +2775,47 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   green; counts re-derived by `ctest -N | tail -1` at land time, not
   restated here.
 
+- **S2.V2** `[ ]` **Sim-consulting scripted driver + depth pre-scan (the
+  sanctioned §8 escalation).** Opened 2026-08-27 on the measured condition
+  design §6's driver-risk paragraph names: S2.43's breadth wave put the
+  b1.7.0 TE.1 family at 0 Act-2 boss fights in 2,000 A20 attempts
+  (29.5 %/28.3 % Act-1 boss-fight reach, 19 Act-1 kills, 19 Act-2
+  entries, deepest floor 27) — insufficient for the S2-G2 depth bars, the
+  exact trigger the design paragraph names. Scope, per §6 item 3's
+  sanctioned shape (sim pre-scan chooses (seed, policy, policy-seed)
+  triples whose scripted line reaches the target; the oracle then
+  confirms the full run zero-diff): (a) a deterministic, weight-free
+  **sim-consulting policy** in the engine's tooling family — turn-local
+  search / shallow rollout / 1-ply lookahead over engine snapshots
+  (memcpy snapshot+restore is the instrument; no wall-clock, no
+  randomness outside the declared policy-seed); (b) **`seed_scan`
+  extended** to run it at scale and select triples through the existing
+  S2.42 filters (`--need-boss-act`, `--need-boss-kill-act`,
+  `--need-victory`, `--need-boss-id`), emitting a per-triple **scripted
+  action line**; (c) a driver-side **script-following policy** behind the
+  STS-POLICY-IO v1 seam (its own SHA-pinned binary in the
+  `survival_policy_cmd` mould) that plays a scripted line against the
+  live game and, on any desync between the game's advertised choices and
+  the script's next step, STOPS and marks the run divergent for Stage-B
+  triage rather than improvising — a desync is capture evidence, not a
+  failure to route around.
+  **Deps:** S2.42 (planner + b1.7.0 family), S2.43 breadth (the
+  escalation measurement) **Acceptance:** measured sim-side reach report
+  at scanned scale (per-act boss-fight / boss-kill / double-boss rates
+  for the sim-consulting policy) committed under `docs/verification/`;
+  scripted lines replay deterministically in the sim
+  (`--verify-determinism`, zero mismatches); the S2-G2 item-2/3 depth
+  cohorts **demonstrably schedulable from the scan output** — a concrete
+  triple list covering every Act-2 and Act-3 registry BOSS row, boss-relic
+  take AND skip lines, ≥ 3 double-boss lines over ≥ 2 distinct first-boss
+  identities, and ≥ 1 Act-3 line drawing Mind Bloom (`--need-boss-id` +
+  the event filter) for the deferred-row capture; the script-following
+  policy_cmd unit-tested against recorded protocol dumps WITHOUT
+  launching the game; six presets green.
+  **Log:** —
+
 ### S2-G2 `[ ]` **Gate: S2 verified (unblocks training Phase T4)** — tag `s2-g2-verified`
-**Deps:** S2.41–S2.49, S2-G1
+**Deps:** S2.41–S2.49, S2.V2, S2-G1
 The design §6 S2-G2 bar, checked literally, every item with linked
 evidence. Then: update CLAUDE.md "Current state"; notify the training
 ledger (T4.1's `Deps: S2` is this tag); S3 planning opens as its own fresh
@@ -2781,8 +2833,9 @@ all S2.0x/1x/2x/3x ─▶ S2-G1
 S2.12 ─▶ S2.42 ; S2.11+S2.12 ─▶ S2.41
 S2-G1 ─▶ S2.47 ∥ S2.44 ∥ S2.45 ; S2.47 ─▶ S2.43 (needs S2.42)
 S2.48 ∥ S2.49 (owner-directed 2026-08-10) ─▶ S2.43
+S2.43(breadth) ─▶ S2.V2 ─▶ S2.43(depth cohorts + coverage join)
 S2.43+S2.44 ─▶ S2.46
-S2.41–S2.49 ─▶ S2-G2
+S2.41–S2.49 + S2.V2 ─▶ S2-G2
 ```
 
 ## Change log
@@ -2801,3 +2854,9 @@ S2.41–S2.49 ─▶ S2-G2
   row); **S2.48** (stolen-gold settlement ordering) and **S2.49**
   (attacker-side multi-hit cancel) opened as owner-directed behavior
   fixes, both Deps of S2.43; gate Deps extended to S2.41–S2.49.
+- 2026-08-27 — orchestrator took the §8 escalation decision on S2.43's
+  measured breadth numbers (0 Act-2 boss fights / 2,000 attempts; E0
+  sim reach structurally 0 past Act 1): **S2.V2 opened** as the design
+  §6 driver-risk paragraph's sanctioned sim-consulting driver, with the
+  scan-emitted scripted-line architecture item 3 already sanctions; gate
+  Deps extended to include S2.V2.
