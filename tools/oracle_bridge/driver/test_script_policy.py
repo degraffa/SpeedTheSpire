@@ -346,6 +346,64 @@ class GlueRuleTest(unittest.TestCase):
         self.assertEqual(got, "proceed")
         self.assertEqual(policy._script.cursor, 0)
 
+    def test_sole_choose_dialog_glues_without_consuming(self):
+        # Glue rule 3's first live witness (divergence_STS100009_ps0): the
+        # Neow `talk` pre-screen shows one candidate while the script's
+        # first step is the blessing pick the sim recorded.
+        policy = self._policy_with([{"k": "neow", "index": 3}])
+        talk = {"available_commands": ["choose", "state"],
+                "game_state": {"screen_type": "EVENT",
+                               "choice_list": ["talk"],
+                               "screen_state": {"event_id": "Neow Event"}}}
+        got = policy.decide(decide_request("STS1", talk, ["choose 0"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 0)  # nothing consumed
+        blessing = {"available_commands": ["choose", "state"],
+                    "game_state": {"screen_type": "EVENT",
+                                   "choice_list": ["a", "b", "c", "d"],
+                                   "screen_state": {
+                                       "event_id": "Neow Event"}}}
+        got = policy.decide(decide_request(
+            "STS1", blessing,
+            ["choose 0", "choose 1", "choose 2", "choose 3"]))
+        self.assertEqual(got, "choose 3")
+        self.assertEqual(policy._script.cursor, 1)
+
+    def test_scripted_single_option_choice_is_consumed_not_glued(self):
+        # Match-first: when the sim DID record the one-option decision, the
+        # step matches and is consumed; rule 3 never gets a look-in.
+        policy = self._policy_with([{"k": "neow", "index": 0}])
+        state = {"available_commands": ["choose", "state"],
+                 "game_state": {"screen_type": "EVENT",
+                                "choice_list": ["talk"],
+                                "screen_state": {"event_id": "Neow Event"}}}
+        got = policy.decide(decide_request("STS1", state, ["choose 0"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 1)  # consumed, not glued
+
+    def test_sole_choose_glue_does_not_mask_a_multi_candidate_desync(self):
+        policy = self._policy_with([{"k": "neow", "index": 3}])
+        state = {"available_commands": ["choose", "state"],
+                 "game_state": {"screen_type": "EVENT",
+                                "choice_list": ["a", "b"],
+                                "screen_state": {"event_id": "Neow Event"}}}
+        with self.assertRaises(spc.Divergence):
+            policy.decide(decide_request("STS1", state,
+                                         ["choose 0", "choose 1"]))
+
+    def test_exhausted_script_still_glues_a_trailing_one_click_dialog(self):
+        policy = self._policy_with([{"k": "proceed", "ctx": "t"}])
+        first = {"available_commands": ["proceed", "state"],
+                 "game_state": {"screen_type": "COMBAT_REWARD",
+                                "screen_state": {"rewards": []}}}
+        policy.decide(decide_request("STS1", first, ["proceed"]))
+        trailing = {"available_commands": ["choose", "state"],
+                    "game_state": {"screen_type": "EVENT",
+                                   "choice_list": ["leave"],
+                                   "screen_state": {"event_id": "X"}}}
+        got = policy.decide(decide_request("STS1", trailing, ["choose 0"]))
+        self.assertEqual(got, "choose 0")
+
 
 class BossRewardTest(unittest.TestCase):
     """PROTOCOL.md 3.8-shaped BOSS_REWARD dumps (the Act-1 corpus cannot

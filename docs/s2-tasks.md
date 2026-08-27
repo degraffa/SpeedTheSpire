@@ -2912,8 +2912,13 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   row's `final_hash`; `--verify-determinism` compares trajectories too.
   (c) **`script_policy_cmd.py`**, the STS-POLICY-IO v1 follower in the
   `survival_policy_cmd` mould (config-driven script dir, SHA-pinned like
-  every external policy): match-first with exactly two non-consuming glue
-  rules (confirmation-only screens; the GRID pick-then-confirm seam), and
+  every external policy): match-first with non-consuming glue rules
+  (confirmation-only screens; the GRID pick-then-confirm seam; and — added
+  2026-08-27 when the first live campaign stopped on
+  `divergence_STS100009_ps0` at Neow's opening `talk`, exactly the stop
+  contract doing its job — the collapsed one-click dialog whose sole
+  candidate is a single `choose`, the vestigial-click class the engine
+  deliberately collapses), and
   on ANY other mismatch it writes a `script_divergence` record and exits 3
   — the driver's FatalEnvironmentDrift path stops the campaign; a desync is
   capture evidence, never routed around. **Measured, frozen build, 107,424

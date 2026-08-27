@@ -224,5 +224,10 @@ from the output that exists today.
   `script_policy_cmd.py`'s stop-on-desync contract; any desync it records
   is Stage-B capture evidence by design. The known granularity seams
   (confirmation-only screens; the GRID pick-then-confirm shape) are handled
-  by the follower's two glue rules, which never advance the script cursor;
-  anything else stops the run.
+  by the follower's glue rules, which never advance the script cursor;
+  anything else stops the run. The first live campaign added a third glue
+  rule beside the original two (2026-08-27, divergence_STS100009_ps0): a
+  screen whose only legal candidate is a single `choose` — the collapsed
+  one-click dialog (Neow's opening `talk`; the Woman in Blue / Sensory
+  Stone vestigial-click class the engine deliberately collapses) — is
+  answered without consuming a step, match-first still applying.

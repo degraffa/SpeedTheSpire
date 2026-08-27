@@ -151,8 +151,10 @@ different card at the same index is the desync the follower must stop on):
 | `proceed` | `ctx` (advisory) | `proceed` |
 | `shop` | `index` (raw) | never emitted by the sim-consulting policies (they buy nothing); decode-completeness only |
 
-The follower consumes steps strictly in order; its only two glue commands
-(a confirmation-only screen, and the GRID pick-then-confirm seam) never
+The follower consumes steps strictly in order; its only three glue commands
+(a confirmation-only screen; the GRID pick-then-confirm seam; a collapsed
+one-click dialog whose sole candidate is a single `choose` — Neow's opening
+`talk` and the vestigial-click event class the engine collapses) never
 advance the script cursor, and **any other mismatch stops the run as
 divergent** — a desync is capture evidence for Stage-B triage, never
 something to route around. `script_policy_cmd.py`'s module header carries the

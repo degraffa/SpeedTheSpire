@@ -35,7 +35,17 @@ rather than improvisation):
     is committable; see campaign_driver.expand_legal_actions's B5.2 note)
     answers `proceed` without consuming a step when the next step is not
     another pick on the same grid -- the sim's grid pick is one action where
-    the live grid wants pick-then-confirm.
+    the live grid wants pick-then-confirm;
+  * a screen whose ONLY legal candidate is a single `choose` answers it
+    without consuming a step -- the collapsed one-click dialog (first live
+    witness: the s2v2_take campaign's divergence_STS100009_ps0 at Neow's
+    opening `talk`). The engine deliberately collapses no-state-change
+    dialog clicks (the Woman in Blue / Sensory Stone precedent, argued at
+    shrines.cpp applyResult), so a sim-emitted line records no decision
+    there; a one-candidate click also carries no information, so answering
+    it cannot steer the run. Match-first still holds: a single-option
+    choice the sim DID record is consumed, never glued past, and a genuine
+    desync surfaces at the next screen with the cursor unmoved.
 Anything else that fails to match stops the run, by design.
 
 CONFIG (`--config <json>`), strict like survival_policy_cmd:
@@ -351,6 +361,15 @@ def match_step(step, state, candidates):
                      "(this policy never emits it)", step)
 
 
+def is_sole_choice_glue(candidates):
+    """Glue rule 3 -- the collapsed one-click dialog (module header): the
+    screen's ONLY legal candidate is a single `choose`, so there is no
+    decision to make and the sim-emitted line recorded none. Evaluated only
+    AFTER the script's next step failed to match this state (match-first),
+    so a scripted single-option choice is consumed rather than glued past."""
+    return len(candidates) == 1 and str(candidates[0]).startswith("choose ")
+
+
 def is_grid_confirm_glue(state, candidates):
     """The GRID pick-then-confirm seam (module header): a committable grid
     selection whose remaining progress command is `proceed`. Evaluated only
@@ -434,6 +453,8 @@ class ScriptPolicy:
                     return "proceed"  # confirmation-only screen: glue rule 1
                 if is_grid_confirm_glue(state, candidates):
                     return "proceed"  # pick-then-confirm seam: glue rule 2
+                if is_sole_choice_glue(candidates):
+                    return candidates[0]  # one-click dialog: glue rule 3
                 raise exc
             self._script.consume()
             return cmd
@@ -443,6 +464,8 @@ class ScriptPolicy:
             return "proceed"
         if is_grid_confirm_glue(state, candidates):
             return "proceed"
+        if is_sole_choice_glue(candidates):
+            return candidates[0]
         raise Divergence(
             "script exhausted but the game still asks for a decision "
             f"(seed {seed}, {len(self._script.steps)} steps played)")
