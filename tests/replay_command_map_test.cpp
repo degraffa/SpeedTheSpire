@@ -944,22 +944,54 @@ TEST(ReplayCommandMap, AMatchAndKeepListTheSimCannotMatchDoesNotTranslate) {
 // The deferred-whole onEquip set is what the deferral message is allowed to
 // name, and the list is here because a deferred surface is indistinguishable
 // from an implemented one through `relic_on_equip_fn` -- both are real
-// function pointers, by design. RE-DERIVED at the Wave-C integration: the
-// five BOSS bodies this test used to pin as deferred are LIVE on the
-// `on_equip_screen` surface (relic_pickup_boss.cpp), so they now belong on
-// the FALSE side; what remains deferred whole is Dolly's Mirror (its own
-// raw-deck grid) plus Orrery and Cauldron (reward-screen assembly) -- see
-// `relic_on_equip_deferred`'s comment for the derivation.
+// function pointers, by design. RE-DERIVED TWICE: the Wave-C integration moved
+// the five BOSS bodies (Pandora's Box, Tiny House, Astrolabe, Empty Cage,
+// Calling Bell) onto the FALSE side when they went live on `on_equip_screen`,
+// and the equip-trio task moved the last three -- Dolly's Mirror's raw-deck
+// grid and Orrery's / Cauldron's reward-screen assembly (relic_pickup_shop.cpp).
+// THE SET IS NOW EMPTY, which is the claim this test makes: no relic in the
+// tree has a whole-deferred onEquip, so the deferral message must never name
+// one. `relic_on_equip_deferred` survives for the next body that is.
 TEST(ReplayCommandMap, TheDeferredOnEquipSetMatchesTheUnionTree) {
     using sts::replay::relic_on_equip_deferred;
     for (const RelicId id : {RelicId::ORRERY, RelicId::DOLLYS_MIRROR,
-                             RelicId::CAULDRON})
-        EXPECT_TRUE(relic_on_equip_deferred(id)) << static_cast<int>(id);
-    for (const RelicId id : {RelicId::PANDORAS_BOX, RelicId::TINY_HOUSE,
-                             RelicId::ASTROLABE, RelicId::EMPTY_CAGE,
-                             RelicId::CALLING_BELL, RelicId::BURNING_BLOOD,
-                             RelicId::NONE})
+                             RelicId::CAULDRON, RelicId::PANDORAS_BOX,
+                             RelicId::TINY_HOUSE, RelicId::ASTROLABE,
+                             RelicId::EMPTY_CAGE, RelicId::CALLING_BELL,
+                             RelicId::BURNING_BLOOD, RelicId::NONE})
         EXPECT_FALSE(relic_on_equip_deferred(id)) << static_cast<int>(id);
+}
+
+// Dolly's Mirror's overlay is the other phase-independent master-deck grid, and
+// the harness has to see it exactly as it sees the bottle's -- otherwise a
+// capture that opens it stops as "the capture opens a master-deck grid the sim
+// never opened", which is what STS430130's Cauldron stop used to read as. Two
+// claims: `sim_grid_open` recognizes it over ANY phase, and its rows snapshot
+// ASCENDING because DollysMirror hands gridSelectScreen the master deck itself
+// (DollysMirror.java:41) rather than a getCardsOfType prepend.
+TEST(ReplayCommandMap, ADollysMirrorGridIsSeenOverAnyPhaseAndReadsDeckOrder) {
+    namespace eng = sts::engine;
+    RunController rc = at_phase(RunPhase::SHOP);
+    rc.shop.screen = static_cast<uint8_t>(eng::ShopScreenKind::MENU);
+    auto add = [&rc](eng::CardId id) {
+        eng::CardInstance c{};
+        c.card_id = static_cast<uint16_t>(id);
+        rc.run.master_deck[rc.run.master_deck_count++] = c;
+    };
+    add(eng::CardId::STRIKE);
+    add(eng::CardId::DEFEND);
+    add(eng::CardId::ASCENDERS_BANE);  // unpurgeable: still on THIS grid
+    EXPECT_FALSE(sim_grid_open(rc)) << "the shop menu is not a grid";
+
+    rc.pending_deck_pick =
+        static_cast<uint8_t>(eng::EquipDeckPick::DOLLYS_MIRROR);
+    ASSERT_TRUE(sim_grid_open(rc)) << "pending_deck_pick overlays any phase";
+
+    sts::replay::GridSession g;
+    sts::replay::open_grid_session(rc, g);
+    const std::vector<int> expected = {0, 1, 2};
+    EXPECT_EQ(g.filtered, expected)
+        << "every row, in master-deck order -- the grid filters nothing";
 }
 
 // --- the merchant (SHOP_ROOM / SHOP_SCREEN) ---------------------------------

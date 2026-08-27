@@ -243,6 +243,16 @@ RewardCardRarity reward_card_rarity_with_relics(const RunState& rs, int roll,
     if (room == RoomType::Boss) {
         return RewardCardRarity::RARE;  // MonsterRoomBoss.java:40-42, no pass
     }
+    if (room == RoomType::Shop) {
+        // ShopRoom OVERRIDES the one-argument getCardRarity to forward
+        // `useAlternation = false` (ShopRoom.java:52-55), so the pass below is
+        // SKIPPED for every roll made in the merchant's room -- N'loth's Gift
+        // cannot raise the rare chance of an Orrery / Cauldron offer, and the
+        // thresholds are the constructor's 9/37 (ShopRoom.java:35-36). That is
+        // exactly reward_card_rarity's Shop arm, so defer to it whole rather
+        // than restate the numbers.
+        return reward_card_rarity(roll, room);
+    }
     // alterCardRarityProbabilities (AbstractRoom.java:179-186): a fan-out over
     // the relic LIST, so each held Nloth's Gift multiplies again -- ordinary
     // acquisition can hold one, but the fan-out shape is the spec. The

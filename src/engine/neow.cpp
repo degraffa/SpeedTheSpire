@@ -105,6 +105,12 @@ void spawn_relic_and_obtain(RunState& rs, NeowState& st, RewardScreen& rewards,
             // payout can produce the request.
             assert(false && "a bottle grid request from the Neow boss swap");
             break;
+        case RelicEquipScreen::GRID_DUPLICATE:
+            // Structurally unreachable for the same reason: Dolly's Mirror is
+            // SHOP tier and the boss swap draws BOSS. Loud rather than a silent
+            // screenless equip, exactly as the bottle arm above is.
+            assert(false && "a duplicate grid request from the Neow boss swap");
+            break;
         case RelicEquipScreen::GRID_CONFIRM_PANDORA:
             open_grid(st, NeowGridMode::CONFIRM_PANDORA, 0);
             break;

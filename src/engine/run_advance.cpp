@@ -2080,11 +2080,24 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
     // the Smith/Toke and shop-purge grid masks.
     const auto pending_bottle =
         static_cast<MasterBottleKind>(rc.pending_bottle);
+    const auto pending_deck_pick =
+        static_cast<EquipDeckPick>(rc.pending_deck_pick);
     if (pending_bottle != MasterBottleKind::NONE) {
         for (uint16_t i = 0;
              i < rc.run.master_deck_count && i < kMasterDeckCap; ++i) {
             out.can_choose_master_deck[i] =
                 bottle_pick_legal(rc.run, pending_bottle, i);
+        }
+    } else if (pending_deck_pick != EquipDeckPick::NONE) {
+        // Dolly's Mirror's grid is the pending-bottle overlay's sibling and is
+        // modal for the same reason -- one mandatory pick, no cancel, room
+        // INCOMPLETE (DollysMirror.java:40-41). What differs is the FILTER: the
+        // Java hands gridSelectScreen the master deck itself (:41), so every
+        // row is offerable.
+        for (uint16_t i = 0;
+             i < rc.run.master_deck_count && i < kMasterDeckCap; ++i) {
+            out.can_choose_master_deck[i] =
+                dollys_mirror_pick_legal(rc.run, i);
         }
     } else switch (static_cast<RunPhase>(rc.phase)) {
         case RunPhase::NEOW: {
@@ -2915,10 +2928,14 @@ bool step_discard_potion(RunController& rc, Action a, StepResult& res) noexcept 
 }
 
 // Translate an on_equip_screen body's request made at a CLAIM/purchase site
-// onto the controller. Only GRID_BOTTLE can arise on these paths in S1: the
-// five boss on_equip_screen relics are BOSS-tier, so no claim screen or shop
-// slot ever holds one (Neow's boss swap owns them, spawn_relic_and_obtain in
-// neow.cpp, which translates onto NeowState's own sub-screens instead).
+// onto the controller. Three of the seven requests can arise on these paths:
+// GRID_BOTTLE (the Bottled trio, UNCOMMON, so reward screens and shop stock
+// both reach them) and, since the equip-trio landed, GRID_DUPLICATE and
+// ITEM_REWARD from the three SHOP-tier bodies. The four BOSS requests cannot:
+// their relics are BOSS-tier, so no claim screen or shop slot ever holds one
+// (Neow's boss swap and the boss chest own them -- spawn_relic_and_obtain in
+// neow.cpp and apply_boss_chest_equip_request below, which translate onto
+// NeowState's own sub-screens instead).
 void apply_claim_equip_request(RunController& rc,
                                const RelicEquipContext& ctx) noexcept {
     switch (ctx.screen) {
@@ -2930,9 +2947,35 @@ void apply_claim_equip_request(RunController& rc,
             // (BottledFlame.java:49-51).
             rc.pending_bottle = static_cast<uint8_t>(ctx.bottle);
             break;
+        case RelicEquipScreen::GRID_DUPLICATE:
+            // Dolly's Mirror: the SAME modal shape over the raw master deck,
+            // carried by its own overlay byte because the grid is unfiltered
+            // (DollysMirror.java:40-41). The phase is deliberately untouched --
+            // the game remembers previousScreen (:38) and the pick drops the
+            // player back on the merchant.
+            rc.pending_deck_pick =
+                static_cast<uint8_t>(EquipDeckPick::DOLLYS_MIRROR);
+            break;
+        case RelicEquipScreen::ITEM_REWARD:
+            // Orrery / Cauldron assembled ctx.rewards (== rc.rewards) and the
+            // game is now literally on the COMBAT_REWARD screen:
+            // combatRewardScreen.open sets `AbstractDungeon.screen =
+            // COMBAT_REWARD` inside the still-mounted ShopRoom
+            // (CombatRewardScreen.java:250-254). The merchant is NOT reachable
+            // again -- ProceedButton's COMBAT_REWARD arm for a room that is
+            // neither a boss nor an event does closeCurrentScreen() +
+            // dungeonMapScreen.open(false) with previousScreen = COMBAT_REWARD
+            // (ProceedButton.java:122-158), so a map `return` re-opens THIS
+            // screen, not the shop -- which is exactly what a shop visit's
+            // COMBAT_REWARD phase gives, including the reward screen's own
+            // proceed-to-map. Clearing the stock follows open_dig_reward's
+            // precedent (the rest site clears rc.rest on the same transition):
+            // the visit is over and a stale mask must not outlive it.
+            rc.shop = ShopState{};
+            rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+            break;
         case RelicEquipScreen::GRID_REMOVE:
         case RelicEquipScreen::GRID_TRANSFORM_UPGRADE:
-        case RelicEquipScreen::ITEM_REWARD:
         case RelicEquipScreen::GRID_CONFIRM_PANDORA:
         case RelicEquipScreen::GRID_CONFIRM_CALLING_BELL:
         default:
@@ -2998,6 +3041,11 @@ void apply_boss_chest_equip_request(RunController& rc,
             // chest draws BOSS. Loud rather than a silent overlay, exactly as
             // the symmetric case is at the Neow boss swap (neow.cpp:99-107).
             assert(false && "a bottle grid request from the boss chest");
+            rc.run.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::DONE);
+            break;
+        case RelicEquipScreen::GRID_DUPLICATE:
+            // Unreachable for the same reason: Dolly's Mirror is SHOP tier.
+            assert(false && "a duplicate grid request from the boss chest");
             rc.run.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::DONE);
             break;
     }
@@ -3086,6 +3134,31 @@ bool step_bottle_pick(RunController& rc, Action a, StepResult& res) noexcept {
     return true;
 }
 
+// The pending-deck-pick overlay's pick (run_advance.hpp) -- step_bottle_pick's
+// sibling, with the same modal contract and the same reason for it: Dolly's
+// Mirror opens a cancel-less 1-pick grid over the RAW master deck and parks the
+// room INCOMPLETE until it lands (DollysMirror.java:40-41), so this consumes
+// EVERY action while active. A legal CHOOSE duplicates the picked row and
+// closes the overlay; anything else is the non-corrupting no-op. Dispatched
+// after the potion steps and after the bottle overlay: the two can never both
+// be up (one purchase raises one screen), and the order is fixed rather than
+// left to whichever test happens to construct both.
+bool step_deck_pick(RunController& rc, Action a, StepResult& res) noexcept {
+    const auto pick = static_cast<EquipDeckPick>(rc.pending_deck_pick);
+    if (pick == EquipDeckPick::NONE) {
+        return false;
+    }
+    if (action_verb(a) == ActionVerb::CHOOSE) {
+        const uint8_t a0 = action_arg0(a);
+        if (dollys_mirror_pick_legal(rc.run, a0)) {
+            relic_dollys_mirror_duplicate(rc.run, a0);
+            rc.pending_deck_pick = static_cast<uint8_t>(EquipDeckPick::NONE);
+        }
+    }
+    fill_run_result(rc, res);
+    return true;
+}
+
 void step_one(RunController& rc, Action a, StepResult& res) noexcept {
     // Attach THIS controller's knowledge for everything the step touches
     // (combat pumps, choice resolutions, room-entry combat construction), so
@@ -3099,6 +3172,9 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
         return;
     }
     if (step_bottle_pick(rc, a, res)) {
+        return;
+    }
+    if (step_deck_pick(rc, a, res)) {
         return;
     }
     switch (static_cast<RunPhase>(rc.phase)) {

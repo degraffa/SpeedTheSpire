@@ -1208,6 +1208,281 @@ TEST(ShopFlow, BuyingABottleOpensTheOverlayOverTheShopFloor) {
     EXPECT_TRUE(m.can_proceed) << "back on the shop menu after the pick";
 }
 
+// --- the equip-screen trio (Orrery / Dolly's Mirror / Cauldron) --------------
+//
+// The three SHOP relics whose onEquip opens a screen at the purchase site. Two
+// of them roll REWARD CARDS while the player is standing in the merchant's
+// room, which is why the rarity table below is the shop's and not the base one.
+
+TEST(ShopPurchase, PlainBuyOfAnEquipScreenShopRelicIsRefusedWholeWithNoGoldSpent) {
+    // Same contract as the bottle above (shop.hpp): the context-less overload
+    // cannot present a reward screen or a deck grid, so it must refuse BEFORE
+    // the gold leaves and the slot is marked sold.
+    for (const RelicId id : {RelicId::ORRERY, RelicId::DOLLYS_MIRROR,
+                             RelicId::CAULDRON}) {
+        RunState rs = bare_run(606);
+        rs.gold = 999;
+        rs.master_deck_count = 1;
+        rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+        ShopState shop = generate_shop(rs);
+        shop.relics[0].id = static_cast<uint16_t>(id);
+        shop.relics[0].price = 100;
+        const RunState before = rs;
+        EXPECT_FALSE(shop_buy_relic(rs, rs.merchant_rng, shop, 0))
+            << static_cast<int>(id);
+        EXPECT_EQ(std::memcmp(&rs, &before, sizeof rs), 0)
+            << "a refused purchase is byte-stable";
+        EXPECT_EQ(shop.relics[0].sold, 0);
+    }
+}
+
+TEST(ShopFlow, CauldronBrewsFiveFlatPotionsAndBurnsTheDeletedCardRow) {
+    // Cauldron.onEquip (Cauldron.java:30-45): five PotionHelper.getRandomPotion()
+    // brews (the FLAT potionRng draw, one each -- PotionHelper.java:169-172),
+    // then combatRewardScreen.open, whose setupItemReward appends a full
+    // getRewardCards() row that :36-44 immediately deletes again. The cards are
+    // never shown; the cardRng draws and the blizz step are still spent, and
+    // skipping them desyncs the run (measured live, seed STS430130).
+    RunController rc = enter_shop(0xB48'5407LL);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
+    rc.run.gold = 5000;
+    rc.run.potion_slots = 3;
+    rc.shop.relics[0].id = static_cast<uint16_t>(RelicId::CAULDRON);
+    rc.shop.relics[0].price = 300;
+
+    // The mirror: the same two stream consumptions, in the Java's order, run
+    // beside the engine off a copy of the pre-purchase run. The scratch run
+    // does not own Cauldron, which is exact here because Cauldron overrides
+    // neither changeNumberOfCardsInReward nor any rarity hook.
+    RunState scratch = rc.run;
+    PotionId expected_brew[5];
+    for (int i = 0; i < 5; ++i) {
+        expected_brew[i] = get_random_potion(scratch.potion_rng);
+    }
+    RewardScreen scratch_screen{};
+    scratch_screen.open_card_item = kNoOpenCardReward;
+    const int32_t card_counter_before = scratch.card_rng.counter;
+    roll_setup_item_card_reward(scratch, RoomType::Shop, scratch_screen);
+    EXPECT_GE(scratch.card_rng.counter - card_counter_before, 9)
+        << "3 rollRarity + 3 pool picks + 3 upgrade randomBooleans, the last "
+           "taken even at Act 1's 0.0f chance";
+
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         static_cast<uint8_t>(kChooseShopRelicBase + 0)));
+
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, scratch.potion_rng))
+        << "exactly five flat potionRng draws";
+    EXPECT_TRUE(streams_equal(rc.run.card_rng, scratch.card_rng))
+        << "the deleted card row's draws are spent all the same";
+    EXPECT_EQ(rc.run.card_blizz_randomizer, scratch.card_blizz_randomizer)
+        << "and its pity bookkeeping lands too";
+
+    // The screen: five potions, in brew order, and NO card row.
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    ASSERT_EQ(rc.rewards.count, 5);
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_EQ(rc.rewards.items[i].kind,
+                  static_cast<uint8_t>(RewardItemKind::POTION)) << i;
+        EXPECT_EQ(rc.rewards.items[i].id,
+                  static_cast<uint16_t>(expected_brew[i])) << i;
+    }
+    for (uint8_t i = 0; i < rc.rewards.count; ++i) {
+        EXPECT_NE(rc.rewards.items[i].kind,
+                  static_cast<uint8_t>(RewardItemKind::CARDS))
+            << "the hidden row is deleted from the VISIBLE rewards (:36-44)";
+    }
+
+    // The merchant is gone: ProceedButton's COMBAT_REWARD arm for a non-boss
+    // non-event room opens the MAP (ProceedButton.java:122-158), never the shop.
+    RunActionMask m{};
+    legal_actions(rc, m);
+    EXPECT_TRUE(m.can_proceed);
+    for (int i = 0; i < kShopItemCount; ++i) {
+        EXPECT_FALSE(m.can_buy_shop_item[i]) << i;
+    }
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+TEST(ShopFlow, CauldronsHiddenRowRollsTheMerchantRoomsRarityTable) {
+    // rollRarity asks getCurrRoom().getCardRarity(roll) (AbstractDungeon.java:
+    // 1597-1603), and ShopRoom overrides BOTH halves: baseRareCardChance = 9
+    // (ShopRoom.java:35-36) and getCardRarity(roll) -> getCardRarity(roll,
+    // false) (:52-55), i.e. no alterCardRarityProbabilities pass. So a shop
+    // reward roll is 9/37 AND N'loth's Gift cannot move it -- unlike every
+    // combat reward, where the relic triples the rare chance.
+    EXPECT_EQ(reward_card_rarity(8, RoomType::Shop), RewardCardRarity::RARE);
+    EXPECT_EQ(reward_card_rarity(9, RoomType::Shop),
+              RewardCardRarity::UNCOMMON);
+    EXPECT_EQ(reward_card_rarity(45, RoomType::Shop),
+              RewardCardRarity::UNCOMMON);
+    EXPECT_EQ(reward_card_rarity(46, RoomType::Shop),
+              RewardCardRarity::COMMON);
+    // The base table for the same rolls, so the divergence is on the record.
+    EXPECT_EQ(reward_card_rarity(8, RoomType::Monster),
+              RewardCardRarity::UNCOMMON);
+
+    RunState rs = bare_run(909);
+    give_relic(rs, RelicId::NLOTHS_GIFT);
+    EXPECT_EQ(reward_card_rarity_with_relics(rs, 8, RoomType::Shop),
+              RewardCardRarity::RARE)
+        << "still the shop's own 9, not 9 x 3";
+    EXPECT_EQ(reward_card_rarity_with_relics(rs, 26, RoomType::Shop),
+              RewardCardRarity::UNCOMMON)
+        << "useAlternation=false: the gift is inert in the merchant's room";
+    EXPECT_EQ(reward_card_rarity_with_relics(rs, 8, RoomType::Monster),
+              RewardCardRarity::RARE)
+        << "the same roll IS rare in a monster room, through the x3 pass";
+}
+
+TEST(ShopFlow, OrreryOffersFiveCardRowsNotFour) {
+    // Orrery.onEquip (Orrery.java:27-33) is FOUR addCardToRewards() calls, and
+    // combatRewardScreen.open -> setupItemReward appends a FIFTH unconditional
+    // card row (CombatRewardScreen.java:72-96) that nothing here deletes -- a
+    // ShopRoom is neither a TreasureRoom nor a RestRoom and carries no event.
+    RunController rc = enter_shop(0xB48'5407LL);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
+    rc.run.gold = 5000;
+    rc.shop.relics[2].id = static_cast<uint16_t>(RelicId::ORRERY);
+    rc.shop.relics[2].price = 250;
+
+    RunState scratch = rc.run;
+    RewardScreen scratch_screen{};
+    scratch_screen.open_card_item = kNoOpenCardReward;
+    for (int i = 0; i < 5; ++i) {
+        roll_setup_item_card_reward(scratch, RoomType::Shop, scratch_screen);
+    }
+
+    const RngStream potion_before = rc.run.potion_rng;
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         static_cast<uint8_t>(kChooseShopRelicBase + 2)));
+
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    ASSERT_EQ(rc.rewards.count, 5)
+        << "four addCardToRewards plus setupItemReward's own row";
+    for (uint8_t i = 0; i < rc.rewards.count; ++i) {
+        EXPECT_EQ(rc.rewards.items[i].kind,
+                  static_cast<uint8_t>(RewardItemKind::CARDS)) << i;
+        EXPECT_EQ(rc.rewards.items[i].card_ids[0],
+                  scratch_screen.items[i].card_ids[0]) << i;
+        EXPECT_EQ(rc.rewards.items[i].card_count,
+                  scratch_screen.items[i].card_count) << i;
+    }
+    EXPECT_TRUE(streams_equal(rc.run.card_rng, scratch.card_rng))
+        << "five getRewardCards rolls, no more and no fewer";
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, potion_before))
+        << "Orrery draws no potions";
+
+    // The offer is claimable: opening row 0's pick screen is legal.
+    RunActionMask m{};
+    legal_actions(rc, m);
+    EXPECT_TRUE(m.can_claim_reward[4])
+        << "the fifth row is a real, claimable offer";
+}
+
+TEST(ShopFlow, DollysMirrorGridIsUnfilteredAndDuplicatesThePick) {
+    // DollysMirror.onEquip (DollysMirror.java:33-42) hands gridSelectScreen
+    // `player.masterDeck` ITSELF -- no getPurgeableCards, no bottled exclusion
+    // -- with numCards 1 and canCancel FALSE. update (:45-58) then obtains a
+    // makeStatEquivalentCopy of the pick with the three bottle flags cleared on
+    // the COPY. Zero RNG on every path.
+    RunController rc = enter_shop(0xB48'5407LL);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
+    rc.run.gold = 5000;
+
+    // A deck whose rows the OTHER grids would all reject in some way: an
+    // unpurgeable curse, a bottled attack, and an upgraded Searing Blow
+    // carrying a misc value.
+    rc.run.master_deck_count = 3;
+    rc.run.master_deck[0] = CardInstance{};
+    rc.run.master_deck[0].card_id =
+        static_cast<uint16_t>(CardId::ASCENDERS_BANE);
+    rc.run.master_deck[1] = CardInstance{};
+    rc.run.master_deck[1].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rc.run.master_deck[1].flags = kMasterCardInBottleFlame;
+    rc.run.master_deck[2] = CardInstance{};
+    rc.run.master_deck[2].card_id =
+        static_cast<uint16_t>(CardId::SEARING_BLOW);
+    rc.run.master_deck[2].upgrade = 2;
+    rc.run.master_deck[2].misc = 7;
+
+    rc.shop.relics[1].id = static_cast<uint16_t>(RelicId::DOLLYS_MIRROR);
+    rc.shop.relics[1].price = 250;
+    const RunState streams_before = rc.run;
+    const RngStream card_random_before = rc.combat.card_random_rng;
+    const RngStream misc_before = rc.combat.misc_rng;
+
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         static_cast<uint8_t>(kChooseShopRelicBase + 1)));
+    ASSERT_EQ(rc.pending_deck_pick,
+              static_cast<uint8_t>(EquipDeckPick::DOLLYS_MIRROR));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP))
+        << "the grid is an overlay; previousScreen brings the player back";
+    EXPECT_TRUE(streams_equal(rc.run.card_rng, streams_before.card_rng));
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, streams_before.potion_rng));
+    EXPECT_TRUE(streams_equal(rc.combat.misc_rng, misc_before));
+    EXPECT_TRUE(
+        streams_equal(rc.combat.card_random_rng, card_random_before));
+
+    RunActionMask m{};
+    legal_actions(rc, m);
+    EXPECT_FALSE(m.can_proceed) << "the grid is modal over the shop";
+    for (int i = 0; i < kShopItemCount; ++i) {
+        EXPECT_FALSE(m.can_buy_shop_item[i]) << i;
+    }
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        EXPECT_TRUE(m.can_choose_master_deck[i])
+            << "row " << i << " -- the raw master deck is offered whole";
+    }
+    EXPECT_FALSE(m.can_choose_master_deck[rc.run.master_deck_count])
+        << "and nothing past its end";
+
+    // Pick the bottled, upgraded, misc-carrying rows in turn is not possible --
+    // one pick closes the grid -- so take the Searing Blow, which proves the
+    // stat-equivalent half, and check the bottle clear on a second run below.
+    step(rc, make_action(ActionVerb::CHOOSE, 2));
+    EXPECT_EQ(rc.pending_deck_pick,
+              static_cast<uint8_t>(EquipDeckPick::NONE));
+    ASSERT_EQ(rc.run.master_deck_count, 4);
+    EXPECT_EQ(rc.run.master_deck[3].card_id,
+              static_cast<uint16_t>(CardId::SEARING_BLOW));
+    EXPECT_EQ(rc.run.master_deck[3].upgrade, 2)
+        << "makeStatEquivalentCopy carries timesUpgraded";
+    EXPECT_EQ(rc.run.master_deck[3].misc, 7)
+        << "and misc -- a grown Ritual Dagger duplicates grown";
+    EXPECT_EQ(rc.run.master_deck[2].upgrade, 2) << "the original is untouched";
+    legal_actions(rc, m);
+    EXPECT_TRUE(m.can_proceed) << "back on the shop menu after the pick";
+}
+
+TEST(ShopFlow, DollysMirrorClearsTheBottleOnTheCopyOnly) {
+    // DollysMirror.java:50-52 sets the three inBottle* flags false ON THE COPY;
+    // the original keeps its bottle, so mirroring a bottled card yields one
+    // bottled instance and one free duplicate.
+    RunController rc = enter_shop(0xB48'5407LL);
+    rc.run.gold = 5000;
+    rc.run.master_deck_count = 1;
+    rc.run.master_deck[0] = CardInstance{};
+    rc.run.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rc.run.master_deck[0].flags = kMasterCardInBottleFlame;
+    rc.shop.relics[1].id = static_cast<uint16_t>(RelicId::DOLLYS_MIRROR);
+    rc.shop.relics[1].price = 250;
+
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         static_cast<uint8_t>(kChooseShopRelicBase + 1)));
+    ASSERT_EQ(rc.pending_deck_pick,
+              static_cast<uint8_t>(EquipDeckPick::DOLLYS_MIRROR));
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+
+    ASSERT_EQ(rc.run.master_deck_count, 2);
+    EXPECT_EQ(rc.run.master_deck[0].flags, kMasterCardInBottleFlame)
+        << "the original keeps its bottle";
+    EXPECT_EQ(rc.run.master_deck[1].flags & kMasterCardBottleMask, 0u)
+        << "the copy arrives unbottled (:50-52)";
+    EXPECT_EQ(rc.run.master_deck[1].card_id,
+              static_cast<uint16_t>(CardId::CLEAVE));
+}
+
 TEST(ShopFlow, MealTicketHealsOnAStaticShopRoomEntry) {
     RunController rc = run_begin(0xB48'5407LL, kA20);
     for (int x = 0; x < kMapCols; ++x) {

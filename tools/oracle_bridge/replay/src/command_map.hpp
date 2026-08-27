@@ -297,6 +297,12 @@ inline void rewind_xs128(RngStream& rng) noexcept {
 // `group.add(c)` (CardGroup.java:978-985) keeps deck order. The session
 // snapshots the legal indices DESCENDING for that grid so "the game's row i"
 // still maps positionally.
+//
+// Dolly's Mirror (the pending-deck-pick overlay) is NOT a second exception even
+// though it is the other phase-independent overlay: it hands gridSelectScreen
+// `player.masterDeck` itself and GridCardSelectScreen keeps the group by
+// reference (`targetGroup = group`, GridCardSelectScreen.java:437-438), so its
+// rows are plain master-deck order and the forward branch below is right.
 inline void open_grid_session(const RunController& rc, GridSession& g) {
     g.open = true;
     g.filtered.clear();
@@ -319,8 +325,14 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
 [[nodiscard]] inline bool sim_grid_open(const RunController& rc) noexcept {
     // The pending-bottle overlay is a master-deck grid over ANY phase (the
     // bottle was claimed on a reward screen or bought in a shop; the game
-    // parks the room INCOMPLETE under the gridSelectScreen).
+    // parks the room INCOMPLETE under the gridSelectScreen). Dolly's Mirror's
+    // pending-deck-pick overlay is its unfiltered sibling, raised by a shop
+    // purchase and equally phase-independent.
     if (rc.pending_bottle != static_cast<uint8_t>(MasterBottleKind::NONE)) {
+        return true;
+    }
+    if (rc.pending_deck_pick !=
+        static_cast<uint8_t>(sts::engine::EquipDeckPick::NONE)) {
         return true;
     }
     switch (static_cast<RunPhase>(rc.phase)) {
@@ -364,31 +376,26 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
            mode == NeowGridMode::CONFIRM_CALLING_BELL;
 }
 
-// The relics whose `onEquip` the engine defers WHOLE. Re-derived at the Wave-C
-// integration: the five BOSS bodies this list used to name (Pandora's Box,
-// Tiny House, Astrolabe, Empty Cage, Calling Bell) are LIVE on the
-// `on_equip_screen` surface (relic_pickup_boss.cpp) -- the sim opens their
-// grids itself, so naming them here would repeat the misattribution this
-// function exists to prevent, one build later. What remains deferred whole
-// (registry/relics.yaml provenance, each row re-read): DOLLYS_MIRROR (the only
-// one whose deferred onEquip is itself a master-deck grid, DollysMirror.java:
-// 33-43), and ORRERY / CAULDRON (reward-screen assembly, Orrery.java:27-33
-// / Cauldron.java:30-45 -- no grid of their own, but a capture that drives
-// their unmodelled reward screens desyncs and can surface here, so ruling them
-// "modelled" would be false). A deferred surface cannot be told from an
-// implemented one through `relic_on_equip_fn` -- it maps to a real function
-// pointer either way, by design. Naming them here is therefore a list and not
-// a lookup; it is short, it is pinned by `replay_command_map_test`, and the
-// alternative is the misattribution below.
+// The relics whose `onEquip` the engine defers WHOLE. **The list is EMPTY, and
+// that is the current answer, not an oversight.** It has been re-derived twice:
+// at the Wave-C integration the five BOSS bodies it used to name (Pandora's
+// Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) went live on the
+// `on_equip_screen` surface (relic_pickup_boss.cpp), leaving DOLLYS_MIRROR /
+// ORRERY / CAULDRON; the equip-trio task then landed those three on the same
+// surface (relic_pickup_shop.cpp) -- the sim opens Dolly's Mirror's raw-deck
+// grid and assembles Orrery's and Cauldron's reward screens itself, so naming
+// any of them here would repeat, one build later, exactly the misattribution
+// this function exists to prevent.
+//
+// The function STAYS because the hazard has not gone anywhere: a deferred
+// surface cannot be told from an implemented one through `relic_on_equip_fn`
+// -- it maps to a real function pointer either way, by design -- so the next
+// deferred body needs a place to be named, and both callers below need to keep
+// asking before they blame a relic. It is a list and not a lookup for that
+// reason, and it is pinned by `replay_command_map_test`.
 [[nodiscard]] inline bool relic_on_equip_deferred(RelicId id) noexcept {
-    switch (id) {
-        case RelicId::ORRERY:
-        case RelicId::DOLLYS_MIRROR:
-        case RelicId::CAULDRON:
-            return true;
-        default:
-            return false;
-    }
+    (void)id;
+    return false;
 }
 
 // A relic's `onEquip` runs at ACQUISITION, and the run layer acquires relics on
@@ -469,15 +476,18 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
            "this stop)";
 }
 
-// The Cauldron/Orrery half of the same discipline, for the REWARD-ROW mapping
-// stop: their deferred onEquip ASSEMBLES a combat-reward screen (Cauldron's
-// five brewed potions, Cauldron.java:30-45; Orrery's card rewards,
-// Orrery.java:27-33) that the sim never opened, so a capture claim on that
-// screen finds no sim row -- a stop that used to read as a mapping defect
-// (seed STS430130, the S2.43 triage). Returns the relic's name when the most
-// recent acquisition explains the missing screen, else "" (the same
-// desync-vs-deferral guard as unsimulated_grid_reason: without the phase gate
-// and the deferred check, the text would confidently misattribute).
+// The same discipline for the REWARD-ROW mapping stop. It was written for
+// Cauldron and Orrery, whose deferred onEquip ASSEMBLED a combat-reward screen
+// the sim never opened, so a capture claim on that screen found no sim row --
+// a stop that used to read as a mapping defect (seed STS430130, the S2.43
+// triage). BOTH BODIES ARE NOW LIVE (relic_pickup_shop.cpp) and STS430130
+// replays clean, so with `relic_on_equip_deferred` empty this returns "" for
+// every input today and the caller falls back to the plain key-elision text.
+// Kept, not deleted, for the reason that function is: the next deferred
+// screen-assembling onEquip should be NAMED here rather than surface as an
+// index-mapping defect. The desync-vs-deferral guard is unchanged -- without
+// the phase gate and the deferred check the text would confidently
+// misattribute, which is what it did before it had them.
 [[nodiscard]] inline std::string deferred_reward_screen_owner(
     const RunController& rc) {
     if (!phase_can_follow_relic_pickup(rc.phase) || rc.run.relic_count == 0) {

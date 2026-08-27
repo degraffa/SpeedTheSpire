@@ -208,6 +208,42 @@ inline void dispatch_relics_on_master_deck_change(RunState& run) noexcept {
     return add_card_to_master_deck_after_omamori(run, id, upgrade);
 }
 
+// The same door for a card obtained as a COPY OF AN EXISTING INSTANCE rather
+// than as a fresh registry row: AbstractCard.makeStatEquivalentCopy
+// (AbstractCard.java:825-849) carries `timesUpgraded`, `cost`/`costForTurn` and
+// `misc` across, so the duplicate of a +2 Searing Blow is a +2 Searing Blow and
+// the duplicate of a grown Ritual Dagger keeps its damage. Everything after the
+// copy is `add_card_to_master_deck` exactly -- the constructor-time Omamori
+// gate, the append, onObtainCard in acquisition order, onMasterDeckChange.
+//
+// `clear_flags` is the caller's per-site mask of instance bits the Java clears
+// ON THE COPY: Dolly's Mirror sets `inBottleFlame/Lightning/Tornado = false`
+// (DollysMirror.java:50-52) so a duplicated bottled card arrives unbottled
+// while the ORIGINAL keeps its bottle. Taken by value because `src` may point
+// into `run.master_deck`, which the append writes past.
+[[nodiscard]] inline bool add_card_copy_to_master_deck(
+    RunState& run, CardInstance src,
+    uint16_t clear_flags = kMasterCardBottleMask) noexcept {
+    const CardId id = static_cast<CardId>(src.card_id);
+    const CardDef* def = card_def(id);
+    if (def == nullptr) {
+        return false;
+    }
+    if (omamori_blocks_card_obtain(run, id)) {
+        return true;  // the ShowCardAndObtainEffect ctor ate it (:31-36)
+    }
+    if (run.master_deck_count >= kMasterDeckCap) {
+        return false;
+    }
+    src.flags = static_cast<uint16_t>(src.flags & ~clear_flags);
+    CardInstance& c = run.master_deck[run.master_deck_count];
+    c = src;
+    ++run.master_deck_count;
+    dispatch_relics_on_obtain_card(run, c, *def);
+    dispatch_relics_on_master_deck_change(run);
+    return true;
+}
+
 // CardGroup.addToTop -- the card lands at master-deck INDEX 0 and every later
 // row shifts up. Only one Act-1 site uses it: NoteForYourself.buttonEffect
 // (NoteForYourself.java:56-66), which also bypasses ShowCardAndObtainEffect

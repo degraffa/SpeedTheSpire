@@ -241,6 +241,18 @@ enum class RunCombatOutcome : uint8_t {
                   // with it (settled against RunState.gold at combat end).
 };
 
+// Which relic's raw-master-deck 1-pick grid is up on the pending-deck-pick
+// overlay (RunController.pending_deck_pick). Values are append-only; NONE is
+// the value-init default, which is what lets the field live in a former
+// padding byte without moving any hash.
+enum class EquipDeckPick : uint8_t {
+    NONE = 0,
+    DOLLYS_MIRROR = 1,  // DollysMirror.onEquip (DollysMirror.java:33-42): one
+                        // mandatory pick over the UNFILTERED master deck; the
+                        // pick is duplicated into the deck
+                        // (relic_dollys_mirror_duplicate, relic_pools.hpp).
+};
+
 // CHOOSE arg0 sentinel for "take the boss edge" at a MAP_CHOICE (the boss node is
 // not a grid column, so it needs a value outside 0..kMapCols-1).
 inline constexpr uint8_t kChooseBoss = static_cast<uint8_t>(kMapCols);  // 7
@@ -429,7 +441,25 @@ struct RunController {
     // the pick before any phase dispatch. Transient like every screen field
     // above; the phase itself never changes while the overlay is up.
     uint8_t pending_bottle;
-    uint8_t pad2[3];  // explicit padding (value-init zeroed, hash-stable).
+
+    // THE PENDING-DECK-PICK OVERLAY: EquipDeckPick (below), non-NONE while a
+    // just-acquired relic's mandatory 1-pick grid over the RAW master deck is
+    // up. Dolly's Mirror is its only member (DollysMirror.java:33-42): the
+    // grid it opens is neither purgeable-filtered nor type-filtered, so it
+    // cannot share bottle_pick_legal, but it is the same SHAPE as the
+    // pending-bottle overlay above -- raised at a claim/purchase site, modal
+    // over whatever screen is showing, cancel-less, room parked INCOMPLETE
+    // until the pick -- and so it is carried the same way: legal_actions
+    // offers ONLY master-deck rows while it is non-NONE, and step_one applies
+    // the pick before any phase dispatch. The phase never changes while it is
+    // up, which is how the player lands back on the merchant afterwards.
+    //
+    // It occupies ONE BYTE OF THE FORMER pad2, deliberately: the controller is
+    // byte-hashed, an explicit pad is value-init zeroed, and EquipDeckPick's
+    // NONE is 0 -- so every state that did not raise this overlay hashes
+    // exactly as it did before the field existed, and no fixture moves.
+    uint8_t pending_deck_pick;
+    uint8_t pad2[2];  // explicit padding (value-init zeroed, hash-stable).
 
     // THE LIVE colorlessCardPool's ORDER (CardId as u16 per slot; slots at
     // index >= kColorlessPoolCount are 0 and never read -- the cap is rounded

@@ -2327,6 +2327,24 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `s243_recap_seeds.txt`) — zero open, zero wildcards. The collided
   first-round recap postprocess was re-run in a clean window (all 10
   workers exit 0, zero untriaged). Six presets green.
+  **2026-08-27 — STS430130's PART is discharged: the seventh residual is
+  now SCOREABLE, not merely dispositioned.** The equip-plumbing owner this
+  row handed Cauldron to has landed (`equip-trio`): Orrery, Dolly's Mirror
+  and Cauldron are implemented on the existing `on_equip_screen` surface
+  (`relic_pickup_shop.cpp`), including the hidden `setupItemReward` burn
+  this row measured — and two things it did not, both found by reading the
+  Java rather than the capture: Orrery's offer is FIVE card rows (its four
+  `addCardToRewards` plus `setupItemReward`'s own, which nothing deletes),
+  and a reward roll made in the merchant's room uses the SHOP's rarity
+  table, 9/37 with no `alterCardRarityProbabilities` pass
+  (`ShopRoom.java:35-36`, `:52-55`). STS430130 replays **CLEAN to its run
+  terminal, 88 records compared** (it stopped at 37 with a PART before).
+  The full 94-run divergent set re-swept with the release replay tool is
+  now **76 CLEAN + 18 PART, and the PART set is exactly the 18 recaptured
+  escape-window artifacts** — set-verified against `s243_recap_seeds.txt`,
+  with STS430130 no longer in it. The `deferred_reward_screen_owner` stop
+  is retained but can no longer fire: the harness's deferred-onEquip list
+  is empty.
   **2026-08-27 — the §8 escalation decision is TAKEN: S2.V2.** The
   deciding number is measured, not assumed: 0 Act-2 boss fights in 2,000
   breadth attempts under the b1.7.0 TE.1 family, and sim-side Act-2/3

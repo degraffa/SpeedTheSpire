@@ -172,6 +172,22 @@ enum class RelicEquipScreen : uint8_t {
     GRID_CONFIRM_CALLING_BELL = 6, // Calling Bell: display-only curse grid;
                                    // curse obtain and reward assembly wait for
                                    // Confirm
+    GRID_DUPLICATE = 7,          // Dolly's Mirror: ONE mandatory pick over the
+                                 // RAW master deck -- no purgeable filter and
+                                 // no bottled exclusion, because
+                                 // DollysMirror.onEquip passes
+                                 // `player.masterDeck` itself
+                                 // (DollysMirror.java:41), unlike every other
+                                 // grid in scope. The pick is DUPLICATED into
+                                 // the deck (relic_dollys_mirror_duplicate
+                                 // below). Like GRID_BOTTLE this request
+                                 // arises at CLAIM/purchase sites, so the run
+                                 // layer presents it as the phase-independent
+                                 // pending-deck-pick overlay
+                                 // (RunController.pending_deck_pick), the
+                                 // sim's rendering of the game's cancel-less
+                                 // gridSelectScreen + RoomPhase.INCOMPLETE
+                                 // (DollysMirror.java:40-41).
 };
 
 struct RelicEquipContext {
@@ -203,6 +219,20 @@ void relic_confirm_pandoras_box(
     RunState& rs, RewardScreen& rewards) noexcept;
 void relic_confirm_calling_bell(
     RunState& rs, RewardScreen& rewards, RoomType reward_room) noexcept;
+
+// Dolly's Mirror's GRID_DUPLICATE pick, applied by the screen owner when the
+// one mandatory selection lands (DollysMirror.update, DollysMirror.java:45-58).
+// `deck_index` is the picked master-deck row; out of range is a no-op. Defined
+// in relic_pickup_shop.cpp with the full Java accounting.
+void relic_dollys_mirror_duplicate(RunState& rs, uint16_t deck_index) noexcept;
+
+// Whether `deck_index` is a legal Dolly's Mirror pick. The grid is opened over
+// `player.masterDeck` ITSELF (DollysMirror.java:41), so EVERY row is eligible
+// -- curses, statuses, already-bottled cards, Ascender's Bane. Named as a
+// predicate anyway so the overlay's action mask, the pick dispatch and the
+// replay harness all read one authority, exactly as bottle_pick_legal is.
+[[nodiscard]] bool dollys_mirror_pick_legal(const RunState& rs,
+                                            uint16_t deck_index) noexcept;
 
 // One master-deck row's eligibility on a bottle's grid:
 // getPurgeableCards().getCardsOfType(type) (BottledFlame.java:43/:51 and

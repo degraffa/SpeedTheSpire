@@ -227,6 +227,17 @@ inline constexpr int kBaseUncommonCardChance = 37;      // AbstractRoom.java:109
 inline constexpr int kEliteRareCardChance = 10;         // MonsterRoomElite.java:34
 inline constexpr int kEliteUncommonCardChance = 40;     // MonsterRoomElite.java:35
 
+// A SHOP ROOM has its own table, and it is reachable from a reward roll: the
+// ShopRoom constructor raises baseRareCardChance to 9 (ShopRoom.java:35-36),
+// and rollRarity reads `getCurrRoom().getCardRarity(roll)`
+// (AbstractDungeon.java:1597-1603) -- so any getRewardCards() that happens
+// WHILE THE PLAYER IS STANDING IN THE MERCHANT'S ROOM rolls against 9/37, not
+// 3/37. Orrery and Cauldron are the two producers (their onEquip bodies roll
+// reward cards at the purchase site, relic_pickup_shop.cpp); the merchant's own
+// stock reads the same numbers through shop.hpp's aliases below.
+inline constexpr int kShopRoomRareCardChance = 9;       // ShopRoom.java:35
+inline constexpr int kShopRoomUncommonCardChance = 37;  // ShopRoom.java:36
+
 inline constexpr int kBasePotionDropChance = 40;        // AbstractRoom.java:583
 inline constexpr int kBlizzardPotionModStep = 10;       // AbstractRoom.java:101
 
@@ -234,9 +245,13 @@ inline constexpr int kBlizzardPotionModStep = 10;       // AbstractRoom.java:101
 // semantics; this is NOT a registry enum.
 enum class RewardCardRarity : uint8_t { COMMON = 0, UNCOMMON = 1, RARE = 2 };
 
-// AbstractRoom.getCardRarity(roll) for the three room kinds that give combat
-// rewards. `roll` is the ALREADY-BIASED value cardRng.random(99) +
+// AbstractRoom.getCardRarity(roll) for the room kinds that roll reward cards.
+// `roll` is the ALREADY-BIASED value cardRng.random(99) +
 // cardBlizzRandomizer. Thresholds, not widths (see the provenance block).
+//
+// The SHOP arm is not a combat-reward room but is reachable all the same:
+// rollRarity asks the CURRENT room, and Orrery / Cauldron roll reward cards
+// while the player stands in the merchant's (kShopRoomRareCardChance above).
 //
 // NOTE this constexpr form carries NO relic pass: it is getCardRarity(roll,
 // false)'s threshold arithmetic. Every LIVE reward roll goes through the
@@ -251,10 +266,15 @@ enum class RewardCardRarity : uint8_t { COMMON = 0, UNCOMMON = 1, RARE = 2 };
     if (room == RoomType::Boss) {
         return RewardCardRarity::RARE;  // MonsterRoomBoss.java:40-42
     }
-    const int rare = room == RoomType::Elite ? kEliteRareCardChance
-                                             : kBaseRareCardChance;
-    const int uncommon = room == RoomType::Elite ? kEliteUncommonCardChance
-                                                 : kBaseUncommonCardChance;
+    int rare = kBaseRareCardChance;
+    int uncommon = kBaseUncommonCardChance;
+    if (room == RoomType::Elite) {
+        rare = kEliteRareCardChance;
+        uncommon = kEliteUncommonCardChance;
+    } else if (room == RoomType::Shop) {
+        rare = kShopRoomRareCardChance;
+        uncommon = kShopRoomUncommonCardChance;
+    }
     if (roll < rare) {
         return RewardCardRarity::RARE;
     }
@@ -427,16 +447,27 @@ inline constexpr float kColorlessRareChance = 0.3f;
 // Adds nothing when the relic-modified count is <= 0.
 void roll_colorless_card_reward_item(RunState& rs, RewardScreen& s) noexcept;
 
-// CombatRewardScreen.setupItemReward's UNCONDITIONAL card row
-// (CombatRewardScreen.java:72-96): every open() from a room that is not a
-// TreasureRoom, not a RestRoom and whose event does not set noCardsInRewards
-// appends one `new RewardItem()` -- i.e. a full getRewardCards() roll. Exposed
-// because Neow's three-potion blessing opens that screen from the NeowRoom
-// (whose NeowEvent leaves noCardsInRewards at its false default,
-// AbstractEvent.java:63), so the roll HAPPENS -- cardRng draws and the pity
-// counter move -- and the row is then explicitly deleted again
-// (NeowReward.java:273-283). Skipping the roll would desync cardRng for the
-// rest of the run.
+// ONE `new RewardItem()` card row (RewardItem.java:145-150 -> a full
+// getRewardCards() roll), appended when the offer is non-empty. The Java spells
+// this in two places and they are the same code:
+//
+//   * CombatRewardScreen.setupItemReward's UNCONDITIONAL row
+//     (CombatRewardScreen.java:72-96) -- every open() from a room that is not a
+//     TreasureRoom, not a RestRoom and whose event does not set
+//     noCardsInRewards appends one. Neow's three-potion blessing opens that
+//     screen from the NeowRoom (whose NeowEvent leaves noCardsInRewards at its
+//     false default, AbstractEvent.java:63), so the roll HAPPENS -- cardRng
+//     draws and the pity counter move -- and the row is then explicitly deleted
+//     again (NeowReward.java:273-283). Cauldron does the same at a shop
+//     (Cauldron.java:36-44). Skipping the roll would desync cardRng for the
+//     rest of the run.
+//   * AbstractRoom.addCardToRewards (AbstractRoom.java:573-578) -- the same
+//     `new RewardItem()` + non-empty guard, called four times by Orrery's
+//     onEquip (Orrery.java:28-30) before its screen opens.
+//
+// `room` is the room the roll is made IN, which is what rollRarity's threshold
+// table keys on (reward_card_rarity) -- RoomType::Shop for the two relic
+// bodies, kNeowRewardScreenRoom for the blessing.
 void roll_setup_item_card_reward(RunState& rs, RoomType room,
                                  RewardScreen& s) noexcept;
 

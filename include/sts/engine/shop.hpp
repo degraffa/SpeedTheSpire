@@ -331,8 +331,13 @@ inline constexpr int kSmilingMaskPurgeCost = 50;
 // constructor's baseRareCardChance = 9 / baseUncommonCardChance = 37 --
 // ShopRoom.java:35-36). useAlternation=false is why no relic can move a shop
 // card's rarity, unlike a combat reward's.
-inline constexpr int kShopRareCardChance = 9;
-inline constexpr int kShopUncommonCardChance = 37;
+//
+// The two numbers are the ROOM's, not the stock's, so they are defined once in
+// combat_rewards.hpp (kShopRoomRareCardChance) -- reward_card_rarity's Shop arm
+// needs the same pair for the reward rolls Orrery / Cauldron make while the
+// player is standing in this room. These names stay as the merchant's spelling.
+inline constexpr int kShopRareCardChance = kShopRoomRareCardChance;
+inline constexpr int kShopUncommonCardChance = kShopRoomUncommonCardChance;
 
 [[nodiscard]] constexpr RewardCardRarity shop_card_rarity_for_roll(
     int roll) noexcept {

@@ -459,6 +459,15 @@ inline constexpr ClassRow kRunControllerRows[] = {
                "audit 8.6: the four rolled blessings ARE the screen"),
     STS_BC_ROW(RunController, pending_bottle, ByteClass::PUBLIC,
                "audit 5: the modal overlay is on screen"),
+    STS_BC_ROW(RunController, pending_deck_pick, ByteClass::PUBLIC,
+               "audit 5 again: Dolly's Mirror's grid is the same modal "
+               "overlay, equally on screen. Realized through the MASK rather "
+               "than through a PublicView field of its own -- the overlay's "
+               "only observable is that every master-deck row is choosable "
+               "while pending_bottle reads NONE, which action_mask already "
+               "carries. One relic, one kind, nothing to disambiguate; a "
+               "second member of this enum would want its own field and the "
+               "version bump that goes with it"),
     STS_BC_ROW(RunController, pad2, ByteClass::PADDING, ""),
     STS_BC_ROW(RunController, colorless_order, ByteClass::HIDDEN,
                "audit 1's realization rule: the live colorlessCardPool order "
