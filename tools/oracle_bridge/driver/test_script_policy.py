@@ -369,14 +369,43 @@ class GlueRuleTest(unittest.TestCase):
         self.assertEqual(got, "choose 3")
         self.assertEqual(policy._script.cursor, 1)
 
+    def test_a_blessing_index_0_does_not_false_match_the_talk_screen(self):
+        # Fifth live witness (s2v2_skip_b, STS108173): `neow index 0` must
+        # not consume against the one-option talk screen -- glue rule 3
+        # answers it and the step waits for the real menu.
+        policy = self._policy_with([{"k": "neow", "index": 0},
+                                    {"k": "proceed", "ctx": "neow"},
+                                    {"k": "map", "x": 1, "sym": "M"}])
+        talk = {"available_commands": ["choose", "state"],
+                "game_state": {"screen_type": "EVENT",
+                               "choice_list": ["talk"],
+                               "screen_state": {"event_id": "Neow Event"}}}
+        got = policy.decide(decide_request("STS1", talk, ["choose 0"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 0)  # NOT consumed
+        blessing = {"available_commands": ["choose", "state"],
+                    "game_state": {"screen_type": "EVENT",
+                                   "choice_list": ["a", "b", "c", "d"],
+                                   "screen_state": {
+                                       "event_id": "Neow Event"}}}
+        got = policy.decide(decide_request(
+            "STS1", blessing,
+            ["choose 0", "choose 1", "choose 2", "choose 3"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 1)  # the real menu consumes
+
     def test_scripted_single_option_choice_is_consumed_not_glued(self):
-        # Match-first: when the sim DID record the one-option decision, the
-        # step matches and is consumed; rule 3 never gets a look-in.
-        policy = self._policy_with([{"k": "neow", "index": 0}])
+        # Match-first: when the sim DID record a one-option EVENT decision
+        # (a state-changing single option, which the engine does not
+        # collapse), the step matches and is consumed; rule 3 never gets a
+        # look-in. (The NEOW kind deliberately refuses this shape -- see
+        # the blessing-index-0 test above.)
+        policy = self._policy_with([{"k": "event", "event": "X",
+                                     "opt": 0, "index": 0}])
         state = {"available_commands": ["choose", "state"],
                  "game_state": {"screen_type": "EVENT",
-                                "choice_list": ["talk"],
-                                "screen_state": {"event_id": "Neow Event"}}}
+                                "choice_list": ["leave"],
+                                "screen_state": {"event_id": "X"}}}
         got = policy.decide(decide_request("STS1", state, ["choose 0"]))
         self.assertEqual(got, "choose 0")
         self.assertEqual(policy._script.cursor, 1)  # consumed, not glued

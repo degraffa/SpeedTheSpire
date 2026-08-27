@@ -346,6 +346,18 @@ def match_step(step, state, candidates):
             index = step.get("index")
             if index is None:
                 raise Divergence("neow step carries no index", step)
+            # The blessing menu always offers several options; a one-option
+            # screen here is the opening `talk` (or the post-blessing result
+            # dialog), which glue rule 3 answers without consuming. Without
+            # this guard a blessing with index 0 false-matches the talk
+            # click and the cursor runs ahead of the game (fifth live
+            # witness: s2v2_skip_b, STS108173, `neow index 0`).
+            chooses = [c for c in candidates
+                       if str(c).startswith("choose ")]
+            if len(chooses) <= 1:
+                raise Divergence(
+                    "neow blessing cannot match a one-option screen "
+                    f"(candidates {candidates})", step)
             return _require(f"choose {index}", candidates, step,
                             "neow blessing")
         return _match_event(step, state, candidates)
