@@ -217,6 +217,21 @@ TEST(RelicHooks, BurningBloodHealsSixOnVictory) {
     EXPECT_EQ(s2.player_hp, 80);
 }
 
+// BurningBlood.java:34 -- `if (p.currentHealth > 0)` wraps the heal, exactly as
+// BlackBlood.java:33 wraps its 12. The engine's body used to omit it on a
+// comment that said the relic heals unconditionally; the re-read (S2.43,
+// STS103364) says otherwise, and the guard is the last line of defence for the
+// rule that a dead player stays dead. AbstractCreature.heal's own early-out
+// (`if (this.isDying) return`, :391-393) does NOT cover this: isDying is a
+// monster flag, never set on the player outside SpireHeart.java:171.
+TEST(RelicHooks, BurningBloodDoesNotHealAPlayerAtZero) {
+    CombatState s = MakeState();
+    s.player_hp = 0;
+    Relics r; r.add(RelicId::BURNING_BLOOD);
+    dispatch_relics_on_victory(s, r.slots, r.count);
+    EXPECT_EQ(s.player_hp, 0) << "onVictory is guarded on currentHealth > 0";
+}
+
 TEST(RelicHooks, BloodVialHealsTwoAtBattleStart) {
     CombatState s = MakeState();       // hp 70 / max 80
     Relics r; r.add(RelicId::BLOOD_VIAL);

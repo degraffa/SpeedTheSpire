@@ -150,6 +150,14 @@ int32_t game_hand_size(const CombatState& s) noexcept {
 
 namespace {
 
+// The pump's three combat terminals are three DIFFERENT Java events, and what
+// the action queue does at each of them differs, so the resolver below is told
+// which one it is rather than being handed a single "did we win" bit. Defeat
+// wins a tie: a player at 0 alongside an emptied field is the defeat terminal
+// (AbstractPlayer.damage latches the death inside the hit; see the derivation
+// on survives_clear_post_combat).
+enum class TerminalKind : uint8_t { kVictory, kDefeat, kEscape };
+
 // A lethal damage action calls clearPostCombatActions, whose survivor set is
 // FOUR-ARMED (GameActionManager.java:130-137, the loop at :134):
 //
@@ -179,8 +187,44 @@ namespace {
 // SCOPE: the widened set applies to the VICTORY terminal only. Every one of
 // clearPostCombatActions' call sites is gated on areMonstersBasicallyDead()
 // (DamageAction.java:88-91 and its 19 siblings); the player-death and
-// player-escape terminals have no such call, so they keep the established
-// USE_CARD/HEAL-only behaviour (a settled class this must not re-open).
+// player-escape terminals have no such call.
+//
+// AND THE PLAYER-DEATH TERMINAL RESOLVES NOTHING AT ALL (S2.43 residual, seed
+// STS103364 floor 35). It used to keep the USE_CARD/HEAL pair -- a survivor
+// set inherited from before the terminals were told apart, never derived for
+// this one -- and the Java says the opposite. The player's death is LATCHED
+// synchronously inside the hit that lands it: AbstractPlayer.damage sets
+// `isDead = true` and constructs `new DeathScreen(...)` in the same statement
+// pair (AbstractPlayer.java:1500-1501), and that constructor assigns
+// `AbstractDungeon.screen = CurrentScreen.DEATH` (DeathScreen.java:86). From
+// the next frame on, AbstractDungeon.update's screen switch takes its DEATH
+// arm -- `case 17: { deathScreen.update(); break; }` (AbstractDungeon.java:
+// 2092-2095; ordinal 17 == DEATH, AbstractDungeon$1.java:172) -- which, unlike
+// the NONE/map arms (:2021-2023) and every screen arm that keeps the room
+// alive underneath it (:2031, :2065, :2071, :2080, :2085), does NOT call
+// `currMapNode.room.update()`. AbstractRoom.update is the ONLY caller of
+// `actionManager.update()` in the whole game -- its three sites are
+// AbstractRoom.java:231, :265 and :364, all inside that one method -- so the
+// action queue FREEZES on the item that killed the player. Nothing behind it
+// ever ticks again: not a queued HealAction, not the killing card's own
+// UseCardAction.
+//
+// That is a correctness bug, not a cosmetic one, because the pump classifies
+// its own terminal from `player_hp` AFTER this resolution runs. On seed
+// STS103364 the player played Bite at 2 hp into a 3-HP Spiker holding Thorns
+// 9: the queue became [DAMAGE(thorns 9 -> player), HEAL(2), USE_CARD(Bite)],
+// the thorns landed and took the player to 0 -- correctly -- and then Bite's
+// own HealAction resolved past the death for +2, so the pump read hp > 0, took
+// the VICTORY branch with two monsters (36 and 21 HP) still standing, paid
+// Burning Blood's 6 for a final 8 hp, and burned the reward-setup RNG. The
+// live game is GAME_OVER at 0 hp. A heal must not be able to un-kill the
+// player; the fix is the Java's, which is that the queue simply stops.
+//
+// The ESCAPE terminal is deliberately left as it was. Its Java shape is a
+// third thing again -- endBattle() runs from the escape-timer expiry with NO
+// clearPostCombatActions call, and AbstractRoom.update:277 then waits for
+// `actions.isEmpty()`, so the queue drains in FULL -- and no capture has
+// witnessed the difference. Widening it is a separate derivation.
 //
 // The headless pump otherwise keeps its established immediate terminal halt.
 // Rebuild the ring without the survivor shapes, preserving every abandoned
@@ -190,7 +234,14 @@ namespace {
 // exemption is what decides. Hook actions a survivor adds land behind the
 // preserved queue, exactly as addToBot from its later position would.
 [[nodiscard]] bool survives_clear_post_combat(Opcode opcode,
-                                              bool victory) noexcept {
+                                              TerminalKind kind) noexcept {
+    if (kind == TerminalKind::kDefeat) {
+        // The frozen queue, derived above: no arm of the allowlist applies,
+        // because clearPostCombatActions was never called and the drain that
+        // would have run the survivors never happens either.
+        return false;
+    }
+    const bool victory = kind == TerminalKind::kVictory;
     switch (opcode) {
         case Opcode::USE_CARD:  // instanceof UseCardAction (:134)
         case Opcode::HEAL:      // instanceof HealAction (:134)
@@ -222,8 +273,8 @@ namespace {
     }
 }
 
-void resolve_pending_post_combat_actions_at_terminal(CombatState& s,
-                                                     bool victory) noexcept {
+void resolve_pending_post_combat_actions_at_terminal(
+    CombatState& s, TerminalKind kind) noexcept {
     ActionQueueItem kept[kActionQueueCap]{};
     ActionQueueItem post_combat[kActionQueueCap]{};
     uint8_t kept_count = 0;
@@ -234,7 +285,7 @@ void resolve_pending_post_combat_actions_at_terminal(CombatState& s,
             (static_cast<unsigned>(s.action_head) + i) % kActionQueueCap);
         const ActionQueueItem item = s.action_queue[src];
         const Opcode opcode = static_cast<Opcode>(item.opcode);
-        if (survives_clear_post_combat(opcode, victory)) {
+        if (survives_clear_post_combat(opcode, kind)) {
             post_combat[post_combat_count++] = item;
         } else {
             kept[kept_count++] = item;
@@ -246,7 +297,43 @@ void resolve_pending_post_combat_actions_at_terminal(CombatState& s,
     for (uint8_t i = 0; i < kept_count; ++i) {
         add_to_bottom(s, kept[i]);
     }
+    // THE SURVIVORS DRAIN ONE AT A TIME, AND THE PLAYER'S DEATH STOPS THE
+    // DRAIN. This loop is a frame-by-frame drain in the Java, not a batch: each
+    // survivor is one actionManager.update tick inside AbstractRoom.update.
+    // The moment one of them takes the player to zero, AbstractPlayer.damage
+    // latches `isDead` and stands the DeathScreen up in the same statement
+    // (AbstractPlayer.java:1500-1501; DeathScreen.java:86), and from the next
+    // frame AbstractDungeon.update's DEATH arm (:2092-2095) stops calling
+    // `currMapNode.room.update()` -- so actionManager.update never runs again
+    // (its only three call sites are AbstractRoom.java:231, :265 and :364, all
+    // inside AbstractRoom.update) and every remaining survivor is frozen where
+    // it stands.
+    //
+    // THE MUTUAL KILL IS THIS CASE, and it is why the check cannot live only at
+    // the top of pump_step. When the player's attack kills the LAST monster and
+    // that monster's Thorns kills the player, the pump arrives here with
+    // player_hp still positive, so `kind` is kVictory and the clear really did
+    // happen (areMonstersBasicallyDead was true -- DamageAction.java:88-91).
+    // The THORNS DamageAction is a survivor, it resolves, and the player dies
+    // HERE. Anything queued behind it -- Bite's HealAction is the witnessed one
+    // -- must not resolve, or it would raise player_hp back above zero and
+    // the run layer's finish_combat_after_action, which classifies from the
+    // final HP, would read this terminal as a victory. The game's own
+    // tie-break is exactly this ordering: the monster's endBattle() is
+    // deathTimer-gated (~2s of frames, AbstractMonster.java:866-871), the
+    // player's death is not gated at all, so DEATH always wins a mutual kill.
+    //
+    // The unresolved survivors are pushed back rather than dropped, to keep
+    // this resolver's standing property that no queued action is vaporized;
+    // they land behind the abandoned non-survivors, and the pump halts at
+    // COMBAT_OVER without ever reading either group again.
     for (uint8_t i = 0; i < post_combat_count; ++i) {
+        if (s.player_hp <= 0) {
+            for (uint8_t j = i; j < post_combat_count; ++j) {
+                add_to_bottom(s, post_combat[j]);
+            }
+            return;
+        }
         execute_opcode(s, post_combat[i]);
     }
 }
@@ -828,15 +915,33 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
         (!any_monster_alive(s) && (s.flags & kCombatFlagCannotLose) == 0u)) {
         // Resolve the clearPostCombatActions survivor set exactly: the game
         // retains those actions after lethal damage (four arms on a VICTORY,
-        // see survives_clear_post_combat; USE_CARD/HEAL only on a defeat or
-        // escape), so their Spoon RNG, onExhaust fan-out, and THORNS
-        // retaliation remain gameplay-visible. Then normalize any limbo entry
-        // which never acquired a USE_CARD (a terminal-cancelled queued
-        // autoplay). Defeat wins a tie: a player at 0 alongside an emptied
-        // field is the defeat terminal, not a victory.
-        const bool victory =
-            s.player_hp > 0 && (s.flags & kCombatFlagPlayerEscaped) == 0u;
-        resolve_pending_post_combat_actions_at_terminal(s, victory);
+        // see survives_clear_post_combat; USE_CARD/HEAL on an escape; NOTHING
+        // past a player death, where the queue freezes with the room), so
+        // their Spoon RNG, onExhaust fan-out, and THORNS retaliation remain
+        // gameplay-visible exactly where the game keeps them. Then normalize
+        // any limbo entry which never acquired a USE_CARD (a terminal-cancelled
+        // queued autoplay -- and, past a death, the killing card itself, whose
+        // UseCardAction is now abandoned with the rest of the queue).
+        //
+        // DEFEAT WINS A TIE, and it is tested FIRST here for a reason beyond
+        // classification: nothing resolves on that arm, so no queued heal can
+        // raise `player_hp` back above zero and turn the pump's own reading of
+        // this state into a victory. The Java latches the death inside the hit
+        // (AbstractPlayer.java:1500-1501); this ordering is that latch.
+        //
+        // The `kind` chosen here is only the SURVIVOR SET. It is not the
+        // outcome: at a MUTUAL KILL the player is still standing when this test
+        // runs -- the clear really did happen, so kVictory is the right set --
+        // and the death arrives inside the resolver, on the Thorns survivor
+        // itself. The resolver stops there, and the outcome is read off the
+        // final `player_hp` by finish_combat_after_action.
+        const TerminalKind kind =
+            s.player_hp <= 0
+                ? TerminalKind::kDefeat
+                : ((s.flags & kCombatFlagPlayerEscaped) != 0u
+                       ? TerminalKind::kEscape
+                       : TerminalKind::kVictory);
+        resolve_pending_post_combat_actions_at_terminal(s, kind);
         normalize_terminal_card_queue(s);
         flush_limbo_at_combat_over(s);
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);

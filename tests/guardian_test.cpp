@@ -690,11 +690,28 @@ TEST(GuardianSharpHide, DyingOwnersNormalHitStillCancelsAtTheVictoryTerminal) {
 }
 
 // Terminal-kind scoping: the game calls clearPostCombatActions only from
-// damage gated on areMonstersBasicallyDead() -- a DEFEAT has no such call, so
-// the widened survivor set must not apply there. A queued GainBlockAction
-// behind the player's death stays abandoned.
-TEST(GuardianSharpHide, DefeatTerminalKeepsTheNarrowSurvivorSet) {
+// damage gated on areMonstersBasicallyDead() -- a DEFEAT has no such call. It
+// has no DRAIN either: AbstractPlayer.damage latches the death in the hit that
+// lands it (`isDead = true; deathScreen = new DeathScreen(...)`,
+// AbstractPlayer.java:1500-1501), the DeathScreen constructor sets
+// `AbstractDungeon.screen = DEATH` (DeathScreen.java:86), and that screen's arm
+// of AbstractDungeon.update -- `case 17: { deathScreen.update(); break; }`
+// (:2092-2095) -- never calls `currMapNode.room.update()`, which is the only
+// caller of actionManager.update (AbstractRoom.java:231, :265, :364). So the
+// queue FREEZES: not one queued action behind the killing hit resolves, of any
+// shape. This test used to assert only the BLOCK arm and was named for the
+// USE_CARD/HEAL pair it still (wrongly) let through; the HEAL arm is the one
+// that cost a run -- see the Spiker case in beyond_normals_i_test.
+TEST(GuardianSharpHide, DefeatTerminalResolvesNothingBehindTheKillingHit) {
     CombatState s = make_guardian_state(21019, /*player_hp=*/5);
+    const CardDef* strike = card_def(CardId::STRIKE);
+    ASSERT_NE(strike, nullptr);
+    s.card_pool[0].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[0].cost_now = card_cost(*strike, 0);
+    s.card_pool[0].flags = card_flags(*strike, 0);
+    s.limbo[0] = 0;
+    s.limbo_count = 1;
+
     ActionQueueItem kill{};
     kill.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
     kill.src = 0;
@@ -708,12 +725,30 @@ TEST(GuardianSharpHide, DefeatTerminalKeepsTheNarrowSurvivorSet) {
     blk.tgt = kActorPlayer;
     blk.amount = 3;
     add_to_bottom(s, blk);
+    ActionQueueItem heal{};
+    heal.opcode = static_cast<uint16_t>(Opcode::HEAL);
+    heal.src = kActorPlayer;
+    heal.tgt = kActorPlayer;
+    heal.amount = 7;
+    add_to_bottom(s, heal);
+    ActionQueueItem use{};
+    use.opcode = static_cast<uint16_t>(Opcode::USE_CARD);
+    use.src = kActorPlayer;
+    use.amount = 0;  // the limbo card
+    add_to_bottom(s, use);
+
     s.phase = static_cast<uint8_t>(CombatPhase::RESOLVING);
     pump(s);
     EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
-    EXPECT_LE(s.player_hp, 0);
+    EXPECT_EQ(s.player_hp, 0)
+        << "the queued HEAL is abandoned -- nothing may un-kill the player";
     EXPECT_EQ(s.player_block, 0)
         << "BLOCK is a victory-only survivor; a defeat abandons it";
+    EXPECT_EQ(s.limbo_count, 0)
+        << "the abandoned UseCardAction leaves the card to the terminal flush";
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], 0)
+        << "flush_limbo_at_combat_over files it with no RNG and no hooks";
 }
 
 // ===========================================================================

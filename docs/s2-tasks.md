@@ -2758,6 +2758,88 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   the SIMULATOR should also model a clock (and so need a SecretPortal
   body, still unlanded per S2.33) is a policy question this task
   deliberately did not decide.
+
+  **2026-08-27 — STS103364's terminal divergence is closed: a HEAL resolved
+  past the player's death and un-killed him (`thorns-terminal`).** The lead
+  above named the right family and the wrong mechanism. It is NOT a mutual
+  kill and not a combat-over adjudication: at seq 508 the field holds THREE
+  monsters (Spiker 3 hp, Spiker 36 hp, Exploder 21 hp) and only the first
+  dies. The queue after the Bite is
+  `[DAMAGE(thorns 9 → player), HEAL(2), USE_CARD(Bite)]`; the Thorns landed
+  correctly and took the player 2 → 0, and then Bite's own `HealAction`
+  resolved anyway, because `survives_clear_post_combat` returned `true` for
+  `USE_CARD`/`HEAL` at EVERY terminal — a survivor set inherited from before
+  the terminals were told apart and never derived for the death one. The
+  player came back at 2, so the pump's own re-reading of `player_hp` made the
+  terminal a VICTORY with two monsters standing, Burning Blood paid its 6, and
+  the reward roll followed. **The Java: the death is latched inside the hit
+  that lands it** — `AbstractPlayer.damage` sets `isDead = true` and
+  constructs `new DeathScreen(...)` in the same statement pair (:1500-1501),
+  the ctor assigns `AbstractDungeon.screen = DEATH` (DeathScreen.java:86), and
+  that screen's arm of `AbstractDungeon.update` (`case 17: { deathScreen
+  .update(); break; }`, :2092-2095; ordinal 17 == DEATH,
+  `AbstractDungeon$1.java:172`) is the one arm that does NOT call
+  `currMapNode.room.update()`. `AbstractRoom.update` is the only caller of
+  `actionManager.update` in the game (`AbstractRoom.java:231`, `:265`, `:364`,
+  all three inside that one method), so the queue FREEZES on the killing
+  item — no HealAction, no UseCardAction, nothing. `clearPostCombatActions` was
+  never called on this path either (all 20 sites are gated on
+  `areMonstersBasicallyDead()`). Fix: the resolver now takes a
+  `TerminalKind{kVictory,kDefeat,kEscape}` instead of a `victory` bool; the
+  DEFEAT arm resolves NOTHING, and — this is the second half, found by the
+  regression test — the victory arm's survivors drain ONE AT A TIME with a live
+  `player_hp <= 0` check between them, so **the true mutual kill is a DEFEAT
+  too**: the last monster's Thorns kills the player from inside the survivor
+  drain, and everything queued behind it is abandoned rather than flipping the
+  outcome back (the game's tie-break is structural — the monster's
+  `endBattle()` is deathTimer-gated ~2 s of frames out,
+  `AbstractMonster.java:866-871`, the player's death is gated on nothing). The
+  ESCAPE terminal is deliberately untouched (its Java shape is a third thing —
+  no clear at all, and `AbstractRoom.java:277` then drains the queue in FULL —
+  and no capture has witnessed the difference). Rode with it: **Burning Blood
+  was missing its own guard.** `BurningBlood.onVictory` heals behind
+  `if (p.currentHealth > 0)` (BurningBlood.java:34), exactly like Black Blood
+  (BlackBlood.java:33); the engine body omitted it on a comment asserting the opposite, and
+  `AbstractCreature.heal`'s `isDying` early-out (:391-393) does not cover the
+  player (nothing sets `isDying` on him outside `SpireHeart.java:171`). Both
+  comments corrected, the guard added. Tests — four verified RED on the pre-fix
+  engine, one green-both-ways by design:
+  `BeyondNormalsI.SpikerThornsKillsThePlayerAndTheQueuedHealCannotUndoIt` (RED;
+  the capture's own shape, field deliberately non-empty so the terminal can
+  only be the death),
+  `BeyondNormalsI.MutualKillByThornsIsADefeatNotAVictory` (RED),
+  `GuardianSharpHide.DefeatTerminalResolvesNothingBehindTheKillingHit` (RED;
+  renamed from `…KeepsTheNarrowSurvivorSet`, whose name asserted the bug — its
+  BLOCK assertion is unchanged and it now also pins HEAL and USE_CARD),
+  `RelicHooks.BurningBloodDoesNotHealAPlayerAtZero` (RED), and the negative
+  control `BeyondNormalsI.SurvivableSpikerThornsStillLandsAndTheHealStillResolves`
+  — GREEN before and after, which is the point: at the VICTORY terminal the
+  retaliation still lands AND the heal still resolves (20 − 7 + 2 = 15). S2.49's
+  `DamageAttackerCancel.*`,
+  `GuardianSharpHide.RetaliationQueuedBehindTheLethalBlowStillLands` and
+  `GuardianSharpHide.DyingOwnersNormalHitStillCancelsAtTheVictoryTerminal` were
+  re-run against the pre-fix engine with the new tests beside them and pass
+  unchanged in both states. **Verdict: STS103364 replays CLEAN, 510/510
+  records compared, 0 library-order-only / obtain-race / escape-race /
+  preview-race, "first divergence: none — every compared record was
+  zero-diff"** — the S2.V2 depth
+  wave's last open combat divergence. Regression evidence: all **2,061**
+  campaign artifacts under `_oracle_data/campaigns` re-replayed — 2,036 CLEAN,
+  24 PART, 1 ERROR (a `Spire Heart` translator id, Act 4, out of scope) — and
+  every one of those 25 non-clean verdicts is BYTE-IDENTICAL to the same run on
+  the pre-fix engine, so nothing regressed. **Cohort impact, measured by
+  re-emitting all 21 S2.V2 lines:** 18 are byte-identical, 2 (STS108173
+  `sim_search_skip` ps0, STS163083 ps359) did not qualify before the fix
+  either, and exactly ONE moves — **STS103364's own line, which no longer
+  qualifies for `--need-event MindBloom --min-act 3`**: it now dies on floor 35
+  where the live game did, `{"steps":501,"final_hash":"2baa4221451f764a",
+  "end_reason":"run_over","victory":false,"max_act":3,"max_floor":35}` against
+  the old `{"steps":671,"final_hash":"1efe0d8a6ee15602",…,"max_floor":48}`, and
+  its last step is the `play Bite` at the Spiker that kills him. Its scan row
+  loses `MindBloom|Winding Halls` from `events`, so the Mind Bloom pair needs a
+  replacement seat beside STS101166 (unchanged: hash `205938794e73a158`,
+  max_floor 44). WSL `debug`/`asan`/`release` green; `check_stale_counts.sh`
+  and `check_doc_links.sh` clean.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool

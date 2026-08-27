@@ -807,6 +807,160 @@ TEST(BeyondNormalsI, SpikerThornsReflectsOncePerHitOfAMultiHitAttack) {
            "attack";
 }
 
+// ---------------------------------------------------------------------------
+// The Spiker's Thorns as a KILLER of the player, and what the pump owes the
+// queue afterwards. The S2.43 residual, seed STS103364 floor 35: at 2 hp the
+// player played Bite into a 3-HP Spiker holding Thorns 9, with a second Spiker
+// (36 hp) and an Exploder (21 hp) still standing.
+//
+// THE JAVA CHAIN, in the order it happens:
+//   1. AbstractMonster.damage runs the victim's onAttacked fan-out at :666-668,
+//      BEFORE the HP write at :678 and before die() at :697-698 -- so a lethal
+//      blow still triggers Thorns.
+//   2. ThornsPower.onAttacked addToTop's a THORNS-typed DamageAction back at
+//      info.owner (ThornsPower.java:50-57) -- ahead of everything the card had
+//      already queued behind its own damage, which for Bite is a HealAction
+//      (Bite.java:49-50).
+//   3. That THORNS hit is exempt from both of DamageAction.update's owner
+//      guards (:65, :70), so a dying owner still lands it (S2.49).
+//   4. It reaches AbstractPlayer.damage, which at :1483-1501 sets
+//      `isDead = true` and constructs `new DeathScreen(...)` INSIDE the hit.
+//      DeathScreen's ctor assigns `AbstractDungeon.screen = DEATH`
+//      (DeathScreen.java:86), and the DEATH arm of AbstractDungeon.update
+//      (:2092-2095) never calls `currMapNode.room.update()`, and
+//      AbstractRoom.update is the only caller of actionManager.update in the
+//      game (:231, :265, :364). The queue stops dead: the heal never resolves.
+// The engine used to resolve that heal anyway (it was an unconditional
+// USE_CARD/HEAL survivor at every terminal), which put the player back at 2 hp,
+// made the pump read its own terminal as a VICTORY with two monsters alive, and
+// paid out Burning Blood for a final 8 hp against the capture's GAME_OVER at 0.
+TEST(BeyondNormalsI, SpikerThornsKillsThePlayerAndTheQueuedHealCannotUndoIt) {
+    CombatState s = MakeSeeded(20, /*monsters=*/2);
+    spiker_init(s, 0);
+    spiker_use_pre_battle_action(s, 0);
+    drain(s);
+    // The OPENING 7, not the capture's once-buffed 9: the amount is not the
+    // mechanism, it only has to exceed the player's 2 hp.
+    ASSERT_EQ(monster_power(s, 0, PowerId::THORNS), 7);
+    clear_queue(s);
+    s.monsters[0].hp = 3;
+    // The rest of the field, still very much in the fight -- this terminal is
+    // the player's DEATH, not an emptied board.
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::SPIKER);
+    s.monsters[1].hp = 36;
+    s.monsters[1].max_hp = 36;
+    s.player_hp = 2;
+
+    // Bite's shape: DamageAction, then HealAction behind it.
+    ActionQueueItem bite{};
+    bite.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    bite.src = kActorPlayer;
+    bite.tgt = 0;
+    bite.amount = 7;
+    bite.flags = make_damage_flags(DamageType::NORMAL);
+    add_to_bottom(s, bite);
+    ActionQueueItem heal{};
+    heal.opcode = static_cast<uint16_t>(Opcode::HEAL);
+    heal.src = kActorPlayer;
+    heal.tgt = kActorPlayer;
+    heal.amount = 2;
+    add_to_bottom(s, heal);
+
+    s.phase = static_cast<uint8_t>(CombatPhase::RESOLVING);
+    pump(s);
+
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_EQ(s.monsters[0].hp, 0) << "the killing blow landed";
+    EXPECT_GT(s.monsters[1].hp, 0)
+        << "the field is not empty -- the ONLY thing that ended this combat is "
+           "the player's death";
+    EXPECT_EQ(s.player_hp, 0)
+        << "2 - 7 Thorns == dead, and Bite's queued heal is abandoned with the "
+           "rest of the frozen queue";
+}
+
+// The negative control for the same boundary: change only the player's starting
+// HP so the retaliation is survivable. Everything the fix removed from the
+// DEFEAT terminal must still happen at the VICTORY one -- the Thorns hit lands
+// (it is a clearPostCombatActions DAMAGE survivor whose owner is dying, S2.49),
+// and the HealAction behind it resolves (the UseCardAction/HealAction arms of
+// GameActionManager.java:134) while endBattle() waits out the death animation.
+TEST(BeyondNormalsI, SurvivableSpikerThornsStillLandsAndTheHealStillResolves) {
+    CombatState s = MakeSeeded(21, /*monsters=*/1);
+    spiker_init(s, 0);
+    spiker_use_pre_battle_action(s, 0);
+    drain(s);
+    ASSERT_EQ(monster_power(s, 0, PowerId::THORNS), 7);
+    clear_queue(s);
+    s.monsters[0].hp = 3;
+    s.player_hp = 20;
+
+    ActionQueueItem bite{};
+    bite.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    bite.src = kActorPlayer;
+    bite.tgt = 0;
+    bite.amount = 7;
+    bite.flags = make_damage_flags(DamageType::NORMAL);
+    add_to_bottom(s, bite);
+    ActionQueueItem heal{};
+    heal.opcode = static_cast<uint16_t>(Opcode::HEAL);
+    heal.src = kActorPlayer;
+    heal.tgt = kActorPlayer;
+    heal.amount = 2;
+    add_to_bottom(s, heal);
+
+    s.phase = static_cast<uint8_t>(CombatPhase::RESOLVING);
+    pump(s);
+
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.player_hp, 15)
+        << "20 - 7 Thorns + 2 heal: the retaliation lands and the heal "
+           "survives the victory clear";
+}
+
+// THE MUTUAL KILL, which is the tie the pump has to break: the player's attack
+// kills the LAST monster and that monster's Thorns kills the player. The game
+// declares DEATH -- the monster's endBattle() is gated on its death animation
+// running out (AbstractMonster.updateDeathAnimation:866-871, deathTimer armed
+// by die() at :927-928), which is ~2 seconds of frames away, while
+// AbstractPlayer.damage latches isDead and the DeathScreen inside the very hit
+// that lands (:1500-1501). The engine's terminal check therefore tests
+// `player_hp <= 0` FIRST, and -- because the defeat arm resolves nothing -- no
+// queued heal can raise it back out of the tie afterwards.
+TEST(BeyondNormalsI, MutualKillByThornsIsADefeatNotAVictory) {
+    CombatState s = MakeSeeded(22, /*monsters=*/1);
+    spiker_init(s, 0);
+    spiker_use_pre_battle_action(s, 0);
+    drain(s);
+    clear_queue(s);
+    s.monsters[0].hp = 3;
+    s.player_hp = 2;
+
+    ActionQueueItem bite{};
+    bite.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    bite.src = kActorPlayer;
+    bite.tgt = 0;
+    bite.amount = 7;
+    bite.flags = make_damage_flags(DamageType::NORMAL);
+    add_to_bottom(s, bite);
+    ActionQueueItem heal{};
+    heal.opcode = static_cast<uint16_t>(Opcode::HEAL);
+    heal.src = kActorPlayer;
+    heal.tgt = kActorPlayer;
+    heal.amount = 2;
+    add_to_bottom(s, heal);
+
+    s.phase = static_cast<uint8_t>(CombatPhase::RESOLVING);
+    pump(s);
+
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.player_hp, 0)
+        << "both sides at zero reads as the DEFEAT terminal, and the heal that "
+           "would have flipped it is abandoned";
+}
+
 // ============================================================================
 // 5. Turn bodies -- what each move actually queues
 // ============================================================================

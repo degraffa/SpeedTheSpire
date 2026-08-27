@@ -142,11 +142,12 @@ void relic_native_philosophers_stone(CombatState& s, RelicHook hook,
 void relic_native_black_blood(CombatState& s, RelicHook hook,
                               RelicSlot& /*slot*/,
                               const RelicHookContext& /*ctx*/) noexcept {
-    // BlackBlood.onVictory (BlackBlood.java:24-31): addToTop
+    // BlackBlood.onVictory (BlackBlood.java:28-36): addToTop
     // RelicAboveCreatureAction, then `if (p.currentHealth > 0) p.heal(12)`.
-    // Burning Blood's onVictory (heal 6) is the same shape WITHOUT the guard --
-    // BurningBlood.java:30-33 heals unconditionally -- so the `> 0` test is
-    // reproduced here rather than hoisted into the shared seam.
+    // Burning Blood's onVictory (heal 6) carries the SAME guard, at
+    // BurningBlood.java:34 -- an earlier version of this comment claimed it
+    // heals unconditionally and that the `> 0` test was Black Blood's alone,
+    // which is why relics_starter.cpp went without one.
     // Routed through heal_player_with_relics so Magic Flower's x1.5 applies
     // exactly where it applies for Burning Blood.
     if (hook == RelicHook::ON_VICTORY && s.player_hp > 0) {
