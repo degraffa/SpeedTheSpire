@@ -2637,6 +2637,69 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `survives_clear_post_combat` family), not the spawn pre-pass. WSL
   `debug`/`asan`/`release` green; `check_stale_counts.sh` and
   `check_doc_links.sh` clean.
+  **Depth-wave finding closed 2026-08-27 — The Library's read pick is a
+  GRID screen, not an event page** (STS100009 ps0, step 224, floor 20,
+  Act 2). The re-emitted line — now clean through the floor-1 fight the
+  Rampage repair above corrected — played 224 steps live and stopped
+  with `script
+  expects an EVENT screen, game shows 'GRID'`. Both halves were behaving:
+  The Library hosts its twenty-card read on `GridCardSelectScreen`
+  (`gridSelectScreen.open(group, 1, OPTIONS[4], false)`,
+  `TheLibrary.java:91`), so CommunicationMod reports `screen_type: GRID`
+  with the twenty cards in `screen_state.cards`
+  (`GameStateConverter.getGridScreenState` ← `ChoiceScreenUtils.getGridScreenCards`,
+  which hands back `targetGroup.group` unsorted) and `choose 0..19`, and
+  the follower's `_match_event` refused the screen kind exactly as the
+  stop contract asks. The RUN LAYER models the same pick as twenty
+  ordinary event options over the event BOARD (`library_menu`,
+  `city_events_ii.cpp`) with no `grid_kind`, so `script.cpp`'s generic
+  event arm claimed it and emitted `{"k":"event","event":"The
+  Library","opt":7,"index":7}`. Fixed the way the schema says — an option
+  space whose members are dynamically rolled CARDS carries a card
+  identity, never a bare sim index — and that is also the only safe
+  derivation, because a "corrected" index would have had to be REVERSED:
+  the Java builds the group with `group.addToBottom(card)` in roll order
+  (`TheLibrary.java:83`) and `addToBottom` is a PREPEND (`group.add(0,
+  c)`, `CardGroup.java:459-461`), nothing between there and
+  `getGridScreenCards` sorts it (`GridCardSelectScreen.open` only assigns
+  `targetGroup`), so the live grid runs in reverse roll order — the same
+  fact `command_map.hpp`'s Library arm already proved positionally
+  against capture STS432432. The emitter now writes
+  `{"k":"grid","ctx":"library","event":"The Library","card":…,"up":…,"ord":…,"opt":…}`;
+  the same-identity `ord` is counted in the LIVE (reversed) order the
+  follower's `_nth_index` walks, and it is always 0 because the read pile
+  is unique by card id by construction (`TheLibrary.java:69-78`).
+  **The follower needed NO extension**: `_match_grid` already joins
+  `screen_state.cards` by (id, upgrades, ordinal), and a live GRID dump
+  from the committed Act-1 corpus (`STS70001`, keys `any_number /
+  cards / confirm_up / for_purge / for_transform / for_upgrade /
+  num_cards / selected_cards`, each card carrying `id` + `upgrades`)
+  confirms the field name — the corpus holds no Library dump because The
+  Library is a `TheCity` (Act-2) event. AUDIT of the sibling risk: the
+  engine has exactly TWO event option spaces whose members are cards
+  (`EventDialogState::board`) — Match and Keep's twelve and The Library's
+  twenty. Match and Keep stays an `event` step BY DESIGN (its live screen
+  really is the event page and its cards are face DOWN, so there is no
+  identity to emit; gap 3's screen-position `index` is the whole answer),
+  and every other event card screen is a master-deck grid
+  (`EventGridKind`), already emitted as `grid` + `card`/`up`/`ord`. No
+  third case exists. **Sim trajectories and `final_hash` do NOT move** —
+  verified by re-emitting STS100009 with the built release binary and
+  diffing against the archived line: 475/475 lines, header identical
+  (`steps` 474, `final_hash` `8b6edea301d288c1`, `max_act` 3, `max_floor`
+  41), exactly ONE line changed, step 224, and the card it now names is
+  `Rage` — which is row 12 of the live `choice_list` the divergence
+  record archived, i.e. the reversal confirmed against live evidence, and
+  proof the old `index 7` would have taken `Body Slam`. Pinned by
+  `SimSearchScriptLibrary.*` (4: the identity emit with no `index` field,
+  every slot naming its own card, the reversed-order ordinal, and the
+  intro/leave pages plus the Match and Keep board staying `event` steps)
+  and `LibraryGridTest.*` (4, `test_script_policy.py`: the identity join
+  landing on `choose 12`, every row reachable by identity, an absent card
+  still stopping, and the old bare-index event step still refused).
+  RE-EMISSION: any line whose Library visit takes the READ branch —
+  among the archived cohort that is STS100009 ps0 alone (STS101166 ps0
+  and STS111111 `_skip` ps0 both Sleep, `opt 1`, and are byte-unchanged).
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool

@@ -143,6 +143,7 @@ different card at the same index is the desync the follower must stop on):
 | `take_card` / `skip_card` / `sing` | `card`+`up`+`ord` / — / — | match in `screen_state.cards` → `choose i`; `skip`; the bowl row |
 | `rest` | `opt` (`rest`/`smith`/`lift`/`toke`/`dig`/`recall`) | choice_list entry of that name |
 | `grid` / `grid_cancel` | `ctx` + `card`+`up`+`ord` | match in the grid's card list → `choose i`; cancel alias |
+| `grid` with `ctx` = `library` | `event` (game id), `card`+`up`+`ord`, `opt` (sim board slot, advisory) | The Library's twenty-card read: the run layer models it as event options, but the game hosts it on `GridCardSelectScreen` (TheLibrary.java:91) so the live dump is `screen_type: GRID` — identity join in `screen_state.cards`, same as any other grid |
 | `choose_card` | `src` (pile) + `card`+`up`+`ord`+`index` | combat choice screens; identity join like `grid` |
 | `confirm` | — | the hand-select confirm (`proceed`) |
 | `event` / `neow` | `event` (game id), `opt` (full-list ordinal), `index` (**enabled-only** index — the `choose` command's own space, command_map.hpp's two-index-space note inverted; on Match and Keep's twelve-card board that space is ordered by SCREEN POSITION, not by board slot — see `script.cpp`'s `event_live_choose_index`) | `choose <index>` |
@@ -150,6 +151,15 @@ different card at the same index is the desync the follower must stop on):
 | `boss_pick` / `boss_skip` | `relic` (game id) / — | match in `screen_state.relics` → `choose i`; `skip` |
 | `proceed` | `ctx` (advisory) | `proceed` |
 | `shop` | `index` (raw) | never emitted by the sim-consulting policies (they buy nothing); decode-completeness only |
+
+**Event pages whose options are CARDS.** The engine has exactly two
+(`EventDialogState::board`): Match and Keep's twelve-card board and The
+Library's twenty-card read. Only Match and Keep stays an `event` step — its
+live screen really is the event page and its cards are face DOWN, so there is
+no identity to emit and the `index` permutation above is the whole answer. The
+Library's board is face UP on a real `GRID` screen (TheLibrary.java:91), so it
+emits card identity instead. Every other event card screen is a master-deck
+grid (`EventGridKind`), already emitted as `grid` + `card`/`up`/`ord`.
 
 The follower consumes steps strictly in order; its only three glue commands
 (a confirmation-only screen; the GRID pick-then-confirm seam; a collapsed

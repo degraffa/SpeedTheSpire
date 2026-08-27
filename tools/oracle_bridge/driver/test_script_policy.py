@@ -578,6 +578,76 @@ class BossRewardTest(unittest.TestCase):
                            self.STATE, self._candidates())
 
 
+class LibraryGridTest(unittest.TestCase):
+    """The Library's read pick reaches the follower as a GRID, not an EVENT.
+
+    S2.43, STS100009 ps0, step 224: the emitter used to write
+    `{"k":"event","event":"The Library","opt":7,"index":7}` and `_match_event`
+    stopped on the screen kind. The card list below is the archived
+    divergence record's own `choice_list` -- the twenty live rows, in the
+    LIVE order, which is the sim board's roll order REVERSED
+    (`group.addToBottom` is `group.add(0, c)`, CardGroup.java:459-461). No
+    follower arm was added for this: `_match_grid` already joins
+    `screen_state.cards` by identity, and these tests pin that it does.
+    """
+
+    # Live order, from divergence_STS100009_ps0.
+    LIVE = ["Power Through", "Thunderclap", "True Grit", "Anger",
+            "Shrug It Off", "Dual Wield", "Whirlwind", "Body Slam",
+            "Wild Strike", "Battle Trance", "Ghostly Armor",
+            "Perfected Strike", "Rage", "Clash", "Clothesline", "Headbutt",
+            "Warcry", "Feel No Pain", "Searing Blow", "Dropkick"]
+
+    STATE = {"available_commands": ["choose", "state"],
+             "game_state": {
+                 "screen_type": "GRID",
+                 "choice_list": [name.lower() for name in LIVE],
+                 "screen_state": {
+                     "confirm_up": False,
+                     "selected_cards": [],
+                     "cards": [{"id": name, "upgrades": 0} for name in LIVE]}}}
+
+    def _candidates(self):
+        return campaign_driver.expand_legal_actions(self.STATE,
+                                                    random.Random(0))
+
+    def test_identity_join_finds_the_reversed_row(self):
+        # The sim's board slot 7 (`opt 7`, the pick that stopped the line) is
+        # the eighth ROLL, which the live grid shows twelfth from the top.
+        # The emitter names the card, so the follower lands there without
+        # either side doing index arithmetic.
+        cmd = spc.match_step(
+            {"k": "grid", "ctx": "library", "event": "The Library",
+             "card": "Rage", "up": 0, "ord": 0, "opt": 7},
+            self.STATE, self._candidates())
+        self.assertEqual(cmd, "choose 12")
+        # And the old step's index would have flipped a different card --
+        # the silent half of the bug, had the screen kind not caught it.
+        self.assertEqual(self.LIVE[7], "Body Slam")
+
+    def test_every_row_is_reachable_by_identity(self):
+        candidates = self._candidates()
+        for i, name in enumerate(self.LIVE):
+            cmd = spc.match_step(
+                {"k": "grid", "ctx": "library", "card": name, "up": 0,
+                 "ord": 0}, self.STATE, candidates)
+            self.assertEqual(cmd, "choose %d" % i)
+
+    def test_a_card_the_grid_does_not_hold_still_stops(self):
+        with self.assertRaises(spc.Divergence):
+            spc.match_step(
+                {"k": "grid", "ctx": "library", "card": "Bash", "up": 0,
+                 "ord": 0}, self.STATE, self._candidates())
+
+    def test_a_bare_index_event_step_is_still_refused_here(self):
+        # The stop that produced the finding, pinned: nothing about this fix
+        # relaxes `_match_event`'s screen-kind check.
+        with self.assertRaises(spc.Divergence):
+            spc.match_step(
+                {"k": "event", "event": "The Library", "opt": 7, "index": 7},
+                self.STATE, self._candidates())
+
+
 class ConfigTest(unittest.TestCase):
     def test_unknown_keys_fail_loud(self):
         with tempfile.TemporaryDirectory() as tmp:

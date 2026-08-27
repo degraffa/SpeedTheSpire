@@ -1287,3 +1287,161 @@ TEST(SimSearchScriptMatchAndKeep, TheOneButtonPagesAndOtherEventsAreUntouched) {
     ASSERT_FALSE(rich.empty()) << err;
     EXPECT_NE(rich.find("\"index\":2"), std::string::npos);
 }
+
+// --- The Library's read pick: identity, because the live screen is a GRID ----
+//
+// S2.43, seed STS100009 ps0: a 224-step scripted line replayed live with zero
+// desyncs and then stopped at the floor-20 Library, because the emitter wrote
+// `{"k":"event","event":"The Library","opt":7,"index":7}` for a screen the
+// game does not host on the event page at all. The Library opens its twenty
+// rolled cards on `GridCardSelectScreen` (`gridSelectScreen.open(group, 1,
+// OPTIONS[4], false)`, TheLibrary.java:91), so the live dump advertises
+// `screen_type: GRID` with the twenty cards in `screen_state.cards` and
+// `choose 0..19`; the follower's `_match_event` refused the screen kind, which
+// is exactly what the stop contract asks it to do.
+//
+// The run layer models the same pick as twenty ordinary event options over the
+// event BOARD (city_events_ii.cpp `library_menu`) with no `grid_kind`, which is
+// why the generic event arm claimed it. The fix is the schema's own rule --
+// an option space whose members are dynamically rolled CARDS carries a card
+// identity, never a bare sim index -- and it is also the only derivation that
+// is safe: the live grid runs in REVERSE roll order (`group.addToBottom(card)`
+// at TheLibrary.java:83 is `group.add(0, c)`, CardGroup.java:459-461, and
+// nothing between there and `getGridScreenCards` sorts it), so a "corrected"
+// index would have had to be reversed too. The follower needs no new arm:
+// `_match_grid` already joins `screen_state.cards` by (id, upgrades, ordinal).
+namespace {
+
+// A controller parked on The Library's board with a hand-built read pile.
+// `run_begin` supplies a well-formed run; only the dialog state is synthetic,
+// which is the point -- the emitted identity must be a function of the board,
+// not of any seed.
+sts::engine::RunController AtLibraryBoard() {
+    sts::engine::RunController rc = sts::engine::run_begin(
+        sts::engine::seed_from_string("STS90001"), 20);
+    rc.phase = static_cast<uint8_t>(sts::engine::RunPhase::EVENT_DIALOG);
+    rc.event = sts::engine::EventDialogState{};
+    rc.event.event_id = static_cast<uint16_t>(EventId::THE_LIBRARY);
+    rc.event.screen = 1;  // the board (city_events_ii.cpp kLibraryBoard)
+    // Twenty distinct ids, in ROLL order -- the shape `library_choose`'s
+    // unique-by-card-id re-roll loop guarantees (TheLibrary.java:69-78).
+    for (int i = 0; i < sts::engine::kEventBoardCap; ++i) {
+        rc.event.board[i].card_id = static_cast<uint16_t>(10 + i);
+    }
+    return rc;
+}
+
+std::string LibraryStep(const sts::engine::RunController& rc, uint8_t opt) {
+    std::string err;
+    const std::string step = sts::planner::script_step_json(
+        rc, sts::engine::make_action(sts::engine::ActionVerb::CHOOSE, opt), 0,
+        err);
+    EXPECT_FALSE(step.empty()) << err;
+    return step;
+}
+
+// The value of a string-valued field, or "" when the field is absent.
+std::string StringField(const std::string& step, const char* key) {
+    const std::string k = std::string("\"") + key + "\":\"";
+    const std::size_t at = step.find(k);
+    if (at == std::string::npos) return {};
+    const std::size_t start = at + k.size();
+    const std::size_t end = step.find('"', start);
+    if (end == std::string::npos) return {};
+    return step.substr(start, end - start);
+}
+
+std::string BoardCardId(const sts::engine::RunController& rc, uint8_t slot) {
+    return std::string(sts::registry::card_game_id(
+        static_cast<sts::registry::CardId>(rc.event.board[slot].card_id)));
+}
+
+}  // namespace
+
+TEST(SimSearchScriptLibrary, ReadPickEmitsCardIdentityNotAnOptionIndex) {
+    const sts::engine::RunController rc = AtLibraryBoard();
+    // Slot 7 is STS100009's own pick (`opt 7`, the step that stopped).
+    const std::string step = LibraryStep(rc, 7);
+    ASSERT_FALSE(step.empty());
+    EXPECT_NE(step.find("\"k\":\"grid\""), std::string::npos) << step;
+    EXPECT_NE(step.find("\"ctx\":\"library\""), std::string::npos) << step;
+    EXPECT_NE(step.find("\"event\":\"The Library\""), std::string::npos)
+        << step;
+    EXPECT_EQ(StringField(step, "card"), BoardCardId(rc, 7)) << step;
+    EXPECT_NE(step.find("\"up\":0"), std::string::npos) << step;
+    EXPECT_NE(step.find("\"ord\":0"), std::string::npos) << step;
+    EXPECT_NE(step.find("\"opt\":7"), std::string::npos) << step;
+    // The step that stopped the line is exactly the one that must not survive:
+    // an `event` kind, or an `index` the follower would feed to `_match_event`.
+    EXPECT_EQ(step.find("\"k\":\"event\""), std::string::npos) << step;
+    EXPECT_EQ(step.find("\"index\":"), std::string::npos) << step;
+}
+
+TEST(SimSearchScriptLibrary, EverySlotNamesItsOwnCard) {
+    // The emitted identity is a function of the board slot alone -- no live
+    // index arithmetic anywhere in the step, so the grid's reverse ordering
+    // (CardGroup.addToBottom is a prepend) cannot desync the follower.
+    const sts::engine::RunController rc = AtLibraryBoard();
+    for (uint8_t slot = 0; slot < sts::engine::kEventBoardCap; ++slot) {
+        const std::string step = LibraryStep(rc, slot);
+        ASSERT_FALSE(step.empty());
+        EXPECT_EQ(StringField(step, "card"), BoardCardId(rc, slot))
+            << "board slot " << static_cast<int>(slot) << ": " << step;
+        EXPECT_NE(step.find("\"ord\":0"), std::string::npos)
+            << "the read pile is unique by card id, so every ordinal is 0: "
+            << step;
+    }
+}
+
+TEST(SimSearchScriptLibrary, TheOrdinalIsCountedInTheLiveReversedOrder) {
+    // The game's re-roll loop makes a duplicate impossible, so this state is
+    // synthetic -- but `ord` must still MEAN what the schema says, and the
+    // follower's `_nth_index` walks the live list, which is the board
+    // reversed. Two copies at slots 3 and 11: the live list meets slot 11
+    // first, so slot 11 is ordinal 0 and slot 3 is ordinal 1. A board-order
+    // count would say the opposite.
+    sts::engine::RunController rc = AtLibraryBoard();
+    rc.event.board[3].card_id = rc.event.board[11].card_id;
+    const std::string late = LibraryStep(rc, 11);
+    const std::string early = LibraryStep(rc, 3);
+    ASSERT_FALSE(late.empty());
+    ASSERT_FALSE(early.empty());
+    EXPECT_EQ(StringField(late, "card"), StringField(early, "card"));
+    EXPECT_NE(late.find("\"ord\":0"), std::string::npos) << late;
+    EXPECT_NE(early.find("\"ord\":1"), std::string::npos) << early;
+}
+
+TEST(SimSearchScriptLibrary, TheDialogPagesAndTheOtherBoardAreUntouched) {
+    // The Library's intro (Read / Sleep) and completion pages are ordinary
+    // dialog buttons on a real EVENT screen -- two options and one -- so they
+    // stay `event` steps with the enabled-only index. Only the twenty-option
+    // board screen is the GRID.
+    sts::engine::RunController rc = AtLibraryBoard();
+    rc.event.screen = 0;  // INTRO
+    const std::string read = LibraryStep(rc, 0);
+    ASSERT_FALSE(read.empty());
+    EXPECT_NE(read.find("\"k\":\"event\""), std::string::npos) << read;
+    EXPECT_NE(read.find("\"index\":0"), std::string::npos) << read;
+    const std::string sleep_step = LibraryStep(rc, 1);
+    ASSERT_FALSE(sleep_step.empty());
+    EXPECT_NE(sleep_step.find("\"k\":\"event\""), std::string::npos)
+        << sleep_step;
+    EXPECT_NE(sleep_step.find("\"index\":1"), std::string::npos) << sleep_step;
+
+    rc.event.screen = 2;  // DONE -- the one-button leave page
+    const std::string leave = LibraryStep(rc, 0);
+    ASSERT_FALSE(leave.empty());
+    EXPECT_NE(leave.find("\"k\":\"event\""), std::string::npos) << leave;
+    EXPECT_NE(leave.find("\"index\":0"), std::string::npos) << leave;
+
+    // The OTHER board event stays an `event` step BY DESIGN: Match and Keep's
+    // twelve cards are face DOWN on the event page itself, so there is no
+    // identity to emit and the screen-position `index` is the whole answer.
+    rc = AtMatchPlayBoard();
+    const std::string match = LibraryStep(rc, 0);
+    ASSERT_FALSE(match.empty());
+    EXPECT_NE(match.find("\"k\":\"event\""), std::string::npos) << match;
+    EXPECT_NE(match.find("\"event\":\"Match and Keep!\""), std::string::npos)
+        << match;
+    EXPECT_EQ(match.find("\"ctx\":\"library\""), std::string::npos) << match;
+}

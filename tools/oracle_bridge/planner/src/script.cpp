@@ -294,6 +294,78 @@ void put_claim(Json& j, const RunController& rc, uint8_t index) {
     return rank;
 }
 
+// --- The Library's read pick: the other DYNAMIC-CARD event option space ------
+//
+// The Library hosts its twenty-card read on GridCardSelectScreen
+// (`AbstractDungeon.gridSelectScreen.open(group, 1, OPTIONS[4], false)`,
+// TheLibrary.java:91), so the live dump is NOT an event page at all: it
+// advertises `screen_type: GRID`, puts the twenty cards in
+// `screen_state.cards` (GameStateConverter.getGridScreenState -> `cards`,
+// filled from ChoiceScreenUtils.getGridScreenCards) and offers
+// `choose 0..19`. The run layer models the same pick as twenty ordinary event
+// options over the event BOARD (city_events_ii.cpp `library_menu`) with no
+// `grid_kind`, so the generic event arm below emitted
+// `{"k":"event","event":"The Library","opt":7,"index":7}` and the follower's
+// `_match_event` -- correctly -- stopped the line on the screen kind. That is
+// the S2.43 STS100009 ps0 finding, step 224, floor 20, Act 2.
+//
+// TWO INDEPENDENT REASONS THE FIX IS IDENTITY, NOT A CORRECTED INDEX.
+//
+// 1. The schema principle (planner README): "stable identity, never a bare sim
+//    index". This option space's members are cards rolled at the press of
+//    Read, so a card identity is exactly what the live screen can be joined on
+//    -- `_match_grid` already walks `screen_state.cards` by (id, upgrades,
+//    same-identity ordinal), so the emitter needs no new follower arm.
+//
+// 2. The index would have to be REVERSED anyway. The Java builds the group
+//    with `group.addToBottom(card)` in roll order (TheLibrary.java:83) and
+//    `addToBottom` is a PREPEND (`this.group.add(0, c)`,
+//    CardGroup.java:459-461); `GridCardSelectScreen.open` only assigns
+//    `targetGroup` and never sorts it (:437-457, and `callOnOpen` :482 is
+//    controller-cursor bookkeeping), and `getGridScreenCards` hands
+//    CommunicationMod that same list (ChoiceScreenUtils.java:454-458). So the
+//    LIVE grid runs in REVERSE roll order while the sim's board is roll order.
+//    The replay harness proved that positionally against a real capture
+//    (command_map.hpp's Library arm; its first draft assumed the identity
+//    mapping and STS432432 refuted it on row 0). The emitter deliberately does
+//    not depend on the reversal -- only the ordinal below does, and only to
+//    stay honest about what `ord` means.
+//
+// The board is unique BY CARD ID by construction (the re-roll loop,
+// TheLibrary.java:69-78, mirrored in `library_choose`), so the same-identity
+// ordinal is always 0. It is still COUNTED, in the live (reversed) order the
+// follower's `_nth_index` walks, so the field means what the schema says
+// instead of being a hard-coded zero that would rot silently.
+//
+// Recognized BY SHAPE, the way the Match and Keep arm above is: the Library's
+// intro page publishes two options and its completion page one, so a
+// twenty-option menu on this event id is the read pick and nothing else.
+[[nodiscard]] bool is_library_board_pick(
+    const RunController& rc, const engine::EventDialogMenu& menu,
+    uint8_t arg0) noexcept {
+    return static_cast<registry::EventId>(rc.event.event_id) ==
+               registry::EventId::THE_LIBRARY &&
+           menu.count == static_cast<uint8_t>(engine::kEventBoardCap) &&
+           arg0 < menu.count && menu.enabled[arg0] &&
+           rc.event.board[arg0].card_id != 0;
+}
+
+void put_board_card(Json& j, const engine::EventDialogState& es, uint8_t count,
+                    uint8_t slot) {
+    const engine::EventBoardCard& c = es.board[slot];
+    j.kv("card", sts::registry::card_game_id(
+                     static_cast<sts::registry::CardId>(c.card_id)));
+    j.kv("up", static_cast<long long>(c.upgrade));
+    // The live list is the board REVERSED (see above), so the slots that
+    // PRECEDE this one in the follower's scan are the HIGHER board indices.
+    int ord = 0;
+    for (int i = static_cast<int>(count) - 1; i > static_cast<int>(slot); --i) {
+        const engine::EventBoardCard& o = es.board[i];
+        if (o.card_id == c.card_id && o.upgrade == c.upgrade) ++ord;
+    }
+    j.kv("ord", ord);
+}
+
 }  // namespace
 
 std::string script_step_json(const RunController& rc, Action a, uint32_t index,
@@ -606,12 +678,26 @@ std::string script_step_json(const RunController& rc, Action a, uint32_t index,
                 put_deck_card(j, rc.run, arg0);
                 break;
             }
-            j.kv("k", "event");
+            const engine::EventDialogImpl* impl =
+                engine::event_dialog_impl(rc.event.event_id);
+            engine::EventDialogMenu menu{};
+            if (impl != nullptr) impl->build_menu(rc, rc.event, menu);
             // Qualified: the registry's event_game_id is also visible via ADL
             // (the seed_scan.cpp jsonl writer hit the same ambiguity).
-            j.kv("event", sts::planner::event_game_id(
-                              static_cast<registry::EventId>(
-                                  rc.event.event_id)));
+            const std::string_view event_id = sts::planner::event_game_id(
+                static_cast<registry::EventId>(rc.event.event_id));
+            // The Library's read pick is a GRID live, joined by card identity
+            // (`is_library_board_pick` above owns the derivation).
+            if (impl != nullptr && is_library_board_pick(rc, menu, arg0)) {
+                j.kv("k", "grid");
+                j.kv("ctx", "library");
+                j.kv("event", event_id);
+                put_board_card(j, rc.event, menu.count, arg0);
+                j.kv("opt", static_cast<long long>(arg0));
+                break;
+            }
+            j.kv("k", "event");
+            j.kv("event", event_id);
             j.kv("opt", static_cast<long long>(arg0));
             // The live `choose N` indexes CommunicationMod's choice_list,
             // which lists ENABLED buttons only (and, on Match and Keep's play
@@ -620,14 +706,8 @@ std::string script_step_json(const RunController& rc, Action a, uint32_t index,
             // -- `event_live_choose_index` above owns the translation and the
             // reasoning, command_map.hpp documents the two index spaces, and
             // this is the inverse direction.
-            const engine::EventDialogImpl* impl =
-                engine::event_dialog_impl(rc.event.event_id);
-            long long enabled_index = -1;
-            if (impl != nullptr) {
-                engine::EventDialogMenu menu{};
-                impl->build_menu(rc, rc.event, menu);
-                enabled_index = event_live_choose_index(rc, menu, arg0);
-            }
+            const long long enabled_index =
+                impl != nullptr ? event_live_choose_index(rc, menu, arg0) : -1;
             j.kv("index", enabled_index);
             break;
         }
