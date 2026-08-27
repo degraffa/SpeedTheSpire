@@ -59,10 +59,19 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
     public static final String STRIP_DRAW_OPTION = "stripDrawSuppression";
     public static final String STRIP_ANIM_OPTION = "stripAnimationCollapse";
     public static final String STRIP_CADENCE_OPTION = "stripFastCadence";
+    // SpeedTheSpire fork addition (s2-design §5 trap 5, task S2.43): pin the
+    // wall clock the SecretPortal shrine gate reads at PINNED_PLAYTIME, so the
+    // gate is shut for the whole run exactly as the simulator has it and a deep
+    // scripted capture stays reproducible past 800 s. Private like
+    // ORACLE_BLOCK_OPTION: its readers (OraclePlaytimePinPatch for the gate,
+    // GameStateConverter for the anchor) go through getOraclePlaytimePin()
+    // rather than the key. See that class and PROTOCOL.md §5.4.
+    private static final String ORACLE_PLAYTIME_PIN_OPTION = "oraclePlaytimePin";
     private static final String DEFAULT_COMMAND = "";
     private static final long DEFAULT_TIMEOUT = 10L;
     private static final boolean DEFAULT_VERBOSITY = true;
     private static final boolean DEFAULT_ORACLE_BLOCK = true;
+    private static final boolean DEFAULT_ORACLE_PLAYTIME_PIN = true;
     public static final boolean DEFAULT_STRIP = true;
 
     public CommunicationMod(){
@@ -76,6 +85,7 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
             defaults.put(INITIALIZATION_TIMEOUT_OPTION, Long.toString(DEFAULT_TIMEOUT));
             defaults.put(VERBOSE_OPTION, Boolean.toString(DEFAULT_VERBOSITY));
             defaults.put(ORACLE_BLOCK_OPTION, Boolean.toString(DEFAULT_ORACLE_BLOCK));
+            defaults.put(ORACLE_PLAYTIME_PIN_OPTION, Boolean.toString(DEFAULT_ORACLE_PLAYTIME_PIN));
             defaults.put(STRIP_DRAW_OPTION, Boolean.toString(DEFAULT_STRIP));
             defaults.put(STRIP_ANIM_OPTION, Boolean.toString(DEFAULT_STRIP));
             defaults.put(STRIP_CADENCE_OPTION, Boolean.toString(DEFAULT_STRIP));
@@ -251,6 +261,25 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
                 });
         settingsPanel.addUIElement(oracleBlockOption);
 
+        // SpeedTheSpire fork addition (s2-design §5 trap 5, task S2.43): pin the
+        // SecretPortal gate's wall clock. Off = retail gate AND a real-wall-clock
+        // `oracle.playtime` anchor, i.e. the pre-2026-08-27 fork behaviour.
+        ModLabeledToggleButton oraclePlaytimePinOption = new ModLabeledToggleButton(
+                "Pin SecretPortal's playtime gate (oracle contract)",
+                350, 250, Settings.CREAM_COLOR, FontHelper.charDescFont,
+                getOraclePlaytimePin(), settingsPanel, modLabel -> {},
+                modToggleButton -> {
+                    if (communicationConfig != null) {
+                        communicationConfig.setBool(ORACLE_PLAYTIME_PIN_OPTION, modToggleButton.enabled);
+                        try {
+                            communicationConfig.save();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+        settingsPanel.addUIElement(oraclePlaytimePinOption);
+
         // SpeedTheSpire fork additions (stage-b-design §2.2, task B1.3): one
         // toggle per rendering-strip family. Changing fast cadence only takes
         // effect on the next game launch (it is read at DesktopLauncher init).
@@ -397,6 +426,25 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
             return DEFAULT_ORACLE_BLOCK;
         }
         return communicationConfig.getBool(ORACLE_BLOCK_OPTION);
+    }
+
+    // SpeedTheSpire fork addition (s2-design §5 trap 5, task S2.43): when true,
+    // the SecretPortal shrine gate (AbstractDungeon.java:1929-1933) reads a
+    // pinned 0.0f wall clock instead of CardCrawlGame.playtime, and the
+    // `oracle.playtime` anchor records that same effective value -- so a
+    // scripted capture past 800 s draws the shrine index the simulator draws.
+    // Read live through the mod's SpireConfig: by the time a `?` room resolves a
+    // shrine the config is long loaded. Absent from an older config.properties
+    // it falls through to the Properties defaults (i.e. ON), which is why the
+    // campaign orchestrator's generated config need not name it.
+    // Read by OraclePlaytimePinPatch (the gate) and GameStateConverter
+    // .getOracleState (the anchor) -- one flag, one helper, so the two can never
+    // disagree about what the gate saw.
+    public static boolean getOraclePlaytimePin() {
+        if (communicationConfig == null) {
+            return DEFAULT_ORACLE_PLAYTIME_PIN;
+        }
+        return communicationConfig.getBool(ORACLE_PLAYTIME_PIN_OPTION);
     }
 
     // SpeedTheSpire fork additions (stage-b-design §2.2, task B1.3). The two

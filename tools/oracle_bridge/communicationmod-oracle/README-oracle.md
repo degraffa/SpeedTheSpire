@@ -76,9 +76,27 @@ the same patch classes and would double-patch.
 | 1. Oracle state block (§2.5) | landed at B1.2 (`GameStateConverter`, flag `oracleBlock`) |
 | 2. Rendering-strip / fast-forward (§2.2) | landed at B1.3 (see below) |
 | 3. Campaign QoL (fast startup, restart hooks) | scoped at B1.4 with the driver |
+| 4. Oracle-contract pins (a retail behavior that is not a function of `(seed, actions)`) | `patches/OraclePlaytimePinPatch`, landed at S2.43 (2026-08-27), flag `oraclePlaytimePin` — see below |
 
 B1.1 = build pipeline only: the fork jar must reproduce the stock jar's
 behavior byte-for-byte (B0.2 capture replay, uuid-normalized per PROTOCOL.md).
+
+## Oracle-contract pin: SecretPortal's wall clock (S2.43, `oraclePlaytimePin`)
+
+`AbstractDungeon.getShrine`'s SecretPortal candidate is gated on
+`CardCrawlGame.playtime >= 800.0f` (`AbstractDungeon.java:1929-1933`), and the
+draw is by INDEX into the surviving list (`:1937`) — so past 800 s of live play
+every Act-3 `?` room resolved to a different event than a sim-emitted script
+expects. `OraclePlaytimePinPatch` is a `@SpireInstrumentPatch` that replaces
+**only that one field read** with a pinned `0.0f`, and `oracle.playtime` is
+emitted from the same helper so the capture records the effective value the gate
+saw. Every other `playtime` reader — the save file, metrics, SPEED_CLIMBER, the
+end-of-run screens — still sees the true wall clock. Full contract, the
+nine-reader audit, and the offline verification: `../PROTOCOL.md` §5.4.
+
+**This flag is part of the equivalence baseline.** `oraclePlaytimePin` defaults
+**on** and changes game behavior, so reproducing stock/pre-B1.3 behavior now
+means turning it off **as well as** the three strip flags below.
 
 ## Rendering-strip / fast-forward patches (B1.3, design §2.2)
 
@@ -86,8 +104,9 @@ Three individually-toggleable patch families make wall-clock time stop mattering
 without changing gameplay state or queue order ("remove time and pixels, never
 order or state"). Config flags live in the same
 `SpireConfig("CommunicationMod","config")` store, all default **on**; with all
-three **off** the fork is byte-identical to its pre-B1.3 behaviour (the
-strip-equivalence baseline). Each is also a toggle in the mod-settings panel.
+three **off** — and, since S2.43, `oraclePlaytimePin` off too — the fork is
+byte-identical to its pre-B1.3 behaviour (the strip-equivalence baseline). Each
+is also a toggle in the mod-settings panel.
 
 | Flag (`config.properties`) | Patch class | Seam (provenance into `SlayTheSpireDecompiled`) |
 |---|---|---|

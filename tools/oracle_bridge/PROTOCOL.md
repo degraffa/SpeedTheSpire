@@ -511,7 +511,7 @@ bit-exact differential testing needs — the frozen inventory of design §2.5.
 | `floor` | int | 10 | `AbstractDungeon.floorNum` | anchor |
 | `act` | int | 10 | `AbstractDungeon.actNum` | anchor |
 | `ascension` | int | 10 | `AbstractDungeon.ascensionLevel` | anchor |
-| `playtime` | float | 10 | `CardCrawlGame.playtime` | s2-design §5 trap 5 duty: wall-clock seconds, recorded so a violated SecretPortal `>= 800.0f` pin is detectable. Still NEVER diffed and still `oracle` — but READ since 2026-08-27 (S2.43): `--replay`/`--event` hand it to `RunController::playtime_seconds` so an Act-3 `getShrine` draw picks the index the game picked. The engine's own default is 0.0f, i.e. the pin |
+| `playtime` | float | 10 | `OraclePlaytimePinPatch.effectivePlaytime()` | s2-design §5 trap 5 duty. **The EFFECTIVE wall clock the SecretPortal gate read**, not the raw `CardCrawlGame.playtime` — since 2026-08-27 (S2.43) the fork pins that gate, so this is `0.0f` whenever `oraclePlaytimePin` is on and the true `CardCrawlGame.playtime` when it is off; **§5.4** has the contract. Still NEVER diffed and still `oracle` — but READ since 2026-08-27: `--replay`/`--event` hand it to `RunController::playtime_seconds` so an Act-3 `getShrine` draw picks the index the game picked. The engine's own default is 0.0f, i.e. the pin |
 | `streams` | object | 1-2 | see §5.2 | the 14 RNG streams |
 | `cardBlizzRandomizer` | int | 3 | `AbstractDungeon.cardBlizzRandomizer` | card-reward rarity pity offset |
 | `blizzardPotionMod` | int | 4 | `AbstractRoom.blizzardPotionMod` | potion-drop ratchet (±10) |
@@ -550,3 +550,81 @@ emitted as **signed** Java longs. Provenance: `Random.java:17-18`
   bit-for-bit (read off `cardRandomRng` at `counter==0`).
 - `blizzardPotionMod` ratchets across combat rewards (0→10→0→10 over floors 1-3).
 - `eventList` shrinks 11→10 when an event fires (floor-5 `?`→"Liars Game").
+
+### 5.4 The SecretPortal playtime pin (fork behavior change, S2.43 — 2026-08-27)
+
+**The contract is the patched fork, not the retail client.** This is the same
+oracle-contract shape as the Discovery wasted-regens boundary and the
+Explosive-Potion THORNS boundary: where a retail behavior is not a function of
+`(seed, actions)`, the fork is what moves, and the capture is scored against the
+fork.
+
+**What retail does.** `AbstractDungeon.getShrine` builds a candidate list `tmp`
+and draws `tmp.get(rng.random(tmp.size() - 1))` (`AbstractDungeon.java:1937`).
+One candidate is gated on wall clock:
+
+```java
+case "SecretPortal":
+    if (!(CardCrawlGame.playtime >= 800.0f) || !id.equals("TheBeyond"))
+        continue block22;              // AbstractDungeon.java:1929-1933
+```
+
+An omitted candidate does not go merely *unseen* — it **shortens `tmp` and moves
+the drawn index**. The simulator pins that predicate false (`event_framework.hpp`,
+the PLAYTIME block; s2-design §5 trap 5), so before this patch **every Act-3 `?`
+room past 800 s of live wall clock resolved to a different event than the
+sim-emitted script expected**, and the capture desynced from its own script
+mid-run. Live witnesses: STS108107 at 924.34705 s and STS153269 at 960.92236 s.
+
+**What the fork now does.** `patches/OraclePlaytimePinPatch` is a
+`@SpireInstrumentPatch` on `AbstractDungeon.getShrine(Random)` whose `ExprEditor`
+replaces **that one `getstatic CardCrawlGame.playtime`** with
+`OraclePlaytimePinPatch.effectivePlaytime()`, which returns `0.0f` (the sim's
+`kUnmodelledPlaytimeSeconds`) while the pin is on. The gate is therefore shut for
+the whole run, exactly as the simulator has it, and a scripted deep capture stays
+reproducible at any depth. Trap 5's sim-side pin is now **mirrored** by the
+capture side instead of diverging from it.
+
+**The anchor stays truthful.** `oracle.playtime` (§5.1) is emitted from the *same*
+`effectivePlaytime()` helper (`GameStateConverter.getOracleState`), so the capture
+records the **effective** value the gate saw rather than a wall clock the gate
+never consulted. Gate and anchor are one function and cannot disagree; `--replay`
+feeds the recorded value to `RunController::playtime_seconds`, so the replay's
+gate input is exactly the game's gate input. The field is still dispositioned
+`oracle` and still never diffed.
+
+**Blast radius — every `CardCrawlGame.playtime` reader in the 12-18-2022 tree,
+and its disposition.** Only the first row is patched; the instrument patch is
+scoped to `getShrine`, so the field itself still accumulates normally and the
+other eight readers see the true wall clock.
+
+| Reader | What it does | Disposition |
+|---|---|---|
+| `AbstractDungeon.java:1930` | the SecretPortal `>= 800.0f` shrine gate | **PATCHED** — the whole point; it is the only reader that branches seeded-RNG-visible state |
+| `AbstractDungeon.java:2001` | `playtime += Gdx.graphics.getDeltaTime()` under `!CardCrawlGame.stopClock` — the sole accumulator | untouched; the field still tracks real wall clock (deliberately: nothing else is perturbed) |
+| `AbstractDungeon.java:2601`, `CardCrawlGame.java:599`, `:1246`, `:891` | resets to `0.0f` at floor ≤ 1 / new game / main-menu return, and reload from `saveFile.play_time` | untouched; unaffected by a read-site patch |
+| `SaveFile.java:190`, `:349` | `play_time` / `metric_playtime` written into the save | untouched — the save keeps the true elapsed time, so a save/continue restores the same clock the game had |
+| `Metrics.java:117` | `addData("playtime", …)` in the run-metrics upload | untouched; telemetry only, and no campaign run uploads |
+| `AbstractMonster.java:1063` | `playtime <= 1200.0f` → `UnlockTracker.unlockAchievement("SPEED_CLIMBER")` on the final-act boss kill | untouched. This is the ONLY other reader that does anything but present a number, and holding the *field* at zero would have made it fire spuriously — the read-site patch is what avoids that. It is also profile-side (achievement), never a run-pool gate (design §1.1) |
+| `DeathScreen.java:74`, `VictoryScreen.java:73`, `GameOverScreen.java:287`, `:379-383` | end-of-run timing display, the fastest-win leaderboard upload, score-bonus tiers | untouched; presentation/leaderboard, outside the dumped state |
+| `SaveSlot.java:79-87`, `RunHistoryScreen.java:1103`, `StatsScreen.updateVictoryTime`/`incrementPlayTime` | main-menu slot time, run-history header, profile stats | untouched; presentation |
+
+**The flag.** `oraclePlaytimePin` in the same `SpireConfig("CommunicationMod",
+"config")` store, **default `true`**, also a mod-settings toggle. The campaign
+orchestrator's generated `config.properties` does not name it, so it falls
+through to that default (`SpireConfig` layers the file over the defaults
+`Properties`). With it **false**, both the gate and the anchor read the real
+`CardCrawlGame.playtime` again — i.e. the pre-2026-08-27 fork bit for bit — so
+this flag, not only the three strip flags, must be off to reproduce the
+stock-equivalence baseline (README-oracle "Rendering-strip" section).
+
+**Verified without launching the game.** ModTheSpire's `InstrumentPatchInfo
+.doPatch` is exactly `Method.invoke(null)` → `(ExprEditor)` →
+`CtBehavior.instrument(editor)`. Running that same sequence with the patch's own
+`Instrument()` against the real `AbstractDungeon` bytecode from
+`desktop-1.0.jar` shows: exactly **1** `CardCrawlGame.playtime` read in
+`getShrine` before, `instrumentedReads == 1`, **0** reads and exactly **1**
+`effectivePlaytime()` call after, `AbstractDungeon.update`'s read/write pair
+unchanged, and the patched class still compiling to bytecode. The editor also
+logs one line per replacement, so a game-version drift that silently matched
+nothing shows up in `mts_launch<N>.log` rather than only in a divergent capture.

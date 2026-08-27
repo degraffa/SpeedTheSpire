@@ -34,6 +34,7 @@ import com.megacrit.cardcrawl.shop.StorePotion;
 import com.megacrit.cardcrawl.shop.StoreRelic;
 import com.megacrit.cardcrawl.ui.buttons.LargeDialogOptionButton;
 import com.megacrit.cardcrawl.ui.panels.EnergyPanel;
+import communicationmod.patches.OraclePlaytimePinPatch;
 import communicationmod.patches.UpdateBodyTextPatch;
 
 import java.lang.reflect.Field;
@@ -174,12 +175,16 @@ public class GameStateConverter {
         oracle.put("act", AbstractDungeon.actNum);
         oracle.put("ascension", AbstractDungeon.ascensionLevel);
         // s2-design section 5 trap 5: the simulator pins SecretPortal's
-        // playtime gate (>= 800s, AbstractDungeon.java:1929-1933) FALSE, and
-        // the capture side must record playtime so a violated pin is
-        // detectable rather than silent. Wall-clock, deliberately outside
-        // the diffed state -- the scorer reads it only when a shrine-list
-        // divergence implicates the gate.
-        oracle.put("playtime", CardCrawlGame.playtime);
+        // playtime gate (>= 800s, AbstractDungeon.java:1929-1933) FALSE.
+        // Since S2.43 (2026-08-27) the FORK pins it too -- OraclePlaytimePinPatch
+        // replaces the gate's own read -- so this anchor records the EFFECTIVE
+        // value the gate saw, not a wall clock the gate never consulted. Same
+        // helper on both sides, so gate and anchor cannot disagree: with the
+        // `oraclePlaytimePin` flag on it is 0.0f, with it off it is the true
+        // CardCrawlGame.playtime and both the gate and this field revert to
+        // retail behaviour. `--replay` feeds it to
+        // RunController::playtime_seconds; it is still never diffed.
+        oracle.put("playtime", OraclePlaytimePinPatch.effectivePlaytime());
 
         // Rows 1-2 -- the 13 dungeon streams (AbstractDungeon.java:149-161) plus
         // Neow's event-scoped 14th (NeowEvent.rng), each {counter, s0, s1}.

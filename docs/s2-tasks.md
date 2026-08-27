@@ -2759,6 +2759,62 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   body, still unlanded per S2.33) is a policy question this task
   deliberately did not decide.
 
+  **2026-08-27 — the capture side now MIRRORS trap 5's pin instead of
+  diverging from it: the fork holds SecretPortal's wall clock at 0.**
+  The paragraph above fixed the REPLAY direction (`--replay`/`--event`
+  feed the capture's `oracle.playtime` to `RunController::playtime_seconds`,
+  so a recorded clock scores correctly either way). It did not fix the
+  SCRIPTED direction: a script the sim emits is computed at playtime 0, so
+  a live capture crossing 800 s still desynced from its own script at the
+  next Act-3 `?` room and turned every later record into noise (the two
+  witnesses were STS108107 at 924 s and STS153269 at 961 s). So the ORACLE
+  moved. `patches/OraclePlaytimePinPatch` is a `@SpireInstrumentPatch` on
+  `AbstractDungeon.getShrine(Random)` whose `ExprEditor` replaces the ONE
+  `getstatic CardCrawlGame.playtime` inside that method
+  (AbstractDungeon.java:1930) with `effectivePlaytime()`, pinned to `0.0f`
+  = the engine's own `kUnmodelledPlaytimeSeconds`, under the new
+  default-on config flag `oraclePlaytimePin`. This is the established
+  **patched-fork oracle contract** — the contract is the patched fork, not
+  the retail client — precedent: the Discovery wasted-regens boundary and
+  the Explosive-Potion THORNS boundary. THE ANCHOR STAYS TRUTHFUL:
+  `oracle.playtime` is emitted from that same `effectivePlaytime()` helper
+  (`GameStateConverter.getOracleState`), so a capture records the
+  EFFECTIVE value the gate saw rather than a wall clock the gate never
+  consulted — gate and anchor are one function and cannot disagree, and
+  the replay's gate input therefore stays exactly the game's gate input.
+  The field is still dispositioned `oracle` and still never diffed, and
+  the translator is untouched (no new key, so no schema drift).
+  WHY A READ-SITE PATCH AND NOT A ZEROED ACCUMULATOR: all nine
+  `CardCrawlGame.playtime` readers in the 12-18-2022 tree were audited
+  (PROTOCOL.md §5.4 carries the table) and one of them is not presentation
+  — `AbstractMonster.java:1063`'s `playtime <= 1200.0f` SPEED_CLIMBER
+  unlock — so holding the
+  FIELD at zero would have fired it spuriously; the instrument patch leaves
+  the accumulator (AbstractDungeon.java:2001), the save file, metrics, the
+  achievement and every screen reading the true clock. VERIFIED WITHOUT
+  LAUNCHING THE GAME: ModTheSpire's `InstrumentPatchInfo.doPatch` is
+  `Method.invoke(null)` → `(ExprEditor)` → `CtBehavior.instrument`, and
+  running that same sequence with the patch's own `Instrument()` against
+  the real `AbstractDungeon` bytecode out of `desktop-1.0.jar` gives 1
+  playtime read in `getShrine` before, `instrumentedReads == 1`, 0 reads
+  and 1 `effectivePlaytime()` call after, `update`'s read/write pair
+  unchanged, and a class that still compiles; `effectivePlaytime()` at
+  STS108107's captured 924.34705 s returns 0.0f, i.e. the gate predicate is
+  false. Sim side: **no change at all** — this is a fork + docs patch, and
+  the engine's pin (`SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond`,
+  `S243SecretPortalPlaytimeGate.*`) is what the fork is now matching.
+  DEPLOYMENT: the new jar pin is
+  `ABD95268462FA31E7F7498B45BA4539E3731CC38E59850B547D03AE6F372A4C1`
+  (`build_fork.ps1 -CheckDeterminism`, deployment itself left to the
+  orchestrator). Captures taken before it keep their real recorded clock
+  and keep replaying correctly, so the two cohorts stay distinguishable by
+  the artifact header's `fork_jar_sha256`. Measured in passing, flagged and
+  NOT changed here: the jar actually on disk in the game install hashes
+  `370CBFA8…`, which is what this task's base commit's fork source rebuilds
+  to byte-for-byte — so the `9BC4BF6A…` figure the fork-redeploy row and the
+  S2.43 dashboard cite for the 2026-08-26 redeploy does not describe the
+  deployed artifact.
+
   **2026-08-27 — STS103364's terminal divergence is closed: a HEAL resolved
   past the player's death and un-killed him (`thorns-terminal`).** The lead
   above named the right family and the wrong mechanism. It is NOT a mutual
