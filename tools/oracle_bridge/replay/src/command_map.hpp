@@ -840,6 +840,62 @@ struct ShopTarget {
     return -1;
 }
 
+// --- the A20 double-boss handoff --------------------------------------------
+//
+// THE ONE PLACE THE SIMULATOR IS DELIBERATELY A ROOM AHEAD OF THE CAPTURE.
+//
+// When the FIRST Act-3 boss dies at ascension 20, the game does not open a
+// reward screen: AbstractRoom.java:327 guards dropReward() /
+// addPotionToRewards() / combatRewardScreen.open() on
+// `!(this instanceof MonsterRoomBoss) || !id.equals("TheBeyond") ||
+// Settings.isEndless`, all three false here. With no screen up and the room's
+// phase COMPLETE, ChoiceScreenUtils.getCurrentChoiceType (:71-83) labels the
+// dump `COMPLETE` and offers exactly one button, `proceed`
+// (getConfirmButtonText :337-339, pressConfirmButton :371-372 ->
+// clickProceedButton). Pressing it runs ProceedButton.update :97-110 --
+// `currentRoom instanceof MonsterRoomBoss` && `id.equals("TheBeyond")` &&
+// `ascensionLevel >= 20 && bossList.size() == 2` -> goToDoubleBoss (:210-220):
+// bossKey = bossList.get(0), a synthetic MapRoomNode(-1, 15) carrying a fresh
+// MonsterRoomBoss, then nextRoomTransitionStart().
+//
+// THE ENGINE HAS NO SUCH SCREEN, ON PURPOSE. run_advance.cpp's Act-3 boss arm
+// takes that whole branch inline the moment the first boss dies -- the same
+// `bosses_left_after_entry_pop == 2` algebra, then next_room_transition into
+// the second boss room -- because the press carries NO PLAYER DECISION (no
+// reward to claim, no map to pick from), which is why S2.28 released rather
+// than spent a MoveCat for it. So at the capture's COMPLETE record the sim has
+// already run the transition and is one floor and one battle-start into the
+// second boss room, and the record's own state cannot be compared to it: the
+// three-to-four fields that differ are precisely what the crossing writes --
+// ++floorNum (AbstractDungeon.java:1741), the relic onEnterRoom fan-out (Maw
+// Bank's +12 gold, MawBank.java:31-34) and the second fight's atBattleStart
+// (Pantograph's +25 heal, Pantograph.java:31-40; the counter relics latching
+// from -1 to 0).
+//
+// This predicate is the gate for BOTH sides of the seam -- `map_command`'s
+// COMPLETE arm below, which must NOT re-press a transition the engine already
+// made, and `replay_one`'s comparison, which compares the sim against the
+// capture's POST-proceed record instead. It is structural rather than
+// field-shaped on purpose: a field-set recognizer would have to enumerate
+// every relic whose counter atBattleStart happens to latch, and would then be
+// a place a real divergence could hide.
+[[nodiscard]] inline bool is_double_boss_handoff(const RunController& rc,
+                                                 const ScreenInfo& s) noexcept {
+    return s.screen_type == "COMPLETE" && s.room_type == "MonsterRoomBoss" &&
+           rc.run.ascension >= 20 && rc.run.act == sts::engine::kFinalAct &&
+           // The sim is INSIDE the second fight -- next_room_transition enters
+           // the room and MonsterRoomBoss.onPlayerEntry starts its combat.
+           rc.phase == static_cast<uint8_t>(RunPhase::COMBAT) &&
+           rc.room_type == static_cast<uint8_t>(RoomType::Boss) &&
+           // Exactly ONE Act-3 boss room completed. boss_cursor counts rooms
+           // LEFT, not bossList pops (next_room_transition_impl's note), so 1
+           // is the state between the two bosses and nothing else: it is 0
+           // inside the first room and the act transition resets it.
+           rc.boss_cursor == 1 &&
+           // ...and the crossing the capture has not made yet.
+           static_cast<int>(rc.run.floor) == s.floor + 1;
+}
+
 [[nodiscard]] inline MappedCommand map_command(const RunController& rc, const ScreenInfo& s,
                                         const std::string& cmd) {
     const std::vector<std::string> p = split_ws(cmd);
@@ -911,6 +967,51 @@ struct ShopTarget {
             return m;
         }
         m.reason = "combat command '" + verb + "' has no run-layer analogue";
+        return m;
+    }
+
+    // A room sitting at RoomPhase.COMPLETE with NO screen over it
+    // (ChoiceScreenUtils.getCurrentChoiceType :80-83: not a chest, shop, rest
+    // or event room, `actionManager.isEmpty()`, not fading). Every ordinary
+    // combat opens COMBAT_REWARD over its room and every other room type has
+    // its own label, so within S2's scope this screen has exactly TWO
+    // producers, and they are the two Act-3 boss rooms that
+    // AbstractRoom.java:327 denies a reward screen to. Both are transitions
+    // the engine has ALREADY made by the time the capture shows the button,
+    // and both are therefore elisions rather than presses.
+    if (s.screen_type == "COMPLETE") {
+        if (verb == "proceed") {
+            // 1. The A20 double-boss handoff (see is_double_boss_handoff): the
+            //    press is ProceedButton's goToDoubleBoss, which run_advance.cpp
+            //    ran inline off the first boss's death. Re-pressing anything
+            //    here would drive a live combat.
+            if (is_double_boss_handoff(rc, s)) {
+                m.kind = MapKind::NOOP;
+                return m;
+            }
+            // 2. The LAST Act-3 boss. The same ProceedButton branch falls to
+            //    `else if (!Settings.isEndless) goToVictoryRoomOrTheDoor()`
+            //    (:104-105, :199-208) -- the VictoryRoom / Door surface that
+            //    belongs to S3's keys, which is exactly where the run layer
+            //    ends the run instead (run_advance.hpp's run_is_victory, and
+            //    the Act-3 arm's "the run ends here"). The records after it are
+            //    the Spire-Heart cinematic the translator already drops.
+            if (sts::engine::run_is_victory(rc)) {
+                m.kind = MapKind::TERMINAL;
+                return m;
+            }
+            m.reason =
+                "a COMPLETE-screen `proceed` that is neither the A20 "
+                "double-boss handoff nor the finished Act-3 victory; the sim "
+                "is in " +
+                std::string(phase_name(rc.phase)) + " at floor " +
+                std::to_string(static_cast<int>(rc.run.floor)) +
+                " (capture floor " + std::to_string(s.floor) +
+                ", boss rooms completed " +
+                std::to_string(static_cast<int>(rc.boss_cursor)) + ")";
+            return m;
+        }
+        m.reason = "COMPLETE-screen command '" + verb + "' is not modelled";
         return m;
     }
 

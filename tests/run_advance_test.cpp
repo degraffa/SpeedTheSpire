@@ -3905,6 +3905,39 @@ TEST(BossVictory, TheActThreeBossIsTheTerminalAndItsMaskIsEmpty) {
     EXPECT_TRUE(run_is_victory(rc));
 }
 
+// play_out_combat loops while phase == COMBAT, and the double-boss crossing
+// lands in ANOTHER combat -- so the first Act-3 fight needs an explicit
+// floor-change stop instead, or the helper plays the second boss un-weakened.
+// Shared by the two double-boss tests below.
+void play_out_combat_until_the_floor_changes(RunController& rc,
+                                             uint16_t first_floor) {
+    StepResult res{};
+    for (int step = 0; step < 800; ++step) {
+        if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT) ||
+            rc.run.floor != first_floor) {
+            break;
+        }
+        RunActionMask m{};
+        legal_actions(rc, m);
+        Action a = make_action(ActionVerb::END_TURN);
+        bool played = false;
+        for (int i = 0; i < kHandCap && !played; ++i) {
+            for (int t = 0; t < kMonsterCap; ++t) {
+                if (m.combat.can_play_target[i][t]) {
+                    a = make_action(ActionVerb::PLAY_CARD,
+                                    static_cast<uint8_t>(i),
+                                    static_cast<uint8_t>(t));
+                    played = true;
+                    break;
+                }
+            }
+        }
+        advance(std::span<RunController>(&rc, 1),
+                std::span<const Action>(&a, 1),
+                std::span<StepResult>(&res, 1));
+    }
+}
+
 // The A20 route to that terminal has ONE MORE ROOM in it (a20.yaml row 20,
 // S2.28). ProceedButton.update:99-104 -- `ascensionLevel >= 20 &&
 // bossList.size() == 2`, read AFTER MonsterRoomBoss.onPlayerEntry popped this
@@ -3924,37 +3957,7 @@ TEST(BossVictory, TheA20DoubleBossInterposesASecondBossRoomBeforeTheTerminal) {
     const int32_t gold_before = rc.run.gold;
 
     weaken_all_monsters(rc);
-    // play_out_combat loops while phase == COMBAT, and the double-boss crossing
-    // lands in ANOTHER combat -- so drive the first fight with an explicit
-    // floor-change stop instead, or the helper would play the second boss
-    // un-weakened.
-    {
-        StepResult res{};
-        for (int step = 0; step < 800; ++step) {
-            if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT) ||
-                rc.run.floor != first_floor) {
-                break;
-            }
-            RunActionMask m{};
-            legal_actions(rc, m);
-            Action a = make_action(ActionVerb::END_TURN);
-            bool played = false;
-            for (int i = 0; i < kHandCap && !played; ++i) {
-                for (int t = 0; t < kMonsterCap; ++t) {
-                    if (m.combat.can_play_target[i][t]) {
-                        a = make_action(ActionVerb::PLAY_CARD,
-                                        static_cast<uint8_t>(i),
-                                        static_cast<uint8_t>(t));
-                        played = true;
-                        break;
-                    }
-                }
-            }
-            advance(std::span<RunController>(&rc, 1),
-                    std::span<const Action>(&a, 1),
-                    std::span<StepResult>(&res, 1));
-        }
-    }
+    play_out_combat_until_the_floor_changes(rc, first_floor);
 
     // Kill #1: NOT a terminal. The crossing is a full room transition --
     // ++floor, the five-stream reseed, boss_cursor advances on the way out --
@@ -4007,6 +4010,105 @@ TEST(BossVictory, TheA20DoubleBossInterposesASecondBossRoomBeforeTheTerminal) {
     EXPECT_EQ(pv.current_encounter_id, 0)
         << "combat-scoped, absent at RUN_OVER -- the non-redundancy the v5 "
            "field note claims";
+}
+
+// goToDoubleBoss's FIRST line, which nothing mirrored until the S2.43/S2.V2
+// depth captures made the handoff record comparable:
+//
+//     AbstractDungeon.bossKey = AbstractDungeon.bossList.get(0);   (:211)
+//
+// `bossKey` is the same single field setBoss writes at act construction
+// (AbstractDungeon.java:349-350) -- getBoss() feeds it to
+// MonsterHelper.getEncounter for the room about to open (:1992-1995) and
+// SaveFile persists it as the run's boss (SaveFile.java:246) -- so the act's
+// boss identity genuinely CHANGES mid-act here, and `boss_ids[act-1]` is the
+// engine's mirror of it (the field the translator fills from a capture's
+// `act_boss` and the differ compares by name). `bossList.get(0)` at that
+// instant is the SECOND boss: the first room's entry already popped its own key
+// (MonsterRoomBoss.java:27-36).
+//
+// The FIGHT was never wrong -- on_player_entry takes its encounter from
+// `boss_list[boss_cursor]` -- which is exactly why the stale mirror survived
+// S2.28: it is invisible to every sim-side observation of the second combat and
+// only a live A20 Act-3 capture past floor 50 can see it.
+TEST(BossVictory, TheA20DoubleBossHandoffMovesTheActsBossIdToTheSecondBoss) {
+    RunController rc = enter_boss_combat(kSeed);  // run_begin(seed, kA20)
+    rc.run.act = 3;
+    rc.run.floor = static_cast<uint16_t>(act_floor_base(3) + kActFloorSpan - 1);
+    ASSERT_EQ(rc.run.ascension, 20);
+    ASSERT_EQ(rc.lists.boss_list_count, 3);
+    ASSERT_EQ(rc.boss_cursor, 0);
+    const uint16_t first_floor = rc.run.floor;
+
+    // run_begin mirrored setBoss(bossList.get(0)) into slot 0; this walk moved
+    // the controller to act 3 by hand, so seed the act-3 slot the same way the
+    // act transition would (rs.boss_ids[next_act - 1] = boss_list[0]).
+    const sts::registry::EncounterDef* first =
+        sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+    const sts::registry::EncounterDef* second =
+        sts::registry::encounter_by_game_id(rc.lists.boss_list[1]);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(second, nullptr);
+    ASSERT_NE(first->id, second->id)
+        << "TheBeyond's three keys are distinct, so the reassignment is "
+           "observable rather than a no-op";
+    rc.run.boss_ids[2] = static_cast<uint16_t>(first->id);
+
+    weaken_all_monsters(rc);
+    play_out_combat_until_the_floor_changes(rc, first_floor);
+
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.run.floor, first_floor + 1);
+    ASSERT_EQ(rc.boss_cursor, 1);
+
+    EXPECT_EQ(rc.run.boss_ids[2], static_cast<uint16_t>(second->id))
+        << "ProceedButton.java:211 reassigns bossKey to bossList.get(0), which "
+           "after the first room's entry pop is the SECOND boss";
+    EXPECT_NE(rc.run.boss_ids[2], static_cast<uint16_t>(first->id))
+        << "the pre-fix engine kept naming the first boss for the whole second "
+           "room and to the terminal";
+    // The other two acts' slots are untouched: bossKey is per-DUNGEON and this
+    // crossing does not leave TheBeyond.
+    EXPECT_EQ(rc.run.boss_ids[0], static_cast<uint16_t>(first->id))
+        << "slot 0 is Act 1's own mirror from run_begin, and this walk borrowed "
+           "the same list -- the crossing must not have touched it";
+    EXPECT_EQ(rc.run.boss_ids[1], 0);
+
+    // And it STAYS moved through the second kill's terminal -- the field the
+    // capture keeps attesting for every record from the crossing on.
+    weaken_all_monsters(rc);
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_EQ(rc.run.boss_ids[2], static_cast<uint16_t>(second->id));
+}
+
+// THE NEGATIVE, and it is the one that keeps the fix act-scoped: an Act-2 boss
+// kill reaches a remaining count of 2 as well (its bossList is three keys too)
+// and is excluded from goToDoubleBoss only by
+// `AbstractDungeon.id.equals("TheBeyond")` (ProceedButton.java:101). It must
+// therefore leave `boss_ids` alone -- the reassignment lives inside the same
+// `act >= kFinalAct` block the whole double-boss branch does, and an Act-2 boss
+// goes to its CHEST, not to a second boss room.
+TEST(BossVictory, AnActTwoBossVictoryLeavesTheActsBossIdWhereItWas) {
+    RunController rc = enter_boss_combat(kSeed);
+    rc.run.act = 2;
+    rc.run.floor = static_cast<uint16_t>(act_floor_base(2) + kActFloorSpan - 1);
+    ASSERT_EQ(rc.run.ascension, 20);
+    ASSERT_EQ(rc.boss_cursor, 0);
+
+    const sts::registry::EncounterDef* first =
+        sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+    ASSERT_NE(first, nullptr);
+    rc.run.boss_ids[1] = static_cast<uint16_t>(first->id);
+
+    weaken_all_monsters(rc);
+    play_out_combat(rc);
+
+    EXPECT_EQ(rc.run.boss_ids[1], static_cast<uint16_t>(first->id))
+        << "no reassignment outside TheBeyond";
+    EXPECT_NE(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+        << "an Act-2 boss kill opens its reward screen; it never crosses into "
+           "a second boss room";
 }
 
 // =============================================================================

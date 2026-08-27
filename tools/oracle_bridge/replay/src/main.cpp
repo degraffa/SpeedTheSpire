@@ -588,6 +588,7 @@ struct Verdict {
     int escape_race_records = 0;    // ...the Smoke-Bomb escape-settlement race
     int preview_race_records = 0;   // ...a curse transform-preview cardRng burn
     int post_victory_ending_records = 0;  // Spire-Heart cinematic tail skipped
+    int double_boss_handoff_records = 0;  // ...compared against the NEXT record
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
 };
@@ -684,7 +685,79 @@ void print_pool_evidence(const std::string& seed_string, int floor,
         const bool escape_counter_reset =
             is_escape_settlement_counter_reset_race(rep, run, k, actual, expected);
 
-        if (only_library_order) {
+        // THE A20 DOUBLE-BOSS HANDOFF (command_map.hpp's is_double_boss_handoff
+        // carries the derivation). The capture is parked on the first Act-3
+        // boss room's bare proceed button; the simulator ran ProceedButton's
+        // goToDoubleBoss inline off the boss's death and is already inside the
+        // second fight. This record's own state therefore CANNOT be the right
+        // comparand -- but the very next one can, and is: it is the capture's
+        // own POST-proceed state, i.e. the game's answer to the question the
+        // sim has already answered. So the record is not skipped, it is
+        // compared SHIFTED, which makes this line a zero-diff assertion rather
+        // than an exception. (The ordinary comparison at k+1 then repeats it
+        // verbatim -- a NOOP command moves nothing -- so nothing is taken on
+        // trust either way.)
+        //
+        // WHAT THIS CANNOT HIDE, said out loud: the sim's PRE-transition values
+        // of the fields the crossing overwrites (a relic counter atBattleStart
+        // hard-sets to 0, an hp the +25 Pantograph heal would clamp to max).
+        // Those are unobservable by construction rather than excused -- the
+        // crossing erases them on both sides, so no later record can depend on
+        // them; everything the crossing does NOT write is still compared at
+        // full strength, because a field the capture leaves equal across its
+        // own two records is compared against a value identical to this
+        // record's.
+        const bool double_boss_handoff =
+            !rep.empty() && is_double_boss_handoff(rc, s) &&
+            k + 1 < run.records.size() && screens[k + 1].floor == s.floor + 1;
+        sts::diff::DiffReport handoff_rep;
+        if (double_boss_handoff) {
+            RunState after = run.records[k + 1].run;
+            // Fold on a COPY: the real accumulator advances at k+1, in order.
+            sts::replay::FiredAccum probe = fired;
+            probe.fold(after);
+            RunState actual_after = rc.run;
+            project_live_combat_sheet(rc, actual_after);
+            neutralize_incomparable(after);
+            neutralize_incomparable(actual_after);
+            neutralize_unattested_boss_chest(after, actual_after);
+            handoff_rep = sts::diff::diff_run_states(after, actual_after);
+        }
+
+        if (double_boss_handoff) {
+            if (handoff_rep.empty()) {
+                ++v.double_boss_handoff_records;
+                std::printf(
+                    "HANDOFF seq=%d floor=%d screen=COMPLETE cmd='%s': the A20 "
+                    "double boss -- the capture is holding the first Act-3 boss "
+                    "room's proceed button (no reward screen exists, "
+                    "AbstractRoom.java:327) while the sim already ran "
+                    "goToDoubleBoss (ProceedButton.java:210-220) off the kill; "
+                    "compared against the capture's own post-proceed record "
+                    "instead, zero-diff\n",
+                    rec.seq, s.floor, rec.action_command.c_str());
+            } else {
+                if (v.diverged_at < 0) {
+                    v.diverged_at = static_cast<int>(k);
+                    v.diverged_seq = rec.seq;
+                    v.diverged_floor = s.floor;
+                    v.diverged_screen = s.screen_type;
+                    v.diverged_fields = handoff_rep.size();
+                }
+                std::printf(
+                    "DIFF seq=%d floor=%d screen=%s sim_phase=%s cmd='%s' "
+                    "(%zu field%s, against the capture's POST-proceed record: "
+                    "the A20 double-boss crossing itself)\n",
+                    rec.seq, s.floor, s.screen_type.c_str(), phase_name(rc.phase),
+                    rec.action_command.c_str(), handoff_rep.size(),
+                    handoff_rep.size() == 1 ? "" : "s");
+                std::printf("%s\n", handoff_rep.to_string().c_str());
+                if (opts.stop_on_diff) {
+                    v.stop_reason = "first divergence";
+                    return v;
+                }
+            }
+        } else if (only_library_order) {
             ++v.deck_identity_records;
             std::printf("LIBORD seq=%d floor=%d screen=%s cmd='%s': %zu deck identity "
                         "field%s differ; count/upgrade/streams/pity all equal\n",
@@ -3159,6 +3232,16 @@ int main(int argc, char** argv) {
                 std::printf("      %d post-victory ending record(s) skipped "
                             "(the Spire Heart cinematic -- out of S2 scope)\n",
                             v.post_victory_ending_records);
+            // Deliberately NOT spelled `... -race`: the campaign pipeline's
+            // strict accounting scrapes every `N <name>-race` field out of this
+            // line as a CAPTURE artifact, and this is not one. Nothing lagged
+            // capture-side; the simulator collapses a screen the game shows,
+            // and the record is compared shifted rather than excused.
+            if (v.double_boss_handoff_records > 0)
+                std::printf("      %d A20 double-boss handoff record(s) "
+                            "compared against the capture's own post-proceed "
+                            "record (ProceedButton.java:210-220)\n",
+                            v.double_boss_handoff_records);
             // The frontier, always on its own line and never folded into the
             // stop -- see `Verdict`. "no divergence" is said out loud too: a
             // replay that stopped without ever disagreeing is a coverage gap in

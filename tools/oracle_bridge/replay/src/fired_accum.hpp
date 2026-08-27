@@ -73,10 +73,20 @@ namespace sts::replay {
 // record). The union rule is per-slot nonzero-wins; the exactness argument
 // is the FIRED one verbatim -- each act's slot is attested by that act's own
 // records before the crossing, a slot never changes within an act (the boss
-// list's front is fixed at construction; a second boss in one act rewrites
-// nothing, A20's double boss lives in its own storage), and 0-vs-nonzero
-// substitution only carries forward what the capture itself attested, so a
-// sim/capture disagreement on a SET slot still diffs.
+// list's front is fixed at construction), and 0-vs-nonzero substitution only
+// carries forward what the capture itself attested, so a sim/capture
+// disagreement on a SET slot still diffs.
+//
+// ONE SLOT DOES CHANGE WITHIN ITS ACT, and this note used to deny it: A20's
+// double boss reassigns `AbstractDungeon.bossKey` in goToDoubleBoss
+// (ProceedButton.java:211), so Act 3's slot names the FIRST boss up to the
+// handoff and the SECOND one after it (the engine mirrors that in
+// run_advance.cpp's double-boss branch). The rule survives untouched, and the
+// reason is the `!= 0` test rather than the claim: every Act-3 record attests
+// its own `act_boss`, so the substitution branch never fires for that slot
+// while the run is in Act 3 -- the capture's live value always wins, before
+// and after the crossing alike, and a sim that kept the stale one still diffs.
+// (That is precisely how the crossing's own defect was caught.)
 struct FiredAccum {
     uint32_t lo = 0;
     uint32_t hi = 0;

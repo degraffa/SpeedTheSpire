@@ -2712,6 +2712,41 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
             // pair, and s2-design section 4.4 asked for a re-check of whether
             // anything sim-visible hangs off it. The answer is a NEGATIVE:
             // achievements and stopClock only.
+            //
+            // `AbstractDungeon.bossKey = bossList.get(0)` (:211) IS the first
+            // line of goToDoubleBoss and it is NOT cosmetic. bossKey is the
+            // same single field `setBoss` writes at act construction
+            // (AbstractDungeon.java:349-350), it is what `getBoss()` hands to
+            // MonsterHelper.getEncounter for the room about to open (:1992-1995)
+            // and what SaveFile persists as the run's boss (SaveFile.java:246),
+            // and the engine mirrors it in `boss_ids[act-1]` -- the field the
+            // translator fills from a capture's `act_boss` and the differ
+            // compares by name. Nothing mirrored it here, so a replayed A20
+            // Act-3 run kept naming the FIRST boss for the whole second room:
+            // the first live witness is the S2.43/S2.V2 double-boss pair, where
+            // the capture says `Donu and Deca` from floor 51 on and the sim said
+            // `Time Eater` / `Awakened One` to the terminal. The FIGHT was never
+            // wrong -- on_player_entry takes its encounter from
+            // `boss_list[boss_cursor]`, not from this mirror -- which is exactly
+            // why nothing caught it until the handoff record was comparable.
+            //
+            // `bossList.get(0)` at this instant is the SECOND boss: the first
+            // room's entry already popped its own key
+            // (MonsterRoomBoss.java:27-36), while rc.boss_cursor still counts
+            // rooms LEFT and so lags that pop by one -- the same offset the gate
+            // above spells out. `boss_list[boss_cursor + 1]` is therefore the
+            // Java's `get(0)` verbatim, and the assignment stays AHEAD of the
+            // transition exactly as :211 stays ahead of :218.
+            if (rc.boss_cursor + 1 < rc.lists.boss_list_count &&
+                rc.run.act <= static_cast<uint8_t>(kBossIdCap)) {
+                const sts::registry::EncounterDef* next_boss =
+                    sts::registry::encounter_by_game_id(
+                        rc.lists.boss_list[rc.boss_cursor + 1]);
+                if (next_boss != nullptr) {
+                    rc.run.boss_ids[rc.run.act - 1] =
+                        static_cast<uint16_t>(next_boss->id);
+                }
+            }
             next_room_transition(rc, 0, /*to_boss=*/true);
             fill_run_result(rc, res);
             return;

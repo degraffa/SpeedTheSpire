@@ -1495,4 +1495,106 @@ TEST(ReplayCommandMap, AHandSelectProceedAfterAMandatoryChoiceResolvedIsElided) 
     EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
 }
 
+// --- the COMPLETE screen: the two Act-3 boss rooms ---------------------------
+//
+// A room at RoomPhase.COMPLETE with no screen over it
+// (ChoiceScreenUtils.getCurrentChoiceType :80-83). Every ordinary combat opens
+// COMBAT_REWARD over its room, so in S2's scope the label has exactly two
+// producers: the two Act-3 boss rooms AbstractRoom.java:327 denies a reward
+// screen to. Both are transitions the ENGINE has already made when the capture
+// shows the button -- the first Act-3 kill runs goToDoubleBoss inline
+// (ProceedButton.java:210-220) and the second ends the run -- so both presses
+// are elisions, and anything else on this screen must still stop. Until the
+// S2.43/S2.V2 depth captures reached floor 50 the whole label was unmodelled,
+// which stopped both double-boss runs one record short of their real terminals.
+
+// The sim standing where goToDoubleBoss has already put it: inside the SECOND
+// Act-3 boss fight, one floor past the capture, with one boss room completed.
+[[nodiscard]] RunController after_the_double_boss_crossing(int capture_floor) {
+    RunController rc = at_phase(RunPhase::COMBAT);
+    rc.room_type = static_cast<uint8_t>(sts::engine::RoomType::Boss);
+    rc.run.ascension = 20;
+    rc.run.act = 3;
+    rc.run.floor = static_cast<uint16_t>(capture_floor + 1);
+    rc.boss_cursor = 1;
+    return rc;
+}
+
+[[nodiscard]] ScreenInfo complete_screen(int floor) {
+    ScreenInfo s;
+    s.screen_type = "COMPLETE";
+    s.room_type = "MonsterRoomBoss";
+    s.floor = floor;
+    return s;
+}
+
+TEST(ReplayCommandMap, TheDoubleBossHandoffProceedIsElidedBecauseTheEngineCrossedAlready) {
+    const MappedCommand m = map_command(after_the_double_boss_crossing(50),
+                                        complete_screen(50), "proceed");
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+    EXPECT_TRUE(m.actions.empty())
+        << "re-pressing anything here would drive the live second-boss combat";
+}
+
+TEST(ReplayCommandMap, TheDoubleBossHandoffGateNeedsEveryTermOfProceedButtonsPair) {
+    // ascensionLevel >= 20 (ProceedButton.java:102).
+    RunController low = after_the_double_boss_crossing(50);
+    low.run.ascension = 19;
+    EXPECT_EQ(map_command(low, complete_screen(50), "proceed").kind,
+              MapKind::UNMAPPED);
+    // id.equals("TheBeyond") -- the act, not the remaining count. Acts 1 and 2
+    // reach a remaining count of 2 as well (:101).
+    RunController act2 = after_the_double_boss_crossing(50);
+    act2.run.act = 2;
+    EXPECT_EQ(map_command(act2, complete_screen(50), "proceed").kind,
+              MapKind::UNMAPPED);
+    // bossList.size() == 2, i.e. exactly one boss room completed. After the
+    // SECOND room's entry pop the remaining count is 1 and the gate fails.
+    RunController second = after_the_double_boss_crossing(50);
+    second.boss_cursor = 2;
+    EXPECT_EQ(map_command(second, complete_screen(50), "proceed").kind,
+              MapKind::UNMAPPED);
+    // ...and the sim really is the room ahead. A sim still standing on the
+    // capture's own floor has NOT crossed, so eliding the press would strand it.
+    RunController not_yet = after_the_double_boss_crossing(50);
+    not_yet.run.floor = 50;
+    const MappedCommand m = map_command(not_yet, complete_screen(50), "proceed");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("double-boss handoff"), std::string::npos) << m.reason;
+}
+
+TEST(ReplayCommandMap, TheFinishedActThreeVictoryProceedIsTheRunTerminal) {
+    RunController rc = at_phase(RunPhase::RUN_OVER);
+    rc.run.act = 3;
+    rc.room_type = static_cast<uint8_t>(sts::engine::RoomType::Boss);
+    rc.combat_outcome =
+        static_cast<uint8_t>(sts::engine::RunCombatOutcome::KILLED);
+    ASSERT_TRUE(sts::engine::run_is_victory(rc));
+    // ProceedButton.java:104-105 goes to goToVictoryRoomOrTheDoor, the S3 keys
+    // surface the run layer deliberately ends the run instead of entering.
+    EXPECT_EQ(map_command(rc, complete_screen(51), "proceed").kind,
+              MapKind::TERMINAL);
+}
+
+TEST(ReplayCommandMap, ADeathParkedAtRunOverIsNotACompleteScreenTerminal) {
+    // A defeat parks at RUN_OVER in the same room with the same act, and the
+    // game shows it GAME_OVER rather than COMPLETE -- run_is_victory's
+    // combat_outcome term is what keeps the two apart here too.
+    RunController rc = at_phase(RunPhase::RUN_OVER);
+    rc.run.act = 3;
+    rc.room_type = static_cast<uint8_t>(sts::engine::RoomType::Boss);
+    rc.combat_outcome =
+        static_cast<uint8_t>(sts::engine::RunCombatOutcome::DEFEAT);
+    EXPECT_EQ(map_command(rc, complete_screen(51), "proceed").kind,
+              MapKind::UNMAPPED);
+}
+
+TEST(ReplayCommandMap, ACompleteScreenCommandOtherThanProceedIsNotModelled) {
+    const MappedCommand m = map_command(after_the_double_boss_crossing(50),
+                                        complete_screen(50), "choose 0");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("COMPLETE-screen command"), std::string::npos)
+        << m.reason;
+}
+
 }  // namespace

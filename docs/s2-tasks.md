@@ -3110,6 +3110,62 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `--replay` blind spot named above is worth its own row: no acceptance
   surface compares in-combat card COSTS against the capture, which is why a
   whole cost-state family reached the depth wave undetected.
+  **2026-08-27 — the LAST un-modelled seam is closed: the COMPLETE screen at
+  the A20 double-boss handoff, and it hid a real engine defect behind it.**
+  The two deep witnesses stopped one record short of their terminals on
+  `screen 'COMPLETE' is not modelled by the run layer` (`command_map.hpp`),
+  STS128113 (the double-boss VICTORY, Time Eater first) at seq 655 with 3
+  fields and STS105835 (death to the second boss) at seq 680 with 4. **Those
+  fields were not a defect**: the capture holds the first Act-3 boss room's
+  bare proceed button (AbstractRoom.java:327 denies a non-endless TheBeyond
+  boss its reward screen, so ChoiceScreenUtils :80-83 labels the dump
+  COMPLETE) while the engine runs ProceedButton's `goToDoubleBoss` (:210-220)
+  inline off the kill — S2.28's deliberate collapse, no player decision — so
+  the sim is one crossing ahead and the diffs are exactly what the crossing
+  writes: `floor` +1, Maw Bank's +12 `gold` (MawBank.java:31-34), Pantograph's
+  +25 `hp` (Pantograph.java:31-40) and the counter relics latching -1 → 0 at
+  the second fight's atBattleStart. **FIX, replay layer:** a COMPLETE arm with
+  the two producers the label has in S2 scope — the handoff `proceed` is a
+  NOOP under a structural gate (`is_double_boss_handoff`: A20, act 3,
+  MonsterRoomBoss, sim in COMBAT in a Boss room, `boss_cursor == 1`, sim floor
+  == capture floor + 1), and the finished Act-3 victory's `proceed` is the run
+  TERMINAL (:104-105's goToVictoryRoomOrTheDoor is the S3 keys surface the run
+  layer ends the run instead of entering). The handoff record is **compared
+  SHIFTED, not skipped** — against the capture's own post-proceed record, so
+  the line is a zero-diff assertion; what that cannot see is only state the
+  crossing itself overwrites, which no later record can depend on.
+  **AND THE SEAM WAS HIDING AN ENGINE GAP** that only became comparable once
+  the walk continued: `goToDoubleBoss`'s first line is `bossKey =
+  bossList.get(0)` (:211) — the same single field `setBoss` writes at act
+  construction (AbstractDungeon.java:349-350), fed to
+  MonsterHelper.getEncounter by `getBoss()` (:1992-1995) and persisted by
+  SaveFile (:246) — and nothing mirrored it into `boss_ids[act-1]`, so both
+  runs diverged on `boss_ids[2]` from the crossing to the terminal (capture
+  `Donu and Deca` 60, sim 59 / 58). The FIGHT was never wrong —
+  `on_player_entry` reads `boss_list[boss_cursor]`, not the mirror — which is
+  why S2.28 could not see it. `finish_combat_after_action`'s double-boss
+  branch now assigns `boss_list[boss_cursor + 1]` (the Java's `get(0)`, given
+  that the cursor lags the entry pop by one) ahead of the transition, exactly
+  as :211 sits ahead of :218. `fired_accum.hpp`'s claim that "a slot never
+  changes within an act" was falsified by this and is corrected in place; its
+  nonzero-wins rule is unaffected and is what let the capture's live value
+  win. **EVIDENCE.** Both captures now replay CLEAN to their true terminals:
+  STS128113 `667 records compared (112 on reward screens) … stop: run
+  terminal` + `5 post-victory ending record(s) skipped` + `1 A20 double-boss
+  handoff record(s) compared against the capture's own post-proceed record`,
+  and STS105835 `683 records compared (110 on reward screens) … stop: run
+  terminal` + the same handoff line — `first divergence: none` on both.
+  Tests: `BossVictory.TheA20DoubleBossHandoffMovesTheActsBossIdToTheSecondBoss`
+  (verified RED on the pre-fix engine: `boss_ids[2]` 19, want 18) with the
+  negative `BossVictory.AnActTwoBossVictoryLeavesTheActsBossIdWhereItWas`
+  (green on both sides), and five command-map pins —
+  `ReplayCommandMap.TheDoubleBossHandoffProceedIsElidedBecauseTheEngineCrossedAlready`,
+  `.TheDoubleBossHandoffGateNeedsEveryTermOfProceedButtonsPair`,
+  `.TheFinishedActThreeVictoryProceedIsTheRunTerminal`,
+  `.ADeathParkedAtRunOverIsNotACompleteScreenTerminal`,
+  `.ACompleteScreenCommandOtherThanProceedIsNotModelled`. The new summary line
+  is deliberately NOT spelled `…-race`: the pipeline's strict accounting
+  scrapes `N <name>-race` as capture artifacts and this is not one.
 - **S2.44** `[x]` ∥ **Tier-4 additions.** Pre-registered hypotheses per
   design §6 item 6 (act pools + exclusion effects, per-act upgrade
   chance, boss shuffle + double-boss conditioning, one-time-pool
