@@ -3460,7 +3460,7 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   `win-debug`/`win-asan`/`win-release` at their standard settings, `/EHsc`
   verified in the `win-debug` cache). `check_stale_counts.sh` and
   `check_doc_links.sh` clean.
-- **S2.46** `[ ]` **Verification report + CI corpus + proactive audit.**
+- **S2.46** `[x]` **Verification report + CI corpus + proactive audit.**
   B5.4 pattern: aggregated report with literal S2-G2 shortfalls; curated
   compressed corpus extended with three-act traces incl. one double-boss
   run; `g7_proactive_manifest` extended with S2-discovered families and
@@ -3468,6 +3468,109 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
   **Deps:** S2.43, S2.44 **Acceptance:** report committed under
   `docs/verification/`; CI replay of the extended corpus green in every
   preset; audit green.
+
+  **Log (2026-08-27).** All three deliverables landed; **no S2-G2 item is
+  UNMET and none is pending.**
+
+  **(1) The aggregated report** is
+  [verification/s2-verification.md](verification/s2-verification.md), the
+  seven §6 items answered one at a time by the instrument that OWNS each
+  number, with what that instrument did not say recorded beside it. Items
+  1–4 are cited from the S2.43 dashboard rather than restated — it
+  regenerates byte-identically over unchanged inputs, so a second copy of
+  its counts here would be a staler copy of a number with one owner; what
+  is copied is the verdict and the generation date. Item 5 is this task's
+  own audit, item 6 S2.44's registered family (`RESULT PASS` at both
+  scales, all four negative controls two-stage rejected — cited, not
+  re-run; the re-run command is in the report's §10), item 7 S2.45. **The
+  one literal shortfall is item 7's baseline half**, and it is the item's
+  premise rather than the engine: run length did not grow, because no run
+  in the benchmark corpus leaves Act 1 under a weight-free policy
+  (`act2_runs=0 act3_runs=0` over ~35,000 runs, `terminal_act_sum ==
+  runs_counted` as the positive control), so the S3 baseline stands as a
+  *pair* — corpus-conditional runs/sec plus length-independent
+  run-steps/sec — and "three-act runs per second" remains unquotable. The
+  report's §9 carries five standing limits stated plainly rather than
+  argued around: Act 4 out of scope (a victory's Spire Heart tail is a
+  named replay skip and a translator refusal), `--replay` comparing
+  `RunState` and therefore **not** in-combat card COSTS (the blind spot
+  that let a whole cost-state family reach the depth wave), the five
+  archived S2.V2 lines the pile-move/upgrade fix moved, the open
+  SecretPortal owner question, and the unattributed ×0.712 / ×0.498
+  per-step ratios.
+
+  **(2) The CI corpus gained an Acts 1–3 sibling**, not an edit: the
+  committed `act1_a20_50` archive and manifest are **byte-unchanged**.
+  `tests/golden/oracle_corpus/three_act_a20_5.tar.gz` is **5 curated
+  whole-run captures, 977 KB compressed** (`9572f301…`) in a new
+  `STS-ORACLE-CI-CORPUS v2` — `s2v2_dbv_103509a`/STS103509 (Donu and Deca
+  → Time Eater, a completed double-boss VICTORY carrying the whole item-3
+  shape), `s2v2_db47_b`/STS128113 (the second first-boss identity, Time
+  Eater first, also a victory), `s2v2_awk_105835`/STS105835 (the Awakened
+  One killed, then a death to the second boss — the LOSING double-boss
+  shape no victory can exercise), `s2v2_mb_102529`/STS102529 (the Mind
+  Bloom Act-1-boss re-fight) and `s2v2_skip_b`/STS111111 (the boss-relic
+  SKIP axis; every other pick runs the take config). Three format
+  departures, each forced rather than chosen: **provenance is per entry**
+  (two fork pins are represented on purpose, and one aggregate pin would
+  hide exactly what the cohort table exists to record;
+  `pipeline_version` is null precisely when the driver stopped a campaign
+  before postprocess, and null on a `complete` campaign is fatal); **a
+  translated trace is optional with a stated reason** (STS128113's
+  translation aborted on the Act-4 `Spire Heart` id, STS111111's wave
+  never reached postprocess — both captures replay clean, which is what
+  the corpus asserts, and a missing trace carrying no reason is refused);
+  and **the stored classification is not a selection input at all** —
+  STS128113 and STS105835 were `translation_drift` / `state_divergence`
+  on capture day and are clean on the landed engine, which is precisely
+  why they belong in a regression corpus, so `--three-act` requires
+  `--replay-bin` and RE-REPLAYS every pick, refusing anything not
+  zero-diff to its run terminal with zero capture-race records. The smoke
+  enforces the corpus's own contract in CI (every entry act-3, ≥ 1
+  *completed* double-boss run, both boss-relic axes present, the axis read
+  from the SHA-pinned policy config and never a directory name), because
+  a curated corpus that quietly lost its double-boss run would still
+  replay green and would no longer be the evidence the report cites. Two
+  new ctest cases beside the Act-1 pair —
+  `OracleCorpusReplay.ThreeActCorpusReplaysZeroDiff` and
+  `.ThreeActInjectedSyntheticDivergenceFailsLoud` — ~13 s under `debug`.
+  `build_ci_corpus.py`'s pick list is pinned independently of the moving
+  dashboard defaults, the B5.4 rule; `ci_corpus_smoke.py` reads both
+  formats and takes `--expect-entries`, asserted rather than read off the
+  manifest it is checking. Seven new `test_verify_report.py` cases
+  (`verify_report_python_test`, 23 total): the committed corpus's
+  contract, the two fail-loud contract rules, the shallow-run and
+  missing-pin rejections, the entry-count assertion, the unstated-trace
+  refusal, the policy-axis derivation and the provenance rule.
+
+  **(3) The proactive audit went 6 families → 21, 26 regressions → 101**,
+  all registered and passing, `VERDICT: PASS`
+  ([verification/g7_proactive_audit.md](verification/g7_proactive_audit.md)
+  + `.json`, regenerated from a full debug ctest run). The fifteen added
+  families cover the whole S2 campaign harvest, not only the 2026-08-27
+  wave: `s2-replay-copy-shared-instance-state`,
+  `s2-spawn-prepass-group-visibility`, `s2-combat-terminal-adjudication`,
+  `s2-card-cost-state-lifecycle`, `s2-reward-offer-preview`,
+  `s2-liveness-senses`, `s2-double-boss-handoff`,
+  `s2-unmodelled-clock-inputs`, `s2-cross-act-capture-derivation`,
+  `s2-live-run-state-projection`, `s2-deferred-hook-boundaries`,
+  `s2-positional-monster-identity`,
+  `s2-screen-arm-shape-and-ownership`, `s2-emitter-index-space-identity`
+  and `s2-act-two-three-replay-seams`. The six G7-era families are
+  unchanged and were verified rather than re-authored. Two judgement
+  calls worth recording: each family carries the fix's own **negative
+  control** where one exists (a family pinned by a single assertion is one
+  a plausible refactor deletes in a single edit), and the boss-chest
+  replay seam — the root cause every one of the breadth wave's 19 Act-2
+  crossers hit, which never got a unit test of its own — is pinned by the
+  new three-act corpus replay itself, which is a registered ctest name and
+  therefore auditable evidence rather than prose. `sources` gained
+  `docs/s2-tasks.md` and `verification/s243-dashboard.md`; the checker
+  fails loud if a source path stops existing.
+
+  WSL `debug`/`asan`/`release` green, corpus replay included in each;
+  `check_stale_counts.sh` and `check_doc_links.sh` clean. No committed
+  trace moved.
 - **S2.47** `[x]` **Boss-relic offer storage (the S2.43 unblock).** Discharge
   the "BOSS_REWARD.screen_state.relics — schema storage" deferred row: durable
   `RunState` storage for the three boss-chest offers plus the reveal bits

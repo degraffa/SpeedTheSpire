@@ -14,6 +14,10 @@ import tarfile
 from pathlib import Path
 
 FORMAT = "STS-ORACLE-CI-CORPUS v1"
+THREE_ACT_FORMAT = "STS-ORACLE-CI-CORPUS v2"
+PROVENANCE_KEYS = {
+    "schema_version", "driver_version", "pipeline_version", "fork_jar_sha256",
+}
 
 
 class CorpusError(RuntimeError):
@@ -24,31 +28,18 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def validate_archive(archive_path: Path, manifest_path: Path) -> tuple[
-        dict, dict[str, bytes]]:
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("format") != FORMAT:
-        raise CorpusError("unsupported corpus manifest format")
-    provenance = manifest.get("provenance")
-    provenance_keys = {
-        "schema_version", "driver_version", "pipeline_version",
-        "fork_jar_sha256",
-    }
-    if not isinstance(provenance, dict) or set(provenance) != provenance_keys \
-            or any(value in (None, "") for value in provenance.values()):
-        raise CorpusError("corpus manifest provenance is incomplete")
-    archive_bytes = archive_path.read_bytes()
-    if sha256(archive_bytes) != manifest.get("archive_sha256"):
-        raise CorpusError("corpus archive SHA-256 mismatch")
-    entries = manifest.get("entries")
-    if not isinstance(entries, list) or len(entries) != 50 or \
-            manifest.get("entry_count") != 50:
-        raise CorpusError("corpus must contain exactly 50 manifest entries")
-    expected = {
-        f"raw/{entry['seed']}.jsonl" for entry in entries
-    } | {
-        f"traces/{entry['seed']}.trace" for entry in entries
-    }
+def check_trace_header(label: str, trace: bytes, entry: dict) -> None:
+    if len(trace) < 24:
+        raise CorpusError(f"{label}: translated trace header is short")
+    magic, schema, state_size, records, seed_long = struct.unpack(
+        "<4sIIIq", trace[:24])
+    if (magic, schema, state_size, records, seed_long) != (
+            b"STS0", entry["trace_schema"], entry["trace_state_size"],
+            entry["trace_records"], entry["seed_long"]):
+        raise CorpusError(f"{label}: translated trace header drift")
+
+
+def extract(archive_path: Path, expected: set[str]) -> dict[str, bytes]:
     members: dict[str, bytes] = {}
     with tarfile.open(archive_path, mode="r:gz") as archive:
         for item in archive:
@@ -61,7 +52,27 @@ def validate_archive(archive_path: Path, manifest_path: Path) -> tuple[
             members[item.name] = extracted.read()
     if set(members) != expected:
         raise CorpusError("archive member set differs from the manifest")
-    if len({entry["seed"] for entry in entries}) != 50:
+    return members
+
+
+def validate_v1(manifest: dict, archive_path: Path,
+                expect_entries: int) -> dict[str, bytes]:
+    provenance = manifest.get("provenance")
+    if not isinstance(provenance, dict) or set(provenance) != PROVENANCE_KEYS \
+            or any(value in (None, "") for value in provenance.values()):
+        raise CorpusError("corpus manifest provenance is incomplete")
+    entries = manifest.get("entries")
+    if not isinstance(entries, list) or len(entries) != expect_entries or \
+            manifest.get("entry_count") != expect_entries:
+        raise CorpusError(
+            f"corpus must contain exactly {expect_entries} manifest entries")
+    expected = {
+        f"raw/{entry['seed']}.jsonl" for entry in entries
+    } | {
+        f"traces/{entry['seed']}.trace" for entry in entries
+    }
+    members = extract(archive_path, expected)
+    if len({entry["seed"] for entry in entries}) != expect_entries:
         raise CorpusError("corpus seed identities are not distinct")
     for entry in entries:
         seed = entry["seed"]
@@ -71,15 +82,92 @@ def validate_archive(archive_path: Path, manifest_path: Path) -> tuple[
             raise CorpusError(f"{seed}: source artifact SHA-256 mismatch")
         if sha256(trace) != entry["translated_trace_sha256"]:
             raise CorpusError(f"{seed}: translated trace SHA-256 mismatch")
-        if len(trace) < 24:
-            raise CorpusError(f"{seed}: translated trace header is short")
-        magic, schema, state_size, records, seed_long = struct.unpack(
-            "<4sIIIq", trace[:24])
-        if (magic, schema, state_size, records, seed_long) != (
-                b"STS0", entry["trace_schema"], entry["trace_state_size"],
-                entry["trace_records"], entry["seed_long"]):
-            raise CorpusError(f"{seed}: translated trace header drift")
-    return manifest, members
+        check_trace_header(seed, trace, entry)
+    return members
+
+
+def validate_v2(manifest: dict, archive_path: Path,
+                expect_entries: int) -> dict[str, bytes]:
+    """The S2.46 curated Acts 1-3 corpus.
+
+    Everything v1 checks, plus the three things this corpus exists to freeze:
+    every member really is an act-3 capture, at least one of them is a
+    COMPLETED A20 double-boss run, and both boss-relic policy axes are
+    present. Those are contract assertions, not statistics -- a curated corpus
+    that silently lost its double-boss run would still replay clean and would
+    no longer be the evidence the gate cites.
+    """
+    entries = manifest.get("entries")
+    if not isinstance(entries, list) or len(entries) != expect_entries or \
+            manifest.get("entry_count") != expect_entries:
+        raise CorpusError(
+            f"corpus must contain exactly {expect_entries} manifest entries")
+    expected: set[str] = set()
+    for entry in entries:
+        label = f"{entry.get('cohort')}/{entry.get('seed')}"
+        provenance = entry.get("provenance")
+        if not isinstance(provenance, dict) or \
+                set(provenance) != PROVENANCE_KEYS:
+            raise CorpusError(f"{label}: entry provenance is incomplete")
+        for key in ("schema_version", "driver_version", "fork_jar_sha256"):
+            if provenance[key] in (None, ""):
+                raise CorpusError(f"{label}: entry provenance has no {key}")
+        # `pipeline_version` is the one pin a driver-stopped campaign cannot
+        # have: it is written by the postprocess that never ran. Null is legal
+        # there and nowhere else.
+        if provenance["pipeline_version"] in (None, "") and \
+                entry.get("campaign_status") == "complete":
+            raise CorpusError(f"{label}: a complete campaign has no pipeline_version")
+        if entry.get("max_act") != 3:
+            raise CorpusError(f"{label}: not an act-3 capture")
+        if entry.get("trace_member") is None and \
+                not str(entry.get("trace_absent_reason") or "").strip():
+            raise CorpusError(f"{label}: a missing trace needs a stated reason")
+        expected.add(str(entry["member"]))
+        if entry.get("trace_member") is not None:
+            expected.add(str(entry["trace_member"]))
+    if len(expected) != sum(
+            1 + (entry.get("trace_member") is not None) for entry in entries):
+        raise CorpusError("corpus member names are not distinct")
+    members = extract(archive_path, expected)
+    for entry in entries:
+        label = f"{entry.get('cohort')}/{entry.get('seed')}"
+        raw = members[str(entry["member"])]
+        if sha256(raw) != entry["source_artifact_sha256"]:
+            raise CorpusError(f"{label}: source artifact SHA-256 mismatch")
+        if entry.get("trace_member") is not None:
+            trace = members[str(entry["trace_member"])]
+            if sha256(trace) != entry["translated_trace_sha256"]:
+                raise CorpusError(f"{label}: translated trace SHA-256 mismatch")
+            check_trace_header(label, trace, entry)
+    if not any(entry.get("completed_double_boss") for entry in entries):
+        raise CorpusError("corpus carries no completed A20 double-boss run")
+    axes = {entry.get("policy_axis") for entry in entries}
+    if not {"take", "skip"} <= axes:
+        raise CorpusError(
+            f"corpus carries only the {sorted(a for a in axes if a)} "
+            f"boss-relic axis")
+    return members
+
+
+def validate_archive(archive_path: Path, manifest_path: Path,
+                     expect_entries: int = 50) -> tuple[dict, dict[str, bytes]]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    archive_bytes = archive_path.read_bytes()
+    if sha256(archive_bytes) != manifest.get("archive_sha256"):
+        raise CorpusError("corpus archive SHA-256 mismatch")
+    fmt = manifest.get("format")
+    if fmt == FORMAT:
+        return manifest, validate_v1(manifest, archive_path, expect_entries)
+    if fmt == THREE_ACT_FORMAT:
+        return manifest, validate_v2(manifest, archive_path, expect_entries)
+    raise CorpusError("unsupported corpus manifest format")
+
+
+def raw_member_name(manifest: dict, entry: dict) -> str:
+    if manifest.get("format") == THREE_ACT_FORMAT:
+        return str(entry["member"])
+    return f"raw/{entry['seed']}.jsonl"
 
 
 def inject_divergence(path: Path) -> None:
@@ -97,16 +185,17 @@ def inject_divergence(path: Path) -> None:
 
 
 def run(archive: Path, manifest_path: Path, replay_bin: Path,
-        scratch: Path, inject: bool) -> int:
-    manifest, members = validate_archive(archive, manifest_path)
+        scratch: Path, inject: bool, expect_entries: int = 50) -> int:
+    manifest, members = validate_archive(archive, manifest_path, expect_entries)
     if scratch.exists():
         shutil.rmtree(scratch)
     scratch.mkdir(parents=True)
     raw_paths = []
     entries = manifest["entries"][:1] if inject else manifest["entries"]
     for entry in entries:
-        path = scratch / f"{entry['seed']}.jsonl"
-        path.write_bytes(members[f"raw/{entry['seed']}.jsonl"])
+        member = raw_member_name(manifest, entry)
+        path = scratch / Path(member).name
+        path.write_bytes(members[member])
         raw_paths.append(path)
     if inject:
         inject_divergence(raw_paths[0])
@@ -134,10 +223,14 @@ def main() -> int:
     parser.add_argument("--replay-bin", type=Path, required=True)
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--inject-divergence", action="store_true")
+    parser.add_argument(
+        "--expect-entries", type=int, default=50,
+        help="the corpus's committed entry count, asserted rather than read "
+             "off the manifest it is checking")
     args = parser.parse_args()
     try:
         return run(args.archive, args.manifest, args.replay_bin, args.scratch,
-                   args.inject_divergence)
+                   args.inject_divergence, args.expect_entries)
     except (CorpusError, OSError, json.JSONDecodeError, tarfile.TarError) as exc:
         print(f"oracle corpus error: {exc}")
         return 2

@@ -182,6 +182,41 @@ independent of the moving dashboard defaults: regenerating a frozen CI corpus
 must not silently select a different 50 runs merely because G7 added a larger
 evidence cohort.
 
+## Compressed CI corpus, Acts 1–3 (S2.46)
+
+`build_ci_corpus.py --three-act` builds the second committed corpus,
+`tests/golden/oracle_corpus/three_act_a20_5.{tar.gz,manifest.json}`, in format
+`STS-ORACLE-CI-CORPUS v2`. Five whole-run Acts 1–3 A20 captures, pinned one by
+one in `DEFAULT_THREE_ACT_PICKS` with the reason each is there — the same
+independence discipline as the B5.4 list above, for the same reason.
+
+Three departures from v1, each forced by what the S2 depth evidence is:
+
+* **Provenance is per entry.** The depth cohorts ran under two fork pins on
+  purpose; one aggregate pin would hide that. `pipeline_version` is null exactly
+  when the driver stopped a campaign before postprocess, and the smoke rejects a
+  null on a `complete` campaign.
+* **The translated trace is optional**, with a recorded `trace_absent_reason`.
+  One entry's translation aborted on an Act-4 `Spire Heart` event id; one wave
+  never reached postprocess at all. Both captures replay clean, which is the
+  assertion the corpus exists to make.
+* **The stored classification is not a selection input.** Two picks were
+  classified non-clean by the postprocess that ran on capture day and are clean
+  on the landed engine — they are the captures whose divergences drove the day's
+  fixes. So `--three-act` requires `--replay-bin` and **re-replays every pick**,
+  refusing anything that is not zero-diff to its run terminal with zero
+  capture-race records.
+
+`ci_corpus_smoke.py` reads both formats and takes `--expect-entries`, which is
+asserted rather than read off the manifest it is checking. On a v2 corpus it
+also enforces the corpus's own contract — every entry an act-3 capture, at least
+one *completed* double-boss run, both boss-relic policy axes present — because a
+curated corpus that quietly lost its double-boss run would still replay green
+and would no longer be the evidence
+[docs/verification/s2-verification.md](../../docs/verification/s2-verification.md)
+cites. `OracleCorpusReplay.ThreeActCorpusReplaysZeroDiff` and its injected
+sibling run in every preset.
+
 ## `check_tier2_coverage.py` — tier-2 registry coverage (G6 leg 1, design §8(2))
 
 Answers mechanically: **does every registry manifest row have at least one
@@ -285,3 +320,15 @@ The checker fails if any required name is absent from CTest or did not pass.
 It writes deterministic `g7_proactive_audit.{md,json}` beside the tier-2
 report; the gate invocation commits the Markdown result under
 `docs/verification/`.
+
+S2.46 extended the manifest to **21 families / 101 named regressions** — the six
+G7-era families unchanged, plus fifteen S2-campaign-discovered ones (the
+replay-copy shared `misc`, the spawn pre-pass, the combat-terminal
+adjudication, card cost state across pile moves and upgrades, the egg reward
+OFFER preview, the three liveness senses, the double-boss handoff, the
+unmodelled wall clock, the cross-act capture derivations, the live run-state
+projections, the deferred hook boundaries, positional monster identity, screen
+arm shape and ownership, emitter index-space identity, and the Act-2/3 replay
+seams). Design §6 S2-G2 item 5 is that audit's exit code; the per-family
+rationale is in
+[docs/verification/s2-verification.md](../../docs/verification/s2-verification.md).

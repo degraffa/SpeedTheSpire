@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -387,6 +388,168 @@ class VerifyReportTest(unittest.TestCase):
         broken.write_bytes(data)
         with self.assertRaisesRegex(CorpusError, "SHA-256"):
             validate_archive(broken, corpus / "act1_a20_50.manifest.json")
+
+    # ------------------------------------------------------------------
+    # S2.46 -- the curated Acts 1-3 corpus (STS-ORACLE-CI-CORPUS v2)
+    # ------------------------------------------------------------------
+
+    def three_act(self, entries: list[dict]) -> tuple[Path, Path]:
+        """Write a synthetic v2 corpus. The bodies are placeholder bytes: the
+        smoke's replay half needs a real binary and a real capture, and is what
+        the ctest case exercises; what is under test here is the manifest
+        contract the committed corpus has to satisfy."""
+        directory = self.root / "three_act"
+        directory.mkdir(parents=True, exist_ok=True)
+        members = []
+        for entry in entries:
+            body = directory / Path(entry["member"]).name
+            body.write_bytes(f"body-{entry['seed']}\n".encode())
+            entry["source_artifact_sha256"] = vr.sha256_file(body)
+            members.append((entry["member"], body))
+        payload = corpus_builder.tar_bytes(members)
+        archive = directory / "three_act.tar.gz"
+        archive.write_bytes(payload)
+        manifest_path = directory / "three_act.manifest.json"
+        dump(manifest_path, {
+            "format": corpus_builder.THREE_ACT_FORMAT,
+            "archive": archive.name,
+            "archive_sha256": hashlib.sha256(payload).hexdigest(),
+            "entry_count": len(entries),
+            "selection_policy": "curated",
+            "entries": entries,
+        })
+        return archive, manifest_path
+
+    def three_act_entry(self, seed="S1", axis="take", double=True,
+                        victory=True, max_act=3, status="complete",
+                        pipeline="p"):
+        return {
+            "campaign_id": f"c_{seed}.worker-001-of-001",
+            "cohort": f"c_{seed}", "seed": seed,
+            "member": f"raw/c_{seed}__{seed}.jsonl",
+            "trace_member": None,
+            "trace_absent_reason": "synthetic fixture carries no trace",
+            "max_act": max_act, "victory": victory,
+            "double_boss": double,
+            "completed_double_boss": double and victory,
+            "policy_axis": axis, "campaign_status": status,
+            "provenance": {
+                "schema_version": 1, "driver_version": "d",
+                "pipeline_version": pipeline, "fork_jar_sha256": "f",
+            },
+        }
+
+    def test_committed_three_act_corpus_carries_its_contract(self):
+        corpus = vr.REPO / "tests" / "golden" / "oracle_corpus"
+        manifest, members = validate_archive(
+            corpus / "three_act_a20_5.tar.gz",
+            corpus / "three_act_a20_5.manifest.json", 5)
+        self.assertEqual(manifest["format"], corpus_builder.THREE_ACT_FORMAT)
+        self.assertEqual(manifest["entry_count"], 5)
+        entries = manifest["entries"]
+        self.assertEqual(len(members), sum(
+            1 + (entry["trace_member"] is not None) for entry in entries))
+        self.assertTrue(all(entry["max_act"] == 3 for entry in entries))
+        # Design section 6 item 3's shape, and both first-boss identities.
+        completed = [entry for entry in entries
+                     if entry["completed_double_boss"]]
+        self.assertGreaterEqual(len(completed), 2)
+        self.assertEqual(
+            len({entry["act3_boss_identities"][0] for entry in completed}), 2)
+        self.assertEqual(
+            {entry["policy_axis"] for entry in entries}, {"take", "skip"})
+        # Every member is asserted CLEAN to its run terminal at build time.
+        self.assertTrue(all(
+            entry["replay"]["verdict"] == "CLEAN" and
+            entry["replay"]["stop"] == "run terminal" for entry in entries))
+        # Two picks were classified non-clean the day they were captured and
+        # are clean on the landed engine; the corpus deliberately keeps them.
+        self.assertNotEqual(
+            {entry["campaign_classification"] for entry in entries}, {"clean"})
+
+    def test_three_act_corpus_needs_a_completed_double_boss_and_both_axes(self):
+        archive, manifest = self.three_act([
+            self.three_act_entry("S1", "take", double=True, victory=True),
+            self.three_act_entry("S2", "skip", double=False, victory=False),
+        ])
+        validate_archive(archive, manifest, 2)
+
+        archive, manifest = self.three_act([
+            self.three_act_entry("S1", "take", double=True, victory=False),
+            self.three_act_entry("S2", "skip", double=False, victory=False),
+        ])
+        with self.assertRaisesRegex(CorpusError, "double-boss"):
+            validate_archive(archive, manifest, 2)
+
+        archive, manifest = self.three_act([
+            self.three_act_entry("S1", "take", double=True, victory=True),
+            self.three_act_entry("S2", "take", double=False, victory=False),
+        ])
+        with self.assertRaisesRegex(CorpusError, "boss-relic axis"):
+            validate_archive(archive, manifest, 2)
+
+    def test_three_act_corpus_rejects_a_shallow_run_and_a_missing_pin(self):
+        archive, manifest = self.three_act([
+            self.three_act_entry("S1", "take", double=True, victory=True),
+            self.three_act_entry("S2", "skip", max_act=2),
+        ])
+        with self.assertRaisesRegex(CorpusError, "not an act-3 capture"):
+            validate_archive(archive, manifest, 2)
+
+        # A driver-stopped campaign legitimately has no pipeline_version; a
+        # complete one that lost it is a corrupt pin, not a special case.
+        archive, manifest = self.three_act([
+            self.three_act_entry("S1", "take", double=True, victory=True),
+            self.three_act_entry("S2", "skip", status="fatal_environment_drift",
+                                 pipeline=None),
+        ])
+        validate_archive(archive, manifest, 2)
+        archive, manifest = self.three_act([
+            self.three_act_entry("S1", "take", double=True, victory=True),
+            self.three_act_entry("S2", "skip", pipeline=None),
+        ])
+        with self.assertRaisesRegex(CorpusError, "pipeline_version"):
+            validate_archive(archive, manifest, 2)
+
+    def test_three_act_corpus_entry_count_is_asserted_not_read(self):
+        corpus = vr.REPO / "tests" / "golden" / "oracle_corpus"
+        with self.assertRaisesRegex(CorpusError, "exactly 4 manifest entries"):
+            validate_archive(corpus / "three_act_a20_5.tar.gz",
+                             corpus / "three_act_a20_5.manifest.json", 4)
+
+    def test_three_act_missing_trace_must_state_its_reason(self):
+        entry = self.three_act_entry("S2", "skip")
+        entry["trace_absent_reason"] = ""
+        archive, manifest = self.three_act([
+            self.three_act_entry("S1", "take", double=True, victory=True),
+            entry,
+        ])
+        with self.assertRaisesRegex(CorpusError, "stated reason"):
+            validate_archive(archive, manifest, 2)
+
+    def test_policy_axis_is_read_from_the_pinned_config_never_a_name(self):
+        self.assertEqual(
+            corpus_builder.policy_axis(
+                {"policy": "external", "external_policy": {
+                    "config_path": "D:/x/follower_sim_search_skip.json",
+                    "config_sha256": "abc"}}, "c/S1"),
+            ("skip", "follower_sim_search_skip.json", "abc"))
+        self.assertEqual(
+            corpus_builder.policy_axis({"policy": "random-legal"}, "c/S1"),
+            ("random-legal", None, None))
+        with self.assertRaisesRegex(vr.ReportError, "take/skip axis"):
+            corpus_builder.policy_axis(
+                {"policy": "external", "external_policy": {
+                    "config_path": "D:/x/policy_unknown.json"}}, "c/S1")
+
+    def test_three_act_provenance_requires_every_pin_but_the_pipeline(self):
+        source = {"schema_version": 1, "driver_version": "d",
+                  "pipeline_version": None, "fork_jar_sha256": "f"}
+        self.assertEqual(
+            corpus_builder.campaign_provenance(source, "c/S1"), source)
+        source["fork_jar_sha256"] = ""
+        with self.assertRaisesRegex(vr.ReportError, "fork_jar_sha256"):
+            corpus_builder.campaign_provenance(source, "c/S1")
 
 
 if __name__ == "__main__":
