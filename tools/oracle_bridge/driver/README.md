@@ -215,7 +215,10 @@ crashed game costs one run, not the campaign (design 7.1(2)). Resume granularity
 is **one seed** (the protocol exposes no mid-run save): an interrupted seed is
 re-run from `start` on the next launch (retry-once, then failed).
 
-**Current capture driver: `b1.7.0`** — `campaign_driver.DRIVER_VERSION` is
+**Current capture driver: `b1.7.1`** (`--boss-reward-via-policy`: the policy
+loop claims boss combat rewards — required for scripted-line depth cohorts,
+whose claims live in the script; default off = `b1.7.0` behavior) —
+`campaign_driver.DRIVER_VERSION` is
 authoritative; this line said `b1.5.3` against a `b1.6.0` tree until S2.42, so
 re-derive it rather than quoting it. A driver exit code is not visible to the
 orchestrator because the game owns the child process. The driver therefore

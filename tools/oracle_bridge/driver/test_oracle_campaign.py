@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import glob
 import hashlib
 import io
@@ -1668,6 +1669,19 @@ class StrictCampaignValidationTest(unittest.TestCase):
                 _files, errors = validate_artifacts.validate_campaign(
                     campaign_dir, require_oracle=True)
                 self.assertTrue(errors, label)
+
+    def test_boss_reward_via_policy_predicate_reads_the_flag(self):
+        # b1.7.1: the flag routes the boss combat-reward screen through the
+        # policy loop; a bare test driver without args keeps b1.7.0 behavior.
+        driver = campaign_driver.CampaignDriver.__new__(
+            campaign_driver.CampaignDriver)
+        self.assertFalse(driver._boss_reward_via_policy())  # no args at all
+        driver.args = argparse.Namespace()
+        self.assertFalse(driver._boss_reward_via_policy())  # args, no flag
+        driver.args = argparse.Namespace(boss_reward_via_policy=False)
+        self.assertFalse(driver._boss_reward_via_policy())
+        driver.args = argparse.Namespace(boss_reward_via_policy=True)
+        self.assertTrue(driver._boss_reward_via_policy())
 
     def test_happy_boss_claim_counter_and_timing_pass_strict_campaign(self):
         class BossStepper:

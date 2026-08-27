@@ -39,6 +39,11 @@ seed cannot wedge the campaign).
 Dependency-free (Python 3 standard library only): it runs under the game's own
 Windows Python, outside the WSL build/CI world.
 
+b1.7.1 (S2.43) -- `--boss-reward-via-policy` routes the boss combat-reward
+screen through the policy loop (scripted-line followers claim for
+themselves; driver-owned claiming left the script cursor permanently
+behind). Default off: b1.7.0 behavior unchanged.
+
 b1.7.0 (S2.42) -- THE RUN NO LONGER STOPS AT THE ACT-1 BOSS.
 S1 terminated every run at the Act-1 boss combat reward and refused the
 `proceed` that opens the boss chest, because the chest and everything past it
@@ -103,7 +108,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.7.0"
+DRIVER_VERSION = "b1.7.1"
 SCHEMA_VERSION = 1
 
 # A temporarily empty legal-action expansion is normal while an animated
@@ -1448,10 +1453,13 @@ class CampaignDriver:
                     menu_ok = self._return_to_menu_from_gameover()
                     return ov, floor, actions, menu_ok
 
-                if is_boss_combat_reward(gs):
+                if is_boss_combat_reward(gs) \
+                        and not self._boss_reward_via_policy():
                     # b1.7.0: claim the rows and PROCEED into the boss chest,
                     # then hand control back to this loop. Only a guard-limited
                     # failure to make progress on that screen still terminates.
+                    # b1.7.1: --boss-reward-via-policy skips this arm so a
+                    # scripted-line follower makes the claims itself.
                     state, actions, stop = self._claim_boss_reward(
                         rl, timing, state, seed, actions)
                     if stop is not None:
@@ -1716,6 +1724,14 @@ class CampaignDriver:
         if cmd and cmd.startswith("choose ") and is_boss_chest_reopen(gs):
             self._boss_chest_opened.add(self._boss_chest_key(gs))
 
+    def _boss_reward_via_policy(self):
+        """b1.7.1: True routes the boss combat-reward screen through the
+        ordinary policy loop (scripted-line followers make their own claims);
+        False is the b1.7.0 driver-owned claim. getattr so bare test drivers
+        without args keep the default."""
+        return bool(getattr(getattr(self, "args", None),
+                            "boss_reward_via_policy", False))
+
     def _claim_boss_reward(self, rl, timing, state, seed, actions):
         """On a boss combat-reward screen (any act): claim every row, then go on.
 
@@ -1959,6 +1975,16 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--policy-config", default=None,
                     help="opaque config file handed to the external policy as "
                          "`--config <path>`; hashed into the campaign identity")
+    ap.add_argument("--boss-reward-via-policy", action="store_true",
+                    help="b1.7.1: route the boss combat-reward screen through "
+                         "the policy loop instead of the driver's scripted "
+                         "_claim_boss_reward. Required for scripted-line "
+                         "depth cohorts (S2.V2 followers): the sim line "
+                         "records the claims, and driver-owned claiming "
+                         "leaves the script cursor permanently behind "
+                         "(first witness: s2v2_mindbloom_a, STS101166). "
+                         "Default off preserves b1.7.0 behavior for "
+                         "heuristic policies")
     ap.add_argument("--card-table", default=None,
                     help="override the greedy policy's card side table "
                          "(default: cards_sidetable.json beside the driver)")

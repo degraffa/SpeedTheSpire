@@ -226,6 +226,8 @@ def build_driver_command(args) -> str:
         if args.policy_config:
             parts += ["--policy-config",
                       args.policy_config.replace("\\", "/")]
+    if args.boss_reward_via_policy:
+        parts += ["--boss-reward-via-policy"]
     return " ".join(parts)
 
 
@@ -491,6 +493,9 @@ def _main(argv=None) -> int:
     ap.add_argument("--script-dir", help="directory of per-seed scripts "
                     "script_<SEED>.txt for --policy script (B1.3 A/B replay)")
     ap.add_argument("--policy-seed", type=int, default=1234)
+    ap.add_argument("--boss-reward-via-policy", action="store_true",
+                    help="passed straight through to campaign_driver.py "
+                         "(b1.7.1: policy-driven boss-reward claims)")
     # B1.3 rendering-strip toggles. Default matches the fork default (on). For an
     # A/B equivalence pass: one campaign with all three true (strip on), one with
     # all three false (strip off); byte-compare the normalized dumps.

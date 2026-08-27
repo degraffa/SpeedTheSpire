@@ -758,6 +758,8 @@ def run_orchestrator(args, campaign_id: str, seed_path: str,
         "--max-actions", str(args.max_actions),
         "--seeds-per-launch", str(args.seeds_per_launch),
     ]
+    if args.boss_reward_via_policy:
+        command.append("--boss-reward-via-policy")
     if runtime is not None:
         command.extend([
             "--runtime-workdir", os.fspath(runtime.game_workdir),
@@ -1599,6 +1601,8 @@ def schedule_nightly(args) -> int:
         "--game-dir", args.game_dir,
         "--fork-jar", args.fork_jar,
     ]
+    if args.boss_reward_via_policy:
+        nightly_args.append("--boss-reward-via-policy")
     if args.policy == "script":
         if not args.script:
             raise ValueError("--policy script requires --script")
@@ -1672,6 +1676,10 @@ def add_run_options(parser, campaign_required=True) -> None:
                         help="opaque config file handed to the external "
                              "policy; hashed into the campaign identity")
     parser.add_argument("--policy-seed", type=int, default=1234)
+    parser.add_argument("--boss-reward-via-policy", action="store_true",
+                        help="b1.7.1 pass-through: the policy loop claims "
+                             "boss combat rewards (required for scripted-"
+                             "line depth cohorts)")
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0,
                         help="zero-based shard index")
@@ -1719,6 +1727,7 @@ def parse_args(argv=None):
     schedule.add_argument("--policy-cmd", default=None)
     schedule.add_argument("--policy-config", default=None)
     schedule.add_argument("--policy-seed", type=int, default=1234)
+    schedule.add_argument("--boss-reward-via-policy", action="store_true")
     schedule.add_argument("--shard-count", type=int, default=1)
     schedule.add_argument("--shard-index", type=int, default=0)
     schedule.add_argument(
