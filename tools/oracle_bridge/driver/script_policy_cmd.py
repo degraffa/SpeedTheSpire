@@ -26,8 +26,11 @@ depth cohorts exist to collect -- it is never something to improvise around,
 so there is deliberately no fallback policy, no re-match, no skipping of
 steps.
 
-GLUE COMMANDS (the two known granularity seams, both driver-visible facts
-rather than improvisation):
+GLUE COMMANDS (the known granularity seams, all driver-visible facts rather
+than improvisation). Three of them are evaluated ONLY AFTER the script's next
+step failed to match the live state (match-first, so a scripted decision is
+never glued past); the fourth is keyed on a screen the sim provably never
+records a step for, and is therefore evaluated BEFORE the match:
   * a state whose ONLY PROGRESS candidate is `proceed` answers `proceed`
     without consuming a script step -- the sim had no decision to record
     where the live game shows a confirmation-only screen. "Progress"
@@ -82,6 +85,34 @@ rather than improvisation):
     and the command answered is that sole progress candidate, not
     `candidates[0]`: the belt commands carry no guaranteed position in
     the list, and answering one would spend a potion.
+  * the `COMPLETE` SCREEN answers `proceed` without consuming a step, and
+    is the ONE rule evaluated BEFORE the match. `COMPLETE` is
+    ChoiceScreenUtils' label (:80-83) for a room at RoomPhase.COMPLETE with
+    no screen over it, and in S2's scope it has exactly two producers --
+    the two Act-3 boss rooms AbstractRoom.java:327 denies a reward screen
+    to. The engine has ALREADY made both transitions when the capture shows
+    the button: the first Act-3 kill runs ProceedButton's `goToDoubleBoss`
+    (:210-220) inline off the kill (S2.28's deliberate collapse; engine
+    commit 3481c08 models that handoff end to end and the replay layer maps
+    this press as a NOOP), and the second press is the run terminal
+    (:104-105). The sim therefore records NO decision here, ever -- which
+    is why this rule cannot be match-first. Tenth live witness,
+    divergence_STS205404_ps20 (s2v3_wave2, floor 50 -> 51): the line killed
+    the Time Eater at seq 893, the handoff `COMPLETE` arrived at seq 894 as
+    `['proceed']`, and the NEXT scripted step was Gambling Chip's floor-51
+    `confirm` (the optional turn-1 hand-select prompt, discarding nothing).
+    Under match-first that `confirm` false-matched the handoff press
+    through the confirm/proceed alias and was consumed; the live Gambling
+    Chip `HAND_SELECT` then met the FOLLOWING `end` step and the follower
+    stopped with "derived command 'end' for end turn is not among the 9
+    legal candidates" -- a stop with no engine defect behind it. The three
+    earlier double-boss captures (tests/golden/oracle_corpus/
+    three_act_a20_5: STS128113 seq 655/666, STS103509 seq 622/662,
+    STS105835 seq 680) survived only because their next scripted step was a
+    `play`/`end` that could not match, so glue rule 1 answered instead --
+    the seam was one relic away from firing the whole time. Screen-keyed,
+    not sole-progress-keyed: the label names a press with no decision in
+    it, whatever else the belt advertises beside it.
 One SKIP rule mirrors the seam in the other direction (second live
 witness, same first campaign, step 2 of the same run): the sim records a
 `proceed`/`confirm` where the live game auto-advances (Neow's blessing
@@ -514,6 +545,29 @@ def sole_choice_glue(candidates):
     return None
 
 
+def is_complete_screen_glue(state, candidates):
+    """Glue rule 4 -- the `COMPLETE` screen (module header).
+
+    ChoiceScreenUtils :80-83 labels a room at RoomPhase.COMPLETE with no
+    screen over it; in S2's scope that is only the two Act-3 boss rooms
+    AbstractRoom.java:327 denies a reward screen to, and the engine has
+    made both crossings already when the capture shows the button (the
+    handoff `proceed` maps to a replay NOOP, the finished-Act-3 one to the
+    run terminal -- tests/replay_command_map_test.cpp's COMPLETE section).
+    The sim records no decision here, so the press is glue.
+
+    This is the ONE rule evaluated BEFORE the match, and it has to be: the
+    press's live command is `proceed`, which is exactly what a scripted
+    `confirm`/`proceed` step's alias set answers, so match-first hands the
+    screen a step that belongs to the NEXT floor (the tenth live witness,
+    divergence_STS205404_ps20, is Gambling Chip's turn-1 hand-select
+    `confirm` eaten by the handoff). Screen-keyed rather than
+    sole-progress-keyed: what makes this press decision-free is the label,
+    not how many commands the belt puts beside it."""
+    return (_gs(state).get("screen_type") == "COMPLETE"
+            and "proceed" in candidates)
+
+
 def is_grid_confirm_glue(state, candidates):
     """The GRID pick-then-confirm seam (module header): a committable grid
     selection whose remaining progress command is `proceed`. Evaluated only
@@ -584,10 +638,19 @@ class ScriptPolicy:
                 raise ConfigError(f"no script for seed {seed!r}: {path}")
             self._script = Script(path)
             self._seed = seed
+        # GLUE RULE 4 FIRST, AND ONLY THIS ONE. A `COMPLETE` screen is a
+        # press the sim never records a step for (module header), and its
+        # live command is `proceed` -- the very alias a scripted
+        # `confirm`/`proceed` answers -- so leaving it to the match would
+        # let a step belonging to the next floor be eaten by the crossing.
+        # It consumes nothing, so a real desync still surfaces at the next
+        # screen with the cursor unmoved.
+        if is_complete_screen_glue(state, candidates):
+            return "proceed"
         # MATCH FIRST, GLUE ON MISMATCH. The script's next step gets the
         # first claim on this state; only when it does not match here do the
-        # two glue rules answer -- so a scripted proceed/confirm is consumed
-        # rather than glued past, and the glue can never advance the cursor.
+        # three post-match glue rules answer -- so a scripted proceed/confirm
+        # is consumed rather than glued past, and no glue advances the cursor.
         step = self._script.peek()
         # SIM-ONLY PROCEED SKIP (module header): a proceed-kind step with
         # neither alias legal can never match this or any state's candidate

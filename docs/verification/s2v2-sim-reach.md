@@ -387,3 +387,12 @@ independent, so the union is the same set of rows.)
   candidates — the always-available `potion discard N` side actions are
   excluded (third witness, divergence_STS100439_ps0: the post-rest
   campfire aftermath), while a scripted `potion_discard` matches first.
+  **A fourth glue rule landed 2026-09-02**, and it is the one evaluated
+  BEFORE the match rather than after: the A20 double-boss `COMPLETE`
+  screen. The label names a press the emitter never writes a step for (the
+  engine runs `goToDoubleBoss` inline off the first Act-3 kill, and the
+  second press is the run terminal), but its live command is `proceed` —
+  the alias a scripted `confirm`/`proceed` answers — so match-first let the
+  floor-50 crossing consume a floor-51 step (tenth witness,
+  divergence_STS205404_ps20: Gambling Chip's turn-1 hand-select `confirm`).
+  It consumes nothing, so a real desync still stops at the next screen.

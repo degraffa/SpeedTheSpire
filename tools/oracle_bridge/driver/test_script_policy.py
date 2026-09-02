@@ -28,11 +28,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS = os.path.normpath(os.path.join(
     HERE, "..", "..", "..", "tests", "golden", "oracle_corpus",
     "act1_a20_50.tar.gz"))
+# The three-act corpus is the only committed source of `COMPLETE` records:
+# the Act-1 corpus cannot reach floor 50, and the label has exactly two
+# producers, both in Act 3 (tests/replay_command_map_test.cpp's COMPLETE
+# section). Two of its five runs are double-boss VICTORIES.
+THREE_ACT_CORPUS = os.path.normpath(os.path.join(
+    HERE, "..", "..", "..", "tests", "golden", "oracle_corpus",
+    "three_act_a20_5.tar.gz"))
 
 
-def corpus_runs(limit):
+def corpus_runs(limit, corpus=CORPUS):
     """Yield (name, [action records]) for the first `limit` corpus runs."""
-    with tarfile.open(CORPUS) as tar:
+    with tarfile.open(corpus) as tar:
         names = sorted(m.name for m in tar.getmembers()
                        if m.name.endswith(".jsonl"))
         for name in names[:limit]:
@@ -725,6 +732,195 @@ class GlueRuleTest(unittest.TestCase):
                                    "screen_state": {"event_id": "X"}}}
         got = policy.decide(decide_request("STS1", trailing, ["choose 0"]))
         self.assertEqual(got, "choose 0")
+
+
+class CompleteScreenGlueTest(unittest.TestCase):
+    """Glue rule 4 -- the A20 double-boss `COMPLETE` press, evaluated BEFORE
+    the match.
+
+    Tenth live witness, s2v3_wave2 STS205404 ps20: the scripted line killed
+    the Time Eater on floor 50 (seq 893, `play 5 0`), the game showed the
+    handoff `COMPLETE` screen at seq 894 with candidates `['proceed']`, and
+    the script's next step was Gambling Chip's floor-51 `confirm` -- the
+    optional turn-1 hand-select prompt, confirmed with nothing selected.
+    Match-first let that `confirm` answer the handoff press through the
+    confirm/proceed alias and CONSUMED it, so the live Gambling Chip
+    `HAND_SELECT` met the FOLLOWING `end` step and the follower stopped:
+    "derived command 'end' for end turn is not among the 9 legal
+    candidates". No engine defect was behind that stop -- the engine models
+    the crossing with no scripted step at all (commit 3481c08; the replay
+    layer maps the press as a NOOP, tests/replay_command_map_test.cpp).
+
+    The three earlier double-boss captures in the committed corpus survived
+    only because their next scripted step was a `play`/`end` that could not
+    match, so glue rule 1 answered instead.
+    """
+
+    # The capture's own seq 894 record (its dump carries an empty
+    # screen_state).
+    HANDOFF = {"available_commands": ["proceed", "key", "click", "wait",
+                                      "state"],
+               "game_state": {"screen_type": "COMPLETE",
+                              "room_type": "MonsterRoomBoss",
+                              "floor": 50, "act": 3,
+                              "screen_state": {}}}
+
+    # The Gambling Chip prompt that opened the second boss fight:
+    # divergence_STS205404_ps20's own choice_list, whose expansion is that
+    # record's own nine candidates.
+    HAND = ["evolve", "corruption", "shrug it off", "feel no pain", "defend",
+            "bash", "juggernaut", "carnage"]
+    GAMBLING_CHIP = {
+        "available_commands": ["choose", "confirm", "state"],
+        "game_state": {"screen_type": "HAND_SELECT",
+                       "floor": 51, "act": 3,
+                       "choice_list": HAND,
+                       "screen_state": {"hand": [{"id": name, "upgrades": 0}
+                                                 for name in HAND],
+                                        "selected_cards": []}}}
+
+    def _policy_with(self, steps):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, "STS1__sim_search__ps0.script.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(make_script_lines("STS1", steps)) + "\n")
+        return spc.ScriptPolicy({"script_dir": tmp.name})
+
+    def _candidates(self, state):
+        return campaign_driver.expand_legal_actions(state, random.Random(0))
+
+    def test_the_witness_candidates_are_the_ones_the_driver_derived(self):
+        self.assertEqual(self._candidates(self.HANDOFF), ["proceed"])
+        self.assertEqual(self._candidates(self.GAMBLING_CHIP),
+                         ["choose %d" % i for i in range(8)] + ["proceed"])
+
+    def test_the_handoff_does_not_consume_the_next_floors_confirm(self):
+        # The witness end to end: script steps 882 (`confirm`) and 883
+        # (`end`) against the live seq-894 handoff and the prompt behind it.
+        policy = self._policy_with([{"k": "confirm", "floor": 51},
+                                    {"k": "end"}])
+        got = policy.decide(decide_request(
+            "STS1", self.HANDOFF, self._candidates(self.HANDOFF)))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 0)  # nothing consumed
+        # ...and the confirm is still there for the prompt it was written for.
+        got = policy.decide(decide_request(
+            "STS1", self.GAMBLING_CHIP, self._candidates(self.GAMBLING_CHIP)))
+        self.assertEqual(got, "proceed")  # the confirm/proceed alias
+        self.assertEqual(policy._script.cursor, 1)
+        combat = {"available_commands": ["play", "end", "state"],
+                  "game_state": {"screen_type": "NONE", "floor": 51,
+                                 "screen_state": {}}}
+        got = policy.decide(decide_request("STS1", combat, ["end"]))
+        self.assertEqual(got, "end")
+        self.assertEqual(policy._script.cursor, 2)
+
+    def test_a_scripted_confirm_on_a_real_prompt_is_still_consumed(self):
+        # The negative control: glue rule 4 is keyed on the COMPLETE label
+        # alone, so a `confirm` that legitimately maps to `proceed` on an
+        # ordinary screen is matched and consumed exactly as before. Same
+        # prompt as above, without the handoff in front of it.
+        policy = self._policy_with([{"k": "confirm", "floor": 51},
+                                    {"k": "end"}])
+        got = policy.decide(decide_request(
+            "STS1", self.GAMBLING_CHIP, self._candidates(self.GAMBLING_CHIP)))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 1)  # consumed, not glued
+
+    def test_a_scripted_proceed_step_is_consumed_on_an_ordinary_screen(self):
+        # The other half of the alias, on the shape the corpus is full of.
+        policy = self._policy_with([{"k": "proceed", "ctx": "combat_reward"}])
+        reward = {"available_commands": ["proceed", "state"],
+                  "game_state": {"screen_type": "COMBAT_REWARD",
+                                 "screen_state": {"rewards": []}}}
+        got = policy.decide(decide_request("STS1", reward, ["proceed"]))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 1)
+
+    def test_the_handoff_glues_with_a_play_step_pending_too(self):
+        # The shape the three earlier captures actually hit (STS128113 seq
+        # 655 -> `play 3` at 656): the pending step cannot match the press,
+        # and the crossing is answered either way.
+        policy = self._policy_with([{"k": "play", "card": "Strike_R",
+                                     "up": 0, "ord": 0, "t": 0}])
+        got = policy.decide(decide_request(
+            "STS1", self.HANDOFF, self._candidates(self.HANDOFF)))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 0)
+
+    def test_the_victory_terminal_complete_screen_glues_when_exhausted(self):
+        # The label's second producer: the finished Act-3 victory press
+        # (ProceedButton.java:104-105), which the run layer ends the run on
+        # -- so the script is out of steps by the time it arrives.
+        policy = self._policy_with([])
+        got = policy.decide(decide_request(
+            "STS1", self.HANDOFF, self._candidates(self.HANDOFF)))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 0)
+
+    def test_the_rule_is_screen_keyed_not_sole_progress_keyed(self):
+        # A belt beside the press must not turn a decision-free crossing
+        # into a stop, the way it did for glue rule 1 (eighth witness).
+        state = json.loads(json.dumps(self.HANDOFF))
+        state["available_commands"] = ["proceed", "potion", "state"]
+        state["game_state"]["potions"] = [{"id": "BloodPotion",
+                                           "can_use": True,
+                                           "can_discard": True,
+                                           "requires_target": False}]
+        policy = self._policy_with([{"k": "confirm", "floor": 51}])
+        candidates = self._candidates(state)
+        self.assertIn("potion use 0", candidates)
+        got = policy.decide(decide_request("STS1", state, candidates))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 0)
+
+    def test_a_complete_screen_without_proceed_still_stops(self):
+        # The stop contract is untouched: the rule answers the press the
+        # label names and nothing else. A COMPLETE dump with no `proceed` is
+        # not a shape the game produces, and the follower does not
+        # improvise one.
+        policy = self._policy_with([{"k": "end"}])
+        state = json.loads(json.dumps(self.HANDOFF))
+        state["available_commands"] = ["choose", "state"]
+        state["game_state"]["choice_list"] = ["a", "b"]
+        with self.assertRaises(spc.Divergence):
+            policy.decide(decide_request("STS1", state,
+                                         ["choose 0", "choose 1"]))
+        self.assertEqual(policy._script.cursor, 0)
+
+    def test_every_committed_complete_record_glues_without_consuming(self):
+        # The three earlier double-boss captures, read from the committed
+        # corpus rather than from prose: every `COMPLETE` record in
+        # three_act_a20_5 (STS128113 seq 655/666 and STS103509 seq 622/662,
+        # the two double-boss victories; STS105835 seq 680, the death to the
+        # second boss) is answered `proceed` with the cursor unmoved, while
+        # the script holds the step the emitter would have written for the
+        # capture's NEXT decision.
+        seen = []
+        for name, records in corpus_runs(limit=5, corpus=THREE_ACT_CORPUS):
+            for i, record in enumerate(records):
+                state = record.get("state_json") or {}
+                if _gs(state).get("screen_type") != "COMPLETE":
+                    continue
+                self.assertEqual(record.get("action_command"), "proceed",
+                                 name)
+                candidates = campaign_driver.expand_legal_actions(
+                    state, random.Random(0))
+                self.assertEqual(candidates, ["proceed"], name)
+                nxt = records[i + 1] if i + 1 < len(records) else None
+                step = derive_step(nxt.get("state_json") or {},
+                                   nxt.get("action_command") or "") \
+                    if nxt else None
+                policy = self._policy_with([step or {"k": "end"}])
+                got = policy.decide(decide_request("STS1", state,
+                                                   candidates))
+                self.assertEqual(got, "proceed", name)
+                self.assertEqual(policy._script.cursor, 0, name)
+                seen.append((name, record.get("seq")))
+        # Five records across three runs -- a corpus swap that silently
+        # stopped carrying the label must fail here, not pass vacuously.
+        self.assertEqual(len(seen), 5, seen)
 
 
 class BossRewardTest(unittest.TestCase):

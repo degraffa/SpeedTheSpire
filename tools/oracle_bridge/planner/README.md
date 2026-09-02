@@ -183,20 +183,33 @@ Library's board is face UP on a real `GRID` screen (TheLibrary.java:91), so it
 emits card identity instead. Every other event card screen is a master-deck
 grid (`EventGridKind`), already emitted as `grid` + `card`/`up`/`ord`.
 
-The follower consumes steps strictly in order; its only three glue commands
+The follower consumes steps strictly in order; its only four glue commands
 (a confirmation-only screen; the GRID pick-then-confirm seam; a collapsed
 one-click dialog whose sole candidate is a single `choose` — Neow's opening
-`talk` and the vestigial-click event class the engine collapses) never
-advance the script cursor — "sole" reads the PROGRESS candidates, i.e. every
-always-available BELT command is excluded — `potion discard N` and
-`potion use N [t]` alike, since CommunicationMod advertises the `potion`
-verb on any screen whose belt holds a discardable/usable potion and
-neither form gates that screen — while a scripted `potion`/`potion_discard`
-still matches first; one SKIP rule covers the mirror seam (a
-scripted `proceed`/`confirm` whose live state offers neither alias — the
-game auto-advanced where the sim stepped — is consumed without emitting,
-and a real desync still stops on the following step). **Any other
-mismatch stops the run as divergent** — a desync is capture evidence for Stage-B triage, never
+`talk` and the vestigial-click event class the engine collapses; and the
+`COMPLETE` screen) never advance the script cursor — "sole" reads the
+PROGRESS candidates, i.e. every always-available BELT command is excluded —
+`potion discard N` and `potion use N [t]` alike, since CommunicationMod
+advertises the `potion` verb on any screen whose belt holds a
+discardable/usable potion and neither form gates that screen — while a
+scripted `potion`/`potion_discard` still matches first; one SKIP rule covers
+the mirror seam (a scripted `proceed`/`confirm` whose live state offers
+neither alias — the game auto-advanced where the sim stepped — is consumed
+without emitting, and a real desync still stops on the following step). The
+first three glue rules are evaluated only **after** the next step failed to
+match, so a scripted decision is never glued past; the `COMPLETE` rule is
+the one evaluated **before** it, and has to be. `COMPLETE` is
+ChoiceScreenUtils' label for a room at RoomPhase.COMPLETE with no screen
+over it, which in S2's scope only the two Act-3 boss rooms produce; the
+engine has already made both crossings when the capture shows the button
+(the first Act-3 kill runs `goToDoubleBoss` inline, the second press is the
+run terminal), so **the emitter writes no step there, ever**. Its live
+command is `proceed` — exactly the alias a scripted `confirm`/`proceed`
+answers — so under match-first the crossing ate a step belonging to the
+next floor (s2v3_wave2 STS205404 ps20: Gambling Chip's floor-51 hand-select
+`confirm` was consumed by the floor-50 handoff, and the follower then
+stopped on the `end` behind it). **Any other mismatch stops the run as
+divergent** — a desync is capture evidence for Stage-B triage, never
 something to route around. `script_policy_cmd.py`'s module header carries the
 stop contract; its unit tests round-trip the schema against the committed
 corpus of recorded dumps.
