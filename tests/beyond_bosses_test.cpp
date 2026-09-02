@@ -42,6 +42,7 @@
 #include "gtest/gtest.h"
 
 #include "sts/engine/action_queue.hpp"
+#include "sts/engine/card_play.hpp"
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"
@@ -818,6 +819,127 @@ TEST(TimeWarp, NothingDecaysTheCounterAcrossRounds) {
         dispatch_on_after_use_card(s, 0, static_cast<uint16_t>(CardId::STRIKE));
     }
     EXPECT_EQ(monster_power(s, 0, PowerId::TIME_WARP), 0) << "the 12th fired";
+}
+
+// --- the two plays the clock must NOT see: `dontTriggerOnUseCard` ----------
+//
+// UseCardAction.update guards BOTH onAfterUseCard loops with
+// `if (this.targetCard.dontTriggerOnUseCard) continue;` (UseCardAction.java:78
+// for the player's powers, :83 for every monster's), and the flag is set on
+// exactly two kinds of play before their UseCardAction resolves:
+//   * the five end-of-turn self-plays -- Burn.java:53-56, Decay.java:49-52,
+//     Doubt.java:49-52, Regret.java:35-39, Shame.java:37-40 each write
+//     `this.dontTriggerOnUseCard = true` and re-queue themselves;
+//   * a queued autoplay that fails canUse -- GameActionManager.java:299-301
+//     `c.dontTriggerOnUseCard = true; addToBottom(new UseCardAction(c));`.
+// So neither play ticks TimeWarpPower.onAfterUseCard (:53-55). The engine
+// counted both until 2026-09-02: five S2.V3 scripted lines (STS204478 ps102 and
+// ps19, STS216263 ps95, STS206243 ps5, STS226546 ps105) every one stopped in the
+// Act-3 Time Eater fight with the sim's clock one card ahead of the game's,
+// and every one traced back to an `end` with a Shame/Doubt/Regret in hand.
+
+// A Time Eater with the clock at 11 and a full test player. `monster_attacks_
+// queued` is set so the pump stops at the player's turn boundary instead of
+// running the boss's turn (the status_curse_test idiom).
+CombatState MakeTimeEaterAtEleven() {
+    CombatState s = MakeSeeded(5);
+    s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::TIME_EATER);
+    s.monsters[0].hp = 480;
+    s.monsters[0].max_hp = 480;
+    give_monster_power(s, 0, PowerId::TIME_WARP, 11);
+    s.shuffle_rng = from_seed(7);
+    s.monster_attacks_queued = 1;
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    return s;
+}
+
+CardPoolIndex add_pool_card(CombatState& s, CardId id) {
+    uint8_t pi = 0;
+    while (pi < kCardPoolCap &&
+           s.card_pool[pi].card_id != static_cast<uint16_t>(CardId::NONE)) {
+        ++pi;
+    }
+    const CardDef* d = card_def(id);
+    EXPECT_NE(d, nullptr);
+    s.card_pool[pi].card_id = static_cast<uint16_t>(id);
+    s.card_pool[pi].cost_now = card_cost(*d, 0);
+    s.card_pool[pi].flags = card_flags(*d, 0);
+    return pi;
+}
+
+// Run the pump until the player's queues are empty or control returns to the
+// player -- and never into the monster turn, whose Reverberate would muddy
+// the assertions below.
+void pump_player_side(CombatState& s) {
+    for (int guard = 0; guard < 256; ++guard) {
+        if (s.action_count == 0 && s.pre_turn_count == 0 &&
+            s.card_queue_count == 0) {
+            return;
+        }
+        if (pump_step(s, default_monster_turn).outcome ==
+            PumpOutcome::WAITING_ON_USER) {
+            return;
+        }
+    }
+    ADD_FAILURE() << "the player-side queues did not quiesce";
+}
+
+TEST(TimeWarp, EndOfTurnCurseSelfPlayDoesNotTickTheClock) {
+    CombatState s = MakeTimeEaterAtEleven();
+    const CardPoolIndex shame = add_pool_card(s, CardId::SHAME);
+    const CardPoolIndex strike = add_pool_card(s, CardId::STRIKE);
+    s.hand[s.hand_count++] = shame;
+    s.hand[s.hand_count++] = strike;
+
+    // The player presses End Turn with Shame in hand. Shame plays ITSELF out
+    // of the hand (dispatch_card_end_of_turn), lands in the discard ahead of
+    // the swept Strike, and applies its Frail -- all of that is the modelled
+    // S1 behaviour and still happens.
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump_player_side(s);
+
+    ASSERT_EQ(s.discard_count, 2);
+    EXPECT_EQ(s.discard[0], shame) << "Shame's own UseCardAction files it first";
+    EXPECT_EQ(s.discard[1], strike);
+    EXPECT_EQ(player_power_amount(s, PowerId::FRAIL), 1)
+        << "the self-effect (Shame.java:29-33) is not what the guard skips";
+    EXPECT_EQ(s.cards_played_this_turn, 0);
+
+    // What the guard skips: TimeWarpPower.onAfterUseCard never ran, so the
+    // clock is still at 11 -- NOT zeroed by a 12th "play" the game never
+    // counts -- and the +2 Strength fan-out (:63-65) was never queued.
+    EXPECT_EQ(monster_power(s, 0, PowerId::TIME_WARP), 11)
+        << "UseCardAction.java:83 -- dontTriggerOnUseCard skips the monster "
+           "powers' onAfterUseCard";
+    EXPECT_EQ(monster_power(s, 0, PowerId::STRENGTH), -1);
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.card_queue_count, 0) << "no second end-turn sentinel";
+}
+
+TEST(TimeWarp, CancelledAutoplayFilingDoesNotTickTheClock) {
+    CombatState s = MakeTimeEaterAtEleven();
+    s.monsters[0].powers[0].amount = 10;  // Havoc itself is the 11th play
+    s.player_energy = 3;
+    const CardPoolIndex havoc = add_pool_card(s, CardId::HAVOC);
+    const CardPoolIndex wound = add_pool_card(s, CardId::WOUND);
+    s.hand[s.hand_count++] = havoc;
+    s.draw[s.draw_count++] = wound;
+
+    // Havoc is a real play (its own UseCardAction counts: 10 -> 11). The Wound
+    // it autoplays fails canUse -- Wound.canUse is false -- so it gets the
+    // no-trigger filing of GameActionManager.java:299-301 and exhausts
+    // (exhaustOnUseOnce) WITHOUT reaching the clock.
+    ASSERT_TRUE(queue_card_play(s, 0, kActorPlayer));
+    pump_player_side(s);
+
+    EXPECT_EQ(s.cards_played_this_turn, 1) << "only Havoc passes canUse";
+    ASSERT_EQ(s.exhaust_count, 1);
+    EXPECT_EQ(s.exhaust[0], wound)
+        << "the cancelled autoplay is still filed (:300-301)";
+    EXPECT_EQ(monster_power(s, 0, PowerId::TIME_WARP), 11)
+        << "Havoc ticked once; the Wound's no-trigger filing did not";
+    EXPECT_EQ(monster_power(s, 0, PowerId::STRENGTH), -1);
+    EXPECT_EQ(s.card_queue_count, 0) << "the turn did not end early";
 }
 
 // ============================================================================

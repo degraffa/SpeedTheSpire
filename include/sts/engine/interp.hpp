@@ -379,10 +379,14 @@ enum class Opcode : uint16_t {
                               // resetAttributes) or discard (:127). `amount` is
                               // the card-pool index. Never authored in YAML
                               // (ENGINE_EMITTED_OPS); emitted only by
-                              // resolve_card_play. onAfterUseCard (:79-88) has
-                              // no S1 binder (BeatOfDeath / Rebound / Slow /
-                              // TimeMaze / TimeWarp are all out of scope), so
-                              // its seam is a named comment in op_use_card.
+                              // resolve_card_play and by the two no-trigger
+                              // autoplay filings (card_play.cpp). The
+                              // onAfterUseCard fan-out (:77-86; Slow and Time
+                              // Warp bind it) fires from here UNLESS `flags`
+                              // carries kUseCardDontTriggerOnUseCard -- the
+                              // Java's `dontTriggerOnUseCard` guard on both
+                              // loops (:78, :83); see the USE_CARD field
+                              // encoding below.
     // --- Colorless-rare addition (append-only from 54) ------------------------
     UPGRADE_ALL = 54,         // Apotheosis / ApotheosisAction.update (:25-34):
                               // upgrade every eligible card in hand, drawPile,
@@ -1021,6 +1025,29 @@ inline constexpr uint32_t kPlayCardQueueFront = 1u << 4;
 // the bottom, touching no pile. Engine-only (Mayhem's native body); never
 // authored from YAML.
 inline constexpr uint32_t kPlayCardDeferRoll = 1u << 5;
+
+// --- USE_CARD field encoding -------------------------------------------------
+// `amount` is the card-pool index of the instance being filed out of limbo;
+// `flags` carries the one bit below (0 for every ordinary play).
+//
+// The played card's `dontTriggerOnUseCard` (AbstractCard). The Java sets it on
+// exactly two kinds of play and both reach UseCardAction.update with it still
+// set: the five end-of-turn self-plays (Burn.java:53-56, Decay.java:49-52,
+// Doubt.java:49-52, Regret.java:35-39, Shame.java:37-40 -- each body's
+// `this.dontTriggerOnUseCard = true` before it re-queues itself) and a
+// queued autoplay that failed canUse (GameActionManager.java:299-301,
+// `c.dontTriggerOnUseCard = true; addToBottom(new UseCardAction(c))`). With
+// the bit set, update() SKIPS the onAfterUseCard fan-out -- both the player
+// loop and the monster loop test it (UseCardAction.java:78, :83) -- and then
+// files the card normally (:87-134). So a Shame that plays itself at end of
+// turn does NOT tick the Time Eater's Time Warp or the Giant Head's Slow. It
+// was counted before this bit existed: five S2.V3 scripted lines (STS204478
+// ps102/ps19, STS216263 ps95, STS206243 ps5, STS226546 ps105) all stopped in
+// the Time Eater fight with the sim's clock one card ahead of the game's,
+// each one traced to an `end` with an end-of-turn curse in hand. The bit is
+// action-local because the Java's own flag is: :133 clears it on the filing
+// path, and every producer sets it immediately before queueing.
+inline constexpr uint32_t kUseCardDontTriggerOnUseCard = 1u << 0;
 
 // --- CHOOSE_CARD field encoding ---------------------------------------------
 // The blocking hand-card select verb. `amount` carries how many cards to select;

@@ -267,11 +267,13 @@ void move_played_card_to_limbo(CombatState& s, CardPoolIndex pool_index) noexcep
 // A failed autoplay canUse check does not run the normal play sequence, but
 // GameActionManager still queues `new UseCardAction(c)` with
 // dontTriggerOnUseCard set (GameActionManager.java:285-301). Its constructor
-// fires no hooks; its update performs only the normal purge/exhaust/discard
-// decision (including Strange Spoon and onExhaust). Leaving the compact-model
-// card in limbo until this queued USE_CARD resolves is gameplay-equivalent to
-// Java's presentation-only ExhaustCardEffect removal and gives the filing
-// action the source membership file_card_from_limbo requires.
+// fires no hooks; its update skips the onAfterUseCard fan-out too
+// (UseCardAction.java:78, :83 -- the bit below is that guard) and performs
+// only the normal purge/exhaust/discard decision (including Strange Spoon and
+// onExhaust). Leaving the compact-model card in limbo until this queued
+// USE_CARD resolves is gameplay-equivalent to Java's presentation-only
+// ExhaustCardEffect removal and gives the filing action the source membership
+// file_card_from_limbo requires.
 void queue_cancelled_autoplay_filing(CombatState& s,
                                      CardPoolIndex pool_index) noexcept {
     ActionQueueItem use{};
@@ -279,6 +281,7 @@ void queue_cancelled_autoplay_filing(CombatState& s,
     use.src = kActorPlayer;
     use.tgt = kActorPlayer;
     use.amount = pool_index;
+    use.flags = kUseCardDontTriggerOnUseCard;
     add_to_bottom(s, use);
 }
 
@@ -764,11 +767,15 @@ void dispatch_card_end_of_turn(CombatState& s) noexcept {
     // 373-375). Burn/Decay/Doubt/Regret/Shame do NOT merely queue a self-effect:
     // each one sets `dontTriggerOnUseCard` and APPENDS ITSELF TO THE cardQueue
     // (Burn.java:53-56, Decay.java:49-52, Doubt.java:49-52, Regret.java:35-39,
-    // Shame.java:39-42). GameActionManager then dequeues each and PLAYS it --
+    // Shame.java:37-40). GameActionManager then dequeues each and PLAYS it --
     // canUse is bypassed by the dontTriggerOnUseCard clause (:214), every
     // onPlayCard / onUseCard / triggerOnCardPlayed fan-out and the
     // cardsPlayedThisTurn increment are skipped (:220-249,
-    // UseCardAction.java:41-64), AbstractPlayer.useCard runs `c.use()` (which is
+    // UseCardAction.java:41-64), and so is the onAfterUseCard fan-out when the
+    // UseCardAction later resolves (UseCardAction.java:78, :83 -- the queued
+    // USE_CARD below carries kUseCardDontTriggerOnUseCard for exactly that
+    // reason; without it the Time Eater's Time Warp counted every end-of-turn
+    // curse, which is the S2.V3 Time Eater stop), AbstractPlayer.useCard runs `c.use()` (which is
     // where the self-effect actually comes from -- each body is guarded by
     // `if (this.dontTriggerOnUseCard)`), queues UseCardAction, and REMOVES THE
     // CARD FROM THE HAND (:1373-1375). So the card lands in the DISCARD PILE
@@ -825,12 +832,16 @@ void dispatch_card_end_of_turn(CombatState& s) noexcept {
         // is [effects of card k, card k, effects of card k+1, card k+1, ...].
         // None of the five is `exhaust`, so all five file to the discard pile;
         // op_use_card derives that from the instance flags rather than assuming.
+        // The bit is the card's `dontTriggerOnUseCard`, still set when its
+        // UseCardAction updates: no onAfterUseCard fan-out (UseCardAction.java:
+        // 78, :83) -- Time Warp and Slow do not see this play.
         move_played_card_to_limbo(s, pi);
         ActionQueueItem use{};
         use.opcode = static_cast<uint16_t>(Opcode::USE_CARD);
         use.src = kActorPlayer;
         use.tgt = kActorPlayer;
         use.amount = pi;
+        use.flags = kUseCardDontTriggerOnUseCard;
         add_to_bottom(s, use);
     }
 }

@@ -29,9 +29,15 @@ void power_native_time_warp(CombatState& s, Hook hook,
     }
     PowerSlot& slot = pv.slots[ctx.power_slot];
 
-    // `++this.amount;` (:60) -- SYNCHRONOUS, every card, no filter of any kind.
-    // Purged cards, POWERs, status and curse plays all count: the hook fires once
-    // per UseCardAction.update, which is once per play.
+    // `++this.amount;` (:55) -- SYNCHRONOUS, every card, no filter of any kind
+    // IN THIS BODY. Purged cards, POWERs, status and curse plays all count: the
+    // hook fires once per UseCardAction.update, which is once per play. The one
+    // play it never sees is filtered UPSTREAM, in the caller: UseCardAction.update
+    // skips the whole monster-power loop for a `dontTriggerOnUseCard` card (:83),
+    // i.e. an end-of-turn Burn/Decay/Doubt/Regret/Shame self-play or a cancelled
+    // autoplay's filing. op_use_card carries that guard (kUseCardDontTriggerOnUseCard)
+    // and does not dispatch this hook for those plays -- so a Shame in hand at
+    // End Turn does NOT tick the clock (the S2.V3 Time Eater stops).
     slot.amount = static_cast<int16_t>(slot.amount + 1);
     if (slot.amount != static_cast<int16_t>(kTimeWarpCountdown)) {
         return;  // `if (this.amount == 12)` (:61)

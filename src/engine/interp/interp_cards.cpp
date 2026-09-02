@@ -1164,13 +1164,23 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
     // exhaustOnUseOnce below, which :132 clears only on the filing path.
     s.card_pool[pi].flags = static_cast<uint16_t>(
         s.card_pool[pi].flags & ~card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
-    // :79-88 onAfterUseCard -- the seam the comment above reserved. The "NO S1
+    // :77-86 onAfterUseCard -- the seam the comment above reserved. The "NO S1
     // binder exists" paragraph is DELETED rather than amended: the prerequisite
     // arrived (conventions section 8), and Slow and Time Warp are the binders it
     // named. It dispatches HERE, between the program's actions (already resolved
     // -- useCard addToBottom'd this item last) and the purge / POWER / Strange
     // Spoon / filing decisions below, which is exactly the Java's order.
-    dispatch_on_after_use_card(s, pi, s.card_pool[pi].card_id);
+    //
+    // UNLESS the play is a `dontTriggerOnUseCard` one: BOTH loops carry
+    // `if (this.targetCard.dontTriggerOnUseCard) continue;` (:78, :83), so an
+    // end-of-turn Burn/curse self-play and a cancelled autoplay's filing reach
+    // this update and fire NOTHING -- the Time Eater's clock does not tick for
+    // a Shame that plays itself. The producers stamp the bit on the item
+    // (kUseCardDontTriggerOnUseCard, interp.hpp); the filing below is the same
+    // either way, exactly as :87-134 run unconditionally after the two loops.
+    if ((item.flags & kUseCardDontTriggerOnUseCard) == 0u) {
+        dispatch_on_after_use_card(s, pi, s.card_pool[pi].card_id);
+    }
     bool to_exhaust =
         has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST) ||
         exhaust_once;

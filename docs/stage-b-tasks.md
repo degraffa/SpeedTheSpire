@@ -1418,6 +1418,29 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
     `StatusCurses.DecayDoubtAndShameRunAtEndOfTurn`, were both RED on the old
     behaviour and now pin the interleaved
     `[effects of card k, card k filed, …, sweep]` order.
+  - **Log 2026-09-02 — the skip list above was one hook short.** The row
+    names the fan-outs a `dontTriggerOnUseCard` play skips (`onPlayCard` /
+    `onUseCard` / `triggerOnCardPlayed`, the `cardsPlayedThisTurn` increment)
+    but not the one that fires when the card's `UseCardAction` later
+    *resolves*: `UseCardAction.update` guards BOTH `onAfterUseCard` loops with
+    the same flag (`UseCardAction.java:78` player powers, `:83` monster powers).
+    The engine's `op_use_card` dispatched `ON_AFTER_USE_CARD` unconditionally,
+    so every end-of-turn Shame/Doubt/Regret self-play ticked the Time Eater's
+    **Time Warp** (`TimeWarpPower.java:53-55`) — and the Giant Head's Slow —
+    once more than the game. Five S2.V3 scripted lines stopped on exactly this
+    (STS204478 ps102 and ps19, STS216263 ps95, STS206243 ps5, STS226546 ps105:
+    every one an `end` with such a curse in hand, then the sim's clock one card
+    ahead until it forced a turn end the game never took; STS226546's
+    `--replay` carried it as a run-level `hp`/relic-counter diff at seq 612).
+    Fix: `USE_CARD` items now carry `kUseCardDontTriggerOnUseCard`
+    (`interp.hpp`), stamped by `dispatch_card_end_of_turn` and by the cancelled
+    autoplay filing (`GameActionManager.java:299-301`, the other producer of
+    the flag), and `op_use_card` skips the fan-out when it is set. Named
+    regressions in `beyond_bosses_test`:
+    `TimeWarp.EndOfTurnCurseSelfPlayDoesNotTickTheClock` and
+    `TimeWarp.CancelledAutoplayFilingDoesNotTickTheClock` (both RED without the
+    gate). `replay_run_diff --trace-powers` is the triage print that showed
+    the drift at the record it starts.
 
 - **Combat: pre-turn monster block clear + debuff duration ticks** `[x]` —
   discharges both combat-layer obligation rows B4.5's oracle replay left behind.

@@ -353,6 +353,7 @@ struct Options {
     bool pool_evidence = false;
     bool stop_on_diff = false;
     bool combat = false;   // also diff the in-combat CombatState (diagnosis aid)
+    bool trace_powers = false;  // per-record monster power lists, both sides
     bool full_replay = false;  // whole-run replay instead of the reward spot-diff
     bool neow = false;         // the floor-0 blessing spot-diff
     bool shop = false;         // the merchant spot-diff
@@ -614,6 +615,83 @@ void print_pool_evidence(const std::string& seed_string, int floor,
     std::printf("]\n");
 }
 
+// --trace-powers: one line per in-combat record. For each monster RECORD (the
+// dump's monsters[] is spawn-order-parallel with the sim's) print
+// `<PowerId>:<amount>` for every slot on both sides and mark the record
+// MISMATCH when the id -> amount joins differ. A power the translator cannot
+// map (PowerId::NONE) prints as `?` and never counts as a mismatch by itself.
+[[nodiscard]] std::string power_list_text(const PowerSlot* slots,
+                                          uint8_t count) {
+    std::string out;
+    for (uint8_t i = 0; i < count && i < kPowerCap; ++i) {
+        if (!out.empty()) out += ',';
+        const auto id = static_cast<PowerId>(slots[i].power_id);
+        out += id == PowerId::NONE
+                   ? std::string("?")
+                   : std::string(sts::registry::power_game_id(id));
+        out += ':' + std::to_string(slots[i].amount);
+    }
+    return out.empty() ? std::string("-") : out;
+}
+
+[[nodiscard]] bool power_lists_differ(const PowerSlot* a, uint8_t na,
+                                      const PowerSlot* b, uint8_t nb) {
+    // Order-insensitive: the game's list is application order with re-sorts,
+    // the sim's is its own priority sort; the join is by id.
+    const auto amount_of = [](const PowerSlot* s, uint8_t n,
+                              uint16_t id) -> int {
+        for (uint8_t i = 0; i < n && i < kPowerCap; ++i)
+            if (s[i].power_id == id) return s[i].amount;
+        return -32768;
+    };
+    for (uint8_t i = 0; i < na && i < kPowerCap; ++i) {
+        if (a[i].power_id == static_cast<uint16_t>(PowerId::NONE)) continue;
+        if (amount_of(b, nb, a[i].power_id) != a[i].amount) return true;
+    }
+    for (uint8_t i = 0; i < nb && i < kPowerCap; ++i) {
+        if (b[i].power_id == static_cast<uint16_t>(PowerId::NONE)) continue;
+        if (amount_of(a, na, b[i].power_id) != b[i].amount) return true;
+    }
+    return false;
+}
+
+void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
+                               const RunController& rc, const ScreenInfo& s) {
+    const CombatState& cap = rec.combat;
+    const CombatState& sim = rc.combat;
+    const uint8_t n = cap.monster_count < sim.monster_count ? sim.monster_count
+                                                            : cap.monster_count;
+    bool mismatch = false;
+    std::string body;
+    for (uint8_t i = 0; i < n && i < kMonsterCap; ++i) {
+        const MonsterState* cm = i < cap.monster_count ? &cap.monsters[i] : nullptr;
+        const MonsterState* sm = i < sim.monster_count ? &sim.monsters[i] : nullptr;
+        if (cm != nullptr && sm != nullptr &&
+            power_lists_differ(cm->powers, cm->power_count, sm->powers,
+                               sm->power_count)) {
+            mismatch = true;
+        }
+        const auto id = static_cast<MonsterId>(
+            sm != nullptr ? sm->monster_id : cm->monster_id);
+        body += "\n      m" + std::to_string(i) + " " +
+                std::string(sts::registry::monster_game_id(id)) + " game{" +
+                (cm != nullptr ? power_list_text(cm->powers, cm->power_count)
+                               : std::string("absent")) +
+                "} sim{" +
+                (sm != nullptr ? power_list_text(sm->powers, sm->power_count)
+                               : std::string("absent")) +
+                "}";
+    }
+    std::printf("POWERS%s seq=%d floor=%d cmd='%s' game[turn=%d hand=%d E=%d] "
+                "sim[turn=%d hand=%d E=%d]%s\n",
+                mismatch ? " MISMATCH" : "", rec.seq, s.floor,
+                rec.action_command.c_str(), static_cast<int>(cap.turn),
+                static_cast<int>(cap.hand_count),
+                static_cast<int>(cap.player_energy), static_cast<int>(sim.turn),
+                static_cast<int>(sim.hand_count),
+                static_cast<int>(sim.player_energy), body.c_str());
+}
+
 [[nodiscard]] Verdict replay_one(const std::string& path, const Options& opts) {
     Verdict v;
     const sts::translate::TranslatedRun run = sts::translate::translate_file(path);
@@ -871,6 +949,15 @@ void print_pool_evidence(const std::string& seed_string, int floor,
             if (!crep.empty())
                 std::printf("  combat seq=%d: %zu field(s)\n%s\n", rec.seq, crep.size(),
                             crep.to_string().c_str());
+        }
+
+        // Triage print (the S2.V3 Time Eater stops): the monster power lists,
+        // capture beside sim, joined by power id. Not a pass/fail signal --
+        // the translator maps only the ids the registry knows -- but a
+        // per-record view of a counter the run-level differ never reads.
+        if (opts.trace_powers && rec.in_combat &&
+            rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+            print_monster_power_trace(rec, rc, s);
         }
 
         if (opts.pool_evidence && s.screen_type == "CARD_REWARD")
@@ -3005,6 +3092,7 @@ int main(int argc, char** argv) {
         else if (a == "--pool-evidence") opts.pool_evidence = true;
         else if (a == "--stop-on-diff") opts.stop_on_diff = true;
         else if (a == "--combat") opts.combat = true;
+        else if (a == "--trace-powers") opts.trace_powers = true;
         else if (a == "--replay") opts.full_replay = true;
         else if (a == "--neow") opts.neow = true;
         else if (a == "--shop") opts.shop = true;
@@ -3020,6 +3108,7 @@ int main(int argc, char** argv) {
                      "usage: replay_run_diff <run.jsonl> [...] "
                      "[--replay | --neow | --shop | --treasure | --event]\n"
                      "         [--verbose] [--pool-evidence] [--stop-on-diff] [--combat]\n"
+                     "         [--trace-powers]\n"
                      "  default:    per-reward-screen spot-diff seeded from the capture\n"
                      "  --replay:   whole-run replay from run_begin, diffed per record\n"
                      "  --neow:     floor-0 blessing spot-diff (options / activation / "
@@ -3031,6 +3120,16 @@ int main(int argc, char** argv) {
                      "              a constructor-dealing body's board -- Match and "
                      "Keep's twelve\n"
                      "              cards; --verbose prints the dealt board)\n"
+                     "  --trace-powers: with --replay, print every in-combat record's\n"
+                     "              monster power lists -- capture beside sim, joined by\n"
+                     "              power id -- and tag the records where they differ.\n"
+                     "              The run-level differ never reads combat state, so a\n"
+                     "              power-count drift (Time Warp's card clock) is invisible\n"
+                     "              to it until the turn boundary moves; this is the print\n"
+                     "              that shows the drift at the record it starts. Triage\n"
+                     "              only: the tag also fires on known dispositions (a\n"
+                     "              hidden Curl Up, a spent Artifact at 0, Life Link /\n"
+                     "              Minion), so read the named power, not the tag count\n"
                      "  the mode flags are mutually exclusive\n");
         return 2;
     }
