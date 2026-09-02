@@ -531,6 +531,188 @@ class GlueRuleTest(unittest.TestCase):
         self.assertEqual(got, "potion use 1 0")
         self.assertEqual(policy._script.cursor, 1)
 
+    def test_a_usable_belt_potion_does_not_defeat_the_proceed_glue(self):
+        # Eighth live witness (s2v3_wave1, STS205404 ps17, floor 6): the
+        # vestigial post-SMITH REST `proceed` arrives with the belt's
+        # commands beside it, and the belt held an out-of-combat-USABLE
+        # potion, so the discard-only filter left two progress candidates
+        # and the follower stopped with "script expects the MAP screen,
+        # game shows 'REST'". The candidate list below is that divergence
+        # record's own, verbatim. The corpus answers this screen with
+        # `proceed` (act1_a20_50 STS71037 seq 77-81 walks the whole smith:
+        # rest->smith, GRID pick, GRID confirm, THIS screen, map).
+        policy = self._policy_with([{"k": "rest", "opt": "smith"},
+                                    {"k": "grid", "ctx": "smith",
+                                     "card": "Dark Embrace", "up": 0,
+                                     "ord": 0},
+                                    {"k": "map", "x": 0, "sym": "E"}])
+        rest = {"available_commands": ["choose", "potion", "state"],
+                "game_state": {"screen_type": "REST",
+                               "choice_list": ["rest", "smith", "recall"],
+                               "potions": [{"id": "Block Potion"},
+                                           {"id": "BloodPotion"}],
+                               "screen_state": {}}}
+        got = policy.decide(decide_request(
+            "STS1", rest, ["choose 0", "choose 1", "choose 2",
+                           "potion discard 0", "potion use 1",
+                           "potion discard 1"]))
+        self.assertEqual(got, "choose 1")  # smith
+        self.assertEqual(policy._script.cursor, 1)
+        grid = {"available_commands": ["choose", "cancel", "state"],
+                "game_state": {"screen_type": "GRID",
+                               "choice_list": ["dark embrace"],
+                               "screen_state": {"confirm_up": False,
+                                                "selected_cards": [],
+                                                "cards": [
+                                                    {"id": "Dark Embrace",
+                                                     "upgrades": 0}]}}}
+        got = policy.decide(decide_request("STS1", grid,
+                                           ["choose 0", "cancel"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 2)
+        # The witness state: REST again, `proceed` plus the belt.
+        aftermath = {"available_commands": ["potion", "proceed", "state"],
+                     "game_state": {"screen_type": "REST",
+                                    "choice_list": [],
+                                    "potions": [{"id": "Block Potion"},
+                                                {"id": "BloodPotion"}],
+                                    "screen_state": {}}}
+        got = policy.decide(decide_request(
+            "STS1", aftermath, ["potion discard 0", "potion use 1",
+                                "potion discard 1", "proceed"]))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 2)  # nothing consumed
+        map_state = {"available_commands": ["choose", "return", "state"],
+                     "game_state": {"screen_type": "MAP",
+                                    "choice_list": ["x=0"],
+                                    "screen_state": {"next_nodes": [
+                                        {"x": 0, "symbol": "E"}]}}}
+        got = policy.decide(decide_request("STS1", map_state,
+                                           ["choose 0", "return"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 3)
+
+    def test_the_post_heal_rest_screen_glues_with_one_belt_potion(self):
+        # The same seam without a grid in the middle, and with a
+        # single-slot belt: STS216298 ps107 (floor 46, Act 3) scripts
+        # `rest opt=rest` at step 562 and the map at 563, and the game puts
+        # the vestigial `proceed` between them with candidates
+        # ['potion use 0', 'potion discard 0', 'proceed'] -- the shape
+        # STS227212 ps88 also hit at floor 6 after a smith. So the screen
+        # follows EVERY rest-site option, not just the smith, and one
+        # usable potion is enough to defeat a discard-only filter.
+        policy = self._policy_with([{"k": "rest", "opt": "rest"},
+                                    {"k": "map", "x": 2, "sym": "M"}])
+        rest = {"available_commands": ["choose", "potion", "state"],
+                "game_state": {"screen_type": "REST",
+                               "choice_list": ["rest", "smith", "recall"],
+                               "potions": [{"id": "EntropicBrew"}],
+                               "screen_state": {}}}
+        got = policy.decide(decide_request(
+            "STS1", rest, ["choose 0", "choose 1", "choose 2",
+                           "potion use 0", "potion discard 0"]))
+        self.assertEqual(got, "choose 0")  # rest/heal
+        self.assertEqual(policy._script.cursor, 1)
+        aftermath = {"available_commands": ["potion", "proceed", "state"],
+                     "game_state": {"screen_type": "REST",
+                                    "choice_list": [],
+                                    "potions": [{"id": "EntropicBrew"}],
+                                    "screen_state": {}}}
+        got = policy.decide(decide_request(
+            "STS1", aftermath,
+            ["potion use 0", "potion discard 0", "proceed"]))
+        self.assertEqual(got, "proceed")
+        self.assertEqual(policy._script.cursor, 1)  # nothing consumed
+        map_state = {"available_commands": ["choose", "return", "state"],
+                     "game_state": {"screen_type": "MAP",
+                                    "choice_list": ["x=2"],
+                                    "screen_state": {"next_nodes": [
+                                        {"x": 2, "symbol": "M"}]}}}
+        got = policy.decide(decide_request("STS1", map_state,
+                                           ["choose 0", "return"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 2)
+
+    def test_a_scripted_potion_use_still_matches_before_the_glue(self):
+        # The belt filter must not swallow a decision the sim DID record:
+        # match-first runs before any glue rule consults it.
+        policy = self._policy_with([{"k": "potion", "slot": 1,
+                                     "potion": "BloodPotion", "t": -1},
+                                    {"k": "map_boss"}])
+        rest = {"available_commands": ["potion", "proceed", "state"],
+                "game_state": {"screen_type": "REST",
+                               "choice_list": [],
+                               "potions": [{"id": "Block Potion"},
+                                           {"id": "BloodPotion"}],
+                               "screen_state": {}}}
+        got = policy.decide(decide_request(
+            "STS1", rest, ["potion discard 0", "potion use 1",
+                           "potion discard 1", "proceed"]))
+        self.assertEqual(got, "potion use 1")
+        self.assertEqual(policy._script.cursor, 1)  # consumed, not glued
+
+    def test_belt_commands_do_not_make_an_unrelated_screen_gluable(self):
+        # The negative control for both belt rules: a screen with a REAL
+        # decision beside the belt still stops. Two progress candidates
+        # remain after the filter, so neither the proceed glue nor the
+        # one-click glue may fire.
+        policy = self._policy_with([{"k": "map", "x": 0, "sym": "E"}])
+        event = {"available_commands": ["choose", "potion", "state"],
+                 "game_state": {"screen_type": "EVENT",
+                                "choice_list": ["a", "b"],
+                                "potions": [{"id": "BloodPotion"}],
+                                "screen_state": {"event_id": "X"}}}
+        with self.assertRaises(spc.Divergence):
+            policy.decide(decide_request(
+                "STS1", event, ["choose 0", "choose 1", "potion use 0",
+                                "potion discard 0"]))
+        self.assertEqual(policy._script.cursor, 0)  # stopped ON the step
+
+    def test_a_belt_potion_does_not_defeat_the_one_click_glue(self):
+        # The same belt exclusion on glue rule 3, third shape of the seam
+        # and NOT a rest site: divergence_STS221674_ps7 (floor 39, Act 3,
+        # Sensory Stone). The sim's line is two `event` picks, a
+        # COMBAT_REWARD `proceed`, then the map; the live event's closing
+        # one-click `leave` page -- the class the engine collapses --
+        # arrives as ['choose 0', 'potion use 0', 'potion discard 0'], so
+        # the discard-only filter left two candidates and rule 3 did not
+        # fire. The record's own choice_list and candidates are below.
+        policy = self._policy_with([{"k": "map", "x": 1, "sym": "R"}])
+        leave = {"available_commands": ["choose", "potion", "state"],
+                 "game_state": {"screen_type": "EVENT",
+                                "choice_list": ["leave"],
+                                "potions": [{"id": "BloodPotion"}],
+                                "screen_state": {"event_id": "SensoryStone"}}}
+        got = policy.decide(decide_request(
+            "STS1", leave,
+            ["choose 0", "potion use 0", "potion discard 0"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 0)  # nothing consumed
+        map_state = {"available_commands": ["choose", "return", "state"],
+                     "game_state": {"screen_type": "MAP",
+                                    "choice_list": ["x=1"],
+                                    "screen_state": {"next_nodes": [
+                                        {"x": 1, "symbol": "R"}]}}}
+        got = policy.decide(decide_request("STS1", map_state,
+                                           ["choose 0", "return"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 1)
+
+    def test_the_one_click_glue_answers_the_choose_not_a_belt_command(self):
+        # The glue must read the sole PROGRESS candidate, not
+        # `candidates[0]`: the belt's position in the list is not
+        # contractual, and answering a potion here would spend it.
+        policy = self._policy_with([{"k": "neow", "index": 3}])
+        talk = {"available_commands": ["choose", "potion", "state"],
+                "game_state": {"screen_type": "EVENT",
+                               "choice_list": ["talk"],
+                               "potions": [{"id": "BloodPotion"}],
+                               "screen_state": {"event_id": "Neow Event"}}}
+        got = policy.decide(decide_request(
+            "STS1", talk, ["potion use 0", "potion discard 0", "choose 0"]))
+        self.assertEqual(got, "choose 0")
+        self.assertEqual(policy._script.cursor, 0)  # nothing consumed
+
     def test_exhausted_script_still_glues_a_trailing_one_click_dialog(self):
         policy = self._policy_with([{"k": "proceed", "ctx": "t"}])
         first = {"available_commands": ["proceed", "state"],
@@ -646,6 +828,104 @@ class LibraryGridTest(unittest.TestCase):
             spc.match_step(
                 {"k": "event", "event": "The Library", "opt": 7, "index": 7},
                 self.STATE, self._candidates())
+
+
+class DiscoverySkipTest(unittest.TestCase):
+    """A `choose_card` step whose decision is the Skip button.
+
+    Ninth live witness, s2v3_wave1 STS209702 ps255 at floor 50: the sim's
+    line took a Skill Potion (step 435) and SKIPPED its three-card
+    discovery (step 436, `{"k":"choose_card","src":"generated","card":"",
+    "skip":1}`). The follower read `card` first and stopped with "grid has
+    no #0 copy of ''+0" against the live CARD_REWARD below, which is that
+    divergence record's own screen. The emitter's shape is unambiguous
+    (planner/src/script.cpp, the COMBAT arm): `card:""` + `skip:1` is
+    written for CHOOSE(kChooseSkipCard) and no card identity is emitted
+    with it, so `skip` is the only readable field.
+    """
+
+    # divergence_STS209702_ps255's own choice_list / candidates.
+    STATE = {"available_commands": ["choose", "potion", "skip", "state"],
+             "game_state": {
+                 "screen_type": "CARD_REWARD",
+                 "choice_list": ["flex", "bloodletting", "entrench"],
+                 "screen_state": {"cards": [
+                     {"id": "Flex", "upgrades": 0},
+                     {"id": "Bloodletting", "upgrades": 0},
+                     {"id": "Entrench", "upgrades": 0}]}}}
+
+    CANDIDATES = ["choose 0", "choose 1", "choose 2", "skip"]
+
+    def test_a_generated_skip_step_answers_the_live_skip(self):
+        cmd = spc.match_step(
+            {"k": "choose_card", "src": "generated", "card": "", "skip": 1},
+            self.STATE, self.CANDIDATES)
+        self.assertEqual(cmd, "skip")
+
+    def test_the_skip_step_is_consumed_like_any_other_match(self):
+        # Not glue: the discovery skip is a decision the sim recorded, so
+        # the cursor advances and the next step faces the next screen.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        steps = [{"k": "potion", "slot": 0, "potion": "SkillPotion",
+                  "t": -1},
+                 {"k": "choose_card", "src": "generated", "card": "",
+                  "skip": 1},
+                 {"k": "end"}]
+        path = os.path.join(tmp.name, "STS1__sim_search__ps0.script.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(make_script_lines("STS1", steps)) + "\n")
+        policy = spc.ScriptPolicy({"script_dir": tmp.name})
+        combat = {"available_commands": ["potion", "end", "state"],
+                  "game_state": {"screen_type": "NONE",
+                                 "potions": [{"id": "SkillPotion"}],
+                                 "screen_state": {}}}
+        got = policy.decide(decide_request("STS1", combat,
+                                           ["potion use 0", "end"]))
+        self.assertEqual(got, "potion use 0")
+        got = policy.decide(decide_request("STS1", self.STATE,
+                                           self.CANDIDATES))
+        self.assertEqual(got, "skip")
+        self.assertEqual(policy._script.cursor, 2)
+
+    def test_a_pile_sourced_skip_is_honoured_too(self):
+        # `skip` is read before `src` is consulted. Today only
+        # `src: "generated"` can carry it (ActionMask::can_skip_choice is
+        # false unless choice_from_generated), so this pins the RULE, not a
+        # shape the emitter writes: the flag is the decision wherever it
+        # appears, and a hand/grid screen exposes the alias as `cancel`.
+        state = {"available_commands": ["choose", "cancel", "state"],
+                 "game_state": {"screen_type": "HAND_SELECT",
+                                "choice_list": ["strike"],
+                                "screen_state": {"hand": [
+                                    {"id": "Strike_R", "upgrades": 0}]}}}
+        cmd = spc.match_step(
+            {"k": "choose_card", "src": "hand", "card": "", "skip": 1},
+            state, ["choose 0", "cancel"])
+        self.assertEqual(cmd, "cancel")
+
+    def test_a_skip_step_on_a_screen_with_no_skip_alias_still_stops(self):
+        # The stop contract is untouched: honouring `skip` is a matcher
+        # arm, not a licence to improvise when the game offers no way out.
+        with self.assertRaises(spc.Divergence):
+            spc.match_step(
+                {"k": "choose_card", "src": "generated", "card": "",
+                 "skip": 1},
+                self.STATE, ["choose 0", "choose 1", "choose 2"])
+
+    def test_a_choose_card_without_skip_still_joins_by_identity(self):
+        # The un-skipped discovery: `skip` absent means the identity join
+        # is still the whole rule.
+        cmd = spc.match_step(
+            {"k": "choose_card", "src": "generated", "card": "Entrench",
+             "up": 0, "ord": 0, "index": 2},
+            self.STATE, self.CANDIDATES)
+        self.assertEqual(cmd, "choose 2")
+        with self.assertRaises(spc.Divergence):
+            spc.match_step(
+                {"k": "choose_card", "src": "generated", "card": "Bash",
+                 "up": 0, "ord": 0, "index": 0},
+                self.STATE, self.CANDIDATES)
 
 
 class ConfigTest(unittest.TestCase):

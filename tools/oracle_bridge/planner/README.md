@@ -144,7 +144,7 @@ different card at the same index is the desync the follower must stop on):
 | `rest` | `opt` (`rest`/`smith`/`lift`/`toke`/`dig`/`recall`) | choice_list entry of that name |
 | `grid` / `grid_cancel` | `ctx` + `card`+`up`+`ord` | match in the grid's card list → `choose i`; cancel alias |
 | `grid` with `ctx` = `library` | `event` (game id), `card`+`up`+`ord`, `opt` (sim board slot, advisory) | The Library's twenty-card read: the run layer models it as event options, but the game hosts it on `GridCardSelectScreen` (TheLibrary.java:91) so the live dump is `screen_type: GRID` — identity join in `screen_state.cards`, same as any other grid |
-| `choose_card` | `src` (pile) + `card`+`up`+`ord`+`index` | combat choice screens; identity join like `grid` |
+| `choose_card` | `src` (pile) + `card`+`up`+`ord`+`index`, or `skip` = 1 with an empty `card` | combat choice screens; identity join like `grid`. **`skip`: 1 is the typed discovery screen's Skip button** (`src` = `generated`; `ActionMask::can_skip_choice`) — the flag is the decision and the empty `card` is its consequence, so the follower reads `skip` before any identity join and answers the live `skip`/`cancel` alias |
 | `confirm` | — | the hand-select confirm (`proceed`) |
 | `event` / `neow` | `event` (game id), `opt` (full-list ordinal), `index` (**enabled-only** index — the `choose` command's own space, command_map.hpp's two-index-space note inverted; on Match and Keep's twelve-card board that space is ordered by SCREEN POSITION, not by board slot — see `script.cpp`'s `event_live_choose_index`) | `choose <index>` |
 | `open_chest` / `boss_open` | — | the `open` choice |
@@ -165,9 +165,12 @@ The follower consumes steps strictly in order; its only three glue commands
 (a confirmation-only screen; the GRID pick-then-confirm seam; a collapsed
 one-click dialog whose sole candidate is a single `choose` — Neow's opening
 `talk` and the vestigial-click event class the engine collapses) never
-advance the script cursor — "sole" reads the PROGRESS candidates, i.e. the
-always-available `potion discard N` side actions are excluded, while a
-scripted `potion_discard` still matches first; one SKIP rule covers the mirror seam (a
+advance the script cursor — "sole" reads the PROGRESS candidates, i.e. every
+always-available BELT command is excluded — `potion discard N` and
+`potion use N [t]` alike, since CommunicationMod advertises the `potion`
+verb on any screen whose belt holds a discardable/usable potion and
+neither form gates that screen — while a scripted `potion`/`potion_discard`
+still matches first; one SKIP rule covers the mirror seam (a
 scripted `proceed`/`confirm` whose live state offers neither alias — the
 game auto-advanced where the sim stepped — is consumed without emitting,
 and a real desync still stops on the following step). **Any other

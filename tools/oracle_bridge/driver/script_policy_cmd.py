@@ -31,12 +31,34 @@ rather than improvisation):
   * a state whose ONLY PROGRESS candidate is `proceed` answers `proceed`
     without consuming a script step -- the sim had no decision to record
     where the live game shows a confirmation-only screen. "Progress"
-    excludes the always-available `potion discard N` side actions (third
-    live witness, divergence_STS100439_ps0: the post-rest campfire screen
-    offers two potion discards beside its leave-`proceed` whenever the
-    belt is non-empty -- as does any other screen); a scripted
-    `potion_discard` still matches FIRST and is consumed, so the sim's
-    own discards are never glued past;
+    excludes EVERY BELT COMMAND -- `potion discard N` and `potion use N
+    [t]` alike. CommunicationMod advertises the `potion` verb on ANY
+    screen while the belt holds a discardable/usable potion
+    (campaign_driver.expand_legal_actions emits one command per
+    `can_discard` slot and one per `can_use` slot, independently of the
+    screen), and neither form gates the screen's own progress, so neither
+    can be what a scripted step means. Third live witness,
+    divergence_STS100439_ps0: the post-rest campfire screen offers two
+    potion discards beside its leave-`proceed`. Eighth live witness,
+    divergence_STS205404_ps17: the SAME vestigial REST screen arrives as
+    `['potion discard 0', 'potion use 1', 'potion discard 1', 'proceed']`
+    -- the belt held an out-of-combat-USABLE potion (the Blood Potion /
+    Fruit Juice / Entropic Brew class), so a discard-only filter no
+    longer left `proceed` alone and the follower stopped on a screen the
+    recorded corpus answers with `proceed` every time it appears
+    (tests/golden/oracle_corpus: `three_act_a20_5` carries that screen
+    with a non-empty belt, `act1_a20_50` with an empty one -- STS71037
+    seq 77-81 walks the whole smith, rest->smith, GRID pick, GRID
+    confirm, THIS screen, map -- and both corpora show `potion use N`
+    advertised beside the progress command on MAP / CHEST / EVENT /
+    CARD_REWARD / COMBAT_REWARD / BOSS_REWARD / SHOP). The same wave
+    produced the shape after the plain HEAL option too
+    (divergence_STS216298_ps107, floor 46: `rest opt=rest` then the map,
+    with the screen between them) and with a one-slot belt
+    (divergence_STS227212_ps88, and ps20 of the same seed as ps17), so
+    it follows EVERY rest-site option and one usable potion is enough. A
+    scripted `potion` or `potion_discard` still matches FIRST and is
+    consumed, so the sim's own belt actions are never glued past;
   * a GRID whose `confirm_up` is set (the game's own signal that a selection
     is committable; see campaign_driver.expand_legal_actions's B5.2 note)
     answers `proceed` without consuming a step when the next step is not
@@ -51,7 +73,15 @@ rather than improvisation):
     there; a one-candidate click also carries no information, so answering
     it cannot steer the run. Match-first still holds: a single-option
     choice the sim DID record is consumed, never glued past, and a genuine
-    desync surfaces at the next screen with the cursor unmoved.
+    desync surfaces at the next screen with the cursor unmoved. "Sole"
+    reads the same PROGRESS filter as rule 1 -- the belt commands are
+    excluded here too (divergence_STS221674_ps7, floor 39, Sensory
+    Stone: the event's closing one-click `leave` page arrives as
+    `['choose 0', 'potion use 0', 'potion discard 0']`, and counting the
+    belt left the collapsed click looking like a three-way decision) --
+    and the command answered is that sole progress candidate, not
+    `candidates[0]`: the belt commands carry no guaranteed position in
+    the list, and answering one would spend a potion.
 One SKIP rule mirrors the seam in the other direction (second live
 witness, same first campaign, step 2 of the same run): the sim records a
 `proceed`/`confirm` where the live game auto-advances (Neow's blessing
@@ -62,6 +92,22 @@ command and matching retries the next step against the same state. A real
 desync is still caught: the following step will not match either, and the
 divergence record lands one step later with the mismatch named.
 Anything else that fails to match stops the run, by design.
+
+A `choose_card` step carrying `skip: 1` is the DISCOVERY SKIP, not an
+identity join: the sim pressed the generated screen's Skip button, so the
+step names no card and `card` is the empty string (script.cpp's COMBAT arm
+writes `card: ""` + `skip: 1` for CHOOSE(kChooseSkipCard); the button is
+legal only on a TYPED discovery -- `ActionMask::can_skip_choice` is false
+unless `choice_from_generated`, from DiscoveryAction.java:49 and
+CardRewardScreen.java:485-500). `skip` is honoured wherever it appears on a
+`choose_card` step -- regardless of `src`, regardless of `card` -- because
+the flag IS the decision and the empty identity is only its consequence;
+reading `card` first is what produced the ninth live witness,
+divergence_STS209702_ps255 at floor 50, where the follower tried to join
+`''+0` against a live CARD_REWARD offering flex / bloodletting / entrench
+and stopped on a step that had already said what it wanted. This is a
+matcher arm, not glue: the step IS consumed, and a screen offering no skip
+alias still stops.
 
 CONFIG (`--config <json>`), strict like survival_policy_cmd:
 
@@ -403,6 +449,15 @@ def match_step(step, state, candidates):
         return _match_alias(step, state, candidates, ("skip", "cancel"),
                             "boss relic skip")
     if kind == "choose_card":
+        # The Skip button on a typed discovery screen (module header):
+        # `skip` is the decision, and the empty `card` it comes with is
+        # only the consequence -- so the flag is read BEFORE any identity
+        # join, on every `src`. Today only `src: "generated"` can carry it
+        # (can_skip_choice is false unless choice_from_generated), but the
+        # flag, not the source, is what this arm keys on.
+        if step.get("skip"):
+            return _match_alias(step, state, candidates, ("skip", "cancel"),
+                                "discovery skip")
         # Combat choice screens (GRID / HAND_SELECT / the discovery card
         # screen): match by identity over whichever card list the screen
         # carries; the sim-side index is provenance, not the join key.
@@ -412,23 +467,39 @@ def match_step(step, state, candidates):
 
 
 def progress_candidates(candidates):
-    """Candidates minus the always-available `potion discard N` side
-    actions (module header, glue rule 1): CommunicationMod advertises them
-    on any screen while the belt is non-empty, and they never gate
-    progress. A scripted `potion_discard` matches BEFORE any glue rule
-    consults this filter, so the sim's own discards are never glued past."""
+    """Candidates minus every BELT command (module header, glue rule 1).
+
+    `potion discard N` AND `potion use N [t]`: CommunicationMod advertises
+    the `potion` verb on any screen while the belt holds a
+    discardable/usable potion -- expand_legal_actions emits one command per
+    `can_discard` slot and one per `can_use` slot with no reference to the
+    screen -- and neither form gates that screen's own progress. Filtering
+    only the discards left `potion use N` counting as a decision on the
+    vestigial post-smith REST screen (divergence_STS205404_ps17), which is
+    exactly the confirmation-only shape this filter exists to expose. A
+    scripted `potion`/`potion_discard` matches BEFORE any glue rule
+    consults this filter, so the sim's own belt actions are never glued
+    past."""
     return [c for c in candidates
-            if not str(c).startswith("potion discard")]
+            if not str(c).startswith("potion ")]
 
 
-def is_sole_choice_glue(candidates):
+def sole_choice_glue(candidates):
     """Glue rule 3 -- the collapsed one-click dialog (module header): the
     screen's ONLY PROGRESS candidate is a single `choose`, so there is no
-    decision to make and the sim-emitted line recorded none. Evaluated only
-    AFTER the script's next step failed to match this state (match-first),
-    so a scripted single-option choice is consumed rather than glued past."""
+    decision to make and the sim-emitted line recorded none. Returns that
+    command, or None. Evaluated only AFTER the script's next step failed to
+    match this state (match-first), so a scripted single-option choice is
+    consumed rather than glued past.
+
+    It returns the progress candidate rather than `candidates[0]`: the belt
+    commands `progress_candidates` filters out carry no guaranteed position
+    in the candidate list, and answering one of them here would spend a
+    potion instead of clicking the dialog."""
     progress = progress_candidates(candidates)
-    return len(progress) == 1 and str(progress[0]).startswith("choose ")
+    if len(progress) == 1 and str(progress[0]).startswith("choose "):
+        return progress[0]
+    return None
 
 
 def is_grid_confirm_glue(state, candidates):
@@ -524,8 +595,9 @@ class ScriptPolicy:
                     return "proceed"  # confirmation-only screen: glue rule 1
                 if is_grid_confirm_glue(state, candidates):
                     return "proceed"  # pick-then-confirm seam: glue rule 2
-                if is_sole_choice_glue(candidates):
-                    return candidates[0]  # one-click dialog: glue rule 3
+                click = sole_choice_glue(candidates)
+                if click is not None:
+                    return click  # one-click dialog: glue rule 3
                 raise exc
             self._script.consume()
             return cmd
@@ -536,8 +608,9 @@ class ScriptPolicy:
             return "proceed"
         if is_grid_confirm_glue(state, candidates):
             return "proceed"
-        if is_sole_choice_glue(candidates):
-            return candidates[0]
+        click = sole_choice_glue(candidates)
+        if click is not None:
+            return click
         raise Divergence(
             "script exhausted but the game still asks for a decision "
             f"(seed {seed}, {len(self._script.steps)} steps played)")
