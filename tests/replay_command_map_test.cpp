@@ -795,6 +795,55 @@ TEST(ReplayCommandMap, AProceedElsewhereInNeowKeepsTheLazyLeaveElision) {
     EXPECT_EQ(map_command(rc, s, "proceed").kind, MapKind::NOOP);
 }
 
+// --- a boss chest's onEquip reward screen is the act transition ---------------
+//
+// Tiny House picked at the boss chest ends its onEquip in
+// `combatRewardScreen.open(...)` inside the TreasureRoomBoss (TinyHouse.java:
+// 58-62). ProceedButton.update excludes that room from the close-and-open-the-
+// map arm (`!(getCurrRoom() instanceof TreasureRoomBoss)`, ProceedButton.java:
+// 111) and routes the press to goToNextDungeon (:159-164, :231-252): one press
+// closes the reward screen AND crosses into the next act. STS218182
+// (s2v3_wave1) did exactly that at seq 345 -> 346: `COMBAT_REWARD` `proceed`
+// straight to an Act-3 `MAP`. The NOOP left the sim in BOSS_TREASURE on the
+// Act-2 chest floor for the rest of the run (`act: 3 -> 2`, `hp: 81 -> 47`).
+//
+// The sim models the game's one frame as two states -- EQUIP_ITEM_REWARD's
+// proceed lands on DONE, DONE's proceed is the transition -- so, as with Neow's
+// three-potion payout, the one press is two CHOOSE(kChooseProceed)s.
+TEST(ReplayCommandMap, TheBossChestsEquipRewardProceedIsTheActTransitionPressedTwice) {
+    RunController rc = at_phase(RunPhase::BOSS_TREASURE);
+    rc.run.boss_chest.screen =
+        static_cast<uint8_t>(sts::engine::BossChestScreen::EQUIP_ITEM_REWARD);
+    ScreenInfo s;
+    s.screen_type = "COMBAT_REWARD";
+
+    const MappedCommand m = map_command(rc, s, "proceed");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 2u);
+    for (const auto& a : m.actions) {
+        EXPECT_EQ(action_verb(a), ActionVerb::CHOOSE);
+        EXPECT_EQ(action_arg0(a), kChooseProceed);
+    }
+}
+
+// The discriminator is the chest SUB-SCREEN. A reward-screen proceed while the
+// chest is on any other screen has no game-side counterpart, and a NOOP there
+// would hand the following map `choose` to the chest -- so it stops.
+TEST(ReplayCommandMap, ARewardProceedAtAChestWithNoItemScreenStopsInsteadOfNoOpping) {
+    for (const auto screen : {sts::engine::BossChestScreen::CLOSED,
+                              sts::engine::BossChestScreen::RELIC_SELECT,
+                              sts::engine::BossChestScreen::EQUIP_GRID,
+                              sts::engine::BossChestScreen::DONE}) {
+        RunController rc = at_phase(RunPhase::BOSS_TREASURE);
+        rc.run.boss_chest.screen = static_cast<uint8_t>(screen);
+        ScreenInfo s;
+        s.screen_type = "COMBAT_REWARD";
+        const MappedCommand m = map_command(rc, s, "proceed");
+        EXPECT_EQ(m.kind, MapKind::UNMAPPED) << static_cast<int>(screen);
+        EXPECT_NE(m.reason.find("boss chest"), std::string::npos) << m.reason;
+    }
+}
+
 // --- the grid stop must not blame a relic that is not the cause --------------
 //
 // STS02009 of the G6 campaign stopped with "the most recently acquired relic is

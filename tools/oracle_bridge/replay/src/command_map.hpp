@@ -1629,6 +1629,53 @@ struct ShopTarget {
                     make_action(ActionVerb::CHOOSE, kChooseProceed));
                 return m;
             }
+            // A BOSS CHEST'S onEquip REWARD SCREEN (Tiny House / Calling Bell
+            // picked at the Act-1/2 chest) is the third COMBAT_REWARD that is
+            // not a lazy-leave room. TinyHouse.onEquip ends in
+            // `combatRewardScreen.open(...)` (TinyHouse.java:58-62) INSIDE the
+            // TreasureRoomBoss, and ProceedButton.update EXCLUDES that room
+            // from the close-and-open-the-map arm -- `screen == COMBAT_REWARD
+            // && !(getCurrRoom() instanceof TreasureRoomBoss)`
+            // (ProceedButton.java:111) -- so the press falls through to the
+            // `currentRoom instanceof TreasureRoomBoss` arm (:159-164) and is
+            // goToNextDungeon (:231-252): ONE press closes the reward screen
+            // AND crosses into the next act. There is no map overlay to defer
+            // through and no way back.
+            //
+            // The sim spends that one press over TWO CHOOSEs, the same way it
+            // does for Neow's three-potion payout above: the boss chest's
+            // EQUIP_ITEM_REWARD proceed abandons the unclaimed rows and lands
+            // on DONE (run_advance.cpp's BOSS_TREASURE arm), and DONE's proceed
+            // is the act transition (on_boss_chest_proceed). Neither consumes
+            // RNG, so the pair is state-equivalent to the game's frame.
+            // Mapping it to NOOP instead parked the sim in BOSS_TREASURE on
+            // the Act-2 chest floor for the rest of the run while the capture
+            // played Act 3 -- STS218182 (s2v3_wave1, Tiny House at the Act-2
+            // chest) diverged at seq 346 with `act: 3 -> 2`, `hp: 81 -> 47`
+            // and every act-scoped stream reseeded, and never recovered.
+            //
+            // Not modelled here: goToNextDungeon's one-time Calling Bell FTUE
+            // swallow (:240-246 -- the first press with all three relic rows
+            // still unclaimed shows a tip and returns). A capture that presses
+            // through it will stop on the next record rather than desync.
+            if (rc.phase == static_cast<uint8_t>(RunPhase::BOSS_TREASURE)) {
+                if (rc.run.boss_chest.screen ==
+                    static_cast<uint8_t>(BossChestScreen::EQUIP_ITEM_REWARD)) {
+                    m.kind = MapKind::ACTIONS;
+                    m.actions.push_back(
+                        make_action(ActionVerb::CHOOSE, kChooseProceed));
+                    m.actions.push_back(
+                        make_action(ActionVerb::CHOOSE, kChooseProceed));
+                    return m;
+                }
+                // Any other chest screen has no COMBAT_REWARD on the game side,
+                // so this is a desync; a NOOP would let the following map
+                // `choose` land on the chest and park the run.
+                m.reason = "reward-screen `proceed` arrived at the boss chest "
+                           "while the sim's chest screen is not the picked "
+                           "relic's item-reward screen";
+                return m;
+            }
             // Leaving is deferred to the map choice. This applies at Neow too:
             // the map is an overlay and `return` can reopen the still-mounted
             // item-reward screen, including claimable potions. The actual map
