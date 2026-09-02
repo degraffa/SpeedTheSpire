@@ -11,7 +11,7 @@ add_executable(gen_combat_fixtures
 
 target_link_libraries(gen_combat_fixtures PRIVATE diff_harness)
 target_compile_definitions(gen_combat_fixtures PRIVATE
-    STS_JAW_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures"
-    STS_FIXTURE_OUT_DIR="${CMAKE_SOURCE_DIR}/tests/golden/combat_fixtures")
+    STS_JAW_FIXTURE_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures"
+    STS_FIXTURE_OUT_DIR="${PROJECT_SOURCE_DIR}/tests/golden/combat_fixtures")
 sts_set_warnings(gen_combat_fixtures)
 sts_enable_sanitizers(gen_combat_fixtures)

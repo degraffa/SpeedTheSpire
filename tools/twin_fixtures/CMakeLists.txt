@@ -19,6 +19,6 @@ sts_enable_sanitizers(twin_fixture)
 add_executable(gen_twin_fixtures src/gen_twin_fixtures.cpp)
 target_link_libraries(gen_twin_fixtures PRIVATE twin_fixture fuzz_core)
 target_compile_definitions(gen_twin_fixtures PRIVATE
-    STS_TWIN_FIXTURE_OUT="${CMAKE_SOURCE_DIR}/tests/golden/twin_fixtures")
+    STS_TWIN_FIXTURE_OUT="${PROJECT_SOURCE_DIR}/tests/golden/twin_fixtures")
 sts_set_warnings(gen_twin_fixtures)
 sts_enable_sanitizers(gen_twin_fixtures)

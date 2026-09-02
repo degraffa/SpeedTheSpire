@@ -194,7 +194,16 @@ add_library(sts_engine
     twin.cpp
 )
 
-target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)
+# PROJECT_SOURCE_DIR, never CMAKE_SOURCE_DIR: this is a PUBLIC include dir, so
+# it is exported to every consumer. Under add_subdirectory() from another
+# top-level (the training repo embeds the engine this way) CMAKE_SOURCE_DIR is
+# the CONSUMER's root, so the old spelling handed each consumer its own
+# <consumer>/include -- a silently wrong include path rather than a build error,
+# since the engine's own TUs would still find the headers via relative paths.
+# Only ./CMakeLists.txt calls project(), so PROJECT_SOURCE_DIR is the engine root
+# whether this tree is the top level or embedded. Same rule for every other
+# repo-owned path in this build; tools/check_embed_consumer.sh is the guard.
+target_include_directories(sts_engine PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_compile_features(sts_engine PUBLIC cxx_std_20)
 
 # The engine's id enums and card/monster tables are the code-generated registry

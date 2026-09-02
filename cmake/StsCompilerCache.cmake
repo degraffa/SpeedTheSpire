@@ -66,7 +66,7 @@ function(sts_setup_compiler_cache)
     # present in the cache on every reconfigure of an existing build tree:
     # bailing out there would mean a deleted or stale shim never gets rewritten,
     # leaving a build tree whose compiler launcher points at nothing.
-    set(_shim "${CMAKE_BINARY_DIR}/sts-ccache-launcher.sh")
+    set(_shim "${PROJECT_BINARY_DIR}/sts-ccache-launcher.sh")
     if(CMAKE_CXX_COMPILER_LAUNCHER AND
        NOT CMAKE_CXX_COMPILER_LAUNCHER STREQUAL "${_shim}")
         message(STATUS "Compiler cache: honouring existing "
@@ -105,7 +105,7 @@ function(sts_setup_compiler_cache)
 #
 # CCACHE_BASEDIR makes two git worktrees of the same commit share cache entries
 # by rewriting absolute paths under it to relative before hashing.
-CCACHE_BASEDIR='${CMAKE_SOURCE_DIR}'
+CCACHE_BASEDIR='${PROJECT_SOURCE_DIR}'
 # Do not hash the working directory (which -g bakes into debug info); without
 # this the cross-worktree hit rate is zero.
 CCACHE_NOHASHDIR=1
@@ -125,5 +125,5 @@ exec '${STS_CCACHE_PROGRAM}' \"$@\"
     set(CMAKE_C_COMPILER_LAUNCHER "${_shim}" CACHE STRING "" FORCE)
 
     message(STATUS "Compiler cache: ${STS_CCACHE_PROGRAM} "
-                   "(shared across worktrees via CCACHE_BASEDIR=${CMAKE_SOURCE_DIR})")
+                   "(shared across worktrees via CCACHE_BASEDIR=${PROJECT_SOURCE_DIR})")
 endfunction()

@@ -50,7 +50,7 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | UNASSIGNED — sim-repo CMake hygiene task | Replace with `CMAKE_CURRENT_SOURCE_DIR`/`PROJECT_SOURCE_DIR` semantics so the engine is embeddable; the quiet failure mode is `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. Acceptance: SpireTrainer switches to add_subdirectory and its engine_suite becomes per-test ctest entries |
+| Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Remaining (training repo):** SpireTrainer still consumes the engine via ExternalProject — switching it to `add_subdirectory` and collapsing its `engine_suite` into per-test entries is now unblocked and is tracked in `SpireTrainer/docs/training-tasks.md` |
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
 
 ---
@@ -701,3 +701,8 @@ desired.
   assist-annealing fallback sentence. T2.x edits mirrored verbatim into
   `SpireTrainer/docs/training-tasks.md` per its tracked-in-both-places
   rule.
+- 2026-09-02 — the `CMAKE_SOURCE_DIR` deferred obligation is DISCHARGED on the
+  sim side: the engine now builds correctly under `add_subdirectory` from a
+  foreign top level, guarded by `tools/check_embed_consumer.sh` and written up
+  in conventions §8. SpireTrainer's own ExternalProject→add_subdirectory switch
+  remains, tracked in its ledger.

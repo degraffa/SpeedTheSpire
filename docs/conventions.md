@@ -556,6 +556,39 @@ GitHub renders a dead `#anchor` as an ordinary link that scrolls nowhere.
 > it fires because the target genuinely vanished, the doc may be what needs
 > restoring; do not repoint the link until you know which.**
 
+**`CMAKE_SOURCE_DIR` is the CONSUMER's root once this tree is embedded.** The
+training repo consumes the engine with `add_subdirectory`, and every repo-owned
+path in this build used to be spelled `${CMAKE_SOURCE_DIR}/...`. At the top
+level that is the same directory as `${PROJECT_SOURCE_DIR}`, so all six presets
+are green either way and no test can tell them apart. Embedded they are
+different directories, and the worst instance was exported:
+`target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)`
+handed each consumer its own `<consumer>/include`. Only `./CMakeLists.txt` calls
+`project()`, so `PROJECT_SOURCE_DIR` is the engine root on both paths.
+
+**Rule:** in this repo's CMake, `CMAKE_SOURCE_DIR`/`CMAKE_BINARY_DIR` mean "the
+top level, whoever that is" and are almost never what a repo-owned path wants;
+use `PROJECT_SOURCE_DIR`, or `CMAKE_CURRENT_SOURCE_DIR` when the local directory
+is meant. The one deliberate exception is `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on
+WIN32, which must follow googletest's hard-coded `${CMAKE_BINARY_DIR}/bin`
+target property or every test binary loses `gtest.dll` and dies at startup with
+`0xc0000135` — the comment at the top of `CMakeLists.txt` carries the reasoning.
+
+> **ELIMINATED 2026-09-02: `tools/check_embed_consumer.sh`, run by hand.** It
+> generates a throwaway consumer project in a temp dir that does
+> `project(EmbedSmoke CXX)` + `enable_testing()` + `add_subdirectory(<engine>)`,
+> builds a one-file program against `sts/engine/run_advance.hpp` linked to
+> `sts_engine`, and requires `ctest -N` in the *consumer's* build tree to
+> enumerate the engine's suites as per-test entries. The teeth are a decoy
+> `<consumer>/include/sts/engine/version.hpp` whose body is `#error`: if the
+> exported include dir ever regresses to the consumer's root, that header wins
+> the lookup and the build fails by name instead of quietly compiling against
+> the wrong tree (verified as a negative control at landing). Minutes-scale — it
+> configures and builds a second full tree — so it is a hand-run check, not a
+> ctest entry. Runs from Git Bash (clang-cl, matching the `win-*` presets) or
+> inside WSL; `STS_EMBED_WORKDIR=<dir>` reuses a work dir so a long build
+> resumes.
+
 **Benchmark A/B must be interleaved.** This box drifts by more than the effects
 being measured. Two separate measurements this project has taken were wrong
 until re-run as interleaved A/B/A/B pairs — one reported a spurious −1.4%, the

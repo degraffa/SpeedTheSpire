@@ -416,7 +416,7 @@ sts_add_test(omniscient_boundary_test
     MAKE_DIRS omniscient_boundary_scratch
     DEFS
         STS_TEST_BASH="${STS_TEST_BASH}"
-        STS_OMNISCIENT_CHECK="${CMAKE_SOURCE_DIR}/tools/check_omniscient_boundary.sh"
+        STS_OMNISCIENT_CHECK="${PROJECT_SOURCE_DIR}/tools/check_omniscient_boundary.sh"
         STS_OMNISCIENT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/omniscient_boundary"
         STS_OMNISCIENT_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/omniscient_boundary_scratch")
 
@@ -593,7 +593,7 @@ sts_add_test(neow_test)
 # paths (combat_begin, enter_combat) must keep going through it. The reproducer
 # is a sleeping Lagavulin's Metallicize; the by-construction half scans the two
 # source files, so it needs STS_SOURCE_ROOT like no_task_ids_test does.
-sts_add_test(combat_start_test DEFS STS_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+sts_add_test(combat_start_test DEFS STS_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 
 # A6.1: diff harness -- trace format + field-by-field differ + reproducer +
 # fixture oracle (design doc §8, §9). Links diff_harness (tools/diff_harness),
@@ -680,12 +680,12 @@ add_test(
     NAME oracle_campaign_python_test
     COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_oracle_campaign.py)
 set_tests_properties(oracle_campaign_python_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools/oracle_bridge/driver")
 add_test(
     NAME oracle_campaign_pipeline_python_test
     COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_campaign_pipeline.py)
 set_tests_properties(oracle_campaign_pipeline_python_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools/oracle_bridge/driver")
 
 # S2.V2 script-following policy (STS-SCRIPT v1 follower). Stdlib-only; the
 # matcher's evidence is the committed compressed corpus (recorded protocol
@@ -695,21 +695,21 @@ add_test(
     NAME oracle_script_policy_python_test
     COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_script_policy.py)
 set_tests_properties(oracle_script_policy_python_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools/oracle_bridge/driver")
 
 # TE.1 standing-deviation shape checker (stdlib-only synthetic diffs).
 add_test(
     NAME oracle_standing_triage_python_test
     COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_standing_triage.py)
 set_tests_properties(oracle_standing_triage_python_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools/oracle_bridge/driver")
 
 # B5.4 deterministic dashboard aggregation + compressed-corpus integrity.
 add_test(
     NAME verify_report_python_test
     COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_verify_report.py)
 set_tests_properties(verify_report_python_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/verify_report")
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools/verify_report")
 
 # S2.43 deterministic dashboard (design s2 section 6, S2-G2 items 1-4). The
 # fixtures are synthetic temp-directory campaign trees: the committed suite
@@ -721,7 +721,7 @@ add_test(
     NAME verify_report_s2_python_test
     COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_s2_report.py)
 set_tests_properties(verify_report_s2_python_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/verify_report")
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools/verify_report")
 
 # B5.4 pure sim-side CI replay over the committed compressed 50-seed corpus,
 # and (S2.46) over the curated five-run Acts 1-3 corpus beside it. The Python
@@ -737,7 +737,7 @@ sts_add_test(oracle_corpus_replay_test
     MAKE_DIRS oracle_corpus_scratch
     DEFS
         STS_PYTHON_EXECUTABLE="${STS_PYTHON_EXECUTABLE}"
-        STS_CORPUS_SMOKE_PY="${CMAKE_SOURCE_DIR}/tools/verify_report/ci_corpus_smoke.py"
+        STS_CORPUS_SMOKE_PY="${PROJECT_SOURCE_DIR}/tools/verify_report/ci_corpus_smoke.py"
         STS_CORPUS_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/golden/oracle_corpus/act1_a20_50.tar.gz"
         STS_CORPUS_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/golden/oracle_corpus/act1_a20_50.manifest.json"
         STS_THREE_ACT_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/golden/oracle_corpus/three_act_a20_5.tar.gz"
@@ -932,7 +932,7 @@ sts_add_test(fp_contract_test)
 # reappears in src/ or include/. Scans the SOURCE tree at run time rather than
 # anything it links, so a new comment is caught without recompiling the engine;
 # the allowlist mechanism and the reasoning live in the test file's header.
-sts_add_test(no_task_ids_test DEFS STS_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+sts_add_test(no_task_ids_test DEFS STS_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 
 # B5.1: sim-side fuzz soak. Tests the TOOL, not the engine: that an injected
 # divergence is caught at the right step, that the emitted STSFUZZ reproducer
@@ -950,7 +950,7 @@ sts_add_test(fuzz_test
         STS_FUZZ_SOAK_BIN="$<TARGET_FILE:fuzz_soak>"
         STS_FUZZ_REPRO_BIN="$<TARGET_FILE:fuzz_repro>"
         STS_TEST_BASH="${STS_TEST_BASH}"
-        STS_FUZZ_SOAK_SCRIPT="${CMAKE_SOURCE_DIR}/tools/fuzz/soak.sh")
+        STS_FUZZ_SOAK_SCRIPT="${PROJECT_SOURCE_DIR}/tools/fuzz/soak.sh")
 
 # The capture planner (tools/oracle_bridge/planner). Tests the TOOL: that the
 # EventId <-> name table covers every generated event row, that the event_flags
@@ -985,4 +985,4 @@ add_test(
     NAME dist_check_spot_python_test
     COMMAND "${STS_PYTHON_EXECUTABLE}" -B -m unittest -v test_oracle_spot.py)
 set_tests_properties(dist_check_spot_python_test PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/dist_check")
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/tools/dist_check")

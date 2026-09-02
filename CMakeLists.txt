@@ -26,6 +26,16 @@ endif()
 # Scoped to WIN32 deliberately: on Linux the layout is load-bearing for tooling
 # that addresses binaries by path (tools/fixture_gen/gen_combat_fixtures among
 # them), and ELF RPATH already solves this, so there is nothing to fix there.
+#
+# CMAKE_BINARY_DIR, and NOT PROJECT_BINARY_DIR, is deliberate and load-bearing:
+# googletest hard-codes RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" as a
+# per-target property (internal_utils.cmake), which a variable cannot override.
+# Under add_subdirectory() from another top level that is the CONSUMER's build
+# root, so pointing our test executables at the engine's own binary dir puts them
+# in a different directory from gtest.dll and every one of them dies at startup
+# with the same 0xc0000135 above -- observed exactly that way while making this
+# tree embeddable. Following gtest to the top-level bin/ is what keeps them
+# together on either host. tools/check_embed_consumer.sh is the regression guard.
 if(WIN32)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
@@ -40,7 +50,7 @@ option(STS_BUILD_TESTS "Build unit tests" ON)
 option(STS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(STS_ENABLE_SANITIZERS "Build with ASan/UBSan" OFF)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 include(StsAddTest)
@@ -121,7 +131,7 @@ option(STS_SHARED_DEP_CACHE
 # directory means whichever toolchain configured second simply cannot build.
 # Splitting by CMAKE_HOST_SYSTEM_NAME keeps both sides cached and independent;
 # the cost is one extra checkout per host, of a ~13 MB pair.
-set(STS_DEP_CACHE_DIR "${CMAKE_SOURCE_DIR}/.cache/deps/${CMAKE_HOST_SYSTEM_NAME}"
+set(STS_DEP_CACHE_DIR "${PROJECT_SOURCE_DIR}/.cache/deps/${CMAKE_HOST_SYSTEM_NAME}"
     CACHE PATH
     "Location of the shared FetchContent checkout cache (see STS_SHARED_DEP_CACHE)")
 

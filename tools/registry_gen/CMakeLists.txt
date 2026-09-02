@@ -55,7 +55,7 @@ endif()
 # the same Python for its determinism / duplicate-id checks.
 set(STS_PYTHON_EXECUTABLE "${Python3_EXECUTABLE}" CACHE INTERNAL "Python for registry codegen")
 
-set(REGISTRY_DIR "${CMAKE_SOURCE_DIR}/registry")
+set(REGISTRY_DIR "${PROJECT_SOURCE_DIR}/registry")
 set(REGISTRY_GEN_PY "${CMAKE_CURRENT_SOURCE_DIR}/gen.py")
 # gen.py is only the CLI; the generator lives in the sibling stsgen package.
 # Listed explicitly (not globbed) so adding a module is a deliberate edit, and so
@@ -77,7 +77,7 @@ set(REGISTRY_GEN_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/potions.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/powers.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/relics.py")
-set(GEN_OUT_ROOT "${CMAKE_BINARY_DIR}/generated")
+set(GEN_OUT_ROOT "${PROJECT_BINARY_DIR}/generated")
 set(STS_REGISTRY_GEN_PY "${REGISTRY_GEN_PY}" CACHE INTERNAL "registry codegen script")
 set(STS_REGISTRY_DIR "${REGISTRY_DIR}" CACHE INTERNAL "registry YAML dir")
 
