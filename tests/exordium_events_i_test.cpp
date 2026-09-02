@@ -173,6 +173,47 @@ TEST(EventDamage, FairyInABottleConsumesTheLeftmostSlotOnly) {
     EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::NONE));
 }
 
+// Mark of the Bloom wraps BOTH arms (AbstractPlayer.java:1484), and this site
+// is the same AbstractPlayer.damage the combat layer reaches -- so out here the
+// relic ends the RUN with the potion still on the belt and the tail still
+// armed. Mind Bloom's "I am Awake" branch grants the relic (S2.33), so an event
+// can hand it over and then kill the player on a later floor.
+TEST(EventDamage, MarkOfTheBloomVetoesBothReviveArmsOutsideCombat) {
+    RunController rc = event_controller(EventId::WORLD_OF_GOOP);
+    rc.run.hp = 5;
+    rc.run.max_hp = 75;
+    rc.run.potion_slots = 2;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    give_relic(rc.run, RelicId::LIZARD_TAIL);
+    give_relic(rc.run, RelicId::MARK_OF_THE_BLOOM);
+
+    EXPECT_FALSE(apply_event_damage(rc, 11, EventDamageOwner::PLAYER));
+
+    EXPECT_EQ(rc.run.hp, 0);
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::FAIRY_POTION))
+        << "a vetoed Fairy is never used, so it is never destroyed";
+    EXPECT_EQ(relic_counter(rc.run, RelicId::LIZARD_TAIL), -1)
+        << "the tail arm is behind the same wrapper";
+    EXPECT_EQ(static_cast<RunPhase>(rc.phase), RunPhase::RUN_OVER);
+}
+
+// The control: the same state without the relic still revives off the Fairy.
+TEST(EventDamage, WithoutMarkOfTheBloomTheSameEventHitStillRevives) {
+    RunController rc = event_controller(EventId::WORLD_OF_GOOP);
+    rc.run.hp = 5;
+    rc.run.max_hp = 75;
+    rc.run.potion_slots = 2;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    give_relic(rc.run, RelicId::LIZARD_TAIL);
+
+    EXPECT_TRUE(apply_event_damage(rc, 11, EventDamageOwner::PLAYER));
+
+    EXPECT_EQ(rc.run.hp, 22);
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(relic_counter(rc.run, RelicId::LIZARD_TAIL), -1);
+    EXPECT_EQ(static_cast<RunPhase>(rc.phase), RunPhase::EVENT_DIALOG);
+}
+
 TEST(BigFish, AllThreeOptionsApplyTheirExactImmediateMutations) {
     {
         RunController rc = event_controller(EventId::BIG_FISH);

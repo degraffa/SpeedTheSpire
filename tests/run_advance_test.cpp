@@ -2250,6 +2250,59 @@ TEST(RunPotion, AnUnusedFairySurvivesFoldBack) {
     EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::FAIRY_POTION));
 }
 
+// Mark of the Bloom wraps BOTH revive arms (AbstractPlayer.java:1484), so a
+// lethal hit ends the RUN and the Fairy is never used -- which means it is
+// never destroyed and the belt still carries it on the GAME_OVER record. This
+// is the exact shape of captures STS205599 (floor 50, Donu and Deca) and
+// STS208086 (floor 50, Time Eater): a Fairy in belt slot 1, Mark of the Bloom
+// among the relics, and `potions[1]: FairyPotion -> NONE` as the run's ONLY
+// diff. Driven through the real step boundary so burn_consumed_fairies -- which
+// burns (belt held - mirror left) -- is exercised, not bypassed.
+TEST(RunPotion, MarkOfTheBloomEndsTheRunWithTheFairyStillOnTheBelt) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(rc);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::MARK_OF_THE_BLOOM), -1};
+    ++rc.run.relic_count;
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(combat_fairy_armed(rc.combat.flags), 1)
+        << "the mirror still counts what the BELT holds; the veto is at the "
+           "revive site, not at the arming edge";
+
+    rc.combat.player_hp = 1;
+    step(rc, make_action(ActionVerb::END_TURN));  // Jaw Worm opens with Chomp.
+
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_EQ(rc.combat_outcome,
+              static_cast<uint8_t>(RunCombatOutcome::DEFEAT));
+    EXPECT_EQ(rc.run.hp, 0);
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::FAIRY_POTION))
+        << "an unused Fairy is never destroyed";
+    EXPECT_EQ(combat_fairy_armed(rc.combat.flags), 1)
+        << "nothing was spent, so nothing is burned";
+}
+
+// The control: the identical run without the relic survives the same hit and
+// burns the slot, so the test above measures the veto and not a dead fairy arm.
+TEST(RunPotion, WithoutMarkOfTheBloomTheSameLethalHitIsSurvived) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(rc);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    rc.combat.player_hp = 1;
+    step(rc, make_action(ActionVerb::END_TURN));
+
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+        << "the Fairy saved the run";
+    EXPECT_GT(rc.combat.player_hp, 0);
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::NONE))
+        << "the spent Fairy leaves the belt at its own step boundary";
+}
+
 // A Fairy is DISCARDABLE in combat (AbstractPotion.canDiscard has no combat
 // gate), and that is the only mid-combat belt mutation there is. Left alone,
 // the mirror would let a thrown-away fairy still revive.

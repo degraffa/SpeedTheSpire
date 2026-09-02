@@ -756,6 +756,81 @@ TEST(RelicRaresShop, MagicFlowerMultipliesTheFairyRevive) {
     EXPECT_EQ(s.player_hp, 36);
 }
 
+// ============================================================================
+// Mark of the Bloom -- the VETO over both revive arms
+// ============================================================================
+//
+// AbstractPlayer.java:1483-1499: the Fairy arm (:1485-1493) and the Lizard Tail
+// arm (:1494-1498) are both inside `if (!hasRelic("Mark of the Bloom"))`
+// (:1484), so the relic blocks BOTH and the death branch (:1500) runs instead.
+// Live capture STS205599 (floor 50, Donu and Deca) and capture STS208086
+// (floor 50, Time Eater) each died holding a Fairy Potion in belt slot 1 with
+// Mark of the Bloom among their relics; the game kept the potion and this
+// engine spent it, which was the ONLY differing field in either run.
+
+TEST(RelicRaresShop, MarkOfTheBloomVetoesTheFairyRevive) {
+    CombatState s = MakeState();
+    give(s, RelicId::MARK_OF_THE_BLOOM);
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+
+    op_damage(s, 0, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 0) << "the veto is on, so the player dies";
+    EXPECT_EQ(combat_fairy_armed(s.flags), 1)
+        << "the potion is never used, so it stays on the belt";
+}
+
+// The control: the SAME lethal hit without the relic still revives, so the test
+// above is measuring the veto and not a broken fairy arm.
+TEST(RelicRaresShop, WithoutMarkOfTheBloomTheSameHitStillRevives) {
+    CombatState s = MakeState();
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+
+    op_damage(s, 0, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 24);
+    EXPECT_EQ(combat_fairy_armed(s.flags), 0);
+}
+
+// The veto is the WRAPPER, not a term inside the Fairy arm, so a Lizard Tail
+// held without any Fairy is blocked too -- and left armed, never spent.
+TEST(RelicRaresShop, MarkOfTheBloomVetoesTheLizardTailRevive) {
+    CombatState s = MakeState();
+    Relics r;
+    r.add(RelicId::LIZARD_TAIL, -1);
+    r.add(RelicId::MARK_OF_THE_BLOOM);
+    const RelicView rv = install(s, r);
+
+    op_damage(s, 0, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 0) << "both arms are behind the same wrapper";
+    EXPECT_EQ(rv.relics[0].counter, -1) << "the tail is not even consulted";
+}
+
+// The control for the tail arm: without the relic the tail fires.
+TEST(RelicRaresShop, WithoutMarkOfTheBloomTheLizardTailStillRevives) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::LIZARD_TAIL, /*counter=*/-1);
+
+    op_damage(s, 0, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 40);
+    EXPECT_EQ(rv.relics[0].counter, -2);
+}
+
+// The veto sits on the HP-LOSS path too: the guard is inside try_player_revive,
+// which is the one revive site both op_damage and op_lose_hp reach.
+TEST(RelicRaresShop, MarkOfTheBloomVetoesTheReviveOnASelfInflictedHpLoss) {
+    CombatState s = MakeState();
+    give(s, RelicId::MARK_OF_THE_BLOOM);
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+
+    op_lose_hp(s, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 0);
+    EXPECT_EQ(combat_fairy_armed(s.flags), 1);
+}
+
 // It fires from the HP-LOSS path too, not only from an attack: the Java hook is
 // on AbstractPlayer.damage, which LoseHPAction also routes through
 // (LoseHPAction.java:41).

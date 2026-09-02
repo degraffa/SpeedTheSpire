@@ -612,10 +612,22 @@ void cards_took_player_damage(CombatState& s) noexcept;
 //
 // So Mark of the Bloom BLOCKS BOTH, and a held Fairy takes precedence: because
 // the Lizard Tail arm is an `else if` on `hasPotion`, holding a Fairy means the
-// Lizard Tail is not even CONSULTED, let alone spent. Mark of the Bloom is an
-// Act-2+ boss relic with no S1 row, so its test is genuinely constant-true here.
+// Lizard Tail is not even CONSULTED, let alone spent.
 // FAIRY_POTION, however, DOES have a row (PotionId 31) -- an earlier version of
 // this comment said it did not, which is what kept the fairy arm from existing.
+//
+// THE BLOOM VETO IS NOT CONSTANT-TRUE. An earlier version of this comment said
+// Mark of the Bloom "is an Act-2+ boss relic with no S1 row, so its test is
+// genuinely constant-true here" and left the guard unwritten. S2.33 gave Mind
+// Bloom's "I am Awake" branch a real MARK_OF_THE_BLOOM grant and the Act-2/3
+// boss-relic pools carry it, so an S2 run holds the relic while holding a
+// Fairy -- capture STS205599 (floor 50, Donu and Deca) died with a Fairy in
+// belt slot 1 and Mark of the Bloom among thirteen relics, the game keeping the
+// potion and this engine spending it. The relic mirror already carries the
+// relic into CombatState (relic_hooks.cpp uses it for the heal suppression), so
+// the guard reads exactly the term the Java reads, at exactly the Java's site:
+// BEFORE either arm, so a vetoed Fairy is neither flashed nor destroyed and a
+// vetoed Lizard Tail keeps counter == -1.
 //
 // The FAIRY half reads CombatState.flags' armed count, mirrored in at combat
 // entry from the run's belt: see kCombatFlagFairyArmedShift (combat_state.hpp)
@@ -643,6 +655,13 @@ void cards_took_player_damage(CombatState& s) noexcept;
 // (LizardTail.java:28-45).
 void try_player_revive(CombatState& s) noexcept {
     if (s.player_hp > 0) {
+        return;
+    }
+    // `if (!hasRelic("Mark of the Bloom"))` (AbstractPlayer.java:1484) -- the
+    // wrapper around BOTH arms, so this is a plain early return and the death
+    // branch (:1500) runs. The armed-Fairy mirror is deliberately LEFT ALONE:
+    // it counts what the belt still holds, and a vetoed Fairy is still held.
+    if (player_has_relic(s, RelicId::MARK_OF_THE_BLOOM)) {
         return;
     }
     const uint8_t fairies = combat_fairy_armed(s.flags);

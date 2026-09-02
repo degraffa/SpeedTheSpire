@@ -783,6 +783,19 @@ bool apply_event_damage(RunController& rc, int32_t amount,
         // out-of-combat twin of try_player_revive (interp_damage.cpp); here the
         // BELT is directly readable, so no CombatState mirror is involved.
         //
+        // ...and the WRAPPER is the veto, quoted above and now written: Mark of
+        // the Bloom blocks both arms (AbstractPlayer.java:1484). S2.33's Mind
+        // Bloom grants the relic and the Act-2/3 boss pools carry it, so the
+        // term is live, not constant-true -- see try_player_revive for the
+        // combat-side witnesses (captures STS205599, STS208086). A vetoed Fairy
+        // is neither used nor destroyed; a vetoed Lizard Tail keeps counter -1.
+        //
+        if (has_relic(rc.run, RelicId::MARK_OF_THE_BLOOM)) {
+            rc.event = EventDialogState{};
+            rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
+            return false;
+        }
+
         // FairyPotion.use (FairyPotion.java:36-45): healAmt =
         // (int)((float)maxHealth * potency/100f), clamped UP to 1, applied to a
         // currentHealth already pinned at 0 -- so the result IS healAmt. The
