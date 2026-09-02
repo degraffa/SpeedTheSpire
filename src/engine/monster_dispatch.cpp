@@ -8,7 +8,7 @@
 #include <cassert>
 #include <cstddef>
 
-#include "interp/interp_powers.hpp"        // op_apply_power (Philosopher's Stone)
+#include "interp/interp_powers.hpp"        // add_power_direct (Philosopher's Stone)
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/interp.hpp"            // Opcode, make_apply_power_flags (the spawn Minion)
 #include "sts/engine/monster_book_of_stabbing.hpp"  // the growing stab counter
@@ -799,11 +799,20 @@ MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
 //     AbstractDungeon.onModifyPower();
 // -- a DIRECT AbstractCreature.addPower, synchronous, not an ApplyPowerAction,
 // exactly like its atBattleStart sibling (relics/relics_boss.cpp), so it applies
-// rather than queues. op_apply_power is reused for the slot append/stack, and
-// the same inertness argument the atBattleStart body spells out holds verbatim
-// for this call shape (src == tgt == the monster; Strength(+1) is a BUFF, so the
-// Artifact nullify cannot fire; Champion Belt needs Vulnerable; Ginger/Turnip
-// need the player).
+// rather than queues -- through add_power_direct, the bare addPower shape.
+//
+// NOT op_apply_power, and the reason is liveness rather than the interception
+// chain (which IS inert for this call shape). op_apply_power carries
+// ApplyPowerAction.update's `isDeadOrEscaped` early-out (:97-100); addPower
+// (AbstractCreature.java:506-527) has no such guard. The two disagree at
+// exactly one landed call site: the Darkling's REINCARNATE turn runs this loop
+// at queue time (Darkling.java:134-136) while the record is still 0 HP with
+// halfDead set -- the heal at :131 is merely queued -- and the game's revived
+// Darkling comes back with the +1 Strength on it. Routed through op_apply_power
+// the Strength was dropped, and the revived Darkling's next Nip hit for one
+// less than the game's (STS239327 seq 407->408, STS212624 seq 516->517).
+// SpawnMonsterAction's fresh spawns are alive either way, so they were never
+// affected.
 //
 // Duplicates are per SLOT, matching the Java's `for (AbstractRelic r : relics)`.
 void dispatch_on_spawn_monster_relics(CombatState& state,
@@ -811,8 +820,7 @@ void dispatch_on_spawn_monster_relics(CombatState& state,
     for (uint8_t i = 0; i < state.relic_count; ++i) {
         if (state.relics[i].relic_id ==
             static_cast<uint16_t>(RelicId::PHILOSOPHERS_STONE)) {
-            op_apply_power(state, monster_index, monster_index, PowerId::STRENGTH,
-                           1);
+            add_power_direct(state, monster_index, PowerId::STRENGTH, 1);
         }
     }
 }

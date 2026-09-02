@@ -185,6 +185,14 @@ void sort_powers_like_the_game(PowerSlot* slots, uint8_t count) noexcept {
     }
 }
 
+// The stack-or-append list write shared by op_apply_power (the ApplyPowerAction
+// shape) and add_power_direct (the bare AbstractCreature.addPower shape).
+// Defined below op_apply_power, whose body it used to be.
+void add_power_to_list(CombatState& s, uint8_t tgt, PowerId id, int amount,
+                       int counter, bool is_source_monster,
+                       const PowerDef* applied_def,
+                       bool sort_after_append) noexcept;
+
 }  // namespace
 
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
@@ -300,6 +308,55 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     if (apply_power_blocked_by_artifact(s, tgt, is_debuff)) {
         return;
     }
+    // (5) the list write (ApplyPowerAction.java:139-168): addPower's
+    // stack-or-append, plus the re-sort that only THIS shape performs.
+    add_power_to_list(s, tgt, id, amount, counter, is_source_monster,
+                      applied_def, /*sort_after_append=*/true);
+}
+
+void add_power_direct(CombatState& s, uint8_t actor, PowerId id,
+                      int amount) noexcept {
+    // AbstractCreature.addPower (AbstractCreature.java:506-527), called DIRECTLY
+    // -- `m.addPower(new StrengthPower(m, 1))` -- rather than through an
+    // ApplyPowerAction. The body is the stack-or-append walk and NOTHING ELSE:
+    //
+    //   * NO liveness guard. `if (target.isDeadOrEscaped()) return` belongs to
+    //     ApplyPowerAction.update (:97-100); addPower reaches a creature at 0 HP
+    //     and a halfDead one alike. This is the load-bearing difference: the
+    //     Darkling's REINCARNATE turn runs the relic onSpawnMonster loop
+    //     synchronously at queue time (Darkling.java:134-136), while the record
+    //     is still 0 HP / halfDead -- the heal is merely QUEUED at :131 -- and
+    //     Philosopher's Stone's +1 Strength lands on it regardless. Routed
+    //     through op_apply_power it was silently dropped, and a revived
+    //     Darkling's Nip then hit for one less than the game's (captures
+    //     STS239327 seq 407->408 and STS212624 seq 516->517, both A20 Act 3).
+    //   * NO interception chain: no source onApplyPower, no Champion Belt, no
+    //     Ginger/Turnip, no Artifact nullify (:106-138 are all ApplyPowerAction).
+    //   * NO re-sort and NO onInitialApplication: both are the !hasBuffAlready
+    //     tail of ApplyPowerAction.update (:165-168); addPower's append is a
+    //     bare `powers.add` (:515). Any later ApplyPowerAction on the same
+    //     creature re-sorts the whole list, which is why the omission is
+    //     observable only as list ORDER in between, never as a wrong number.
+    //
+    // `counter` 0 and is_source_monster true: the constructed power's own ctor
+    // still runs in the Java, so a duration debuff's justApplied latch would
+    // still be derived -- but no direct-addPower site in landed content applies
+    // one, and the two that exist (Philosopher's Stone, at battle start and at
+    // spawn) apply Strength(+1).
+    if (id == PowerId::NONE) {
+        return;
+    }
+    add_power_to_list(s, actor, id, amount, /*counter=*/0,
+                      /*is_source_monster=*/true, power_def(id),
+                      /*sort_after_append=*/false);
+}
+
+namespace {
+
+void add_power_to_list(CombatState& s, uint8_t tgt, PowerId id, int amount,
+                       int counter, bool is_source_monster,
+                       const PowerDef* applied_def,
+                       bool sort_after_append) noexcept {
     PowerSlot* slots = nullptr;
     uint8_t* count = nullptr;
     if (!power_list_for(s, tgt, slots, count)) {
@@ -501,13 +558,19 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     }
     slots[*count] = fresh;
     ++*count;
-    // The new-power branch ends with the whole-list re-sort
+    // The new-power branch of ApplyPowerAction ends with the whole-list re-sort
     // (ApplyPowerAction.java:165-167). Slot order is load-bearing: it is the
     // iteration order of compute_damage's atDamage* walks and of every
     // per-power hook fan-out, so Weak (99) lands behind Strength (5) no matter
     // which was applied first -- (base + Str) * 0.75, never (base * 0.75) + Str.
-    sort_powers_like_the_game(slots, *count);
+    // The bare addPower shape (add_power_direct) does NOT sort: AbstractCreature.
+    // addPower:515 is a plain `powers.add`.
+    if (sort_after_append) {
+        sort_powers_like_the_game(slots, *count);
+    }
 }
+
+}  // namespace
 
 // REMOVE_POWER (RemoveSpecificPowerAction): drop PowerId(flags low16) from tgt's
 // power list (shifting the tail down). No-op if the actor lacks the power.

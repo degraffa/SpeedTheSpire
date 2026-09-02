@@ -20,6 +20,16 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
                     int amount, int counter = 0,
                     bool is_source_monster = true) noexcept;
 
+// AbstractCreature.addPower (AbstractCreature.java:506-527) called DIRECTLY on
+// `actor` -- the shape of Philosopher's Stone's `m.addPower(new
+// StrengthPower(m, 1))` at battle start and at every onSpawnMonster. Stack or
+// append, synchronously, with NONE of ApplyPowerAction.update's machinery: no
+// isDeadOrEscaped guard (a 0-HP / halfDead target is written), no source
+// hooks, no Champion Belt / Ginger / Turnip / Artifact, no re-sort. See the
+// definition for why the missing guard is the part that matters.
+void add_power_direct(CombatState& s, uint8_t actor, PowerId id,
+                      int amount) noexcept;
+
 // REMOVE_POWER. `flags` is the queued item's whole flags word, so an INSTANCED
 // power can name one specific slot (interp.hpp make_power_instance_flags); a
 // key-free 0 keeps the historical first-match-by-id behaviour.

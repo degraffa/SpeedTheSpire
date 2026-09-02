@@ -20,6 +20,7 @@
 #include "sts/engine/combat_rewards.hpp"  // RewardScreen (on_equip_screen bodies)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
+#include "sts/engine/monster_dispatch.hpp"  // dispatch_on_spawn_monster_relics
 #include "sts/engine/piles.hpp"        // discard_hand_at_end_of_turn (Runic Pyramid)
 #include "sts/engine/potions.hpp"      // get_random_potion (Tiny House)
 #include "sts/engine/power_hooks.hpp"
@@ -506,6 +507,40 @@ TEST(RelicBossSpecial, PhilosophersStoneStrengthensEveryMidCombatSpawn) {
     const PowerSlot* q = monster_power(twice, 1, PowerId::STRENGTH);
     ASSERT_NE(q, nullptr);
     EXPECT_EQ(q->amount, 2);
+}
+
+// AbstractCreature.addPower (AbstractCreature.java:506-527) has no liveness
+// guard; the `isDeadOrEscaped` early-out is ApplyPowerAction.update's (:97-100).
+// onSpawnMonster's one landed caller with a NON-fresh monster is the Darkling's
+// REINCARNATE turn (Darkling.java:134-136), which runs the relic loop while the
+// record is still 0 HP / halfDead -- so the direct shape must reach a target the
+// queued shape refuses. Captures STS239327 seq 407->408 and STS212624 seq
+// 516->517 each lost this Strength and hit for one less than the game.
+TEST(RelicBossSpecial, PhilosophersStoneOnSpawnReachesAHalfDeadMonster) {
+    CombatState s = MakeState(1);
+    give(s, RelicId::PHILOSOPHERS_STONE);
+    s.monsters[0].hp = 0;
+    s.monsters[0].flags |= kMonsterFlagHalfDead;
+    ASSERT_TRUE(monster_dead_or_escaped(s.monsters[0]));
+
+    dispatch_on_spawn_monster_relics(s, 0);
+    const PowerSlot* p = monster_power(s, 0, PowerId::STRENGTH);
+    ASSERT_NE(p, nullptr) << "addPower has no isDeadOrEscaped guard";
+    EXPECT_EQ(p->amount, 1);
+    EXPECT_EQ(s.action_count, 0) << "synchronous, nothing queued";
+
+    // The contrast that made the bug: a QUEUED Strength at the same target is
+    // refused (ApplyPowerAction.update:97-100), and the slot stays at 1.
+    ActionQueueItem it{};
+    it.opcode = kOp(Opcode::APPLY_POWER);
+    it.src = 0;
+    it.tgt = 0;
+    it.amount = 1;
+    it.flags = make_apply_power_flags(PowerId::STRENGTH);
+    execute_opcode(s, it);
+    ASSERT_NE(monster_power(s, 0, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(monster_power(s, 0, PowerId::STRENGTH)->amount, 1)
+        << "the ApplyPowerAction shape drops it; the addPower shape did not";
 }
 
 TEST(RelicBossSpecial, MarkOfPainShufflesTwoWoundsIntoTheDrawPile) {

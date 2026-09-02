@@ -1198,6 +1198,110 @@ TEST(BeyondNormalsI, DarklingReincarnatesToHalfMaxHpAndClearsHalfDead) {
     EXPECT_EQ(s.monsters[0].move_history[1], r::kDarklingMoveReincarnate);
 }
 
+// PhilosopherStone.onSpawnMonster (PhilosopherStone.java:50-53) is a DIRECT
+// AbstractCreature.addPower (AbstractCreature.java:506-527), and addPower has
+// NO liveness guard -- the `isDeadOrEscaped` early-out is ApplyPowerAction.
+// update's (:97-100). The REINCARNATE turn runs the relic loop synchronously at
+// queue time (Darkling.java:134-136), while the record is still 0 HP with
+// halfDead set (the heal at :131 is only QUEUED), so the +1 Strength MUST land
+// on it anyway. Routed through the ApplyPowerAction shape it was silently
+// dropped, and the revived Darkling's next Nip hit the player for one less than
+// the game's. Witnesses: STS239327 (s2v3 wave 1, sim_search ps6) seq 407->408
+// and STS212624 (ps13) seq 516->517, both A20 Act 3 "3 Darklings".
+TEST(BeyondNormalsI, DarklingRevivalStrengthFromPhilosophersStoneLandsWhileHalfDead) {
+    CombatState s = MakeDarklingGroup(31);
+    s.relics[0].relic_id = static_cast<uint16_t>(RelicId::PHILOSOPHERS_STONE);
+    s.relic_count = 1;
+    // The relic's battle-start Strength (relics_boss.cpp) is not part of
+    // MakeDarklingGroup; give it by hand so the half-death clear is visible.
+    give_monster_power(s, 0, PowerId::STRENGTH, 1);
+
+    telegraph(s, 0, r::kDarklingMoveNip, MonsterIntent::ATTACK);
+    player_attacks(s, 0, 500);
+    drain(s);
+    ASSERT_TRUE(monster_half_dead(s.monsters[0]));
+    ASSERT_EQ(s.monsters[0].power_count, 0)
+        << "powers.clear() (Darkling.java:211) took the Strength with it";
+
+    darkling_take_turn(s, 0);  // COUNT
+    drain(s);
+    ASSERT_EQ(s.monsters[0].move_history[0], r::kDarklingMoveReincarnate);
+
+    darkling_take_turn(s, 0);  // REINCARNATE: heal/revive/Regrow QUEUED ...
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_TRUE(monster_half_dead(s.monsters[0]));
+    EXPECT_TRUE(monster_dead_or_escaped(s.monsters[0]))
+        << "the very state ApplyPowerAction.update:97-100 refuses";
+    EXPECT_EQ(monster_power(s, 0, PowerId::STRENGTH), 1)
+        << "... but addPower is synchronous and unguarded: the Strength is on "
+           "the record BEFORE the heal resolves (Darkling.java:134-136 -> "
+           "PhilosopherStone.java:51 -> AbstractCreature.java:506-527)";
+    drain(s);
+    EXPECT_EQ(s.monsters[0].hp, s.monsters[0].max_hp / 2);
+    EXPECT_FALSE(monster_half_dead(s.monsters[0]));
+    EXPECT_EQ(monster_power(s, 0, PowerId::STRENGTH), 1)
+        << "and it survives the revival";
+    EXPECT_EQ(monster_power(s, 0, PowerId::REGROW), 1);
+}
+
+// The captured monster turn, in numbers (STS239327 seq 407 -> 408: floor 35,
+// turn 3 -> 4). Player 51 HP behind 12 block. Darkling#1: Nip 11, Strength 3,
+// Weakened 6 -> StrengthPower.atDamageGive (+3) then WeakPower.atDamageGive
+// (* 0.75f, WeakPower.java:62-70) with the one MathUtils.floor at
+// DamageInfo.applyPowers:67 -> floor(10.5f) = 10. Darkling#2, revived the turn
+// before with the Philosopher's Stone Strength: Nip 10 + 1 = 11. 21 into 12
+// block leaves 9: 51 -> 42. Drop the revival Strength and the second hit is 10,
+// the player ends at 43, and the run-level replay prints `hp: 42 -> 43` -- the
+// exact first divergence that capture reported.
+TEST(BeyondNormalsI, DarklingNipsThroughBlockMatchCaptureSTS239327Seq408) {
+    CombatState s = MakeDarklingGroup(31);
+    s.relics[0].relic_id = static_cast<uint16_t>(RelicId::PHILOSOPHERS_STONE);
+    s.relic_count = 1;
+
+    // Darkling#1 as captured: Weak applied FIRST so the priority sort (Weak 99
+    // behind Strength 5) is what orders the walk, not insertion order.
+    auto apply = [&s](uint8_t tgt, PowerId id, int32_t amount) {
+        ActionQueueItem it{};
+        it.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        it.src = kActorPlayer;
+        it.tgt = tgt;
+        it.amount = amount;
+        it.flags = make_apply_power_flags(id);
+        execute_opcode(s, it);
+    };
+    apply(1, PowerId::WEAK, 6);
+    apply(1, PowerId::STRENGTH, 3);
+    s.monsters[1].pad0 = 11;
+
+    // Darkling#2: half-killed, COUNT, then REINCARNATE with the relic present.
+    telegraph(s, 2, r::kDarklingMoveNip, MonsterIntent::ATTACK);
+    player_attacks(s, 2, 500);
+    drain(s);
+    darkling_take_turn(s, 2);  // COUNT
+    drain(s);
+    darkling_take_turn(s, 2);  // REINCARNATE
+    drain(s);
+    ASSERT_FALSE(monster_half_dead(s.monsters[2]));
+    ASSERT_EQ(monster_power(s, 2, PowerId::STRENGTH), 1);
+    s.monsters[2].pad0 = 10;
+
+    EXPECT_EQ(compute_damage(s, 1, kActorPlayer, 11), 10)
+        << "floor((11 + 3) * 0.75f) -- Strength before Weak, one floor";
+    EXPECT_EQ(compute_damage(s, 2, kActorPlayer, 10), 11)
+        << "10 + the revival Strength";
+
+    s.player_hp = 51;
+    s.player_block = 12;
+    clear_queue(s);
+    telegraph(s, 1, r::kDarklingMoveNip, MonsterIntent::ATTACK);
+    darkling_take_turn(s, 1);
+    telegraph(s, 2, r::kDarklingMoveNip, MonsterIntent::ATTACK);
+    darkling_take_turn(s, 2);
+    drain(s);
+    EXPECT_EQ(s.player_block, 0);
+    EXPECT_EQ(s.player_hp, 42) << "the game's 42, not the sim's former 43";
+}
+
 // The last Darkling down: the latch drops and every member dies synchronously,
 // inside the one op_damage.
 TEST(BeyondNormalsI, DarklingAllDeadDropsTheLatchAndKillsTheWholeGroup) {

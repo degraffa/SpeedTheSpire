@@ -296,7 +296,13 @@ void darkling_take_turn(CombatState& s, uint8_t mi) noexcept {
         // `monster.addPower(new StrengthPower(monster, 1))` DIRECTLY rather than
         // queueing (PhilosopherStone.java:50-54), so the +1 Strength is already
         // on the record before the heal resolves -- and it is re-granted on
-        // EVERY revival, uncapped.
+        // EVERY revival, uncapped. The record is STILL 0 HP / halfDead at this
+        // instant, and AbstractCreature.addPower has no liveness guard
+        // (:506-527) -- which is why the fan-out uses add_power_direct rather
+        // than the ApplyPowerAction-shaped op_apply_power, whose
+        // isDeadOrEscaped early-out (:97-100) would drop it. Captures
+        // STS239327 (seq 407->408) and STS212624 (seq 516->517) each lost that
+        // Strength and hit the player for one less than the game.
         dispatch_on_spawn_monster_relics(s, mi);
     } else {
         // CHOMP (:103-108, two DAMAGE steps) and COUNT (:121-123, a

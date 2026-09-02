@@ -8,7 +8,7 @@
 
 #include <cstdint>
 
-#include "../interp/interp_powers.hpp"  // op_apply_power (Philosopher's Stone)
+#include "../interp/interp_powers.hpp"  // add_power_direct (Philosopher's Stone)
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags, CardPile
@@ -116,18 +116,16 @@ void relic_native_philosophers_stone(CombatState& s, RelicHook hook,
     // synchronous: the Strength is on every monster before anything else queued
     // at battle start resolves, which is why this body applies rather than queues.
     //
-    // op_apply_power is reused rather than re-implementing the slot append/stack.
-    // Its interception chain is provably inert for THIS call shape, which is what
-    // makes the reuse faithful rather than merely convenient:
-    //   * source hooks       src == tgt == the monster; the only S1 source-side
-    //                        onApplyPower is Sadistic, a player power, and the
-    //                        fan-out is over the SOURCE's powers.
-    //   * Champion Belt      requires the applied power to be Vulnerable.
-    //   * Ginger / Turnip    require tgt == the player.
-    //   * Artifact nullify   requires a DEBUFF; Strength(+1) is a BUFF (the
-    //                        negative-amount flip needs amount <= 0).
-    // Passing the monster as BOTH src and tgt mirrors `new StrengthPower(m, 1)`,
-    // whose owner is m.
+    // add_power_direct IS that shape: the bare AbstractCreature.addPower
+    // stack-or-append (AbstractCreature.java:506-527), with none of
+    // ApplyPowerAction.update's machinery. At battle start every monster is
+    // alive, so the guard op_apply_power carries (:97-100) could never fire
+    // here, and its interception chain is inert for this call shape anyway
+    // (src == tgt == the monster; Strength(+1) is a BUFF, so no Artifact
+    // nullify; Champion Belt needs Vulnerable; Ginger/Turnip need the player).
+    // The onSpawnMonster sibling (monster_dispatch.cpp) is where the two shapes
+    // genuinely differ -- a half-dead Darkling's revival -- and both sites use
+    // the direct shape so the relic has one implementation of one Java call.
     if (hook != RelicHook::AT_BATTLE_START) {
         return;
     }
@@ -135,7 +133,7 @@ void relic_native_philosophers_stone(CombatState& s, RelicHook hook,
         if (s.monsters[i].monster_id == static_cast<uint16_t>(MonsterId::NONE)) {
             continue;
         }
-        op_apply_power(s, i, i, PowerId::STRENGTH, 1);
+        add_power_direct(s, i, PowerId::STRENGTH, 1);
     }
 }
 
