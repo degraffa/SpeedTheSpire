@@ -2876,6 +2876,10 @@
         # -- the single acquisition door, which is what makes Omamori's curse gate
         # (ShowCardAndObtainEffect.java:30-45) and the onObtainCard /
         # onMasterDeckChange relic fan-outs apply without a second implementation.
+        # Those fan-outs write the RUN sheet, which is a MIRROR while a combat is
+        # live, so the drain brackets the door with a sync in and a sync out --
+        # see drain_pending_obtains (run_advance.cpp) and the Darkstone Periapt
+        # row in relics.yaml (STS204478 floor 37).
         #
         # ONCE PER COMBAT, EVER: usedMegaDebuff is set SYNCHRONOUSLY in takeTurn
         # (:116) and the `num < 20` arm's guard is `!usedMegaDebuff &&

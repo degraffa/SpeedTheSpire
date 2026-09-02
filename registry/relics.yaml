@@ -697,7 +697,7 @@
   pickup:
     can_spawn: true
     on_obtain_card: true
-  provenance: "DarkstonePeriapt.onObtainCard (DarkstonePeriapt.java:28-36) -- if card.color==CURSE: player.increaseMaxHp(6, true). LIVE through the run-layer deck-add path (run_deck.hpp add_card_to_master_deck onObtainCard pass; type CURSE == color CURSE for every S1 curse row). canSpawn floor<=48 (:44-46)."
+  provenance: "DarkstonePeriapt.onObtainCard (DarkstonePeriapt.java:28-36) -- if card.color==CURSE: player.increaseMaxHp(6, true). LIVE through the run-layer deck-add path (run_deck.hpp add_card_to_master_deck onObtainCard pass; type CURSE == color CURSE for every S1 curse row). canSpawn floor<=48 (:44-46). IN-COMBAT OBTAINS ALSO PAY (STS204478 floor 37, fixed 2026-09-02): the Writhing Mass's Implant is the only in-combat master-deck write in Acts 1-3 (WrithingMass.java:118 -> AddCardToDeckAction -> ShowCardAndObtainEffect.update :94-109), and its payout was being LOST -- the Java raises the max HP of the AbstractPlayer that is fighting, while this engine's run sheet is a mirror that combat_begin copies out and fold_back_combat copies back unconditionally, so the run-side +6/+6 was invisible mid-fight and then overwritten. drain_pending_obtains (run_advance.cpp) now brackets the acquisition door with a sync in and a sync out of hp/max_hp AND the relic counters, so the heal lands on the LIVE hp (the capture's 71 -> 77 / 92 -> 98) and Omamori's spent charge and Du-Vu Doll's recount survive the fold."
 
 - id: 56
   name: ETERNAL_FEATHER

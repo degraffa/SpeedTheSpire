@@ -1196,6 +1196,120 @@ TEST(BeyondNormalsII, OmamoriBlocksTheParasiteAndSpendsACharge) {
         << "charges exhausted -- the third Parasite lands";
 }
 
+// --- Implant's relic fan-out reaches the LIVE combat sheet -------------------
+//
+// STS204478 floor 37: the game answered the Implant turn at 77/98 and the sim
+// stayed at 71/92 for the rest of the run. Darkstone Periapt's onObtainCard
+// (DarkstonePeriapt.java:28-36) is increaseMaxHp(6, true) on
+// AbstractDungeon.player -- the SAME object that is fighting -- while this
+// engine's run sheet is a mirror that combat_begin copies out and
+// fold_back_combat copies back, so a run-side write between them was invisible
+// and then overwritten. drain_pending_obtains now brackets the acquisition door
+// with a sync in and a sync out.
+//
+// Seat a relic on the run BEFORE the combat starts, so combat_begin's mirror
+// copy carries it (run_advance.cpp step 5's relic loop).
+void seat_relic(RunController& rc, RelicId id, int16_t counter) {
+    rc.run.relics[rc.run.relic_count].relic_id = static_cast<uint16_t>(id);
+    rc.run.relics[rc.run.relic_count].counter = counter;
+    ++rc.run.relic_count;
+}
+
+// Enter a Writhing Mass, wound the player to `hp`, force MEGA_DEBUFF and end the
+// turn. MEGA_DEBUFF's only non-presentation step is the OBTAIN_CARD, so nothing
+// else on this step can move the sheet.
+void implant_turn(RunController& rc, int16_t hp) {
+    set_monster_move(rc.combat.monsters[0], r::kWrithingMassMoveMegaDebuff,
+                     MonsterIntent::STRONG_DEBUFF);
+    rc.combat.player_hp = hp;
+    const Action end_turn = make_action(ActionVerb::END_TURN);
+    StepResult step{};
+    advance(std::span<RunController>(&rc, 1),
+            std::span<const Action>(&end_turn, 1),
+            std::span<StepResult>(&step, 1));
+}
+
+TEST(BeyondNormalsII, ImplantPaysDarkstonePeriaptIntoTheLiveCombatSheet) {
+    RunController rc = run_begin(4242, /*ascension=*/20);
+    seat_relic(rc, RelicId::DARKSTONE_PERIAPT, -1);
+    ASSERT_TRUE(enter_event_combat(rc, "Writhing Mass"));
+    rc.combat.player_max_hp = 92;  // the capture's sheet at seq 439
+    implant_turn(rc, /*hp=*/71);
+
+    // The capture's seq-440 read-out, exactly: +6 max HP and the heal alongside.
+    EXPECT_EQ(rc.combat.player_max_hp, 98) << "DarkstonePeriapt.java:34";
+    EXPECT_EQ(rc.combat.player_hp, 77)
+        << "increaseMaxHp(amount, true) heals the gained amount, and it heals "
+           "the LIVE hp (71), not the combat-entry hp";
+    // And the run sheet already agrees, so fold_back_combat's unconditional
+    // mirror copy cannot undo it.
+    EXPECT_EQ(rc.run.max_hp, 98);
+    EXPECT_EQ(rc.run.hp, 77);
+}
+
+TEST(BeyondNormalsII, ImplantWithoutDarkstonePeriaptLeavesTheSheetAlone) {
+    RunController rc = run_begin(4242, /*ascension=*/20);
+    ASSERT_TRUE(enter_event_combat(rc, "Writhing Mass"));
+    const uint16_t deck_before = rc.run.master_deck_count;
+    rc.combat.player_max_hp = 92;
+    implant_turn(rc, /*hp=*/71);
+
+    EXPECT_EQ(rc.combat.player_max_hp, 92) << "no relic, no payout";
+    EXPECT_EQ(rc.combat.player_hp, 71);
+    ASSERT_EQ(rc.run.master_deck_count, deck_before + 1)
+        << "the Parasite still lands";
+}
+
+// Omamori is the ctor-time gate (ShowCardAndObtainEffect.java:31-36): the charge
+// is spent, the card never reaches update(), so NO onObtainCard fan-out runs and
+// Darkstone is never offered the curse. The spent charge must also reach the
+// COMBAT relic mirror -- fold_back_combat copies that mirror over the run's
+// counters, so a decrement left only on the run side would be clobbered.
+TEST(BeyondNormalsII, OmamoriEatsImplantAheadOfDarkstoneAndSpendsOnTheMirror) {
+    RunController rc = run_begin(4242, /*ascension=*/20);
+    seat_relic(rc, RelicId::OMAMORI, 2);
+    seat_relic(rc, RelicId::DARKSTONE_PERIAPT, -1);
+    ASSERT_TRUE(enter_event_combat(rc, "Writhing Mass"));
+    const uint16_t deck_before = rc.run.master_deck_count;
+    rc.combat.player_max_hp = 92;
+    implant_turn(rc, /*hp=*/71);
+
+    EXPECT_EQ(rc.run.master_deck_count, deck_before)
+        << "the ctor gate ate the curse";
+    EXPECT_EQ(rc.combat.player_max_hp, 92)
+        << "and Darkstone's onObtainCard therefore never ran";
+    EXPECT_EQ(rc.combat.player_hp, 71);
+
+    const uint8_t slot = rc.run.relic_count - 2;  // Omamori's seat
+    EXPECT_EQ(rc.run.relics[slot].counter, 1) << "one charge spent";
+    EXPECT_EQ(rc.combat.relics[slot].counter, 1)
+        << "and spent on the mirror the fold-back reads back";
+}
+
+// The other counter the door writes: Du-Vu Doll's onMasterDeckChange recounts
+// the master deck's curses (DuVuDoll.java:43-53). The recount happens on the run
+// sheet, so it needs the same sync out.
+TEST(BeyondNormalsII, ImplantRecountsDuVuDollOnTheCombatMirror) {
+    RunController rc = run_begin(4242, /*ascension=*/20);
+    seat_relic(rc, RelicId::DU_VU_DOLL, 0);
+    ASSERT_TRUE(enter_event_combat(rc, "Writhing Mass"));
+    const uint8_t slot = static_cast<uint8_t>(rc.run.relic_count - 1);
+    ASSERT_EQ(rc.combat.relics[slot].counter, 0) << "seated raw, never recounted";
+    int16_t curses = 0;
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        const CardDef* d =
+            card_def(static_cast<CardId>(rc.run.master_deck[i].card_id));
+        if (d != nullptr && d->type == CardType::CURSE) {
+            ++curses;
+        }
+    }
+    implant_turn(rc, /*hp=*/71);
+
+    EXPECT_EQ(rc.run.relics[slot].counter, static_cast<int16_t>(curses + 1))
+        << "the Parasite joined the count";
+    EXPECT_EQ(rc.combat.relics[slot].counter, static_cast<int16_t>(curses + 1));
+}
+
 // ============================================================================
 // 7. The Jaw Worm Horde -- and the proof the ordinary worm is untouched
 // ============================================================================

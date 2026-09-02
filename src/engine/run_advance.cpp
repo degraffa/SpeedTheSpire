@@ -801,12 +801,57 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept;
 //
 // Draining per step also keeps the accumulator's depth requirement at "one
 // step's worth", which is why kPendingObtainCap == 3 is ample.
+//
+// THE MIRROR BRACKET (STS204478 floor 37, the Writhing Mass's Implant under a
+// Darkstone Periapt). The door's relic fan-out writes the RUN sheet -- Darkstone
+// Periapt's onObtainCard is `AbstractDungeon.player.increaseMaxHp(6, true)`
+// (DarkstonePeriapt.java:28-36), i.e. +6 max AND a heal of the gained amount,
+// and Du-Vu Doll's onMasterDeckChange recounts the curses (DuVuDoll.java:43-53)
+// while Omamori's ctor gate spends a charge (ShowCardAndObtainEffect.java:31-36).
+// DURING a combat, though, the player sheet and the relic counters live on the
+// COMBAT mirror: combat_begin copies them out of the run (step 5 and the relic
+// copy below it) and fold_back_combat copies them back, unconditionally. A
+// run-side write made between those two points is therefore invisible while the
+// fight lasts and then CLOBBERED by the fold -- which is exactly what the capture
+// showed, the game at 77/98 on the turn after Implant and the sim still at 71/92
+// for the rest of the run.
+//
+// The game has no mirror: there is one AbstractPlayer and one relic list, and the
+// obtain effect mutates them in place. So the door is bracketed by a sync in and
+// a sync out, and the run sheet is momentarily made LIVE for the call. Syncing IN
+// is what makes the heal land on the live HP (71 -> 77, not the combat-entry HP),
+// and it is also what stops the sync OUT from clobbering a counter the step's own
+// combat actions just ticked. The Fruit Juice precedent (use_fruit_juice above)
+// is the same reading, written at the one site that needed it before this one.
+//
+// Guarded on pending work, so a step with no obtain touches nothing at all.
 void drain_pending_obtains(RunController& rc) noexcept {
+    if (rc.combat.pending_obtain_count == 0) {
+        return;
+    }
+    const bool live_combat = rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
+    const uint8_t n = rc.combat.relic_count < rc.run.relic_count
+                          ? rc.combat.relic_count
+                          : rc.run.relic_count;
+    if (live_combat) {
+        rc.run.hp = rc.combat.player_hp;
+        rc.run.max_hp = rc.combat.player_max_hp;
+        for (uint8_t i = 0; i < n; ++i) {
+            rc.run.relics[i].counter = rc.combat.relics[i].counter;
+        }
+    }
     for (uint8_t i = 0; i < rc.combat.pending_obtain_count; ++i) {
         (void)add_card_to_master_deck(
             rc.run, static_cast<CardId>(rc.combat.pending_obtain[i]));
     }
     rc.combat.pending_obtain_count = 0;
+    if (live_combat) {
+        rc.combat.player_hp = rc.run.hp;
+        rc.combat.player_max_hp = rc.run.max_hp;
+        for (uint8_t i = 0; i < n; ++i) {
+            rc.combat.relics[i].counter = rc.run.relics[i].counter;
+        }
+    }
 }
 
 // Build the live combat for `enc_key` and set rc.phase accordingly. Returns true
