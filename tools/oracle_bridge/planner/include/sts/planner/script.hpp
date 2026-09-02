@@ -46,6 +46,19 @@
 // (the schema's normative home); the Python matcher in script_policy_cmd.py
 // implements the live-side join per kind and is unit-tested against recorded
 // protocol dumps without launching the game.
+//
+// ONE DECISION IS NOT ONE STEP. The optional hand-select is a TOGGLE screen,
+// so a searching policy can select a card and immediately take it back; that
+// pair is a no-op in the engine and INEXPRESSIBLE live (the game moves a
+// picked card out of the screen's card list, so the deselect has no `choose`
+// index). The emitter therefore drops a cancelling run of toggles and emits
+// the NET selection in pick order -- without dropping the ACTIONS, which are
+// all still applied, so the replay and its final_hash check are untouched.
+// `steps` in the header counts EMITTED lines; each step's `i` stays the index
+// of its action in the trajectory, so a gap in `i` is exactly where a
+// cancelling run was elided and a reproducer's action list still joins. The
+// mechanism, and why the drop is decided by the engine rather than by a
+// "same card twice" rule, is at `optional_hand_select_open` in script.cpp.
 
 #include <cstdint>
 #include <string>

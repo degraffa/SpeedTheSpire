@@ -22,6 +22,7 @@
 #include "sts/engine/combat_rewards.hpp"  // RewardItemKind (claim-ordinal test)
 #include "sts/engine/event_framework.hpp"
 #include "sts/engine/neow.hpp"        // NeowRewardType (claim-ordinal test)
+#include "sts/engine/potions.hpp"  // PotionId (the hand-select toggle tests)
 #include "sts/planner/script.hpp"  // S2.V2: the STS-SCRIPT emitter
 
 #include <cstddef>
@@ -1444,4 +1445,226 @@ TEST(SimSearchScriptLibrary, TheDialogPagesAndTheOtherBoardAreUntouched) {
     EXPECT_NE(match.find("\"event\":\"Match and Keep!\""), std::string::npos)
         << match;
     EXPECT_EQ(match.find("\"ctx\":\"library\""), std::string::npos) << match;
+}
+
+// =============================================================================
+// The optional hand-select's CANCELLING TOGGLE RUN (S2.V2)
+// =============================================================================
+//
+// The optional (zero-to-N) hand-select is the one screen where CHOOSE TOGGLES,
+// so a searching policy oscillates on it: select a card, take it straight back
+// out. That pair is a no-op in the engine and the line stays correct -- but it
+// is INEXPRESSIBLE live, because HandCardSelectScreen moves a picked card out
+// of `hand` and CommunicationMod publishes only `hand`, so the deselect has no
+// `choose` index to send. Witness: campaign s2v3_wave1_STS207337_ps255, floor
+// 16 (The Guardian) turn 1 -- an Elixir at step 203, then steps 204 AND 205
+// both `choose_card AscendersBane`, and the follower stopped at 205 with "grid
+// has no #0 copy of 'AscendersBane'+0" while the game's own list held the six
+// cards that were left.
+//
+// The emitter owns the seam: it drops a run of toggles that returns the
+// controller to a state it already held on that screen and emits the NET
+// selection, WITHOUT dropping the actions -- so the replay, and the final_hash
+// check that makes a script evidence, are untouched.
+namespace {
+
+using sts::engine::Action;
+using sts::engine::ActionVerb;
+using sts::engine::RunActionMask;
+using sts::engine::RunController;
+using sts::engine::RunPhase;
+
+Action Choose(uint8_t arg0) {
+    return sts::engine::make_action(ActionVerb::CHOOSE, arg0);
+}
+
+void Apply(RunController& rc, Action a) {
+    sts::engine::StepResult res{};
+    sts::engine::advance(std::span<RunController>(&rc, 1),
+                         std::span<const Action>(&a, 1),
+                         std::span<sts::engine::StepResult>(&res, 1));
+}
+
+// The cheapest FULLY REPLAYABLE route to an optional hand-select: a Neow
+// blessing of three small potions that includes an Elixir (exhaust any number
+// of cards in hand), claimed, carried into the run's first combat and used
+// there. Nothing is planted on the controller -- emit_script replays from
+// run_begin, so the whole opening has to be actions.
+struct ElixirOpening {
+    int64_t seed = 0;
+    std::vector<Action> prefix;  // through the USE_POTION, screen open
+    uint8_t hand = 0;
+};
+
+bool FindElixirOpening(ElixirOpening& out) {
+    for (int64_t s = 1; s < 8000; ++s) {
+        const RunController fresh = sts::engine::run_begin(s, 20);
+        for (uint8_t opt = 0; opt < sts::engine::kNeowOptionCount; ++opt) {
+            if (fresh.neow.option_type[opt] !=
+                static_cast<uint8_t>(
+                    sts::engine::NeowRewardType::THREE_SMALL_POTIONS)) {
+                continue;
+            }
+            RunController rc = fresh;
+            std::vector<Action> line{Choose(opt)};
+            Apply(rc, line.back());
+            int row = -1;
+            for (uint8_t r = 0; r < rc.rewards.count; ++r) {
+                if (rc.rewards.items[r].kind ==
+                        static_cast<uint8_t>(
+                            sts::engine::RewardItemKind::POTION) &&
+                    rc.rewards.items[r].id ==
+                        static_cast<uint16_t>(sts::engine::PotionId::ELIXIR)) {
+                    row = r;
+                    break;
+                }
+            }
+            if (row < 0) continue;
+            for (const Action a : {Choose(static_cast<uint8_t>(row)),
+                                   Choose(sts::engine::kChooseProceed),
+                                   Choose(sts::engine::kChooseProceed)}) {
+                line.push_back(a);
+                Apply(rc, a);
+            }
+            if (rc.phase != static_cast<uint8_t>(RunPhase::MAP_CHOICE)) continue;
+            RunActionMask m{};
+            sts::engine::legal_actions(rc, m);
+            int col = -1;
+            for (uint8_t x = 0; x < sts::engine::kMapCols; ++x) {
+                if (m.can_choose_node[x]) {
+                    col = static_cast<int>(x);
+                    break;
+                }
+            }
+            if (col < 0) continue;
+            line.push_back(Choose(static_cast<uint8_t>(col)));
+            Apply(rc, line.back());
+            if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT)) continue;
+            if (rc.run.potions[0] !=
+                static_cast<uint16_t>(sts::engine::PotionId::ELIXIR)) {
+                continue;
+            }
+            if (rc.combat.hand_count < 3) continue;
+            line.push_back(sts::engine::make_action(ActionVerb::USE_POTION, 0));
+            Apply(rc, line.back());
+            sts::engine::legal_actions(rc, m);
+            if (!m.combat.choice_pending || !m.combat.choice_optional) continue;
+            out.seed = s;
+            out.prefix = line;
+            out.hand = rc.combat.hand_count;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Replay a whole line and return the terminal controller hash -- the
+// `final_hash` an emitted script must land on.
+uint64_t ReplayHash(int64_t seed, const std::vector<Action>& line) {
+    RunController rc = sts::engine::run_begin(seed, 20);
+    for (const Action a : line) Apply(rc, a);
+    return sts::fuzz::hash_controller(rc);
+}
+
+sts::planner::ScriptEmit EmitLine(int64_t seed,
+                                  const std::vector<Action>& line) {
+    return sts::planner::emit_script(seed, sts::engine::seed_to_string(seed),
+                                     20, "sim_search", 0, line, "action_cap",
+                                     ReplayHash(seed, line));
+}
+
+int CountLinesWith(const sts::planner::ScriptEmit& e, const char* needle) {
+    int n = 0;
+    for (std::size_t i = 1; i < e.lines.size(); ++i) {
+        if (e.lines[i].find(needle) != std::string::npos) ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+TEST(SimSearchScriptHandSelect, ACancellingTogglePairIsNotEmitted) {
+    ElixirOpening open;
+    ASSERT_TRUE(FindElixirOpening(open))
+        << "no Neow-Elixir-into-combat opening in range";
+    const uint8_t last = static_cast<uint8_t>(open.hand - 1);
+
+    // THE WITNESS SHAPE. Select the LAST unselected card (the pick lands at
+    // the end of the hand, where it already was, so the deselect names the
+    // same slot -- STS207337's two `index 6` steps), take it straight back
+    // out, then pick a different card and confirm.
+    std::vector<Action> traj = open.prefix;
+    traj.push_back(Choose(last));
+    traj.push_back(Choose(last));
+    traj.push_back(Choose(0));
+    traj.push_back(sts::engine::make_action(ActionVerb::CONFIRM));
+
+    const sts::planner::ScriptEmit e = EmitLine(open.seed, traj);
+    // `ok` at all means the replay landed on the final_hash of the FULL
+    // trajectory: the elision dropped lines, never actions.
+    ASSERT_TRUE(e.ok) << e.error;
+    EXPECT_EQ(e.lines.size(), traj.size() + 1 - 2)
+        << "the cancelling pair, and only it, is gone";
+    EXPECT_EQ(CountLinesWith(e, "\"k\":\"choose_card\""), 1)
+        << "only the NET selection survives";
+    EXPECT_EQ(CountLinesWith(e, "\"k\":\"confirm\""), 1);
+    // The header's `steps` counts EMITTED lines -- the follower checks it
+    // against the file's own line count and would refuse the script otherwise.
+    EXPECT_NE(
+        e.lines[0].find("\"steps\":" + std::to_string(e.lines.size() - 1)),
+        std::string::npos)
+        << e.lines[0];
+    // `i` stays the ACTION's index, so the gap is where the pair was.
+    const std::string want_i =
+        "\"i\":" + std::to_string(open.prefix.size() + 2);
+    ASSERT_GE(e.lines.size(), 2u);
+    EXPECT_NE(e.lines[e.lines.size() - 2].find(want_i), std::string::npos)
+        << e.lines[e.lines.size() - 2];
+}
+
+TEST(SimSearchScriptHandSelect, AToggleThatReordersTheHandIsKept) {
+    // THE NEGATIVE CONTROL, and why the rule is not "the same card twice".
+    // A deselect returns the card to the END of the unselected run
+    // (`AbstractDungeon.player.hand.addToTop`), NOT to where it was picked
+    // from, so selecting any slot but the last and then deselecting it is a
+    // real hand REORDER -- one the game performs too. Both steps must stay.
+    ElixirOpening open;
+    ASSERT_TRUE(FindElixirOpening(open))
+        << "no Neow-Elixir-into-combat opening in range";
+    const uint8_t last = static_cast<uint8_t>(open.hand - 1);
+
+    std::vector<Action> traj = open.prefix;
+    traj.push_back(Choose(0));     // select the FIRST card...
+    traj.push_back(Choose(last));  // ...and take that same card back out
+    traj.push_back(sts::engine::make_action(ActionVerb::CONFIRM));
+
+    const sts::planner::ScriptEmit e = EmitLine(open.seed, traj);
+    ASSERT_TRUE(e.ok) << e.error;
+    EXPECT_EQ(e.lines.size(), traj.size() + 1) << "nothing may be elided here";
+    EXPECT_EQ(CountLinesWith(e, "\"k\":\"choose_card\""), 2);
+}
+
+TEST(SimSearchScriptHandSelect, ANestedCancellingRunCollapsesEntirely) {
+    // The window is a RUN, not a pair: select A, select B, deselect B,
+    // deselect A leaves the screen byte-identical to how it opened, and no
+    // pairwise rule sees it (the two middle steps cancel first, then the two
+    // outer ones). Only the confirm survives.
+    ElixirOpening open;
+    ASSERT_TRUE(FindElixirOpening(open))
+        << "no Neow-Elixir-into-combat opening in range";
+    const uint8_t last = static_cast<uint8_t>(open.hand - 1);
+
+    std::vector<Action> traj = open.prefix;
+    traj.push_back(Choose(last));                            // select A
+    traj.push_back(Choose(static_cast<uint8_t>(last - 1)));  // select B
+    traj.push_back(Choose(last));                            // deselect B
+    traj.push_back(Choose(last));                            // deselect A
+    traj.push_back(sts::engine::make_action(ActionVerb::CONFIRM));
+
+    const sts::planner::ScriptEmit e = EmitLine(open.seed, traj);
+    ASSERT_TRUE(e.ok) << e.error;
+    EXPECT_EQ(e.lines.size(), traj.size() + 1 - 4);
+    EXPECT_EQ(CountLinesWith(e, "\"k\":\"choose_card\""), 0)
+        << "an empty confirm is what the line actually does";
+    EXPECT_EQ(CountLinesWith(e, "\"k\":\"confirm\""), 1);
 }

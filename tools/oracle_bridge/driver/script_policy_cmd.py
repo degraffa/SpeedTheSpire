@@ -461,6 +461,18 @@ def match_step(step, state, candidates):
         # Combat choice screens (GRID / HAND_SELECT / the discovery card
         # screen): match by identity over whichever card list the screen
         # carries; the sim-side index is provenance, not the join key.
+        #
+        # NO DESELECT ARM, deliberately. The sim's OPTIONAL hand-select
+        # toggles, so a select can be taken back by choosing the same card
+        # again; that is an emitter concern and the emitter owns it (it drops
+        # a cancelling run of toggles and emits the net selection --
+        # planner/script.cpp `optional_hand_select_open`). Mirroring it here
+        # would be wrong twice over: HandCardSelectScreen moves a picked card
+        # OUT of `hand` into `selectedCards` and CommunicationMod publishes
+        # only `hand`, so a card the screen STILL lists has demonstrably not
+        # been picked -- a second `choose` of it is a genuine desync, and
+        # re-reading it as a deselect would send a `choose` that selects a
+        # SECOND copy and then silently walk on. Stop instead.
         return _match_grid(step, state, candidates)
     raise Divergence(f"script step kind {kind!r} has no live matcher "
                      "(this policy never emits it)", step)

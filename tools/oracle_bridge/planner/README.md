@@ -152,6 +152,28 @@ different card at the same index is the desync the follower must stop on):
 | `proceed` | `ctx` (advisory) | `proceed` |
 | `shop` | `index` (raw) | never emitted by the sim-consulting policies (they buy nothing); decode-completeness only |
 
+**A cancelling run of hand-select toggles is not emitted.** The optional
+(zero-to-N) hand-select — Elixir's exhaust screen, Purity, upgraded
+Forethought — is the one screen where `choose` TOGGLES: picking an
+already-picked card takes it back out. A searching policy oscillates there
+(`policy_search.cpp`'s CONFIRM tie-bias comment names the residual), and the
+deselect is **inexpressible live** — `HandCardSelectScreen` moves a picked card
+out of `hand`, so CommunicationMod's list no longer contains it and the
+follower stops (witness: campaign `s2v3_wave1_STS207337_ps255`, floor 16 turn
+1, two identical `choose_card AscendersBane` steps). The emitter therefore
+elides a run of toggles that returns the controller to a state it already held
+inside that screen and emits the **net selection in pick order**. The ACTIONS
+are still replayed — only the lines go — so `final_hash` is unchanged and the
+verification stays honest; and the elision is decided by the engine's own
+content hash, not by a "same card twice" rule, because a deselect returns the
+card to the END of the unselected run, so a select of any earlier slot plus its
+deselect is a real hand REORDER the game performs too. Consequences for the
+schema: `steps` counts EMITTED lines (the follower's header check still
+holds), and `i` stays the action's index in the trajectory, so a gap in `i` is
+where a cancelling run was dropped. The follower does **not** mirror the rule:
+a same-card re-`choose` against a screen that still lists the card is a genuine
+desync, not a deselect, and must stop.
+
 **Event pages whose options are CARDS.** The engine has exactly two
 (`EventDialogState::board`): Match and Keep's twelve-card board and The
 Library's twenty-card read. Only Match and Keep stays an `event` step — its

@@ -366,6 +366,48 @@ void put_board_card(Json& j, const engine::EventDialogState& es, uint8_t count,
     j.kv("ord", ord);
 }
 
+// --- The optional hand-select's cancelling toggle run ------------------------
+//
+// An OPTIONAL (zero-to-N) hand-select -- Elixir's exhaust screen, Purity,
+// upgraded Forethought -- is the ONE screen where CHOOSE(slot) TOGGLES rather
+// than commits: choosing an already-picked card takes it back out
+// (advance.hpp, "OPTIONAL (zero-to-N) CHOOSE"). A sim-consulting policy
+// searching that screen therefore emits select/deselect OSCILLATIONS, because
+// the rollout can strictly prefer each toggle from the other's state --
+// policy_search.cpp's CONFIRM tie-bias comment carries that residual by name.
+// In the engine the pair is a no-op and the line stays correct.
+//
+// LIVE THE DESELECT IS NOT EXPRESSIBLE. HandCardSelectScreen moves a picked
+// card OUT of `hand` and into `selectedCards`, and CommunicationMod publishes
+// only the former, so after `choose 6` the screen lists the six cards that are
+// LEFT: the deselect has no `choose` index at all, and the follower stops.
+// Witness: campaign s2v3_wave1_STS207337_ps255, floor 16 (The Guardian) turn
+// 1, script steps 204 and 205 both `choose_card AscendersBane`, follower stop
+// "grid has no #0 copy of 'AscendersBane'+0" at step 205.
+//
+// So the emitter drops a cancelling toggle run and emits the NET selection, in
+// pick order. It does NOT drop the actions: every action is still applied to
+// the replaying controller, so the replayed trajectory -- and the final_hash
+// check that makes a script evidence rather than hope -- is bit-for-bit what
+// it was. Only the lines go.
+//
+// The drop is gated on the ENGINE's verdict (the whole-controller content
+// hash returning to a value already seen inside this screen's run of toggles)
+// rather than on a structural "same card twice" rule, because a select
+// followed by the deselect of the same card is only a no-op when the select
+// took the LAST unselected slot. Deselecting puts the card back at the END of
+// the unselected run -- `AbstractDungeon.player.hand.addToTop(e)`,
+// interp_cards.cpp -- not where it was picked from, so any earlier slot makes
+// the pair a hand REORDER that the game performs too and the script must keep.
+// The same window also collapses nested runs (select A, select B, deselect B,
+// deselect A), which no pairwise rule would catch.
+[[nodiscard]] bool optional_hand_select_open(const RunController& rc) noexcept {
+    if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT)) return false;
+    RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    return mask.combat.choice_pending && mask.combat.choice_optional;
+}
+
 }  // namespace
 
 std::string script_step_json(const RunController& rc, Action a, uint32_t index,
@@ -826,7 +868,25 @@ ScriptEmit emit_script(int64_t seed_value, const std::string& seed_text,
     steps.reserve(trajectory.size());
     uint8_t max_act = 0;
     uint32_t max_floor = 0;
+    // The open cancelling window (optional_hand_select_open above): one entry
+    // per state seen inside the current run of toggles, each holding that
+    // state's controller hash and how many lines had been emitted when it was
+    // first seen. Empty whenever no such run is in progress.
+    struct ToggleMark {
+        uint64_t hash;
+        size_t emitted;
+    };
+    std::vector<ToggleMark> marks;
     for (uint32_t i = 0; i < trajectory.size(); ++i) {
+        const bool toggling =
+            engine::action_verb(trajectory[i]) == ActionVerb::CHOOSE &&
+            optional_hand_select_open(*rc);
+        if (!toggling) {
+            marks.clear();
+        } else if (marks.empty()) {
+            marks.push_back({fuzz::hash_controller(*rc), steps.size()});
+        }
+
         std::string err;
         std::string line = script_step_json(*rc, trajectory[i], i, err);
         if (line.empty()) {
@@ -841,6 +901,24 @@ ScriptEmit emit_script(int64_t seed_value, const std::string& seed_text,
         if (rc->run.floor > max_floor) {
             max_floor = static_cast<uint32_t>(rc->run.floor);
         }
+
+        if (!toggling) continue;
+        const uint64_t after = fuzz::hash_controller(*rc);
+        size_t back_to = marks.size();
+        for (size_t m = 0; m < marks.size(); ++m) {
+            if (marks[m].hash == after) {
+                back_to = m;
+                break;
+            }
+        }
+        if (back_to == marks.size()) {
+            marks.push_back({after, steps.size()});
+            continue;
+        }
+        // The screen is byte-for-byte back at a state it already held: every
+        // line since then describes a selection the confirm will not see.
+        steps.resize(marks[back_to].emitted);
+        marks.resize(back_to + 1);
     }
 
     // Replay fidelity: the re-driven trajectory must land on the scanned
