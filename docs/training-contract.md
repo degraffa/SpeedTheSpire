@@ -83,7 +83,7 @@ The header groups the struct into these sections, in layout order:
 | combat: piles | hand / **draw (canonically sorted multiset)** / discard / exhaust / limbo, as card values |
 | combat: monsters | per-monster block, HP, intent, and full 24-slot power lists (the old `ObsBuffer` stub truncated at 4) |
 | belt | potions — public in every phase, combat or not |
-| reserved (v1) | `keys_reserved`, `act_reserved` (both **populated** since v2), `second_boss_reserved` (**populated** since v5: the A20 second Act-3 boss, 0 elsewhere), `boss_relic_choice_reserved` (zero until S2/S3) |
+| reserved (v1) | `keys_reserved`, `act_reserved` (both **populated** since v2), `second_boss_reserved` (**populated** since v5: the A20 second Act-3 boss, 0 elsewhere), `boss_relic_choice_reserved` (**populated** since S2.11/S2.47: the three offered boss-relic ids while `phase == BOSS_TREASURE`, and only once the chest has been opened — zero before that and outside the phase) |
 | *v2 tail append →* | everything below was appended; no v1 field moved |
 | always-block | hp/max-hp/gold/floor/ascension, screen-flow scalars, `current_encounter_id`, masked chest fields, pity/membership counters |
 | always-block: collections | master deck (**engine order** — see below), relics + displayed counters, the full current-act map incl. the emerald node, consumed encounter prefix |

@@ -616,7 +616,21 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   docs/verification/s2-verification.md), GT0 **Acceptance:** twin +
   tripwire suites green over S2 phases; an S1-era shard loads and trains
   under the extended schema.
-  **Log:** —
+  **Log:** 2026-09-02 — **sim half re-derived as ALREADY SATISFIED; no
+  engine change and no `PUBLIC_VIEW_VERSION` bump owed.** Every reserved
+  field this row names is populated with its declared meaning today:
+  `act_reserved` since v2, `second_boss_reserved` since v5 (S2.28), and
+  `boss_relic_choice_reserved[3]` since S2.11 (source re-pointed to
+  `run.boss_chest` at S2.47, schema v8) — all three additive (audit case 1),
+  so an S1-era PublicView record of the SAME version reads unchanged. The
+  S2-phase twin/tripwire coverage is in place (`BossChest.*` pins the
+  unopened-twin byte equality and the `seen`-gated reveal; the S2.28
+  double-boss tests pin `second_boss_reserved` through `RUN_OVER`; the
+  total-byte tripwire is over the whole `RunController`). One consumer-facing
+  wording fix landed with this note: [training-contract.md](training-contract.md)
+  §2's group table still said the boss-relic field was "zero until S2/S3".
+  What remains of T4.1 is the training-repo half only — loading an S1-era
+  shard under the current stamp — and it is tracked in `SpireTrainer`.
 
 - **T4.2** `[ ]` **V2 re-fit + pre-registered re-baseline.** V2 on real
   Acts 1–3 continuations; the pre-registered T3-result re-baseline with
