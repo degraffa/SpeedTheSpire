@@ -3616,20 +3616,30 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                         // the CURRENT room, and this room is not one that adds
                         // a card row.
                         //
-                        // bossObtainLogic's four starter-swap relics (Black
-                        // Blood, Ring of the Serpent, FrozenCore, HolyWater)
-                        // skip obtain() and instantObtain(player, 0, true)
-                        // instead, replacing relics[0] -- that replacement lives
-                        // in the relics' own pickup bodies, reached through the
-                        // same door.
                         const RelicId picked =
                             static_cast<RelicId>(chest.relics[a0]);
                         chest.chose_relic = 1;
                         RelicEquipContext ectx{rc.combat.card_random_rng,
                                                rc.rewards,
                                                RoomType::TreasureBoss};
-                        (void)acquire_relic(rc.run, rc.combat.misc_rng, picked,
-                                            ectx);
+                        if (boss_relic_replaces_starter(picked)) {
+                            // bossObtainLogic (:391-398) does NOT call obtain()
+                            // for Black Blood / Ring of the Serpent / FrozenCore
+                            // / HolyWater; relicObtainLogic (:196-198) then runs
+                            // `r.instantObtain(player, 0, true)`, whose
+                            // `slot < relics.size()` arm is `relics.set(0,
+                            // this)` (AbstractRelic.java:230-234): the starter
+                            // in slot 0 is overwritten in place, relic_count
+                            // does not move, and onEquip runs (:240-243).
+                            // Witness STS212624 seq 448: the game kept ten
+                            // relics with Black Blood at [0]; the sim used to
+                            // append an eleventh.
+                            (void)instant_obtain_relic_at_slot(
+                                rc.run, rc.combat.misc_rng, picked, 0, ectx);
+                        } else {
+                            (void)acquire_relic(rc.run, rc.combat.misc_rng,
+                                                picked, ectx);
+                        }
                         apply_boss_chest_equip_request(rc, ectx);
                     }
                     break;

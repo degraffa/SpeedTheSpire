@@ -325,6 +325,42 @@ void initialize_relic_pools(RunState& rs) noexcept;
     RunState& rs, RngStream& misc_rng, RelicId id,
     RelicEquipContext& ctx) noexcept;
 
+// AbstractRelic.instantObtain(player, slot, callOnEquip=TRUE)
+// (AbstractRelic.java:219-249) at a caller-named slot, through the
+// screen-capable door. The Java seats the relic with
+//     if (slot >= p.relics.size()) p.relics.add(this);
+//     else                         p.relics.set(slot, this);      (:230-234)
+// and then runs onEquip (:240-243). So a slot below rs.relic_count is an
+// IN-PLACE REPLACEMENT: it costs no slot, every other relic keeps its index
+// (trap 8), and the evicted relic is dropped without loseRelic or onUnequip;
+// a slot at or past the count is the ordinary append and behaves exactly as
+// acquire_relic. The Circlet-stacking first arm (:220-226) is shared.
+//
+// Its one caller is the boss chest's starter swap.
+// BossRelicSelectScreen.relicObtainLogic (BossRelicSelectScreen.java:196-198)
+// calls `r.instantObtain(AbstractDungeon.player, 0, true)` for Black Blood /
+// Ring of the Serpent / FrozenCore / HolyWater -- the same four ids
+// AbstractRelic.bossObtainLogic (AbstractRelic.java:391-398) skips obtain()
+// for -- so the starter in slot 0 is overwritten and the relic list does not
+// grow. Witness: capture STS212624 seq 448 (the Act-2 chest, Black Blood
+// picked with ten relics owned): the game kept ten with Black Blood at [0];
+// the sim, appending, had eleven with Burning Blood still at [0].
+//
+// Contrast swap_relic_in_place (below): the callOnEquip=FALSE, find-by-id
+// form Forgotten Altar's gainChalice uses.
+[[nodiscard]] RelicAcquireResult instant_obtain_relic_at_slot(
+    RunState& rs, RngStream& misc_rng, RelicId id, uint8_t slot,
+    RelicEquipContext& ctx) noexcept;
+
+// The bossObtainLogic / relicObtainLogic four-id list, restricted to the
+// registry. Black Blood is the Ironclad's starter upgrade; Ring of the Serpent
+// (Silent), FrozenCore (Defect) and HolyWater (Watcher) are other classes'
+// and are not registry rows, so no chest can offer them. When such a row
+// lands, it belongs on this list -- the Java tests the id, not the class.
+[[nodiscard]] constexpr bool boss_relic_replaces_starter(RelicId id) noexcept {
+    return id == RelicId::BLACK_BLOOD;
+}
+
 // AbstractPlayer.loseRelic (AbstractPlayer.java:2014-2031): run onUnequip on
 // EVERY owned copy of `id`, then remove the LAST one (the loop overwrites
 // `toRemove` rather than breaking) and reorganize, which for a plain ArrayList

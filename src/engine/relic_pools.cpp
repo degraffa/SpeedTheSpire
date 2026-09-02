@@ -484,9 +484,17 @@ namespace {
 // before any mutation, so a caller that cannot present screens fails loudly
 // and non-corruptingly -- claim_reward already treats a non-ACQUIRED result as
 // a refused claim.
+//
+// `slot` names the seat the relic is written into. kAppendSlot is the ordinary
+// obtain()/instantObtain() append (AbstractRelic.java:266, :288); a slot below
+// rs.relic_count is AbstractRelic.instantObtain(p, slot, callOnEquip)'s
+// `p.relics.set(slot, this)` arm (:230-234) -- the in-place replacement the
+// boss chest's starter swap takes at slot 0 (see instant_obtain_relic_at_slot).
+constexpr uint8_t kAppendSlot = static_cast<uint8_t>(kRelicCap);
+
 RelicAcquireResult acquire_relic_impl(RunState& rs, RngStream& misc_rng,
-                                      RelicId id,
-                                      RelicEquipContext* ctx) noexcept {
+                                      RelicId id, RelicEquipContext* ctx,
+                                      uint8_t slot) noexcept {
     const RelicDef* def = relic_def(id);
     if (def == nullptr) {
         return RelicAcquireResult::INVALID_ID;
@@ -510,22 +518,32 @@ RelicAcquireResult acquire_relic_impl(RunState& rs, RngStream& misc_rng,
         }
     }
 
-    if (rs.relic_count >= kRelicCap) {
-        return RelicAcquireResult::RELIC_CAP_REACHED;
+    RelicSlot* seat = nullptr;
+    if (slot < rs.relic_count) {
+        // instantObtain(p, slot, callOnEquip) (AbstractRelic.java:230-234):
+        //     if (slot >= p.relics.size()) p.relics.add(this);
+        //     else                         p.relics.set(slot, this);
+        // The set arm. The evicted relic simply stops being referenced -- no
+        // loseRelic, no onUnequip, no reorganize -- so relic_count does not
+        // move and every other relic keeps its index (trap 8).
+        seat = &rs.relics[slot];
+    } else {
+        if (rs.relic_count >= kRelicCap) {
+            return RelicAcquireResult::RELIC_CAP_REACHED;
+        }
+        seat = &rs.relics[rs.relic_count++];
     }
+    seat->relic_id = static_cast<uint16_t>(id);
+    seat->counter = def->initial_counter;
 
-    RelicSlot& slot = rs.relics[rs.relic_count++];
-    slot.relic_id = static_cast<uint16_t>(id);
-    slot.counter = def->initial_counter;
-
-    // AbstractRelic.instantObtain/obtain (AbstractRelic.java:219-291) append in
-    // acquisition order and THEN call onEquip, so the handler sees its own slot
+    // AbstractRelic.instantObtain/obtain (AbstractRelic.java:219-291) seat the
+    // relic FIRST and THEN call onEquip, so the handler sees its own slot
     // already present and counter-seeded. The two surfaces are mutually
     // exclusive (the emitter rejects a row listing both).
     if (screen_fn != nullptr) {
-        screen_fn(rs, misc_rng, slot, *ctx);
+        screen_fn(rs, misc_rng, *seat, *ctx);
     } else if (const RelicOnEquipFn fn = relic_on_equip_fn(id)) {
-        fn(rs, misc_rng, slot);
+        fn(rs, misc_rng, *seat);
     }
     return RelicAcquireResult::ACQUIRED;
 }
@@ -534,12 +552,19 @@ RelicAcquireResult acquire_relic_impl(RunState& rs, RngStream& misc_rng,
 
 RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
                                  RelicId id) noexcept {
-    return acquire_relic_impl(rs, misc_rng, id, nullptr);
+    return acquire_relic_impl(rs, misc_rng, id, nullptr, kAppendSlot);
 }
 
 RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng, RelicId id,
                                  RelicEquipContext& ctx) noexcept {
-    return acquire_relic_impl(rs, misc_rng, id, &ctx);
+    return acquire_relic_impl(rs, misc_rng, id, &ctx, kAppendSlot);
+}
+
+RelicAcquireResult instant_obtain_relic_at_slot(RunState& rs,
+                                                RngStream& misc_rng, RelicId id,
+                                                uint8_t slot,
+                                                RelicEquipContext& ctx) noexcept {
+    return acquire_relic_impl(rs, misc_rng, id, &ctx, slot);
 }
 
 bool swap_relic_in_place(RunState& rs, RelicId old_id,

@@ -553,6 +553,94 @@ TEST(BossChest, PickingCallingBellRunsItsConfirmAndRewardScreensHere) {
 }
 
 // =============================================================================
+// The starter swap: instantObtain(player, 0, true), not obtain()
+// =============================================================================
+
+// Capture STS212624 (A20 Ironclad, the Act-2 boss chest at floor 34) picked
+// Black Blood from [Mark of Pain, Sacred Bark, Black Blood] with ten relics
+// owned and Burning Blood at [0]. The game's own dump one record later shows
+// TEN relics with Black Blood at [0]; the sim had ELEVEN -- Burning Blood still
+// at [0], Black Blood appended at [10] -- and every later record carried those
+// three fields. The mechanism: AbstractRelic.bossObtainLogic
+// (AbstractRelic.java:391-398) skips obtain() for the four starter-swap ids,
+// and BossRelicSelectScreen.relicObtainLogic (BossRelicSelectScreen.java
+// :196-198) calls `r.instantObtain(AbstractDungeon.player, 0, true)` instead,
+// whose `slot < p.relics.size()` arm is `p.relics.set(slot, this)`
+// (AbstractRelic.java:230-234): an in-place replacement -- no count change, no
+// loseRelic, onEquip run (:240-243). The pick branch has no act test, so the
+// same arm serves the Act-1 chest; this pins it where the helper parks.
+TEST(BossChest, BlackBloodReplacesTheStarterInSlotZeroWithoutCostingASlot) {
+    RunController rc = at_boss_chest();
+    // Two relics behind the starter, one with a non-default counter, so index
+    // preservation (trap 8) and an untouched neighbour are both observable.
+    ASSERT_EQ(acquire_relic(rc.run, rc.combat.misc_rng, RelicId::TINY_CHEST),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rc.run, rc.combat.misc_rng, RelicId::ANCHOR),
+              RelicAcquireResult::ACQUIRED);
+    rc.run.relics[rc.run.relic_count - 2].counter = 3;  // Tiny Chest, mid-cycle
+    ASSERT_EQ(rc.run.relics[0].relic_id,
+              static_cast<uint16_t>(RelicId::BURNING_BLOOD))
+        << "Ironclad.getStartingRelics puts Burning Blood at [0]";
+    const RunState before = rc.run;
+    const uint8_t count_before = before.relic_count;
+    ASSERT_GE(count_before, 3);
+
+    rc.run.boss_chest.relics[2] = static_cast<uint16_t>(RelicId::BLACK_BLOOD);
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
+    step(rc, make_action(ActionVerb::CHOOSE, 2));
+
+    EXPECT_EQ(rc.run.relic_count, count_before)
+        << "relics.set(0, this), not relics.add(this): no slot is spent";
+    EXPECT_EQ(rc.run.relics[0].relic_id,
+              static_cast<uint16_t>(RelicId::BLACK_BLOOD));
+    EXPECT_EQ(rc.run.relics[0].counter, -1)
+        << "a fresh relic object: AbstractRelic's default, not a leftover";
+    EXPECT_FALSE(owns(rc.run, RelicId::BURNING_BLOOD))
+        << "the starter is dropped by being overwritten; :233 is a plain set, "
+           "with no loseRelic and no onUnequip";
+    for (uint8_t i = 1; i < count_before; ++i) {
+        EXPECT_EQ(rc.run.relics[i].relic_id, before.relics[i].relic_id)
+            << "slot " << int{i} << " moved";
+        EXPECT_EQ(rc.run.relics[i].counter, before.relics[i].counter)
+            << "slot " << int{i} << "'s counter changed";
+    }
+    EXPECT_EQ(rc.run.relics[count_before].relic_id,
+              static_cast<uint16_t>(RelicId::NONE))
+        << "nothing was appended past the old end";
+    EXPECT_EQ(rc.run.boss_chest.chose_relic, 1);
+    EXPECT_EQ(rc.run.boss_chest.screen,
+              static_cast<uint8_t>(BossChestScreen::DONE))
+        << "Black Blood has no onEquip screen; the room is finished";
+    // And the gate the swap closes: BlackBlood.canSpawn is hasRelic("Burning
+    // Blood") (BlackBlood.java:39-41), which the replacement just falsified.
+    RelicSpawnContext ctx{};
+    fill_boss_spawn_gates(rc.run, ctx);
+    EXPECT_FALSE(ctx.has_burning_blood);
+}
+
+// The negative control for the arm above: every OTHER boss relic goes through
+// bossObtainLogic's obtain() (AbstractRelic.java:393 -> :277-291,
+// `player.relics.add(this)` at :288) and lands at the END, behind the starter.
+// Mark of Pain is the capture's own slot-0 offer.
+TEST(BossChest, AnOrdinaryBossRelicStillAppendsBehindTheStarter) {
+    RunController rc = at_boss_chest();
+    const uint8_t count_before = rc.run.relic_count;
+    ASSERT_EQ(rc.run.relics[0].relic_id,
+              static_cast<uint16_t>(RelicId::BURNING_BLOOD));
+
+    rc.run.boss_chest.relics[0] = static_cast<uint16_t>(RelicId::MARK_OF_PAIN);
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+
+    EXPECT_EQ(rc.run.relic_count, count_before + 1);
+    EXPECT_EQ(rc.run.relics[0].relic_id,
+              static_cast<uint16_t>(RelicId::BURNING_BLOOD))
+        << "the starter stays in slot 0 for a non-swap pick";
+    EXPECT_EQ(rc.run.relics[count_before].relic_id,
+              static_cast<uint16_t>(RelicId::MARK_OF_PAIN));
+}
+
+// =============================================================================
 // canSpawn: trap 9 and the starter-swap gates
 // =============================================================================
 

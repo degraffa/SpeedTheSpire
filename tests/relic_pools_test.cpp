@@ -492,6 +492,47 @@ TEST(RelicAcquisition, ConstructorAndOnEquipCountersAreExact) {
     EXPECT_EQ(rs.relics[3].counter, 0);
 }
 
+// AbstractRelic.instantObtain(p, slot, callOnEquip=true) (AbstractRelic.java
+// :219-249): `slot < p.relics.size()` is `p.relics.set(slot, this)` (:233), an
+// in-place replacement; `slot >= size()` is `p.relics.add(this)` (:231), the
+// ordinary append; onEquip runs on either arm (:240-243). The boss chest's
+// starter swap is the caller (BossRelicSelectScreen.relicObtainLogic,
+// BossRelicSelectScreen.java:196-198, slot 0) -- STS212624 seq 448.
+TEST(RelicAcquisition, InstantObtainAtAnOccupiedSlotReplacesInPlaceAndRunsOnEquip) {
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    RngStream misc = from_seed(3);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::TreasureBoss};
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::BURNING_BLOOD),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::TINY_CHEST),
+              RelicAcquireResult::ACQUIRED);
+    rs.relics[1].counter = 3;  // a mid-cycle neighbour, to prove it is untouched
+
+    // The set arm.
+    EXPECT_EQ(instant_obtain_relic_at_slot(rs, misc, RelicId::STRAWBERRY, 0, ctx),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(rs.relic_count, 2) << "set(), not add(): no slot spent";
+    EXPECT_EQ(rs.relics[0].relic_id, static_cast<uint16_t>(RelicId::STRAWBERRY));
+    EXPECT_EQ(rs.relics[0].counter, -1) << "a fresh object's counter";
+    EXPECT_EQ(rs.max_hp, 87) << "callOnEquip is TRUE at this door (contrast "
+                                "swap_relic_in_place, Forgotten Altar's FALSE)";
+    EXPECT_EQ(rs.hp, 67);
+    EXPECT_EQ(rs.relics[1].relic_id, static_cast<uint16_t>(RelicId::TINY_CHEST));
+    EXPECT_EQ(rs.relics[1].counter, 3) << "the neighbour keeps index AND counter";
+    EXPECT_EQ(rs.relics[2].relic_id, static_cast<uint16_t>(RelicId::NONE));
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::NONE);
+
+    // The add arm: a slot at or past the count is the ordinary append.
+    EXPECT_EQ(instant_obtain_relic_at_slot(rs, misc, RelicId::ANCHOR, 9, ctx),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(rs.relic_count, 3);
+    EXPECT_EQ(rs.relics[2].relic_id, static_cast<uint16_t>(RelicId::ANCHOR));
+}
+
 // STS00068 regression (b47_treasure_oracle_20260727T204809Z_claude01): a Neow
 // common-relic blessing handed over Centennial Puzzle and the ONLY field that
 // differed from the capture was `relics[1].counter: -1 -> 0`. The relic's row
