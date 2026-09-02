@@ -8,6 +8,7 @@
 
 #include "interp_damage.hpp"
 
+#include <bit>      // std::bit_cast (the kDamageOwnerLocked float carrier)
 #include <cstdint>
 
 #include "interp_ops.hpp"                   // actor_powers / actor_hp / actor_block
@@ -822,7 +823,8 @@ bool damage_attacker_cancelled(const CombatState& s, uint8_t src,
 // cancelled hit.
 void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
                int strength_mult,
-               DamageType type, bool pure, bool source_null) noexcept {
+               DamageType type, bool pure, bool source_null,
+               bool owner_locked) noexcept {
     if (tgt != kActorPlayer && tgt >= kMonsterCap) {
         return;
     }
@@ -834,10 +836,18 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // never called on it, so no float op runs at all (the surviving NORMAL
     // non-pure path is untouched -- FP contract preserved by omission, not
     // reordering). NORMAL non-pure damage runs the full DamageInfo.applyPowers
-    // pipeline, carrying the Strength multiplier (Heavy-Blade-style attacks).
-    const int out = (type == DamageType::NORMAL && !pure)
-                        ? compute_damage(s, src, tgt, base, strength_mult)
-                        : (base < 0 ? 0 : base);
+    // pipeline, carrying the Strength multiplier (Heavy-Blade-style attacks) --
+    // or, for a card item locked at queue time (kDamageOwnerLocked), resumes
+    // it from the play-time owner stage carried in `base`'s bits.
+    int out = 0;
+    if (type == DamageType::NORMAL && !pure) {
+        out = owner_locked
+                  ? compute_damage_from_owner_stage(s, src, tgt,
+                                                    std::bit_cast<float>(base))
+                  : compute_damage(s, src, tgt, base, strength_mult);
+    } else {
+        out = base < 0 ? 0 : base;
+    }
     int16_t* hp = actor_hp(s, tgt);
     int16_t* blk = actor_block(s, tgt);
     if (hp == nullptr || blk == nullptr) {
@@ -1514,6 +1524,46 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt,
     return compute_damage(s, src, tgt, base, /*strength_mult=*/1);
 }
 
+// The player-owned pipeline's OWNER half (AbstractCard.calculateCardDamage:
+// 2320-2327 / DamageInfo.applyPowers:71-99 for a player owner): the owner's
+// atDamageGive loop, then the stance hook, which for a player owner sits AFTER
+// that loop and BEFORE the target's atDamageReceive loop. Target-independent by
+// construction -- nothing here reads `tgt` -- which is what lets a card's AoE
+// item lock it once for every monster (kDamageOwnerLocked, interp.hpp).
+float owner_damage_stage(const CombatState& s, uint8_t src, int base,
+                         int strength_mult) noexcept {
+    const PowerView owner = actor_powers(s, src);
+    float tmp = static_cast<float>(base);
+    for (uint8_t i = 0; i < owner.count; ++i) {
+        tmp = at_damage_give(tmp, owner.slots[i], strength_mult);
+    }
+    return stance_at_damage_give(s, tmp);
+}
+
+// The player-owned pipeline's TARGET half (:2328-2345): the target's
+// atDamageReceive loop, the owner's atDamageFinalGive loop, the target's
+// atDamageFinalReceive loop, then the ONE floor and the >= 0 clamp (trap 1).
+int compute_damage_from_owner_stage(const CombatState& s, uint8_t src,
+                                    uint8_t tgt, float owner_stage) noexcept {
+    const PowerView owner = actor_powers(s, src);
+    const PowerView target = actor_powers(s, tgt);
+    float tmp = owner_stage;
+    for (uint8_t i = 0; i < target.count; ++i) {
+        tmp = at_damage_receive(s, tgt, tmp, target.slots[i]);
+    }
+    for (uint8_t i = 0; i < owner.count; ++i) {
+        tmp = at_damage_final_give(tmp, owner.slots[i]);
+    }
+    for (uint8_t i = 0; i < target.count; ++i) {
+        tmp = at_damage_final_receive(tmp, target.slots[i]);
+    }
+    int out = mathutils_floor(tmp);  // one floor, at the very end (trap 1)
+    if (out < 0) {
+        out = 0;
+    }
+    return out;
+}
+
 int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt, int base,
                    int strength_mult) noexcept {
     const PowerView owner = actor_powers(s, src);
@@ -1539,22 +1589,11 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt, int base,
             tmp = at_damage_final_receive(tmp, target.slots[i]);
         }
     } else {
-        // Player-owned attack (DamageInfo.java:71-99). Owner is the player, so
-        // the stance hook is atDamageGive and sits AFTER the owner's
-        // atDamageGive loop, BEFORE the target's atDamageReceive loop.
-        for (uint8_t i = 0; i < owner.count; ++i) {
-            tmp = at_damage_give(tmp, owner.slots[i], strength_mult);
-        }
-        tmp = stance_at_damage_give(s, tmp);
-        for (uint8_t i = 0; i < target.count; ++i) {
-            tmp = at_damage_receive(s, tgt, tmp, target.slots[i]);
-        }
-        for (uint8_t i = 0; i < owner.count; ++i) {
-            tmp = at_damage_final_give(tmp, owner.slots[i]);
-        }
-        for (uint8_t i = 0; i < target.count; ++i) {
-            tmp = at_damage_final_receive(tmp, target.slots[i]);
-        }
+        // Player-owned attack (DamageInfo.java:71-99): the two halves below,
+        // in sequence. Kept as the two public functions so a play-time-locked
+        // card item (kDamageOwnerLocked) resumes at exactly the same seam.
+        return compute_damage_from_owner_stage(
+            s, src, tgt, owner_damage_stage(s, src, base, strength_mult));
     }
 
     int out = mathutils_floor(tmp);  // one floor, at the very end (trap 1)

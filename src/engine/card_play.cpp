@@ -10,6 +10,7 @@
 
 #include "sts/engine/card_play.hpp"
 
+#include <bit>      // std::bit_cast (the kDamageOwnerLocked float carrier)
 #include <cassert>
 #include <cstdint>
 
@@ -193,6 +194,27 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
             player_has_relic(s, RelicId::STRIKE_DUMMY)) {
             item.amount += 3;
         }
+    }
+    // calculateCardDamage-at-useCard (AbstractPlayer.java:1362, BEFORE c.use()
+    // at :1369): the card's damage number is fixed NOW, from the player's
+    // current modifiers, and the queued DamageAction lands it unchanged
+    // (DamageAction.java:88; kDamageOwnerLocked in interp.hpp has the full
+    // derivation). So bake the OWNER stage of the pipeline into the item here
+    // and let op_damage resume at the target stage. Everything queued ahead of
+    // this hit that changes the player's Strength -- Hemokinesis' own LoseHP
+    // feeding Rupture, Pain's addToTop'd LoseHP feeding Rupture -- must not
+    // reach this card's number, exactly as it does not reach `this.damage` in
+    // the game. Random-target items are left alone: the game re-applies powers
+    // per hit there (AttackDamageRandomEnemyAction.update). Plain NORMAL,
+    // non-pure, real-owner card items only; anything else has no pipeline to
+    // lock (op_damage never calls compute_damage for it).
+    if (static_cast<Opcode>(item.opcode) == Opcode::DAMAGE &&
+        item.src == kActorPlayer && item.tgt != kActorRandomEnemy &&
+        damage_type_from_flags(item.flags) == DamageType::NORMAL &&
+        !damage_is_pure(item.flags) && !damage_source_is_null(item.flags)) {
+        item.amount = std::bit_cast<int32_t>(owner_damage_stage(
+            s, kActorPlayer, item.amount, /*strength_mult=*/1));
+        item.flags |= kDamageOwnerLocked;
     }
     if (static_cast<Opcode>(item.opcode) == Opcode::APPLY_POWER &&
         item.tgt == kActorPlayer &&

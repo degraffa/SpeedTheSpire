@@ -11,6 +11,7 @@
 // here against both an empty and a populated mirror (the wired power_hooks.cpp /
 // action_queue.cpp sites read it).
 
+#include <bit>      // std::bit_cast (the locked DAMAGE item's float amount)
 #include <cstdint>
 
 #include "gtest/gtest.h"
@@ -1454,13 +1455,18 @@ TEST(RelicHooksUncommon, StrikeDummyAddsThreeToStrikeCardsOnly) {
     s.hand_count = 2;
     mirror_relic(s, RelicId::STRIKE_DUMMY);
 
+    // A card DAMAGE item is locked at queue time (kDamageOwnerLocked): its
+    // `amount` is the float32 bits of the play-time owner stage, which with no
+    // player powers is exactly the relic-modified base.
     CardQueueItem play{};
     play.card_index = 0;
     play.target = 0;
     resolve_card_play(s, play);
     ASSERT_GE(s.action_count, 1);
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::DAMAGE));
-    EXPECT_EQ(queued(s, 0).amount, 9) << "Strike 6 + 3 (StrikeDummy.java:30)";
+    ASSERT_TRUE(damage_owner_locked(queued(s, 0).flags));
+    EXPECT_EQ(std::bit_cast<float>(queued(s, 0).amount), 9.0f)
+        << "Strike 6 + 3 (StrikeDummy.java:30)";
     drain(s);
     EXPECT_EQ(s.monsters[0].hp, 41);
 
@@ -1468,7 +1474,8 @@ TEST(RelicHooksUncommon, StrikeDummyAddsThreeToStrikeCardsOnly) {
     resolve_card_play(s, play);
     ASSERT_GE(s.action_count, 1);
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::DAMAGE));
-    EXPECT_EQ(queued(s, 0).amount, 8);
+    ASSERT_TRUE(damage_owner_locked(queued(s, 0).flags));
+    EXPECT_EQ(std::bit_cast<float>(queued(s, 0).amount), 8.0f);
 }
 
 // --- Meat on the Bone: pre-victory heal, before every onVictory ---------------

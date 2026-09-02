@@ -832,5 +832,52 @@ TEST(GuardianDirectedScript, AdvanceRunsTheOpeningOffensiveCycle) {
     EXPECT_NE(find_player_power(s, PowerId::VULNERABLE), nullptr);
 }
 
+// The flip driven from the PLAYER'S END OF TURN (S2.V3 seed STS237405, floor
+// 16, turn 2 -> 3): Combust's DamageAllEnemiesAction takes the Guardian across
+// its threshold while the end-turn sequence is still queued. The damage()
+// override addToBottom's a ChangeStateAction (TheGuardian.java:288); by the
+// time IT resolves, AbstractRoom$1 has already appended EndTurnAction /
+// WaitAction / MonsterStartTurnAction, so changeState's own GainBlock(20)
+// (:240) lands BEHIND MonsterStartTurnAction's applyPreTurnLogic block clear
+// (MonsterGroup.java:98-106) and the Guardian starts its turn -- and the
+// player's next one -- holding the 20. The capture shows blk=20 with Sharp Hide
+// 4 at the top of turn 3; the engine used to show 0.
+TEST(GuardianDirectedScript, DefensiveBlockFromAnEndOfTurnFlipSurvivesTheMonsterTurn) {
+    CombatState s = make_guardian_state(21015);
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    s.turn = 1;
+    s.monster_attacks_queued = 1;
+
+    // 35 of the 40 already taken during the turn; Mode Shift reads 5.
+    hit_guardian(s, 35);
+    ASSERT_EQ(s.monsters[0].move_history[0], kChargeUp) << "no flip yet";
+    ASSERT_EQ(find_monster_power(s, 0, PowerId::MODE_SHIFT)->amount, 5);
+
+    // Combust 7 (hpLoss 1): atEndOfTurn queues LoseHP(1) then a pure THORNS
+    // DamageAllEnemies(7) (CombustPower.java:39-45).
+    s.player_powers[s.player_power_count++] =
+        PowerSlot{static_cast<uint16_t>(PowerId::COMBUST), 7, 0, 0};
+    s.flags = (s.flags & ~kCombatFlagCombustHpLossMask) |
+              (1u << kCombatFlagCombustHpLossShift);
+
+    Action action[1] = {make_action(ActionVerb::END_TURN)};
+    StepResult result[1]{};
+    advance(std::span<CombatState>(&s, 1), std::span<const Action>(action, 1),
+            std::span<StepResult>(result, 1));
+    EXPECT_FALSE(result[0].terminal);
+
+    const MonsterState& g = s.monsters[0];
+    EXPECT_EQ(g.hp, kA20Hp - 35 - 7) << "Combust's 7 landed";
+    EXPECT_EQ(s.player_hp, 500 - 1) << "Combust's own HP loss; Close Up deals none";
+    EXPECT_EQ(find_monster_power(s, 0, PowerId::MODE_SHIFT), nullptr)
+        << "the flip happened: Mode Shift removed (:238)";
+    EXPECT_NE(find_monster_power(s, 0, PowerId::SHARP_HIDE), nullptr)
+        << "the turn it then took was CLOSE_UP (:246), not the telegraphed Charge Up";
+    EXPECT_EQ(g.move_history[0], kRollAttack);
+    EXPECT_EQ(g.block, 20)
+        << "GainBlock(20) resolved AFTER MonsterStartTurnAction's block clear, "
+           "so the Defensive-Mode block is still up at the top of the player's turn";
+}
+
 }  // namespace
 }  // namespace sts::engine

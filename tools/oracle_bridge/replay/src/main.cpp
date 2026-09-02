@@ -4,6 +4,7 @@
 //   replay_run_diff <run.jsonl> [<run2.jsonl> ...]
 //                   [--replay | --neow | --shop | --treasure | --event]
 //                   [--verbose] [--pool-evidence] [--stop-on-diff]
+//                   [--combat] [--combat-summary]          (--replay triage aids)
 //
 // SIX MODES, one per acceptance read-out, all over the same artifacts:
 //
@@ -326,6 +327,37 @@ void project_live_combat_sheet(const RunController& rc, RunState& actual) noexce
     for (uint8_t i = 0; i < n; ++i) actual.relics[i].counter = rc.combat.relics[i].counter;
 }
 
+// --combat-summary: one record's worth of the sim's combat sheet, in the
+// capture's vocabulary. `hist[0]` is the monster's decided NEXT move (the
+// capture's `move_id`), hist[1..2] its `last_move_id` / `second_last_move_id`.
+void print_power_list(const PowerSlot* slots, uint8_t count) {
+    std::printf("[");
+    for (uint8_t i = 0; i < count; ++i) {
+        const std::string id(sts::registry::power_game_id(
+            static_cast<sts::registry::PowerId>(slots[i].power_id)));
+        std::printf("%s%s:%d", i == 0 ? "" : " ", id.c_str(), slots[i].amount);
+    }
+    std::printf("]");
+}
+
+void print_combat_summary(int seq, const CombatState& c) {
+    std::printf("  sim seq=%d turn=%u php=%d blk=%d en=%d fairy=%u pow=", seq,
+                static_cast<unsigned>(c.turn), c.player_hp, c.player_block,
+                c.player_energy, static_cast<unsigned>(combat_fairy_armed(c.flags)));
+    print_power_list(c.player_powers, c.player_power_count);
+    std::printf("\n");
+    for (uint8_t mi = 0; mi < c.monster_count; ++mi) {
+        const MonsterState& mo = c.monsters[mi];
+        const std::string id(sts::registry::monster_game_id(
+            static_cast<sts::registry::MonsterId>(mo.monster_id)));
+        std::printf("      mon %s hp=%d/%d blk=%d hist=[%u,%u,%u] intent=%u pow=",
+                    id.c_str(), mo.hp, mo.max_hp, mo.block, mo.move_history[0],
+                    mo.move_history[1], mo.move_history[2], mo.intent);
+        print_power_list(mo.powers, mo.power_count);
+        std::printf("\n");
+    }
+}
+
 // A deck divergence whose count and upgrades agree but whose card id differs is
 // the documented card-pool library-order deviation, not a stream bug (the
 // runbook's read-out rule). Recognizing it here is what lets the read-out say
@@ -354,6 +386,7 @@ struct Options {
     bool stop_on_diff = false;
     bool combat = false;   // also diff the in-combat CombatState (diagnosis aid)
     bool trace_powers = false;  // per-record monster power lists, both sides
+    bool combat_summary = false;  // print the sim's combat sheet per in-combat record
     bool full_replay = false;  // whole-run replay instead of the reward spot-diff
     bool neow = false;         // the floor-0 blessing spot-diff
     bool shop = false;         // the merchant spot-diff
@@ -960,6 +993,20 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             print_monster_power_trace(rec, rc, s);
         }
 
+        // The second diagnosis aid, --combat-summary: the SIM's own in-combat
+        // sheet at every in-combat record, in the capture's vocabulary (game
+        // ids, hp/block/energy, powers, each monster's move history and
+        // intent) so it can be read side by side with the artifact's
+        // `combat_state` dump. --combat's field diff is index-normalised and
+        // does not translate monster powers, which is exactly what makes the
+        // first drifting HIT hard to see in it; this print is what found the
+        // play-time damage lock (S2.V3, four captures whose run-level compare
+        // stayed clean until the fight ended, because monster HP is not a
+        // RunState field). Triage only, never a pass/fail signal.
+        if (opts.combat_summary && rec.in_combat &&
+            rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+            print_combat_summary(rec.seq, rc.combat);
+        }
         if (opts.pool_evidence && s.screen_type == "CARD_REWARD")
             print_pool_evidence(run.seed_string, s.floor, rc, s);
 
@@ -3093,6 +3140,7 @@ int main(int argc, char** argv) {
         else if (a == "--stop-on-diff") opts.stop_on_diff = true;
         else if (a == "--combat") opts.combat = true;
         else if (a == "--trace-powers") opts.trace_powers = true;
+        else if (a == "--combat-summary") opts.combat_summary = true;
         else if (a == "--replay") opts.full_replay = true;
         else if (a == "--neow") opts.neow = true;
         else if (a == "--shop") opts.shop = true;

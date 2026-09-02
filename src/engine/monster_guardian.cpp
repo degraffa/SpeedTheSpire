@@ -49,13 +49,28 @@ void guardian_reset_accumulator(MonsterState& m) noexcept {
     m.pad0 = static_cast<uint8_t>(hp > 255 ? 255 : hp);
 }
 
-// changeState "Defensive Mode" (TheGuardian.java:237-251). The Java action does
-// three things synchronously -- grow the threshold, setMove(CLOSE_UP) and clear
-// isOpen -- and queues the power removal and block gain at the bottom, so the
-// resolution order is setMove, RemoveSpecificPower, GainBlock. Nothing runs
-// between this call and that resolution, so the two latches and the counter are
-// applied here rather than through a queued item.
+// The damage() override's `addToBottom(new ChangeStateAction(this,
+// DEFENSIVE_MODE))` (TheGuardian.java:288): ONE queued item, whose body is
+// guardian_change_state below at resolve time. Previously the body's three
+// children were queued straight from here, one hop too early: a flip driven
+// by the player's end-of-turn Combust then put GainBlock(20) AHEAD of
+// MonsterStartTurnAction's block clear, and the Guardian took its turn with 0
+// block where the game keeps 20 (S2.V3 seed STS237405, floor 16, turn 3).
 void queue_defensive_mode(CombatState& s, uint8_t mi) noexcept {
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::MONSTER_CHANGE_STATE);
+    it.src = mi;
+    it.tgt = mi;
+    it.amount = kGuardianStateDefensiveMode;
+    add_to_bottom(s, it);
+}
+
+// changeState "Defensive Mode" (TheGuardian.java:237-251), at ChangeStateAction
+// resolve time. Synchronous in the Java: dmgThreshold += increase (:245),
+// setMove(CLOSE_UP, BUFF) (:246) and isOpen = false (:248). Queued at the
+// bottom, in this order: RemoveSpecificPower("Mode Shift") (:238) and
+// GainBlock(20) (:240) -- behind whatever the queue holds at THIS moment.
+void enter_defensive_mode(CombatState& s, uint8_t mi) noexcept {
     MonsterState& m = s.monsters[mi];
 
     // dmgThreshold += dmgThresholdIncrease (:245), saturating (see kMaxShiftCount).
@@ -64,17 +79,10 @@ void queue_defensive_mode(CombatState& s, uint8_t mi) noexcept {
         m.flags = (m.flags & ~kMonsterFlagGuardianShiftMask) |
                   ((shifts + 1u) << kMonsterFlagGuardianShiftShift);
     }
-    m.flags &= ~kMonsterFlagGuardianOpen;  // isOpen = false (:248)
+    set_monster_move(m, kCloseUp, MonsterIntent::BUFF);  // (:246)
+    m.flags &= ~kMonsterFlagGuardianOpen;                // isOpen = false (:248)
 
     ActionQueueItem it{};
-    it.opcode = static_cast<uint16_t>(Opcode::SET_MOVE);
-    it.src = mi;
-    it.tgt = mi;
-    it.amount = kCloseUp;
-    it.flags = static_cast<uint32_t>(MonsterIntent::BUFF);
-    add_to_bottom(s, it);  // setMove(CLOSEUP_NAME, CLOSE_UP, Intent.BUFF) (:246)
-
-    it = ActionQueueItem{};
     it.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
     it.src = mi;
     it.tgt = mi;
@@ -268,6 +276,19 @@ void guardian_on_damaged(CombatState& s, uint8_t mi) noexcept {
     guardian_reset_accumulator(m);  // dmgTaken = 0 (:286)
     m.flags |= kMonsterFlagGuardianCloseUpTriggered;  // (:289)
     queue_defensive_mode(s, mi);  // ChangeStateAction(DEFENSIVE_MODE) (:288)
+}
+
+void guardian_change_state(CombatState& s, uint8_t mi, int32_t state_id) noexcept {
+    if (mi >= kMonsterCap) {
+        return;
+    }
+    switch (state_id) {
+        case kGuardianStateDefensiveMode:
+            enter_defensive_mode(s, mi);
+            return;
+        default:
+            return;
+    }
 }
 
 }  // namespace sts::engine

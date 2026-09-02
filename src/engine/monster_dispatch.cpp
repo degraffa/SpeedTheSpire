@@ -1212,6 +1212,29 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
     }
 }
 
+void monster_change_state(CombatState& state, uint8_t monster_index,
+                          int32_t state_id) noexcept {
+    if (monster_index >= kMonsterCap) {
+        return;
+    }
+    switch (static_cast<MonsterId>(state.monsters[monster_index].monster_id)) {
+        // The Guardian's Defensive Mode is the ONE changeState body reached
+        // through a queued ChangeStateAction whose own children are
+        // gameplay-visible (TheGuardian.java:237-251). Its Offensive Mode
+        // (:253-266) is queued FIRST by useTwinSmash and resolves before the
+        // slams with nothing in between, so monster_guardian.cpp still applies
+        // that one at the take-turn site. Every other changeState in the
+        // modelled roster is either presentation (SlaverRed "Use Net",
+        // Hexaghost's orb animation) or already applied at its producer with
+        // nothing observable between queue and resolve.
+        case MonsterId::THE_GUARDIAN:
+            guardian_change_state(state, monster_index, state_id);
+            return;
+        default:
+            return;
+    }
+}
+
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
     static_assert(sts::registry::manifest::kMonstersCount == 62,
                   "new monster: does it override usePreBattleAction? Read the "

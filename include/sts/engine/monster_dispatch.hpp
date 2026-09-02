@@ -303,6 +303,25 @@ void dispatch_on_spawn_monster_relics(CombatState& state,
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept;
 
+// AbstractMonster.changeState(stateName), reached ONLY through a queued
+// ChangeStateAction (Opcode::MONSTER_CHANGE_STATE) at its resolve time. `state`
+// is a monster-scoped id (each native monster header names its own; The
+// Guardian's kGuardianStateDefensiveMode is the first). Dispatches by
+// monster_id; no-op for a monster that declares no changeState body, and for an
+// out-of-range or dead slot.
+//
+// WHY A QUEUED HOP AND NOT AN INLINE CALL AT THE PRODUCER. changeState bodies
+// addToBottom their own actions (the Guardian's RemoveSpecificPower + GainBlock,
+// TheGuardian.java:238-240), and those land behind whatever is in the queue at
+// RESOLVE time, not at queue time. When the producer is an end-of-turn power
+// (Combust's DamageAllEnemiesAction), AbstractRoom$1 has appended
+// MonsterStartTurnAction between the two moments, so the children sit BEHIND
+// the monster block clear; an inline call put them in front of it and the
+// Guardian entered its turn with 0 block where the game had 20 (S2.V3 seed
+// STS237405, floor 16, turn 3).
+void monster_change_state(CombatState& state, uint8_t monster_index,
+                          int32_t state_id) noexcept;
+
 // --- The death edge (AbstractMonster.die overrides) --------------------------
 
 // A monster's own die() body: the part a subclass runs BEFORE `super.die()`.

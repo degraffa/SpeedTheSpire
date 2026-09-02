@@ -16,11 +16,15 @@ namespace sts::engine {
 // DAMAGE (see the definition for the full DamageInfo provenance). `pure` is
 // the kDamagePure matrix bit (createDamageMatrix(amount, true): skip
 // applyPowers, DamageInfo.java:126-136); `source_null` is the kDamageNullSource
-// bit (a null-owner DamageInfo: the on-attacked/relic owner gates fail).
+// bit (a null-owner DamageInfo: the on-attacked/relic owner gates fail);
+// `owner_locked` is the kDamageOwnerLocked bit, under which `base` is the
+// float32 bit pattern of the play-time owner stage (interp.hpp) and the
+// pipeline resumes at the target stage instead of running from an int base.
 void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
                int strength_mult = 1,
                DamageType type = DamageType::NORMAL,
-               bool pure = false, bool source_null = false) noexcept;
+               bool pure = false, bool source_null = false,
+               bool owner_locked = false) noexcept;
 
 // DamageAction.update's ATTACKER-side cancel (DamageAction.java:69-73), read
 // at RESOLVE time against the queued hit's OWNER (`src`). True == the hit is

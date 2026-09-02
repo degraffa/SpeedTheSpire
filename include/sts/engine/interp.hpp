@@ -808,6 +808,21 @@ enum class Opcode : uint16_t {
                               // addToRandomSpot:463-468). All monsters
                               // basically dead at the head is a ZERO-DRAW
                               // consume (:29-32). ENGINE_EMITTED_OPS.
+    MONSTER_CHANGE_STATE = 75,// ChangeStateAction(monster, stateName)
+                              // (ChangeStateAction.java:18-31): at RESOLVE
+                              // time call monsters[tgt]'s changeState with the
+                              // monster-scoped state id in `amount`
+                              // (monster_change_state, monster_dispatch.hpp).
+                              // A QUEUED hop, not an inline call, because what
+                              // changeState itself queues lands behind whatever
+                              // sits in the queue WHEN IT RESOLVES -- The
+                              // Guardian's Defensive-Mode GainBlock(20) from a
+                              // flip during the player's end-of-turn Combust
+                              // resolves AFTER MonsterStartTurnAction's block
+                              // clear only because ChangeStateAction is one
+                              // action deep (S2.V3 seed STS237405); folding
+                              // the children into the damage site put the
+                              // block in front of the clear. ENGINE_EMITTED_OPS.
 };
 
 // --- SPAWN_MONSTER field encoding --------------------------------------------
@@ -1779,15 +1794,58 @@ enum class DamageType : uint8_t {
 // is pure + null-source NORMAL; Panache/The Bomb are pure matrices with a
 // REAL owner (typed THORNS at their call sites); Fire Potion's THORNS item
 // keeps a real owner and needs neither bit.
-// Bits 8..9 were claimed from the free bits 8+ by the wave2-engine track; no
-// other DAMAGE-item flag bits are allocated above the DamageType byte.
+// Bits 8..9 were claimed from the free bits 8+ by the wave2-engine track; bit
+// 10 by the play-time damage lock below. No other DAMAGE-item flag bits are
+// allocated above the DamageType byte.
 inline constexpr uint32_t kDamagePure = 1u << 8;
 inline constexpr uint32_t kDamageNullSource = 1u << 9;
+// --- DAMAGE owner-stage lock (flags bit 10) ----------------------------------
+// A CARD's damage number is decided when the card is PLAYED, not when its
+// DamageAction resolves: AbstractPlayer.useCard calls c.calculateCardDamage(m)
+// (AbstractPlayer.java:1362) BEFORE c.use() (:1369), and use() hands the
+// resulting `this.damage` / `this.multiDamage` to `new DamageInfo(p, damage)`
+// (PerfectedStrike.java:59-60, Hemokinesis, every attack), whose `output` the
+// resolving DamageAction lands as-is (DamageAction.java:88 `target.damage(info)`
+// -- no applyPowers on that path). Anything that changes the PLAYER's damage
+// modifiers between useCard and the resolve therefore does NOT touch that
+// card's own hit. The witnessed cases are Rupture's Strength from an HP loss
+// the card itself resolves first -- Hemokinesis' LoseHPAction (queued ahead of
+// its DamageAction, Hemokinesis.java:35-36), or Pain's addToTop'd LoseHPAction
+// (Pain.java:34-36, fired from useCard:1372 for the card just played) -- and
+// the engine used to read the grown Strength at execute time (S2.V3 seeds
+// STS204756 / STS205854 / STS230126).
+//
+// So a card DAMAGE item is LOCKED at queue time: `amount` carries the float32
+// bit pattern of DamageInfo.applyPowers' OWNER stage -- relic atDamageModify
+// (already baked as an int, Strike Dummy), the player's atDamageGive loop and
+// the stance hook (AbstractCard.calculateCardDamage:2313-2327 / :2350-2360) --
+// and op_damage resumes the pipeline from that float at the TARGET stages
+// (atDamageReceive / atDamageFinalGive / atDamageFinalReceive, :2328-2340).
+// Splitting exactly there is what lets ONE item serve an AoE: the owner stage
+// is target-independent (the Java computes it per multiDamage[i] from the same
+// inputs, :2350-2360), while the target stage is resolved per live monster at
+// the fan-out, as before. The target side is read at execute time rather than
+// play time; no Ironclad content changes a target's damage-receiving powers
+// between a card's useCard and its own hit (a card's Vulnerable follows its
+// damage step), so the two reads agree.
+//
+// NOT locked, deliberately: kActorRandomEnemy items (AttackDamageRandomEnemy
+// Action.update re-runs info.applyPowers against the rolled target at every
+// hit, so Sword Boomerang IS execute-time in the game), non-NORMAL / pure /
+// null-source items (no applyPowers pipeline at all), and monster-owned
+// DAMAGE (the monster's DamageInfo is re-applied at intent time, a different
+// model, untouched here). The float round-trips through std::bit_cast, so the
+// locked path is bit-identical to the unlocked one whenever nothing changed
+// in between -- every existing fixture number is unchanged.
+inline constexpr uint32_t kDamageOwnerLocked = 1u << 10;
 [[nodiscard]] constexpr bool damage_is_pure(uint32_t flags) noexcept {
     return (flags & kDamagePure) != 0u;
 }
 [[nodiscard]] constexpr bool damage_source_is_null(uint32_t flags) noexcept {
     return (flags & kDamageNullSource) != 0u;
+}
+[[nodiscard]] constexpr bool damage_owner_locked(uint32_t flags) noexcept {
+    return (flags & kDamageOwnerLocked) != 0u;
 }
 [[nodiscard]] constexpr uint32_t make_damage_flags(DamageType t, bool pure,
                                                    bool null_source) noexcept {
@@ -1844,6 +1902,23 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 [[nodiscard]] int compute_damage(const CombatState& state, uint8_t src_actor,
                                  uint8_t tgt_actor, int base_damage,
                                  int strength_mult) noexcept;
+
+// The two halves of the PLAYER-owned pipeline, split where kDamageOwnerLocked
+// (above) splits it. `owner_damage_stage` runs everything calculateCardDamage
+// decides from the player's side alone (the atDamageGive loop and the stance
+// hook, AbstractCard.java:2320-2327) over the float base and returns the float;
+// `compute_damage_from_owner_stage` resumes from that float at the target's
+// atDamageReceive loop and runs to the single floor/clamp (:2328-2345).
+// compute_damage's player branch IS these two calls in sequence, so a locked
+// item whose inputs did not change between queue and execute lands the same
+// int, bit for bit. src_actor must be the player for both.
+[[nodiscard]] float owner_damage_stage(const CombatState& state,
+                                       uint8_t src_actor, int base_damage,
+                                       int strength_mult) noexcept;
+[[nodiscard]] int compute_damage_from_owner_stage(const CombatState& state,
+                                                  uint8_t src_actor,
+                                                  uint8_t tgt_actor,
+                                                  float owner_stage) noexcept;
 
 // --- CHOOSE_CARD queries -----------------------------------------------------
 // Shared by the pump (block-or-auto decision), legal_actions (which hand slots

@@ -110,6 +110,15 @@ const PowerSlot* FindMonsterPower(const CombatState& s, uint8_t actor,
     return nullptr;
 }
 
+const PowerSlot* FindPlayerPower(const CombatState& s, PowerId id) {
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id == static_cast<uint16_t>(id)) {
+            return &s.player_powers[i];
+        }
+    }
+    return nullptr;
+}
+
 bool PileHas(const CardPoolIndex* pile, uint8_t count, CardPoolIndex pi) {
     for (uint8_t i = 0; i < count; ++i) {
         if (pile[i] == pi) {
@@ -256,6 +265,86 @@ TEST(CardUncommonHemokinesis, SelfLossThenBaseAndUpgradedDamage) {
     Play(u);
     EXPECT_EQ(u.player_hp, 78);
     EXPECT_EQ(u.monsters[0].hp, 80);
+}
+
+// --- The play-time damage lock (kDamageOwnerLocked) -------------------------
+// A card's damage number is fixed by calculateCardDamage at useCard
+// (AbstractPlayer.java:1362), BEFORE use() queues its actions (:1369), and the
+// DamageAction lands that DamageInfo unchanged (DamageAction.java:88). Strength
+// the card's OWN earlier actions grant -- via Rupture (RupturePower.java:32-37,
+// `info.owner == owner`) on a self-inflicted HP loss -- reaches the NEXT card,
+// never this one. Live witnesses: seeds STS205854 / STS230126 (Hemokinesis+ with
+// Rupture 2 / 4) and STS204756 (Pain + Rupture 2 + Perfected Strike+).
+
+TEST(CardDamageLock, HemokinesisOwnRuptureStrengthDoesNotScaleItsHit) {
+    // Hemokinesis.use: addToBot(LoseHP 2) THEN addToBot(DamageAction 20)
+    // (Hemokinesis.java:35-36). The loss resolves first, Rupture 2 grants +2
+    // Strength, and the 20 must still land as 20 -- not 22.
+    CombatState s = MakeCombat();
+    AddPower(s, kActorPlayer, PowerId::RUPTURE, 2);
+    AddHand(s, CardId::HEMOKINESIS, 1);
+    Play(s);
+    EXPECT_EQ(s.player_hp, 78);
+    EXPECT_EQ(s.monsters[0].hp, 80) << "locked at play time: 20, not 20 + 2";
+    ASSERT_NE(FindPlayerPower(s, PowerId::STRENGTH), nullptr)
+        << "Rupture DID fire -- the Strength is real, it just arrives too late";
+    EXPECT_EQ(FindPlayerPower(s, PowerId::STRENGTH)->amount, 2);
+
+    // And the NEXT attack sees it: Strike 6 + 2.
+    AddHand(s, CardId::STRIKE);
+    Play(s);
+    EXPECT_EQ(s.monsters[0].hp, 72);
+}
+
+TEST(CardDamageLock, PainTriggeredRuptureStrengthDoesNotScaleTheTriggeringAoE) {
+    // Pain.triggerOnOtherCardPlayed addToTop's a LoseHPAction(1) (Pain.java:
+    // 34-36) from useCard:1372 -- so it resolves BEFORE the played card's own
+    // damage. With Rupture 2 the player has +2 Strength by the time Cleave's
+    // DamageAllEnemiesAction lands, and the game still deals the play-time 8
+    // to every monster: `multiDamage` was fixed at useCard. One queued AoE
+    // item serves all three targets, so this also pins the owner-stage lock
+    // surviving the execute-time fan-out.
+    CombatState s = MakeThree();
+    AddPower(s, kActorPlayer, PowerId::RUPTURE, 2);
+    AddHand(s, CardId::PAIN);
+    AddHand(s, CardId::CLEAVE);
+    Play(s, /*hand_slot=*/1);
+    EXPECT_EQ(s.player_hp, 79) << "Pain's 1 HP";
+    for (uint8_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(s.monsters[i].hp, 92) << "monster " << i << ": 8, not 8 + 2";
+    }
+    ASSERT_NE(FindPlayerPower(s, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::STRENGTH)->amount, 2);
+}
+
+TEST(CardDamageLock, PainTriggeredRuptureStrengthDoesNotScalePerfectedStrike) {
+    // The STS204756 shape exactly: Perfected Strike+ (6 + 3 per Strike-tagged
+    // card in hand/draw/discard, itself included) with Pain in hand and
+    // Rupture 2. Two Strike-tagged cards (itself + a Strike in hand) -> 12
+    // locked; the sim used to land 14 and kill a 13-HP target the game left
+    // at 1 -- which is how the Blue Slaver survived to attack in the capture.
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/13);
+    AddPower(s, kActorPlayer, PowerId::RUPTURE, 2);
+    AddHand(s, CardId::PAIN);
+    AddHand(s, CardId::STRIKE);
+    AddHand(s, CardId::PERFECTED_STRIKE, 1);
+    Play(s, /*hand_slot=*/2);
+    EXPECT_EQ(s.player_hp, 79);
+    EXPECT_EQ(s.monsters[0].hp, 1) << "12 locked at play time, not 14";
+}
+
+TEST(CardDamageLock, RandomTargetHitsStayExecuteTime) {
+    // The deliberate exception: AttackDamageRandomEnemyAction.update re-runs
+    // info.applyPowers against the rolled target at EVERY hit, so Sword
+    // Boomerang's three hits DO see the Strength Pain's loss just granted.
+    CombatState s = MakeCombat();
+    AddPower(s, kActorPlayer, PowerId::RUPTURE, 2);
+    AddHand(s, CardId::PAIN);
+    AddHand(s, CardId::SWORD_BOOMERANG);
+    Play(s, /*hand_slot=*/1);
+    EXPECT_EQ(s.player_hp, 79);
+    EXPECT_EQ(s.monsters[0].hp, 100 - 3 * (3 + 2))
+        << "each hit re-applies powers at resolve time";
 }
 
 TEST(CardUncommonPummel, FourOrFiveHitsAndExhaust) {

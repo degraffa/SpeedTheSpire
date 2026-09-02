@@ -87,13 +87,32 @@ void guardian_take_turn(CombatState& state, uint8_t monster_index) noexcept;
 
 // TheGuardian.damage (:275-292), run after the hit fully lands: accumulate
 // toward the mode-shift threshold and, on reaching it, queue the Defensive-Mode
-// change of state.
+// change of state -- a MONSTER_CHANGE_STATE item, i.e. the Java's
+// ChangeStateAction (:288), whose body is guardian_change_state below.
 //
 // This is the ONE registered damage() override that wants the SIZE of the hit
 // rather than the resulting state. It reconstructs the delta from the `pad0` HP
 // baseline described above; if on_monster_damaged ever carries the lost HP
 // directly, that argument is what this should read.
 void guardian_on_damaged(CombatState& state, uint8_t monster_index) noexcept;
+
+// The state ids guardian_change_state understands (the `amount` of a
+// MONSTER_CHANGE_STATE item aimed at a Guardian slot). Only Defensive Mode is
+// reached through a queued action today; Offensive Mode's latches are applied
+// at the Twin Slam take-turn site (see monster_guardian.cpp) and "Reset
+// Threshold" needs no item at all (the accumulator note above).
+inline constexpr int32_t kGuardianStateDefensiveMode = 1;
+
+// changeState (TheGuardian.java:234-273) at ChangeStateAction resolve time.
+// DEFENSIVE_MODE (:237-251): grow the threshold, setMove(CLOSE_UP), clear isOpen
+// -- all synchronous in the Java -- and addToBottom RemoveSpecificPower("Mode
+// Shift") + GainBlock(20), which therefore land behind whatever the queue holds
+// NOW. That "now" is the whole point of routing through a queued item: when the
+// flip comes from an end-of-turn power, MonsterStartTurnAction's block clear is
+// already queued and the 20 block lands after it, as it does in the game
+// (S2.V3 seed STS237405). Unknown state ids are ignored.
+void guardian_change_state(CombatState& state, uint8_t monster_index,
+                           int32_t state_id) noexcept;
 
 // This ascension's STARTING mode-shift threshold, before any flip has grown it
 // (TheGuardian.java:97-106). Exposed for the tier-2 test, which pins all three

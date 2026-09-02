@@ -92,7 +92,8 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_damage(s, item.src, item.tgt, item.amount, /*strength_mult=*/1,
                       damage_type_from_flags(item.flags),
                       damage_is_pure(item.flags),
-                      damage_source_is_null(item.flags));
+                      damage_source_is_null(item.flags),
+                      damage_owner_locked(item.flags));
             return;
         case Opcode::BLOCK:
             op_block(s, item.tgt, item.amount, item.flags);
@@ -443,6 +444,11 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::CAN_LOSE:
             s.flags &= ~kCombatFlagCannotLose;  // CanLoseAction.java:12-15
+            return;
+        case Opcode::MONSTER_CHANGE_STATE:
+            // ChangeStateAction.update (ChangeStateAction.java:25-31):
+            // m.changeState(stateName) once, at resolve time.
+            monster_change_state(s, item.tgt, item.amount);
             return;
         case Opcode::SUICIDE: {
             // SuicideAction.update (SuicideAction.java:29-36): gold = 0 (no
