@@ -158,6 +158,12 @@ namespace {
 // on survives_clear_post_combat).
 enum class TerminalKind : uint8_t { kVictory, kDefeat, kEscape };
 
+// Termination bound for the terminal drain below. The Java's drain is
+// frame-driven and has no bound at all; a headless resolver needs one so a
+// self-requeueing item cannot spin forever. Four full rings.
+constexpr uint16_t kTerminalDrainSteps = static_cast<uint16_t>(
+    kActionQueueCap * 4);
+
 // A lethal damage action calls clearPostCombatActions, whose survivor set is
 // FOUR-ARMED (GameActionManager.java:130-137, the loop at :134):
 //
@@ -291,11 +297,42 @@ void resolve_pending_post_combat_actions_at_terminal(
             kept[kept_count++] = item;
         }
     }
+    // THE RING BECOMES THE SURVIVOR LIST, NOT THE ABANDONED ONE (S3.44). The
+    // survivors used to resolve out of the `post_combat` snapshot above while
+    // the ring held `kept`, and that dropped every action a survivor QUEUES
+    // while it resolves -- the item landed in a ring nothing would ever pop
+    // again. The Java keeps popping: `clearPostCombatActions` prunes the queue
+    // once, and AbstractRoom.update then drains what is left to EMPTY, because
+    // the COMPLETE transition is gated on `actions.isEmpty()`
+    // (AbstractRoom.java:277) and the monster's endBattle() is deathTimer-gated
+    // behind it (AbstractMonster.java:866-871) -- so an action queued DURING
+    // that drain is drained too.
+    //
+    // THE THORNS CASE IS EXACTLY THIS. A THORNS `DamageAction` queued by a
+    // survivor is the shape the game reaches on every lethal turn at the Heart:
+    // `BeatOfDeathPower.onAfterUseCard` addToBot's one THORNS hit at the player
+    // (BeatOfDeathPower.java:40-44) and `onAfterUseCard` fires from
+    // `UseCardAction.update` (:75, its two onAfterUseCard loops at :76-86) --
+    // i.e. from a SURVIVOR (`instanceof UseCardAction`,
+    // GameActionManager.java:134). Snapshot-resolving the
+    // survivors dropped that hit; draining the ring lands it, in queue order,
+    // before the pump adjudicates. The retaliation already queued BEHIND the
+    // killing blow (the Guardian's Sharp Hide, addToBot'd from the
+    // `UseCardAction` CONSTRUCTOR at play time, SharpHidePower.java:43-49) was
+    // already landing -- it is a DAMAGE survivor, and the four-arm set below
+    // kept it -- and it keeps landing unchanged.
+    //
+    // Draining the ring also fixes the ORDER of a survivor's own additions:
+    // `addToTop` from a resolving survivor (ThornsPower.onAttacked,
+    // ThornsPower.java:51-58, is the one that fires here) must run BEFORE the
+    // next survivor, and popping the
+    // front is what makes that true. The snapshot form ran the whole snapshot
+    // first and never ran the insertion at all.
     s.action_head = 0;
     s.action_tail = 0;
     s.action_count = 0;
-    for (uint8_t i = 0; i < kept_count; ++i) {
-        add_to_bottom(s, kept[i]);
+    for (uint8_t i = 0; i < post_combat_count; ++i) {
+        add_to_bottom(s, post_combat[i]);
     }
     // THE SURVIVORS DRAIN ONE AT A TIME, AND THE PLAYER'S DEATH STOPS THE
     // DRAIN. This loop is a frame-by-frame drain in the Java, not a batch: each
@@ -327,14 +364,70 @@ void resolve_pending_post_combat_actions_at_terminal(
     // this resolver's standing property that no queued action is vaporized;
     // they land behind the abandoned non-survivors, and the pump halts at
     // COMBAT_OVER without ever reading either group again.
-    for (uint8_t i = 0; i < post_combat_count; ++i) {
-        if (s.player_hp <= 0) {
-            for (uint8_t j = i; j < post_combat_count; ++j) {
-                add_to_bottom(s, post_combat[j]);
-            }
-            return;
+    //
+    // WHAT A SURVIVOR QUEUES IS FILTERED BY THE SAME FOUR-ARM SET, not admitted
+    // wholesale. `clearPostCombatActions` is not a one-shot: every damage-shaped
+    // action re-calls it whenever it finds the field empty (DamageAction.java:
+    // 88-91 and its 19 siblings), and the field IS empty for the whole of this
+    // drain -- nothing here can revive a monster. So a non-survivor that arrives
+    // mid-drain is exactly as abandoned as one that was already queued, and it
+    // joins `kept`. This keeps the change to the ORDERING question the terminal
+    // actually poses and leaves the survivor set itself untouched: no action
+    // CLASS starts resolving at a terminal that did not resolve there before.
+    for (uint16_t step = 0; step < kTerminalDrainSteps; ++step) {
+        if (s.player_hp <= 0 || s.action_count == 0) {
+            break;
         }
-        execute_opcode(s, post_combat[i]);
+        ActionQueueItem item{};
+        if (!pop_action_front(s, item)) {
+            break;
+        }
+        execute_opcode(s, item);
+        // Re-apply the clear to whatever that survivor just queued.
+        ActionQueueItem still[kActionQueueCap]{};
+        uint8_t still_count = 0;
+        const uint8_t pending = s.action_count;
+        for (uint8_t i = 0; i < pending; ++i) {
+            const uint8_t src = static_cast<uint8_t>(
+                (static_cast<unsigned>(s.action_head) + i) % kActionQueueCap);
+            const ActionQueueItem q = s.action_queue[src];
+            if (survives_clear_post_combat(static_cast<Opcode>(q.opcode),
+                                           kind)) {
+                still[still_count++] = q;
+            } else if (kept_count < kActionQueueCap) {
+                kept[kept_count++] = q;
+            }
+        }
+        s.action_head = 0;
+        s.action_tail = 0;
+        s.action_count = 0;
+        for (uint8_t i = 0; i < still_count; ++i) {
+            add_to_bottom(s, still[i]);
+        }
+    }
+    // Rebuild the halted ring: the abandoned actions first, then whatever the
+    // drain did not reach (a player death stopped it, or the step bound did).
+    // The bound exists only so this loop is provably finite -- the Java's drain
+    // is frame-driven and unbounded, but a headless resolver must not be able
+    // to spin on a self-requeueing item; kActionQueueCap * 4 is four full rings,
+    // far past anything a terminal queue reaches.
+    ActionQueueItem unreached[kActionQueueCap]{};
+    const uint8_t unreached_count = s.action_count;
+    for (uint8_t i = 0; i < unreached_count; ++i) {
+        const uint8_t src = static_cast<uint8_t>(
+            (static_cast<unsigned>(s.action_head) + i) % kActionQueueCap);
+        unreached[i] = s.action_queue[src];
+    }
+    s.action_head = 0;
+    s.action_tail = 0;
+    s.action_count = 0;
+    for (uint8_t i = 0; i < kept_count && s.action_count < kActionQueueCap;
+         ++i) {
+        add_to_bottom(s, kept[i]);
+    }
+    for (uint8_t i = 0; i < unreached_count && s.action_count < kActionQueueCap;
+         ++i) {
+        add_to_bottom(s, unreached[i]);
     }
 }
 

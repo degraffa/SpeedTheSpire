@@ -133,7 +133,7 @@ are S3's own.
 | **Keys as obtainable content** — emerald-elite node flag + `EMERALD_KEY` reward row; `SAPPHIRE_KEY` linked-row claim semantics | stage-b design §1.1 "Out" / s2-design §1; owner-directed to S3 planning 2026-08-10 | **DISCHARGED 2026-09-03 by S3.11** (engine surface), with its behaviour evidence `UNVERIFIED-until-captured` under **S3.23** — see the two forward rows below the rule | **ACCEPTED INTO S3 SCOPE, and the row's premise is corrected.** The row says "the mapRng draw is already modelled — combat_rewards.hpp:107-112 records that only the node flag is missing". The node flag is **not** missing: `setEmeraldElite`'s chosen node has been stored as `emerald_x`/`emerald_y` since the S1 map work (map_rooms.hpp:226-243, :414-435) and the entry buff is applied (`run_advance.cpp` step (9)). What is actually owed is (a) the `EMERALD_KEY` reward row at the burning elite (MonsterRoomElite.java:90,94-98), (b) the sapphire chest's real two-way claim semantics (RewardItem.java:85-90, :298-301, :317-326), and (c) the item the row never mentions — the `!Settings.hasEmeraldKey` guard that **removes the `mapRng` draw from every act generated after the key is taken** (AbstractDungeon.java:543), which changes later maps and is S3's highest-risk trap (design §5 trap 1). Ruby is already live. The S2 row stays as written (it is history); s3-design §9 carries the correction |
 | **The Courier's restocked colored-card identity** (the one unseeded value in scope) | S1 shop model (`shop.hpp` `kShopRestockedUnknownCard`); owner-directed 2026-08-10 to a post-S2-G2 task | **S3.24** | **ACCEPTED INTO S3 SCOPE, sized to ride the one fork redeploy S3 is doing anyway** — which is exactly the condition the row set ("ride it with one that is happening anyway"). Both halves land together: sim-side a dedicated seeded stream reproducing retail's uniform draw over the eligible (rarity, type) pool, fork-side one patched call consuming the same stream under the patched-fork oracle-contract precedent. S3.21 carries the patch into the redeploy; S3.24 owns the sim half and the zero-diff shop capture that witnesses it. **DISCHARGED 2026-09-03 by S3.24** — both halves landed in one commit: `courier_restock_stream` (shop.hpp, a derived stream, no schema byte) and `patches/CourierRestockSeedPatch` (flag `oracleCourierRestockSeed`), with `kShopRestockedUnknownCard` and its buy-refusal deleted. Two live tails remain, each owned elsewhere and named in the S3.24 Log: the jar redeploy + `PROTOCOL.md` §5.5 are **S3.21**'s (hand-over in the fork tree), and the witnessing restock capture is **S3.62**'s, so the S3.24 row stands `UNVERIFIED-until-captured` |
 | **Per-step throughput attribution across S2** (×0.712 combat step / ×0.498 batch vs B5.5) | S2.45 | **S3.64** | **ACCEPTED INTO S3 SCOPE.** The named A/B is `d57e077` against `646bd18` on `bench_advance_mask` + `bench_throughput`, interleaved through `tools/bench_ab.sh` (never two sequential runs), with `RESULT: UNMEASURED` an acceptable answer. S3.64 also owns the *new* honest whole-run baseline: S2's "three-act runs/sec" was unquotable because no weight-free policy leaves Act 1 ([verification/s245-throughput.md](verification/s245-throughput.md)), and S3 is the first stage with a policy that finishes runs |
-| **Sharp Hide THORNS retaliation on the killing blow** | TE.1 (stage-b table: "UNASSIGNED — S1 pump semantics, owner-approved task") | **S3.44** | **ACCEPTED INTO S3 SCOPE.** Witness STS420252 (te1_survival_b160) already exists and is a promoted reproducer — under the 2026-09-03 evidence rule this row is unusually well placed, because the capture that proves the fix is already on disk. Act 4 sharpens the motive: `BeatOfDeathPower` fires a THORNS-typed hit after **every** card the player plays (BeatOfDeathPower.java:40-44), so terminal adjudication at the Heart is exactly this ordering question at its most consequential |
+| **Sharp Hide THORNS retaliation on the killing blow** | TE.1 (stage-b table: "UNASSIGNED — S1 pump semantics, owner-approved task") | **S3.44** | **ACCEPTED INTO S3 SCOPE.** Witness STS420252 (te1_survival_b160) already exists and is a promoted reproducer — under the 2026-09-03 evidence rule this row is unusually well placed, because the capture that proves the fix is already on disk. Act 4 sharpens the motive: `BeatOfDeathPower` fires a THORNS-typed hit after **every** card the player plays (BeatOfDeathPower.java:40-44), so terminal adjudication at the Heart is exactly this ordering question at its most consequential. **DISCHARGED by S3.44, 2026-09-03, and the "already on disk" premise did not hold.** The `te1_survival_b160` group and its promoted reproducer are gone from the §7.3 data root, and the row's own defect had already been closed by `86fc2be` (S2.43's four-arm survivor set, which names the Sharp Hide retaliation and seed STS431342) and `d57e077` (S2.49's THORNS exemption) — both later than TE.1's 2026-08-03 finding. S3.44 re-witnessed the family from a 21-instance same-shape cohort mined out of the 184 on-disk Sharp Hide captures and fixed the **residual**: the terminal resolver drained a snapshot, so an action a survivor queued while resolving was never popped — which is precisely the Heart's `BeatOfDeathPower` case. See the S3.44 Log |
 | **~60 out-of-yaml MIRROR sites carrying citations `wave3-citations` corrected in `registry/*.yaml`** | wave3-citations, 2026-07-28 (stage-b, UNASSIGNED) | **S3.65** | **ACCEPTED INTO S3 SCOPE**, together with the three sibling citation rows the same sweep left open (the nine repo-wide out-of-range `File.java:line`s, the eleven and fifteen `relics.yaml` +1000-class ones, the nine `cards.yaml` ones). Folded into one provenance task because S3 touches `src/`, `include/` and `tools/` broadly and a split-brain between the registry and its mirrors is precisely the thing that makes a re-read at task time untrustworthy. Comment/provenance only — a behaviour change discovered mid-sweep is stop-the-line, not a drive-by |
 | **Windows CI job** | build effort (stage-b, UNASSIGNED) | **S3.66** | **ACCEPTED INTO S3 SCOPE**, and promoted in importance by the evidence rule: with unit tests gone, CI's job is to prove the six presets still **build** and that the committed corpora still replay zero-diff, which is now the whole automated safety net. **Pin the LLVM version** (the googletest `/WX-` workaround exists because a clang release added a warning gtest trips over). The proposed workflow is unverified because Actions cannot run locally; S3.67 owes a green run on a real push, not a plausible YAML |
 | **Translator: power `misc` fields other than player-owned Combust** (the five-way untagged union) | B3.7 (stage-b, UNASSIGNED; re-scoped by `wave2-harness` stage 3) | **S3.21** | **ACCEPTED INTO S3 SCOPE because Act 4 makes it live.** `GameStateConverter` emits whichever of `basePower`/`maxAmt`/`storedAmount`/`hpLoss`/`cardsDoubledThisTurn` is present first (PROTOCOL §3.14), with nothing telling a reader which. `InvinciblePower` carries a private **`maxAmt`** (InvinciblePower.java:18-29) — the union's *second* member — on a power the differ must compare every turn of the Heart fight. S3.21 owns the disambiguation as part of the redeploy (a tagged emission is the obvious fix and is a fork change, so it rides the same jar). **DISCHARGED 2026-09-03 by S3.21** — `power.misc_field` names the source field and is emitted only alongside `misc` (PROTOCOL §3.14, §5.6(c)); the translator keeps its inference on an untagged (pre-redeploy) capture and VERIFIES it against the tag on a new one, so a Combust whose tag is not `hpLoss` aborts. The tag's LIVE witness is `UNVERIFIED-until-captured` and is **S3.23**'s: exactly five classes declare the union's members (Malleable, Invincible, Flight, Combust, Echo Form) and none of them can appear in an Act-1 Ironclad run, so the preflight could not witness it and an Act-2 crossing witnesses it automatically |
@@ -857,7 +857,7 @@ are S3's own.
   least step 3; named here.
   **Log:** —
 
-- **S3.44** `[ ]` ∥ **Pump/combat-over ordering: THORNS retaliation on the
+- **S3.44** `[x]` ∥ **Pump/combat-over ordering: THORNS retaliation on the
   killing blow.** The owner-approved stage-b obligation, taken now because Act
   4 makes it consequential: the live game applies THORNS retaliation even when
   the damage kills its source, and the sim's pump drops the queued retaliation
@@ -880,7 +880,99 @@ are S3's own.
   triage, not a number to accept); six presets **build**; Stage-A fixtures
   regenerated only if the change is proven to alter them in meaning, with the
   reason recorded.
-  **Log:** —
+  **Log:** 2026-09-03 — landed. **Two findings, and the first one re-scoped the
+  task.**
+  **(1) The inherited defect was already closed, by two S2 tasks that landed
+  after TE.1 wrote the row and never re-owned it.** TE.1 recorded STS420252 on
+  **2026-08-03**. `86fc2be` (S2.43 residual wave 2) restored the four-arm
+  `clearPostCombatActions` survivor set — `HealAction || GainBlockAction ||
+  UseCardAction || actionType == DAMAGE` (GameActionManager.java:130-137) — and
+  its own derivation names *"the Guardian's Sharp Hide onUseCard retaliation,
+  addToBot'd after Blood for Blood's own damage"* and *"seed STS431342: 4 hp,
+  the Sharp Hide amount"*; `d57e077` (S2.49) exempted THORNS from the
+  attacker-side cancel (`damage_attacker_cancelled`, DamageAction.java:69-73).
+  Together those are exactly the fix this row asked for, so a THORNS
+  `DamageAction` already sitting in the queue when the field empties has been
+  landing since `86fc2be` (2026-08-26); `45f9528` (2026-08-27) then settled the
+  player-death arm on top of it.
+  **(2) The Acceptance's witness is not on disk.** The whole
+  `te1_survival_b160_20260803_420000_420499` campaign group — the promoted
+  `STS420252.reproducer.json` with it — has been removed from the §7.3 data
+  root; `find` over `D:` to depth 8 and `E:` to depth 6 for `*te1_survival*` /
+  `STS420252*` returns nothing, and the reproducer was never promoted into
+  `tests/golden/oracle_reproducers/` (that directory still holds only
+  `b14-living-wall-obtain-race`). The Acceptance's premise ("the capture that
+  proves the fix is already on disk") is therefore **false as written**, and the
+  row's `hp 22 (sim) vs 26 (game)` is transposed against its own prose: a
+  *dropped* retaliation leaves the SIM higher, not lower.
+  **The witness was replaced by a cohort of the identical shape, not assumed
+  away.** 184 on-disk captures carry a `Sharp Hide` power; a scripted scan over
+  them for the exact witness shape — a `play <attack>` command issued while a
+  Defensive-Mode Guardian holds Sharp Hide 4 at positive HP, whose next record
+  has the field empty — found **21 instances**, **STS431342 among them**. All 21
+  replay through `replay_run_diff --replay --combat --vitals` with `first
+  divergence: none`, at the base commit and after this change, and the log sets
+  are **byte-identical before and after** (`diff -r`). The one file whose exit
+  code is non-zero, STS210868, stops on an unrelated Act-3 Writhing Mass
+  `Writhe` placement at seq 629 / floor 50 (hand vs discard) — run-level `first
+  divergence: none`, identical on both sides of the change, and it is a finding
+  for whoever owns Writhing Mass, not for this row.
+  **What actually changed** is the residual half of the same seam, which is this
+  row's stated Act-4 motive.
+  `resolve_pending_post_combat_actions_at_terminal` (action_queue.cpp) resolved
+  the survivors out of a SNAPSHOT taken before the drain while the ring held the
+  *abandoned* actions — so every action a survivor QUEUED while resolving landed
+  in a ring nothing would pop again, and a survivor's `addToTop` never ran at
+  all. The Java keeps popping: `clearPostCombatActions` prunes the queue once,
+  and `AbstractRoom.update` then drains `actions` to EMPTY, because the COMPLETE
+  transition is gated on `actions.isEmpty()` (AbstractRoom.java:277) behind a
+  deathTimer-gated `endBattle()` (AbstractMonster.java:866-871). The resolver
+  now rebuilds the ring **as** the survivor list and pops the front until it is
+  empty, the player is dead, or a four-ring step bound is hit (the Java's drain
+  is frame-driven and unbounded; a headless resolver must not be able to spin).
+  Everything a survivor queues is re-filtered through the **same** four-arm set —
+  the clear is not one-shot, every damage-shaped action re-calls it while the
+  field is empty (DamageAction.java:88-91 and its 19 siblings) — so **no action
+  class starts resolving at a terminal that did not resolve there before**, and
+  the victory-terminal survivor set is untouched. S2.49's attacker-side cancel is
+  untouched too: THORNS is still exempt, and the drain runs through
+  `execute_opcode`, so the predicate stays live.
+  **The THORNS shape this buys is Act 4's.** `BeatOfDeathPower.onAfterUseCard`
+  addToBot's one THORNS `DamageAction` at the player per card played
+  (BeatOfDeathPower.java:40-44), and `onAfterUseCard` fires from
+  `UseCardAction.update` (:77-88) — i.e. **from a survivor**. Under the snapshot
+  form the Heart's killing card dropped its own retaliation; under the drain it
+  lands, in queue order, before the pump adjudicates.
+  **Evidence** (build + real-run only, per the 2026-09-03 directive — no gtest
+  written, no ctest run): committed corpora `tools/corpus_replay.sh` —
+  `act1_a20_50` and `three_act_a20_5` **ZERO-DIFF**, both injected-divergence
+  controls fail loud, identical before and after; `--vitals` over all 55 corpus
+  captures and the 21-instance cohort — no vitals divergence introduced; the 20
+  Stage-A fixtures replayed through the engine by `fixture_oracle_test` run
+  **directly** (not via ctest) — 3/3, zero diffs; `fuzz_soak --seeds 3000
+  --threads 6` — **24,000 cases, 3,286,411 counted actions, 142,082 combats
+  entered / 113,876 killed / 23,620 deaths / 788 Smoke-Bomb escapes, failures:
+  0**, which is the drain's termination and determinism bar (every case replayed
+  to an equal content hash, `no_progress: 0`); six presets **build** (`debug`,
+  `asan`, `release` via `wsl_run.sh --script tools/build_presets.sh`;
+  `win-debug`, `win-asan`, `win-release` through a vcvars64 + LLVM wrapper);
+  `check_stale_counts.sh` and `check_doc_links.sh` clean.
+  **Stage-A fixtures: NOT regenerated, and the reason is recorded.** The change
+  touches no struct, no `SCHEMA_VERSION`, and no mechanic the fixtures reach —
+  the scripted Jaw Worm fights never queue a survivor-class action during a
+  terminal — and the generator is the independent reference simulator, which
+  this change cannot reach at all. `fixture_oracle_test`'s zero-diff replay of
+  the committed traces through the changed engine is the proof, not the
+  assumption.
+  **`UNVERIFIED-until-captured` for the Beat of Death instance**, named here
+  rather than left implicit: Act 4 content is not landed, so in Acts 1–3 the
+  drain has no observable consumer, which is exactly why every capture on disk
+  is byte-identical across the change. **S3.62**'s Heart capture must replay
+  `--combat` zero-diff on a lethal turn — a turn where the killing card's
+  `BeatOfDeathPower` retaliation lands — and that is this row's outstanding
+  witness.
+  **Discharged in place:** the stage-b "Sharp Hide THORNS retaliation on the
+  killing blow" row, with the same two findings recorded there.
 
 ## Phase S3.5 — Information layer and harness
 
