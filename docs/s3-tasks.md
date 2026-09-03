@@ -3191,7 +3191,12 @@ this tree, not a Log carried forward.
   the GitHub Actions API once this lands; until then the Windows leg of
   S3.66's own acceptance bar stays open evidence, now with a concrete,
   reproduced cause behind it rather than an unread red X.
-
+  **On-push confirmation, 2026-09-03 (orchestrator, from the GitHub Actions API):**
+  the first run after the Windows Configure fix (`81e69df`) is GREEN on all five
+  jobs -- `stale numbers`, `debug`, `asan`, `release` (incl. the corpus replay and
+  the leak-gate binaries) and `windows (win-debug)`: https://github.com/degraffa/SpeedTheSpire/actions/runs/33799608407 .
+  The run before it (`dbe4446`) was the red Windows Configure the fix answered.
+  The S3.66 acceptance is therefore fully closed.
 - **S3.67** `[ ]` **Verification report + CI corpus + proactive audit.** The
   S2.46 analogue. Answer the design §6 S3-G2 bar item by item with linked
   evidence; extend the committed CI corpus with a curated **four-act** archive
