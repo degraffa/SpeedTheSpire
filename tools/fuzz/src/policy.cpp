@@ -83,6 +83,9 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::BOSS_CHEST_PICK: return "boss_chest_pick";
         case MoveCat::BOSS_CHEST_SKIP: return "boss_chest_skip";
         case MoveCat::BOSS_CHEST_PROCEED: return "boss_chest_proceed";
+        case MoveCat::REWARD_CLAIM_KEY: return "reward_claim_key";
+        case MoveCat::ACT4_MAP_CHOICE: return "act4_map_choice";
+        case MoveCat::SPIRE_HEART_DIALOG: return "spire_heart_dialog";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -196,18 +199,23 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
             }
             break;
 
-        case RunPhase::MAP_CHOICE:
+        case RunPhase::MAP_CHOICE: {
+            // S3.52: Act 4's hand-built map (TheEnding, s3-design §4.2) drives
+            // this same mask, so the category split happens here rather than
+            // in a second phase -- see MoveCat::ACT4_MAP_CHOICE.
+            const bool act4 = rc.run.act == engine::kFinalAct;
             for (int x = 0; x < engine::kMapCols; ++x) {
                 if (mask.can_choose_node[x]) {
                     s.add(make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(x)),
-                          MoveCat::MAP_NODE);
+                          act4 ? MoveCat::ACT4_MAP_CHOICE : MoveCat::MAP_NODE);
                 }
             }
             if (mask.can_choose_boss) {
                 s.add(make_action(ActionVerb::CHOOSE, engine::kChooseBoss),
-                      MoveCat::MAP_BOSS);
+                      act4 ? MoveCat::ACT4_MAP_CHOICE : MoveCat::MAP_BOSS);
             }
             break;
+        }
 
         case RunPhase::COMBAT: {
             const engine::ActionMask& cm = mask.combat;
@@ -327,8 +335,18 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
             } else {
                 for (int i = 0; i < engine::kRewardItemCap; ++i) {
                     if (mask.can_claim_reward[i]) {
+                        // S3.52: split the two key rows (EMERALD_KEY the
+                        // burning elite's own row, SAPPHIRE_KEY the chest's
+                        // linked row -- combat_rewards.hpp) out of the
+                        // ordinary claim bucket. See MoveCat::REWARD_CLAIM_KEY.
+                        const auto item_kind = static_cast<engine::RewardItemKind>(
+                            rc.rewards.items[i].kind);
+                        const bool is_key =
+                            item_kind == engine::RewardItemKind::EMERALD_KEY ||
+                            item_kind == engine::RewardItemKind::SAPPHIRE_KEY;
                         s.add(make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(i)),
-                              MoveCat::REWARD_CLAIM);
+                              is_key ? MoveCat::REWARD_CLAIM_KEY
+                                     : MoveCat::REWARD_CLAIM);
                     }
                 }
                 // The pending-bottle overlay: claiming a Bottled trio relic
@@ -485,22 +503,29 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
             }
             break;
 
-        case RunPhase::EVENT_DIALOG:
+        case RunPhase::EVENT_DIALOG: {
+            // S3.52: the `Spire Heart` dialog gets its own bucket, split out
+            // of EVENT_GRID/EVENT_OPTION -- see MoveCat::SPIRE_HEART_DIALOG.
+            const bool spire_heart =
+                rc.event.event_id == engine::kSpireHeartEventId;
             for (int i = 0; i < engine::kMasterDeckCap; ++i) {
                 if (mask.can_choose_master_deck[i]) {
                     s.add(make_action(ActionVerb::CHOOSE,
                                       static_cast<uint8_t>(i)),
-                          MoveCat::EVENT_GRID);
+                          spire_heart ? MoveCat::SPIRE_HEART_DIALOG
+                                      : MoveCat::EVENT_GRID);
                 }
             }
             for (int i = 0; i < engine::kEventOptionCap; ++i) {
                 if (mask.can_choose_event_option[i]) {
                     s.add(make_action(ActionVerb::CHOOSE,
                                       static_cast<uint8_t>(i)),
-                          MoveCat::EVENT_OPTION);
+                          spire_heart ? MoveCat::SPIRE_HEART_DIALOG
+                                      : MoveCat::EVENT_OPTION);
                 }
             }
             break;
+        }
 
         case RunPhase::SHOP:
             // The purge grid is modal, so exactly one of these two loops ever
@@ -705,6 +730,12 @@ struct CardScore {
             if (r == engine::RoomType::Boss) return 90;
             return 10;
         }
+        // S3.52: Act 4's map has exactly one node per row (s3-design §4.2),
+        // so there is nothing to prefer between rooms -- score it like an
+        // ordinary node pick so a case that reaches the Door keeps moving
+        // rather than stalling on a tie-break against nothing else legal.
+        case MoveCat::ACT4_MAP_CHOICE:
+            return 100;
         case MoveCat::REWARD_CLAIM: {
             const uint8_t idx = engine::action_arg0(m.action);
             const auto kind_of = static_cast<engine::RewardItemKind>(
@@ -722,6 +753,12 @@ struct CardScore {
             }
             return 100;
         }
+        // S3.52: the two key rows score ABOVE an ordinary claim for every
+        // policy -- a key is free (no capacity check, RewardItem.java:317-332)
+        // and is the one row whose reachability this soak exists to witness,
+        // so even HOARD_GOLD (which otherwise prefers GOLD) takes it first.
+        case MoveCat::REWARD_CLAIM_KEY:
+            return 150;
         case MoveCat::REWARD_TAKE_CARD:
             return kind == PolicyKind::HOARD_GOLD ? 10 : 100;
         case MoveCat::REWARD_SKIP_CARD:
@@ -753,6 +790,11 @@ struct CardScore {
             // branch uniformly -- exactly what a coverage generator wants.
             return 100;
         case MoveCat::EVENT_GRID:
+            return 100;
+        // S3.52: the `Spire Heart` dialog's one-option menu (spire_heart.cpp)
+        // -- every policy presses through it exactly like any other single-
+        // option event, so it is scored at parity with EVENT_OPTION.
+        case MoveCat::SPIRE_HEART_DIALOG:
             return 100;
         case MoveCat::SHOP:
             // One weight for the whole bucket, and it must stay ABOVE the

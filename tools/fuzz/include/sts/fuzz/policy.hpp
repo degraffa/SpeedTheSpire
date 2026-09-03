@@ -218,7 +218,48 @@ enum class MoveCat : uint8_t {
                             // part of the same pick, not a fifth move kind)
     BOSS_CHEST_SKIP = 30,   // the screen's cancel button -- REVERSIBLE
     BOSS_CHEST_PROCEED = 31,  // leave the room (the noPick path when unpicked)
-    COUNT = 32,
+    // S3.52's block (docs/s3-tasks.md), granted 32-35. Three spent, one
+    // released unspent -- see the note below.
+    //
+    // The reward-screen claim of either key row (RewardItemKind::EMERALD_KEY,
+    // the burning elite's own row, or SAPPHIRE_KEY, the chest's LINKED row --
+    // combat_rewards.hpp). Both kinds claim through the SAME COMBAT_REWARD
+    // screen ordinary REWARD_CLAIM already enumerates (policy.cpp), so this is
+    // a SPLIT of that category by the claimed item's kind, not a new screen --
+    // exactly the reason a soak needs it: without the split, "REWARD_CLAIM was
+    // taken a million times" cannot say whether either key row was ever among
+    // them. The Ruby key has no row here at all -- it is the campfire's
+    // existing RECALL category (27) above, S2's grant, not a new one.
+    REWARD_CLAIM_KEY = 32,
+    // The Act-4 map choice (RunPhase::MAP_CHOICE while RunState::act ==
+    // engine::kFinalAct). Structurally identical to MAP_NODE/MAP_BOSS --
+    // TheEnding's hand-built map (s3-design §4.2) still drives the same
+    // CHOOSE-a-column / CHOOSE-the-boss-edge mask -- but split into its own
+    // category so the soak can say, separately from Acts 1-3, whether a case
+    // ever so much as SAW a legal move on the Act-4 map, which is exactly the
+    // "we never got there" vs "we got there and did not count it" distinction
+    // the kActBuckets comment (coverage.hpp) already states. Node picks and
+    // the boss-edge pick share the one bucket -- unlike MAP_NODE/MAP_BOSS,
+    // Act 4 has only one playable room per row (s3-design §4.2), so there is
+    // no node/boss reachability question left to split.
+    ACT4_MAP_CHOICE = 33,
+    // The `Spire Heart` dialog's own CHOOSE press (RunPhase::EVENT_DIALOG
+    // while EventDialogState::event_id == engine::kSpireHeartEventId),
+    // split out of EVENT_OPTION for the same reason ACT4_MAP_CHOICE is split
+    // out of MAP_NODE/MAP_BOSS: the dialog is the ACT-3 TERMINAL (the DEATH /
+    // GO_TO_ENDING branch, spire_heart.cpp) and a soak needs to know its four
+    // clicks were reached at all, distinctly from the run of the mill events
+    // EVENT_OPTION already covers. WHICH of the two branches fired is a
+    // separate, state-based coverage question (Coverage::spire_heart_death /
+    // spire_heart_go_to_ending) -- this category only says the DIALOG was
+    // pressed.
+    SPIRE_HEART_DIALOG = 34,
+    // 35 was granted as a contingency reserve and is RELEASED UNSPENT
+    // (docs/s3-tasks.md's S3.52 row corrected in the same commit): the three
+    // values above turned out to cover every new move shape this task found,
+    // so COUNT stops at 35 rather than the granted 36. Append-only gapping --
+    // 35 is never assigned to a later MoveCat.
+    COUNT = 35,
 };
 
 [[nodiscard]] const char* move_cat_name(MoveCat c) noexcept;

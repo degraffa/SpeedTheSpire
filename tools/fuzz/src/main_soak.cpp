@@ -50,7 +50,7 @@ using namespace sts::fuzz;
 
 #ifndef STS_FUZZ_BUILD_ID
 #define STS_FUZZ_BUILD_ID \
-    "stsfuzz-b51fix2-cardgate1-rest1-treasure1-eventgrid1-shrines1-g7fix1-schema5-s241act1"
+    "stsfuzz-b51fix2-cardgate1-rest1-treasure1-eventgrid1-shrines1-g7fix1-schema5-s241act1-s352act4"
 #endif
 
 struct Options {

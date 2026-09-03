@@ -67,6 +67,23 @@ const char* turn_bucket_label(int i) noexcept {
     return kLabels[i];
 }
 
+// S3.52. Indices match run_state.hpp's kKeyEmerald(0)/kKeyRuby(1)/
+// kKeySapphire(2).
+const char* key_kind_name(int i) noexcept {
+    static const char* kNames[kKeyKindCount] = {"emerald", "ruby", "sapphire"};
+    return (i >= 0 && i < kKeyKindCount) ? kNames[i] : "?";
+}
+
+// S3.52. Indices match run_state.hpp's RunVictoryKind (NONE/ACT3_STOP/HEART).
+const char* run_outcome_kind_name(int i) noexcept {
+    switch (static_cast<engine::RunVictoryKind>(i)) {
+        case engine::RunVictoryKind::NONE: return "none";
+        case engine::RunVictoryKind::ACT3_STOP: return "act3_stop";
+        case engine::RunVictoryKind::HEART: return "heart";
+    }
+    return "?";
+}
+
 // The ONE description of every scalar counter, shared by kv() and the parser so
 // the two cannot drift (a merge that silently drops a field would understate a
 // soak's totals, which is the failure mode this shape removes).
@@ -129,6 +146,16 @@ void visit_scalars(C& c, F&& f) {
     }
     for (int i = 0; i < kFloorBuckets; ++i) {
         f(std::string("floor_bucket.") + std::to_string(i), c.floor_bucket[i]);
+    }
+    // S3.52.
+    for (int i = 0; i < kKeyKindCount; ++i) {
+        f(std::string("key_claimed.") + key_kind_name(i), c.key_claimed[i]);
+    }
+    f("spire_heart_death", c.spire_heart_death);
+    f("spire_heart_go_to_ending", c.spire_heart_go_to_ending);
+    for (int i = 0; i < kRunOutcomeKindCount; ++i) {
+        f(std::string("run_outcome.") + run_outcome_kind_name(i),
+          c.run_outcome_kind[i]);
     }
 }
 
@@ -601,6 +628,55 @@ std::string Coverage::report(double elapsed_s) const {
     }
     os << "\n";
 
+    // S3.52: the keys, the Spire-Heart branch, and the run-outcome kind.
+    os << "\n-- keys and the Act-4 terminal (S3.52) --\n";
+    os << "  keys claimed:";
+    for (int i = 0; i < kKeyKindCount; ++i) {
+        os << "  " << key_kind_name(i) << "=" << key_claimed[i];
+    }
+    os << "\n";
+    std::snprintf(buf, sizeof(buf),
+                  "  spire-heart dialog: death(ACT3_STOP) %10llu   "
+                  "go_to_ending(Door) %10llu\n",
+                  static_cast<unsigned long long>(spire_heart_death),
+                  static_cast<unsigned long long>(spire_heart_go_to_ending));
+    os << buf;
+    os << "  run outcome kind:";
+    for (int i = 0; i < kRunOutcomeKindCount; ++i) {
+        os << "  " << run_outcome_kind_name(i) << "=" << run_outcome_kind[i];
+    }
+    os << "\n";
+    // Two exact cross-checks, printed only on disagreement -- same discipline
+    // as the act_boss_kills[kActBeyond] vs victories check above. DEATH is
+    // the ONLY writer of ACT3_STOP anywhere in the engine, so the two must
+    // agree exactly; likewise run_outcome_kind[ACT3_STOP] + [HEART] is just
+    // "!= NONE" restated, which is `victories`' own definition.
+    if (spire_heart_death != run_outcome_kind[static_cast<int>(
+                                 engine::RunVictoryKind::ACT3_STOP)]) {
+        std::snprintf(buf, sizeof(buf),
+                      "  !! spire-heart DEATH presses (%llu) != "
+                      "run_outcome.act3_stop (%llu) -- the two probes for the "
+                      "same event disagree\n",
+                      static_cast<unsigned long long>(spire_heart_death),
+                      static_cast<unsigned long long>(run_outcome_kind[
+                          static_cast<int>(engine::RunVictoryKind::ACT3_STOP)]));
+        os << buf;
+    }
+    {
+        const uint64_t outcome_sum =
+            run_outcome_kind[static_cast<int>(engine::RunVictoryKind::ACT3_STOP)] +
+            run_outcome_kind[static_cast<int>(engine::RunVictoryKind::HEART)];
+        if (outcome_sum != victories) {
+            std::snprintf(buf, sizeof(buf),
+                          "  !! run_outcome.act3_stop + run_outcome.heart "
+                          "(%llu) != victories (%llu) -- the two probes for "
+                          "the same event disagree\n",
+                          static_cast<unsigned long long>(outcome_sum),
+                          static_cast<unsigned long long>(victories));
+            os << buf;
+        }
+    }
+
     os << "\n-- registry rows exercised (the design §7.4 'to-fuzz list') --\n";
     set_report(os, "cards played", cards_played, [](std::size_t i) {
         return registry::card_game_id(static_cast<registry::CardId>(i));
@@ -653,6 +729,35 @@ std::string Coverage::report(double elapsed_s) const {
     if (combats_smoked == 0) os << "  no combat was ever escaped (Smoke Bomb)\n";
     if (deaths == 0) os << "  the player never died\n";
     if (potions_used == 0) os << "  no potion was ever used\n";
+    // S3.52. Named individually rather than folded into the move-category
+    // block above: a key/branch/outcome zero is a REACH finding (an E0
+    // policy is not expected to carry a key or open the Door), not a
+    // structural gap, so it earns its own line beside the positive control
+    // the per-act table above already prints (acts 1-3 nonzero, act 4 the
+    // honest zero).
+    for (int i = 0; i < kKeyKindCount; ++i) {
+        if (key_claimed[i] == 0) {
+            os << "  key never claimed: " << key_kind_name(i) << "\n";
+        }
+    }
+    if (spire_heart_death == 0 && spire_heart_go_to_ending == 0) {
+        os << "  the Spire-Heart dialog's branch was never reached (the "
+              "Act-3 boss was never killed via the Door path)\n";
+    } else {
+        if (spire_heart_death == 0) {
+            os << "  the Spire-Heart dialog's DEATH branch was never taken\n";
+        }
+        if (spire_heart_go_to_ending == 0) {
+            os << "  the Spire-Heart dialog's GO_TO_ENDING branch was never "
+                  "taken (no case ever carried all three keys through the "
+                  "door)\n";
+        }
+    }
+    if (run_outcome_kind[static_cast<int>(engine::RunVictoryKind::HEART)] ==
+        0) {
+        os << "  the run was never TRUE-victoried (the Corrupt Heart was "
+              "never killed)\n";
+    }
     os << "==========================================================\n";
     return os.str();
 }

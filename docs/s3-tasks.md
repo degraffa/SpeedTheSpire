@@ -104,7 +104,7 @@ granted windows (`monsters` 48 and 66, `powers` 112–135, `cards` 133,
 | `a20.yaml` | no new rows; six existing rows' notes refreshed | S3.41 — **DONE 2026-09-03, and it was EIGHT rows, not six:** the design-§4.6 six (3, 4, 8, 9, 18, 19) plus the two Act-4 negatives, which live on rows **1** (no elite quota — `generateRoomTypes` never runs) and **20** (no double boss — `ProceedButton.java:101-104` gates on `TheBeyond`) |
 | `RunPhase` (`run_advance.hpp`) | **12** contingency — the preferred model rides `EVENT_DIALOG` (design §4.1); release unspent | S3.31 — **RELEASED UNSPENT 2026-09-03.** The `Spire Heart` dialog rides `EVENT_DIALOG` exactly as predicted, and the Act-3 boss's proceed needed no phase either (it is run inline off the kill, the goToDoubleBoss precedent), so no new run phase exists. 12 gaps permanently; `RunPhase::BOSS_TREASURE` (11) remains the last enumerator and `legal_actions`' `static_assert` on it is unmoved |
 | `RoomType` (`map_rooms.hpp`) | **9** `Victory`, **10** `TrueVictory`; `kRoomTypeCount` 9 → 11 with its `static_assert` | **BOTH SPENT.** S3.31 spent 9 `Victory` (`kRoomTypeCount` 9 → 10); S3.33 spent 10 `TrueVictory` (10 → 11), with the `static_assert`, `room_symbol` and the fuzz coverage mirror (`coverage.hpp`'s own `static_assert` + the `default:`-less `room_name` switch) re-pinned on it. The block is exhausted |
-| fuzz `MoveCat` (`tools/fuzz/.../policy.hpp`) | **32–35** (`REWARD_CLAIM_KEY`, the Act-4 map choice, the Spire-Heart dialog, one reserve); `COUNT` → 36 | S3.52 |
+| fuzz `MoveCat` (`tools/fuzz/.../policy.hpp`) | **32–35** (`REWARD_CLAIM_KEY`, the Act-4 map choice, the Spire-Heart dialog, one reserve); `COUNT` → 36 | S3.52 — **SPENT 32–34 (`REWARD_CLAIM_KEY`, `ACT4_MAP_CHOICE`, `SPIRE_HEART_DIALOG`), 2026-09-03; 35 RELEASED UNSPENT.** The three spent values covered every new move shape the task found; `COUNT` stops at **35**, not the granted 36 — 35 gaps permanently (append-only) |
 | Opcode (`interp.hpp`, `vocab.py`) | **75–77** contingency — design §2.3 expects the four powers to be native binders on existing opcodes; release unspent | S3.42 / **S3.43 — HALF RELEASED UNSPENT 2026-09-03.** Beat of Death is an ordinary `DAMAGE` item with `DamageType::THORNS` and Invincible queues nothing at all, so neither Act-4 boss power needed an opcode; the Heart's own moves are `DAMAGE` / `APPLY_POWER` / `MAKE_CARD`. S3.42 still holds the other half |
 | power `Hook` | **18** `on_attacked_to_change_damage` contingency (`kHookCount` → 19) — Invincible may instead ride the existing `apply_buffer` site natively, in which case release it | **S3.43 — RELEASED UNSPENT 2026-09-03.** The contingency's own escape was the right one: `onAttackedToChangeDamage` returns an INTEGER into the middle of the receive chain, which no queued hook program can express, so it is the bespoke `apply_invincible` site in `interp/interp_damage.cpp` beside Buffer's (powers.yaml 28 binds no hook either). `kHookCount` stays 18 and `ON_AFTER_USE_CARD` (16) remains the last-but-one enumerator. Invincible's row IS `native: true` — for its `at_start_of_turn` refill, which is a queued-phase hook and does have a body |
 | `RewardItemKind` (`combat_rewards.hpp`) | **two new values** `EMERALD_KEY` (6), `SAPPHIRE_KEY` (7); `kRewardKindCount` 5 → **8**, not 7 — see S3.11's Log for why the granted arithmetic was wrong (the constant lived only in the fuzz coverage table and already under-covered `STOLEN_GOLD`) | S3.11 `[x]` |
@@ -2490,7 +2490,7 @@ are S3's own.
   green on every preset it was run on, though it is not part of this task's
   Acceptance surface.
 
-- **S3.52** `[ ]` ∥ **Fuzz/soak across four acts.** The determinism and reach
+- **S3.52** `[x]` ∥ **Fuzz/soak across four acts.** The determinism and reach
   instrument, extended: per-act buckets to act 4 (the `kActBuckets` slot has
   been reserved on purpose since S2 — `coverage.hpp:80-88`), the Act-4 room
   kinds, **per-key acquisition counters**, the Spire-Heart branch taken, and
@@ -2508,7 +2508,53 @@ are S3's own.
   with `terminal_act_sum == runs_counted` beside it is the honest form —
   the S2.41/S2.45 precedent); six presets **build**; soak artifacts
   uncommitted under the campaign data root.
-  **Log:** —
+  **Log:** 2026-09-03 — landed. Claimed fuzz `MoveCat` **32–34**
+  (`REWARD_CLAIM_KEY`, `ACT4_MAP_CHOICE`, `SPIRE_HEART_DIALOG`); **35 RELEASED
+  UNSPENT** — three values covered every new move shape found, so `COUNT` is
+  **35**, not the granted 36 (corrected in the id-block table above). The
+  load-bearing fix the split forced: `policy_search.cpp`'s `run_move_score`
+  needed an explicit `REWARD_CLAIM_KEY` arm calling the same
+  `reward_claim_score`, or S3.22's K1 key-priority rule would have silently
+  stopped firing for `sim_search_keys` the moment the category split existed
+  (the function scores by the claimed item's *kind*, not by `MoveCat`, so
+  routing both categories through it keeps every `sim_search*` kind's own
+  score, and therefore its append-only-invariant trajectory, unmoved). A
+  second, independent gap found and fixed: `fuzz_run.cpp`'s room-entry
+  sampling never included `RunPhase::RUN_OVER`, so `TrueVictoryRoom`'s entry
+  (S3.33 writes `RUN_OVER` in the same step as `room_type`) was structurally
+  uncountable — fixed narrowly (gated on `room_type == TrueVictory`, not a
+  blanket `RUN_OVER` addition, which would double-count every other room a
+  case happens to die in) rather than reopening the shop-entry hole it is
+  named after. Soak (two `win-release` sweeps, A20, all ten policies, 8
+  threads, replay-twice + sampled pass-C on every case): **76,000 cases /
+  152,297 engine runs / 10,915,836 counted actions, failures 0** — zero
+  `no_legal_moves`, zero `no_progress`, zero `room_unimplemented`; the one
+  non-zero end reason is `livelock` (1.49% of cases / 2.85% of the action
+  budget), reproduced directly (`--fail-on-livelock` on a 500-seed probe) and
+  confirmed as the already-documented SIM_SEARCH boss-floor hand-select
+  oscillation (reproducer STS100007/sim_search/ps0, 4.7% at
+  [s2v2-sim-reach.md](verification/s2v2-sim-reach.md) §7, 1.8% at S3.43's own soak), not a
+  new defect. Per-act: act 1 100.00% (76,000 cases), act 2 13.38% (10,172),
+  act 3 0.093% (71 cases, 4 boss fights, **0 kills**), act 4 **0 cases** — the
+  honest, structural zero the per-act table's own progression (1→2→3) proves
+  is measured rather than broken. Keys claimed: emerald 1,959, ruby 6,281,
+  sapphire 11,654 (`reward_claimed.emerald_key`/`.sapphire_key` agree with
+  `key_claimed.emerald`/`.sapphire` exactly, two independent probes of the
+  same event). `spire_heart.death`/`.go_to_ending` and `run_outcome.act3_stop`
+  /`.heart` all read 0, with both of `coverage.cpp`'s cross-checks
+  (`spire_heart_death == run_outcome.act3_stop`; `run_outcome.act3_stop +
+  run_outcome.heart == victories`) holding with no disagreement printed —
+  the honest zero the Act-3-boss-never-killed row already predicts, not an
+  unwired counter (`run_outcome.none == 76,000 == cases` is the positive
+  control). Full breakdown, sha256s and the per-file change list:
+  [verification/s3-52-four-act-soak.md](verification/s3-52-four-act-soak.md).
+  Six presets build (`win-debug`/`win-asan`/`win-release`/WSL
+  `debug`/`asan`/`release`; the WSL `ctest` tail is red on 24 pre-existing,
+  out-of-surface tests per the "run no ctest" brief and is not this task's
+  to fix). `tools/corpus_replay.sh` (WSL `release`): all three committed
+  corpora, all three modes (`--replay`/`--costs`/`--masks`), zero-diff, all
+  six negative controls fail loud — the coverage/policy change touches no
+  engine file. `check_stale_counts.sh` / `check_doc_links.sh` clean.
 
 - **S3.53** `[x]` ∥ **Close the two replay blind spots.** Under the evidence
   rule the replay differ *is* the acceptance surface, so its blind spots are

@@ -840,6 +840,16 @@ enum class GridWants : uint8_t { WORST, BEST };
             }
         }
         case MoveCat::REWARD_CLAIM:
+        // S3.52 split the two key rows (EMERALD_KEY / SAPPHIRE_KEY) out of
+        // REWARD_CLAIM into their own MoveCat (policy.hpp), purely for
+        // coverage accounting -- reward_claim_score's K1 arm (S3.22) already
+        // switches on the CLAIMED ITEM'S kind, not on `m.cat`, so routing
+        // REWARD_CLAIM_KEY through the SAME call preserves the exact score
+        // K1 assigned before the split existed. This is load-bearing: without
+        // this arm a key row would silently fall to `default: break;` below
+        // and score 0, which would make SIM_SEARCH_KEYS never actually claim
+        // a key it is scored to prefer.
+        case MoveCat::REWARD_CLAIM_KEY:
             return reward_claim_score(kind, rc, m);
         case MoveCat::REWARD_TAKE_CARD:
             return take_card_score(rc, m);
@@ -945,6 +955,17 @@ enum class GridWants : uint8_t { WORST, BEST };
         case MoveCat::USE_POTION:
         case MoveCat::USE_POTION_TARGET:
             return kPotionOutOfCombat;  // out-of-combat use: below any screen move
+        case MoveCat::ACT4_MAP_CHOICE:
+            // TheEnding's map offers exactly one legal node (or the boss edge
+            // alone) per row (s3-design §4.2, generate_special_map) -- there
+            // is never a competing candidate to prefer, so any constant score
+            // picks the same move. kMapNonCombat is reused rather than adding
+            // a constant for a screen with no real choice.
+            return kMapNonCombat;
+        case MoveCat::SPIRE_HEART_DIALOG:
+            // The dialog's one-option menu (spire_heart.cpp): scored like any
+            // other single-option event.
+            return kEventNeutral;
         default:
             break;
     }

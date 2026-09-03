@@ -234,6 +234,25 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
     uint64_t recent[kRevisitWindow]{};
     uint32_t recent_n = 0;
     uint32_t revisits = 0;
+    // S3.52: the key bits sampled last step, so a set is caught on the
+    // TRANSITION (this run's grant) rather than re-counted every step the
+    // bit stays set.
+    uint8_t prev_keys = 0;
+    // S3.52: the `Spire Heart` dialog's screen value sampled last step, gated
+    // on event_id so no other event's screen is mistaken for it. kNotInDialog
+    // is outside EventDialogState::screen's real range (screen is one byte
+    // but the dialog never reaches past 4), so it can never alias a real
+    // value and starts every case as "not currently in the dialog".
+    constexpr uint8_t kNotInDialog = 0xFF;
+    // SpireHeart$CUR_SCREEN's ordinals, recovered and cited in
+    // src/engine/events/spire_heart.cpp (kScreenDeath / kScreenGoToEnding).
+    // Not exported by the engine -- this reads the public EventDialogState::
+    // screen field against the same fixed, already-attested ordinals rather
+    // than duplicating engine logic or widening the engine's public surface
+    // for a soak-only counter.
+    constexpr uint8_t kSpireHeartScreenDeath = 3;
+    constexpr uint8_t kSpireHeartScreenGoToEnding = 4;
+    uint8_t prev_spire_heart_screen = kNotInDialog;
 
     p.actions.reserve(64);
     p.hashes.reserve(64);
@@ -262,6 +281,53 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
         if (cov != nullptr && act_now < kActBuckets) {
             acts_seen[act_now] = true;
             if (act_now > cov->max_act) cov->max_act = act_now;
+        }
+
+        // --- per-key acquisition (S3.52) --------------------------------------
+        // Sampled every step and caught on the BIT TRANSITION, the same shape
+        // as the per-act sampling above: a key can be granted by an action
+        // that also does something else (the campfire RECALL press both
+        // spends the whole campfire action and sets the bit), so this does
+        // not assume the grant coincides with any one MoveCat.
+        if (cov != nullptr) {
+            const uint8_t keys_now = rc.run.keys;
+            if (keys_now != prev_keys) {
+                if ((keys_now & engine::kKeyEmerald) != 0 &&
+                    (prev_keys & engine::kKeyEmerald) == 0) {
+                    ++cov->key_claimed[0];
+                }
+                if ((keys_now & engine::kKeyRuby) != 0 &&
+                    (prev_keys & engine::kKeyRuby) == 0) {
+                    ++cov->key_claimed[1];
+                }
+                if ((keys_now & engine::kKeySapphire) != 0 &&
+                    (prev_keys & engine::kKeySapphire) == 0) {
+                    ++cov->key_claimed[2];
+                }
+                prev_keys = keys_now;
+            }
+        }
+
+        // --- the Spire-Heart dialog's branch (S3.52) --------------------------
+        // The DEATH/GO_TO_ENDING split happens INSIDE the dialog (spire_heart.
+        // cpp's kScreenMiddle2 arm returns CONTINUE, not TRANSITIONED), so the
+        // branch is live for exactly one full step before the click that
+        // consumes it -- sampled here, the same transition shape as the keys
+        // above, gated on event_id so an unrelated event's screen value can
+        // never be mistaken for it.
+        if (cov != nullptr) {
+            const bool in_spire_heart =
+                rc.event.event_id == engine::kSpireHeartEventId;
+            const uint8_t screen_now = in_spire_heart ? rc.event.screen
+                                                      : kNotInDialog;
+            if (screen_now != prev_spire_heart_screen) {
+                if (screen_now == kSpireHeartScreenDeath) {
+                    ++cov->spire_heart_death;
+                } else if (screen_now == kSpireHeartScreenGoToEnding) {
+                    ++cov->spire_heart_go_to_ending;
+                }
+                prev_spire_heart_screen = screen_now;
+            }
         }
 
         // --- phase-transition accounting -------------------------------------
@@ -332,6 +398,27 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                  phase == RunPhase::EVENT_DIALOG ||
                  phase == RunPhase::SHOP ||
                  phase == RunPhase::ROOM_UNIMPLEMENTED)) {
+                ++cov->room_entered[rc.room_type];
+                if (act_now < kActBuckets) {
+                    ++cov->act_rooms[act_now][rc.room_type];
+                }
+            } else if (phase == RunPhase::RUN_OVER &&
+                       rc.room_type ==
+                           static_cast<uint8_t>(engine::RoomType::TrueVictory)) {
+                // S3.52: TheEnding's TrueVictoryRoom is the ONE room kind
+                // whose "entry" IS a terminal phase transition (S3.33's
+                // on_player_entry writes RunPhase::RUN_OVER in the same step
+                // that sets room_type -- run_advance.cpp) -- every OTHER room
+                // kind reaches its own room-bearing phase first and RUN_OVER
+                // only later, if at all (a combat death), so RUN_OVER is
+                // deliberately NOT added to the general list above: doing so
+                // would DOUBLE-COUNT every other room a case happens to die
+                // in (e.g. an Elite fight lost mid-combat already filed its
+                // entry when COMBAT was entered; adding RUN_OVER would file
+                // it again when the death transitions the phase). TrueVictory
+                // has no other route to a room-bearing phase at all -- gating
+                // this arm on the room type, not merely the phase, is what
+                // keeps it from reopening that hole for the ordinary rooms.
                 ++cov->room_entered[rc.room_type];
                 if (act_now < kActBuckets) {
                     ++cov->act_rooms[act_now][rc.room_type];
@@ -453,7 +540,14 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                     ++cov->potions_used;
                     break;
                 }
-                case MoveCat::REWARD_CLAIM: {
+                case MoveCat::REWARD_CLAIM:
+                // S3.52 split the two key rows into their own MoveCat
+                // (REWARD_CLAIM_KEY) for move-category accounting, but
+                // reward_claimed[] is keyed on the CLAIMED ITEM's kind, not
+                // on the category -- both arms still belong here, or
+                // reward_claimed[emerald_key]/[sapphire_key] would silently
+                // stop being counted the moment the split landed.
+                case MoveCat::REWARD_CLAIM_KEY: {
                     const uint8_t idx = engine::action_arg0(chosen);
                     if (idx < engine::kRewardItemCap) {
                         const uint8_t k = rc.rewards.items[idx].kind;
@@ -584,6 +678,31 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
         cov->relics_gained += rc.run.relic_count;
         for (int i = 0; i < engine::kPotionCap; ++i) {
             if (rc.run.potions[i] != 0) cov->potions_held.set(rc.run.potions[i]);
+        }
+        // S3.52: the terminal key state, for the same reason as the terminal
+        // act catch-up above -- a key granted on the very step a NO_PROGRESS
+        // / LIVELOCK break fires would otherwise never reach the loop's own
+        // transition sampling (there is no next iteration to sample it in).
+        {
+            const uint8_t keys_now = rc.run.keys;
+            if ((keys_now & engine::kKeyEmerald) != 0 &&
+                (prev_keys & engine::kKeyEmerald) == 0) {
+                ++cov->key_claimed[0];
+            }
+            if ((keys_now & engine::kKeyRuby) != 0 &&
+                (prev_keys & engine::kKeyRuby) == 0) {
+                ++cov->key_claimed[1];
+            }
+            if ((keys_now & engine::kKeySapphire) != 0 &&
+                (prev_keys & engine::kKeySapphire) == 0) {
+                ++cov->key_claimed[2];
+            }
+        }
+        // S3.52: the run-outcome kind at terminal (run_state.hpp
+        // RunVictoryKind), read once per case off the FINAL controller.
+        {
+            const uint8_t vk = rc.run.victory_kind;
+            if (vk < kRunOutcomeKindCount) ++cov->run_outcome_kind[vk];
         }
     }
 }

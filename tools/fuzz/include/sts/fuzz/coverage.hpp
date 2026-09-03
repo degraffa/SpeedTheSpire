@@ -84,6 +84,19 @@ static_assert(kRewardKindCount ==
 inline constexpr int kTurnBuckets = 8;        // 1,2,3,4,5-6,7-9,10-19,20+
 inline constexpr int kFloorBuckets = 16;      // floor 0..14, then 15+
 
+// S3.52: the three run-scoped key booleans (run_state.hpp kKeyEmerald /
+// kKeyRuby / kKeySapphire), indexed by the SAME bit position those constants
+// use so the array and the bitmask share one numbering.
+inline constexpr int kKeyKindCount = 3;
+// S3.52: RunVictoryKind's three values (run_state.hpp), indexed by the enum's
+// own numeric value (NONE=0, ACT3_STOP=1, HEART=2). Derived from the engine
+// enum's own last value rather than a hand-written 3, the same discipline
+// kRoomTypeCount/kRewardKindCount already apply.
+inline constexpr int kRunOutcomeKindCount =
+    static_cast<int>(engine::RunVictoryKind::HEART) + 1;
+static_assert(kRunOutcomeKindCount == 3,
+              "kRunOutcomeKindCount must cover every RunVictoryKind enumerator");
+
 // PER-ACT BUCKETS, indexed by RunState::act DIRECTLY (1-based), so index 0 is a
 // slot that can never be written and every table below reads act N at [N].
 //
@@ -213,6 +226,44 @@ struct Coverage {
 
     uint64_t turn_bucket[kTurnBuckets]{};   // per COMBAT, its max turn reached
     uint64_t floor_bucket[kFloorBuckets]{}; // per CASE, its final floor
+
+    // --- S3.52: Act-4 reach witnesses ---------------------------------------
+    //
+    // Three counters answering the SAME "we never got there" vs "we got there
+    // and did not count it" question kActBuckets already states, applied to
+    // the keys and the Act-3 terminal specifically.
+
+    // Per-key ACQUISITION, indexed like run_state.hpp's kKeyEmerald(0) /
+    // kKeyRuby(1) / kKeySapphire(2). Each key has exactly one claim site:
+    // emerald is the burning elite's combat REWARD row (RewardItemKind::
+    // EMERALD_KEY, MoveCat::REWARD_CLAIM_KEY), ruby is the campfire's RECALL
+    // button (MoveCat::RECALL, rest_sites.cpp -- already an S2 grant), and
+    // sapphire is the chest's LINKED reward row (RewardItemKind::
+    // SAPPHIRE_KEY, the SAME MoveCat::REWARD_CLAIM_KEY as emerald -- both key
+    // kinds claim through the one shared reward screen). Sampled from
+    // RunState::keys' bit TRANSITION (fuzz_run.cpp), not from a move taken,
+    // so a key granted with no player decision would still be caught -- none
+    // is today, but the counter does not assume that stays true.
+    uint64_t key_claimed[kKeyKindCount]{};
+
+    // The `Spire Heart` dialog's ONE branch (spire_heart.cpp's kScreenMiddle2
+    // arm, door_is_open): DEATH (the ACT3_STOP terminal) or GO_TO_ENDING (the
+    // Act-4 crossing). Sampled once per case, the step the branch becomes
+    // live, gated on EventDialogState::event_id == kSpireHeartEventId so no
+    // other event's screen value is mistaken for it. spire_heart_death is an
+    // EXACT cross-check against run_outcome_kind[ACT3_STOP] below: DEATH is
+    // its only writer anywhere in the engine.
+    uint64_t spire_heart_death = 0;
+    uint64_t spire_heart_go_to_ending = 0;
+
+    // The run-outcome KIND at terminal (run_state.hpp RunVictoryKind), read
+    // off the case's FINAL controller (RunState::victory_kind), indexed by
+    // the enum's own value. run_outcome_kind[ACT3_STOP] + run_outcome_kind
+    // [HEART] == victories by construction (run_is_victory is "!= NONE"), and
+    // run_outcome_kind[HEART] is the TRUE-victory count `victories` alone
+    // cannot give -- run_is_true_victor (run_advance.hpp) had no counter of
+    // its own before this one.
+    uint64_t run_outcome_kind[kRunOutcomeKindCount]{};
     uint32_t max_turn = 0;
     uint32_t max_floor = 0;
     uint32_t max_actions_in_case = 0;
