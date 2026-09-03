@@ -63,7 +63,7 @@ one exists, mirroring the Stage B convention.
 | The value-artifact registry has no CHECKER that a registered `sha256` still matches the file it names | T1.4s | T2.3 | `artifacts/value-artifacts.json` records each artifact's digest, and `v0s_fit.py` writes it — but nothing re-verifies it on the way in. A registry whose hashes are never checked is a comment. T2.3 owns the registry's lifecycle (promote / retire / reanalyze against a champion), so the guard belongs in the same change as the first operation that reads an entry it did not write. Until then, `python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())"` is the manual check. |
 | `v0s.1` has only ever seen FLOOR-BOUNDARY states, so a search that queries it at a mid-combat leaf is extrapolating | T1.4s | **MEASURED 2026-09-03 (T1.7); the decision it informs is T2.2's** | The corpus is one row per floor, by construction. T1.7 is the first consumer that could measure the gap and did: it queries V0s at every searched decision *and* at the combat exit, and reports both (`SpireTrainer/docs/verification/t1-7-tracer-bullet.md` (training repo)). Over 4,096 episodes/generation the mid-combat mean is **0.3946** against exit means of 0.2400 / 0.2709 / 0.2731, i.e. a mean absolute gap of **0.161 → 0.131 → 0.129** — large relative to the target's own spread (sd ≈ 0.17), and *systematically optimistic*: a mid-combat state still holds the HP it is about to lose, so the floor-boundary table reads it as a healthier floor-boundary state than the one the combat actually exits into. T1.7 therefore does NOT query V0s at a search leaf at all — the leaf value is the network's own head, and V0s is used once per episode, at the exit, which is the plan's E[V(exit RunState)] and is in-distribution. What is left for **T2.2** is the decision the number now supports: either keep that arrangement, or generate a combat-state corpus (a one-line change to the boundary test in `roll_floor_rows`) and fit a V0 that is honest at a mid-combat leaf. |
 | The V0s → V0h comparison is PRE-REGISTERED but not run | T1.4s | T1.4 | The protocol — features, target re-labelling, split, the paired-bootstrap statistic, and the four registered deltas with what each triggers — is section 9 of `SpireTrainer/docs/verification/t1-4s-v0s.md` (training repo), written before the human dump exists so the comparison cannot be designed around its result. T1.4 runs it. If the dump cannot support the bootstrapped-horizon re-labelling, the protocol says to declare the comparison impossible and record that, not to weaken it. |
-| `engine::RunController` is not portable between PROCESSES: `RunController::lists` holds three `std::array<std::string_view, N>` into the registry's static strings, so a state memcpy'd to disk carries pointers | T2.1 | **DISCHARGED 2026-09-03 (engine, `lists-ids`)** | T2.1's bank is the first artifact this program writes in one process and reads in another, and the first `bank_check` against a real bank SEGFAULTED in `encode_public_view` -> `encode_prefix` dereferencing a stored view; it is also a determinism defect, since ASLR would make a shard's bytes a function of where the generator was loaded. T2.1 fixed it CONSUMER-SIDE: a bank record stores the three lists as registry `EncounterDef` ids, zeroes the views in the stored state, and `bank_restore_state` rebinds them on the way in (`bank_capture_lists` refuses, naming the key, if an entry is not a registry encounter). **T1.2's `SidecarKeyframe` has the same flaw and is NOT fixed** -- nothing reconstructs a sidecar across processes today, so it is latent rather than live. The durable fix is in the engine (ids in `MonsterLists`, resolved at use) rather than a second copy of the workaround, which makes it an engine-repo change and therefore stop-and-surface under conventions §6. Full write-up: `SpireTrainer/docs/verification/t2-1-snapshot-bank.md` (training repo) §8. **DISCHARGED, engine-side, exactly as that write-up asked.** A `MonsterLists` slot is an `EncounterKeyId` (`uint8_t`, encounters.hpp) -- the registry's CANONICAL `EncounterDef.id`, i.e. the id `encounter_by_game_id` already returned for the key every consumer resolved, so it is a pure representation change; keys the registry does not carry (Act 4's `Shield and Spear` / `The Heart`, until S3.41) get ENGINE-LOCAL ids from 200 up, and resolution is registry-first so they retire themselves when those rows land. Text is resolved at the use sites that need it (`enter_combat`'s composition join, `encounter_list_oracle`, `dist_check`, the scratch witnesses); `encode_prefix` no longer looks anything up. `MonsterLists` 488 B -> 32 B and alignment 8 -> 1, so its three 7-byte `pad_*` members are gone rather than declared; `sizeof(RunController)` 11600 -> 11144 (the SANCTIONED transient layer -- `RunState` 2200 and `CombatState` 8088 are unmoved, `SCHEMA_VERSION` stays 9 and `PUBLIC_VIEW_VERSION` stays 6). EVIDENCE, all real runs, reproduced 2026-09-03 finishing this task: the
+| `engine::RunController` is not portable between PROCESSES: `RunController::lists` holds three `std::array<std::string_view, N>` into the registry's static strings, so a state memcpy'd to disk carries pointers | T2.1 | engine repo (**surfaced to the orchestrator**) | T2.1's bank is the first artifact this program writes in one process and reads in another, and the first `bank_check` against a real bank SEGFAULTED in `encode_public_view` -> `encode_prefix` dereferencing a stored view; it is also a determinism defect, since ASLR would make a shard's bytes a function of where the generator was loaded. T2.1 fixed it CONSUMER-SIDE: a bank record stores the three lists as registry `EncounterDef` ids, zeroes the views in the stored state, and `bank_restore_state` rebinds them on the way in (`bank_capture_lists` refuses, naming the key, if an entry is not a registry encounter). **T1.2's `SidecarKeyframe` has the same flaw and is NOT fixed** -- nothing reconstructs a sidecar across processes today, so it is latent rather than live. The durable fix is in the engine (ids in `MonsterLists`, resolved at use) rather than a second copy of the workaround, which makes it an engine-repo change and therefore stop-and-surface under conventions §6. Full write-up: `SpireTrainer/docs/verification/t2-1-snapshot-bank.md` (training repo) §8. |
 cross-process defect's own witness is a two-image write-then-read demo
 (`tools/fuzz/src/scratch_witness.cpp`, uncommitted scratch built against
 `fuzz_core`; seed 1 / ascension 20 / `SIM_SEARCH` / decision 50) -- process A
@@ -97,8 +97,14 @@ simplify**: `bank_restore_state`'s rebinding, `bank_capture_lists`' refusal-by-n
 | The search is combat-scoped: potions and every run-layer decision are outside the searched action set | T1.3 | T2.2 | `Search` steps `rc.combat` with the COMBAT-level `advance` (the overload that takes the mask, advance.hpp:319-323). `USE_POTION` legality lives on `RunActionMask` and that overload does not dispatch it at all, so potions are simply not searchable at this layer. Plan §3.2's run level is structured expectimax over the act map, which is a different search and a later phase; what T2.2 inherits is the combat one plus the knowledge that adding potions means either a run-level mask-supplied overload (an ENGINE change) or a hybrid step. |
 | The GPU inference path runs on the DEFAULT CUDA stream: no two-stream copy/compute overlap, because there is no CUDA toolkit | T1.3 | T2.2 | `<c10/cuda/CUDAStream.h>` and `<ATen/cuda/CUDAEvent.h>` include `cuda_runtime_api.h`, a CUDA TOOLKIT header; the box has the driver and LibTorch's bundled runtime DLLs and no toolkit, and T1.3's download allowlist does not cover NVIDIA's site. `nn.cpp` therefore double-buffers host STAGING against device execution and waits with `torch::cuda::synchronize()`. Measured, that costs little today — 3.55 ms in `begin_batch` against 0.02 ms in `end_batch`, i.e. the host side is ~170x the device wait — but the same measurement is what makes the actor LAUNCH-BOUND, and the fix for that (CUDA graphs, or TensorRT) needs the toolkit too. |
 | The Phase-T2 default search config was selected STRUCTURALLY, not on decision quality | T1.3 | T2.2 | The spike's weights are random, so no row of its sweep says anything about which configuration plays better; T1.3 says so in the doc and picks on the plan's own commitments plus measured root fanout. The axes ARE swept and their COSTS measured (16/48/128 evals, 4/8/16 candidates, Gumbel-SH vs PUCT at the root, reveal coarsening on/off, per-simulation vs 8/32-world banks), so T2.2 re-runs the same grid against a trained net and changes `STS_TRAIN_SEARCH_CONFIG_ID` if the quality ordering disagrees. |
-| A shard's `weights_version` is fixed at BUILD time, so an ONLINE actor that hot-swaps weights cannot label which generation produced a record — and if it did, its own build's reader would refuse the shard | T1.7 | T2.3 | `make_shard_header` fills all six stamp fields from `version_stamp()`, and `weights_version` is a CMake cache variable baked into a generated header at configure time; `ShardReader::open` then compares it **exactly** against the running build's stamp. T1.7 swapped the module three times inside one process, so three generations of shards produced by three demonstrably different nets (sha256 `102e35bb…`, `7b42a12d…`, `87de1213…`) all carry `weights_version = none`. Demonstrated rather than argued: a copy of generation 0's shard with that header field patched to `tracer.g1` is refused by name (`weights_version_mismatch: shard 'tracer.g1' != manifest 'none'`, exit 2) by the same reader that accepts the unpatched file. T1.7's workaround is to record the weights path + sha256 in the per-generation `manifest.json`, so the provenance sits beside the shard rather than inside it. The real fix — a runtime-settable weights identity in the header, and a loader that compares it against a POLICY rather than against its own build — is the versioned-artifact lifecycle T2.3 owns, and it is the same shape as quarantine's `CommitOrder` row above. |
-| The trajectory shard carries no TENSORS, so an online actor and its learner must agree on a second file format out of band | T1.7 | T2.2 | `DecisionRecord` stores the `PublicView` and the sparse search distribution; the learner needs the tokenized observation and the per-slot action encoding, which the record has no room for and which re-deriving in Python would duplicate `pv_encode.cpp`. T1.7 wrote a tracer-local companion (`observations.stsobs`, one record per decision, joined by (run_id, step_index), layout published in the generation's `manifest.json`) rather than append a `RecordKind` to the durable container for a throwaway loop. T2.2 has to decide which it is: a fifth record kind in the shard container, or a declared sidecar format with its own header and refusal path. Two facts from T1.7 bear on it — the companion is ~5.3 KB against the record's ~13.9 KB, and the join it forces (sparse `action_bits` → dense slot) is where the `Action{0}` sentinel defect surfaced, so the join is worth keeping *somewhere* as a check even if the storage merges. |
+| A shard's `weights_version` is fixed at BUILD time, so an ONLINE actor that hot-swaps weights cannot label which generation produced a record — and if it did, its own build's reader would refuse the shard | T1.7 | T2.3 | `make_shard_header` fills all six stamp fields from `version_stamp()`, and `weights_version` is a CMake cache variable baked into a generated header at configure time; `ShardReader::open` then compares it **exactly** against the running build's stamp. T1.7 swapped the module three times inside one process, so three generations of shards produced by three demonstrably different nets (sha256 `102e35bb…`, `7b42a12d…`, `87de1213…`) all carry `weights_version = none`. Demonstrated rather than argued: a copy of generation 0's shard with that header field patched to `tracer.g1` is refused by name (`weights_version_mismatch: shard 'tracer.g1' != manifest 'none'`, exit 2) by the same reader that accepts the unpatched file. T1.7's workaround is to record the weights path + sha256 in the per-generation `manifest.json`, so the provenance sits beside the shard rather than inside it. The real fix — a runtime-settable weights identity in the header, and a loader that compares it against a POLICY rather than against its own build — is the versioned-artifact lifecycle T2.3 owns, and it is the same shape as quarantine's `CommitOrder` row above. **Narrowed 2026-09-03 (T2.2):** the ONLINE half now has a partial answer — `ObsRecord::weights_generation` (`obs_companion.hpp`) is a runtime-settable field in the companion, stamped per record by `Actor::worker`/`set_weights_generation`, so a reader of the companion CAN tell which generation produced a row even though the shard header still cannot. Still narrow: it is only in the companion (not the shard itself), still uncompared by any loader (nothing refuses a mismatch on it — it is provenance, not a stamp), and the shard-header fix T2.3 owns is unchanged. |
+| The trajectory shard carries no TENSORS, so an online actor and its learner must agree on a second file format out of band | T1.7 | **DISCHARGED 2026-09-03 (T2.2)** | Decided: a DECLARED companion format, not a fifth record kind. `include/sts/training/obs_companion.hpp` mirrors `shard.hpp`'s discipline field-for-field (a fixed 512-byte `ObsHeader`, a byte-order probe, all six `VersionStamp` fields compared individually, `kObsContainerVersion`/`kObsRecordLayoutVersion` independent of the shard's own versions) rather than being folded into `DecisionRecord`, because the tokenization (this repo's `pv_encode.hpp`) churns on a different clock than the shard container (versioned with the engine's `PublicView`). The join T1.7 flagged as worth keeping stays: `tools/training/learner_v1.py::build_policy_targets` asserts `(run_id, step_index)` equal record-for-record between the two streams and reports `policy_target_coverage`, which was 1.000000 across all 14 real generations T2.2 ran. |
+| **The T2.2 trained value function does not beat `sim_search`, and the bars are NOT met** | T2.2 | orchestrator (contingency decision), then whichever task resumes T2.2 | 15 real generations, plateauing from generation ~8 (deaths 30.9%→17.6%→flat, exit V0s 0.248→0.304→flat); `sim_search` beats both `search` and `policy` with p=1.0 in a 20,000-resample paired bootstrap on the frozen 2,500-entry suite, at both a 10-generation and a 14-generation checkpoint. Three undisambiguated hypotheses (report §"The verdict"): an information gap against the non-information-limited `sim_search`; a teacher search budget (192 evals/decision, 4x deployed) too weak relative to `sim_search`'s effective depth; `v0s.1` itself calibrated against the very cohort the loop is failing to beat. The plan §4.3 assist-annealed-generation contingency was deliberately NOT adopted — that decision belongs to the orchestrator. Full numbers: `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo). |
+| A learner subprocess launched via `std::system()` while the parent actor holds its own CUDA context can fail transiently with `0xC0000142` / `STATUS_DLL_INIT_FAILED` and no stderr | T2.2 | whichever task next hardens the production loop (T2.3 or later) | Hit once in 15 generation-launches (generation 2 of the T2.2 training run); the identical command line succeeded standalone seconds later, and it did not recur over the other 14 launches — the shape of a transient Windows/CUDA child-process resource race, not a code defect. Worked around by resuming the loop with `--gen-offset`/`--init-weights` at the last good checkpoint (the loop's per-generation-directory design makes this a clean resume point). Not fixed: a production loop should retry a failed learner launch a bounded number of times before surfacing the failure. |
+| The search-config sweep found `e48-c8-puct-rc-w0` (PUCT in-tree) measurably better than the deployed default on every quality axis, at 7.1x lower throughput | T2.2 | whichever task next tackles the T2.2 value-function gap | Sweep on 600 dev snapshots against the gen14 net: exit V0s 0.2976 vs the default's 0.2865, death 17.2% vs 20.3%, HP fraction 0.4538 vs 0.4186 — all at 38.0 vs 268.9 decisions/s. T2.2 CONFIRMED the existing default (`e48-c8-gsh-rc-w0`) rather than moving it, because the headline finding is that the value function underneath EITHER configuration does not beat `sim_search`, so this ~4% relative gain would not by itself close that gap, and a 7.1x production-throughput cost is a decision that deserves its own measurement against the loop's collect/learn balance, not a side effect of a sweep table. Candidate lever for a follow-up, to be re-evaluated PAIRED against the frozen suite rather than on the dev set's raw means. |
+| `ObsRecord::weights_generation` (T2.2's online per-record provenance, narrowing the row above) is written but never checked by any loader | T2.2 | T2.3 | It is provenance, not a stamp comparison — nothing refuses a companion whose per-record generation looks wrong. The versioned-artifact lifecycle T2.3 owns is the natural place for a policy that reads it. |
+| The versioned-label class (`label_suite.hpp`) has a container, a join and a trend gate, but no REAL search-labelled case — only a synthetic toy set (`label_suite_demo`) | T1.5 | T3.5 | The plan's split (§6) exists so a search-labelled suite can be gated on a TREND rather than fossilizing early-network strategy; T1.5 builds that machinery but has no champion to label with yet. `TrendGateConfig`'s defaults (`trailing_window=3`, `max_regression=0.10`, `min_joined_for_gate=30`) are untuned against any real agreement trend — chosen to make the toy demonstration exercise both a pass and a fail, nothing more. |
+| `paired_eval`'s `net_search` arm (`NetSearchAgent`) is wired and compiles but is unexercised by any real run — T1.5's acceptance run is `ladder` vs `scripted:random`, no `--weights` | T1.5 | T2.2 | The class it will need to pair against a trained net exists (`Search` + `Evaluator`, one evaluator instance shared under a mutex across searches — the header notes this is engine-bound, not network-bound, so no batching server was built for it). First real exercise is whichever T2.2 checkpoint runs its first paired eval. |
 
 ---
 
@@ -812,7 +818,7 @@ force run 1 with `workflow_dispatch` after this lands).
   `training-tasks.md`, leaving the losing document unfixed; §3 now says **no
   attribution trailer**.
 
-- **T1.5** `[ ]` ∥ **Eval harness + decision suite v0.** Three seed
+- **T1.5** `[x]` ∥ **Eval harness + decision suite v0.** Three seed
   populations provisioned (dev / frozen paired-validation /
   untouched-holdout, generation procedure and the holdout's rotation
   trigger documented); paired runner with
@@ -823,7 +829,73 @@ force run 1 with `workflow_dispatch` after this lands).
   **Deps:** T1.1, T1.2 **Acceptance:** harness runs end-to-end on the
   random policy + one scripted policy and emits the paired report; suite
   scoring reproduces ground truth for an exact-search reference agent.
-  **Log:** —
+  **Inherited:** `first_legal_action` (`include/sts/training/actor_smoke.hpp`)
+  is the scripted policy T1.1 left behind — deterministic, mask-only, and
+  already pinned by a test. It is a *baseline*, not a policy. T1.2 adds the
+  durable side: paired-run reports are artifacts, so they carry the six-field
+  version stamp and their loaders refuse on mismatch, exactly as
+  `shard.hpp` does; and `record_run` (`trajectory_recorder.hpp`) already takes a
+  `RunPolicy`, which is the seam a second scripted policy plugs into.
+  **Log:** 2026-09-03 — landed. Three seed populations (`eval_seeds.hpp`, a
+  hash-seeded splitmix64 stripe over `[1e9, 2e9)`, generated in order
+  dev_smoke(1000)/paired_validation(10000)/holdout(10000) with a running
+  rejection set, five orders of magnitude above every training-range this
+  repo has used) frozen in `eval/seed_populations.json` by `seed_populations
+  --write`, self-verifying via `--verify`; the holdout's rotation trigger is
+  documented in `eval_seeds.hpp` and echoed into the JSON itself, and
+  `paired_eval` mechanically refuses `--population holdout` without
+  `--i-am-making-a-promotion-decision`. `paired_eval` (two `ArmSpec` arms —
+  ladder / scripted-by-name / net_search, common-random-numbers keyed on
+  `public_hash` for any hidden-world sampling) plays both arms over a
+  population and writes one CSV row per (arm, seed) via `RunLabels`;
+  `tools/training/eval_report.py` (stdlib-only Python) computes the paired
+  bootstrap CI (resampled by seed), McNemar on `victory`, the discordance
+  rate and a per-category breakdown. Required run (random vs
+  `first_legal_action` on `dev_smoke`, 1000 seeds): both arms 0/1000 wins
+  (consistent with the ~0.1–0.3% act-boss-kill rate already measured for
+  E0/ladder policies — not enough seeds to expect one), but cleanly separated
+  on every other paired metric (floor 3.09 vs 7.03, decisions 45.4 vs 95.2,
+  both CIs excluding zero) — see `SpireTrainer/docs/verification/t1-5-eval-harness.md` (training repo) §2
+  for the full report. **Deviation from this Inherited note, recorded rather
+  than silently diverged from:** the paired report is a plain CSV, not a
+  version-stamped shard — `paired_eval.hpp`'s own header argues this
+  directly (the statistics belong in Python, and the CSV is regenerated
+  output, not a durable artifact fed back into the engine, so shard-style
+  refuse-on-mismatch has nothing to protect). Decision suite v0
+  (`eval/decision_suite_v0.bin`, `decision_suite.hpp`/`.cpp`, `suite_build`):
+  240 exactly-solvable micro-combats (candidates=337, accepted=240,
+  by_category multi_monster=16/lethal_race=116/mitigation=108,
+  by_source synthetic=189/reached=51), deterministic and reproduced
+  byte-identical on a from-scratch rebuild. The exact-search reference agent
+  scores 100% on every axis the scorer checks (root agreement, playout
+  attainment, ground-truth reproduction, state-hash integrity);
+  `first_legal_action` and a seeded random agent score strictly worse in the
+  expected order (84.6% / 66.3% root agreement). **Two defects found and
+  fixed in the inherited partial `ExactSolver`, both silent, both now fixed
+  in this commit** (`SpireTrainer/docs/verification/t1-5-eval-harness.md` (training repo) §3): (i) the
+  node budget was compared against the solver's LIFETIME node count instead
+  of the per-solve count, so after roughly one candidate's worth of budget
+  every later candidate in a sweep failed immediately — accepted cases went
+  6/240 to 240/240 after the fix; (ii) `value_of`'s plain recursion keeps a
+  full 8088 B `CombatState` alive per stack frame with no depth bound, and a
+  real (`kReached`) multi-monster board could push a single DFS path past
+  100+ decisions, silently overflowing the default 1 MiB Windows thread
+  stack (crash, zero output, no exception) — fixed with a separate
+  `SolveConfig::max_depth` (96) budget checked the same way node count is.
+  Versioned-label scaffolding (`label_suite.hpp`/`.cpp`: `LabelledCaseRecord`
+  container, `compute_label_agreement` join by `case_id`,
+  `evaluate_agreement_trend` gate) demonstrated end to end on a synthetic toy
+  set by `label_suite_demo` — self-agreement exactly 100%, the no-baseline
+  first point passes by default, a real 31-point agreement drop is caught by
+  the gate; no real search-labelled case exists yet (T3.5). All six presets
+  configure + build the four new tools clean (win-debug/win-asan/win-release
+  via a `t15fin.cmd` vcvars+LLVM wrapper, not committed; debug/asan/release
+  via `tools/wsl_run.sh --script`, configure+build only per the standing
+  evidence-rule direction); a small `suite_build` run was additionally
+  exercised under win-asan (ASan+UBSan) as a real run, clean.
+  `tools/training/check_omniscient_boundary.sh` clean (62 files);
+  `tools/check_submodule_pin.sh` clean. No gtest cases were added and `ctest`
+  was not used as acceptance (owner direction 2026-09-03, conventions §7).
 
 - **T1.6** `[ ]` **Training-side leak gates.** Policy-logit invariance and
   search-statistic invariance across GT0 twin fixtures (pinned sampler
@@ -1040,7 +1112,7 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
 - [x] R and t_enc measured; budget table re-derived (T1.3 — 2026-09-03).
 - [ ] V0 shipped with calibration report — V0s (T1.4s), or V0h (T1.4) if
       the dump landed first.
-- [ ] Eval harness + seed populations frozen (T1.5).
+- [x] Eval harness + seed populations frozen (T1.5, 2026-09-03, SpireTrainer `7b70570`).
 - [x] The tracer-bullet loop ran ≥ 3 generations and its report is
       committed (T1.7 — 2026-09-03, SpireTrainer `ee2af52`).
 **Log:** —
@@ -1172,7 +1244,7 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   check_omniscient_boundary.sh` clean (34 files); `tools/check_submodule_pin.sh`
   clean.
 
-- **T2.2** `[ ]` **Combat ExIt loop v1.** From-scratch expert iteration on
+- **T2.2** `[~]` **Combat ExIt loop v1.** From-scratch expert iteration on
   the bank: teacher search at high budget → distill policy + value —
   including the **distributional exit-HP/death value heads and the
   last-layer value ensemble** (plan §3.3 i–ii; the ensemble ships here,
@@ -1240,12 +1312,171 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   outside the searched action set, and the inference path is single-stream
   and launch-bound — which is the constraint the plan §5 production-loop
   plumbing half of this task runs into first.
+  **Inherited (2026-09-03, from T1.5): the paired runner and the exact-suite
+  half of "micro-combat ground-truth suite runs every generation" both
+  exist.** `paired_eval` (`src/training/main_paired_eval.cpp`) plays two
+  `ArmSpec` arms — `ladder` / `scripted` (an `sts::fuzz::PolicyKind` by name)
+  / `net_search` (`NetSearchAgent`, the T1.3 `Search` at combat decisions,
+  the ladder elsewhere, wired but unexercised by T1.5's own acceptance run —
+  no `--weights` was passed) — over one of the three frozen seed populations
+  in `eval/seed_populations.json`, and `tools/training/eval_report.py` turns
+  its CSV into the paired bootstrap CI / McNemar / discordance / per-category
+  report this task's Acceptance line names. `eval/decision_suite_v0.bin` (240
+  cases, `suite_build`/`score_suite`, `decision_suite.hpp`) is the EXACT half
+  of the suite this task must run every generation; the versioned-label half
+  (search-labelled cases, agreement-trend gated) is scaffolding only
+  (`label_suite.hpp`) — T3.5 populates it, so "no micro-combat ground-truth
+  regressions" above is checkable today only against the exact 240, not
+  against a full ~10k stratified suite (plan §6). `ExactSolver`
+  (`decision_suite.cpp`) had two silent defects fixed in the same commit that
+  froze the suite — a lifetime-cumulative node budget, and unbounded
+  recursion depth overflowing the thread stack on a real multi-monster board
+  — both worth knowing before extending the solver rather than rediscovering
+  (`SpireTrainer/docs/verification/t1-5-eval-harness.md` (training repo) §3).
   **Deps:** T2.1, T1.3 **Acceptance:** on the frozen combat suite, paired:
   search > direct policy > scripted baselines at p < 0.01, and the
   distilled student retains ≥ 60 % of the paired search gain (thresholds
   pre-registered **here, before dispatch**; tighten only via a change-log
   entry); no micro-combat ground-truth regressions; telemetry counters
-  demonstrably live in a generation run. **Log:** —
+  demonstrably live in a generation run.
+
+  **Log:** 2026-09-03 — landed on engine pin `6c50a0b`, **bars NOT met,
+  stopped per the task's own rule rather than adopting the contingency.**
+  Report: `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
+  Checkpoint registered: `artifacts/checkpoints.json`, id
+  `t22run1-gen14-pre-gt1` (weights uncommitted, path + sha256 in the
+  manifest and the report).
+
+  **What landed.** `combat_actor` (`src/training/main_combat_actor.cpp`), a
+  sibling of `tracer_actor` per this block's own "extend, do not rebuild"
+  instruction — `tracer_actor` and its Python half are untouched. Five
+  modes: `loop` (expert iteration), `worker` (the permanent debug-preset
+  fleet member), `freeze` (frozen-suite manifest), `eval` (paired agent
+  comparison), `sweep` (the T1.3 grid re-run). `CombatNet`
+  (`tools/training/export_combat_net.py`) adds the T2.2 heads T1.7
+  deliberately did not build: a `kValueEnsembleK=4` last-layer value
+  ensemble and a `kExitHpBins=11` distributional exit-HP categorical plus a
+  death logit, probed at load time (`nn.cpp`) so a T1.3-era two-output
+  module still loads (`has_aux=false`) and a five-output module whose
+  widths disagree with `pv_encode.hpp` is refused by name. The T1.7 deferred
+  tensor-storage decision is discharged: `include/sts/training/
+  obs_companion.hpp` is a DECLARED companion format (own 512-byte header,
+  own refusal path, own `kObsContainerVersion`), not a fifth `RecordKind` —
+  because the tokenization churns on this repo's clock and the shard
+  container churns on the engine's, and it additionally carries a
+  runtime-settable `weights_generation` field the shard header structurally
+  cannot (T1.7 defect 3's online-provenance half; the full fix is still
+  T2.3's, see the table). The replay buffer and its freshness target, the
+  teacher (`e192-c8-gsh-rc-w0`, 4x deployed)/student (one eval, no tree)
+  split, and the exploration kit (Gumbel root sampling inherited unchanged
+  from T1.3, a declared temperature schedule, the freshness target) are all
+  live and were never silently disabled. Two new Python tools:
+  `tools/training/eval_stats.py` (paired bootstrap + exact McNemar) and
+  `tools/training/calibration_report.py` (HP-bucketed value/death/exit-HP
+  calibration + ensemble disagreement).
+
+  **The training run.** 15 generations (00→14), 2,048 episodes/generation,
+  wall clock 1,583 s, from a random `CombatNet` (d=96, 3 layers, 4 heads,
+  2,037,233 params). Losses fell every generation (policy CE 1.624→1.489,
+  value MSE 0.053→0.003, death BCE 0.704→0.070, exit-HP CE 2.40→0.45,
+  policy-target coverage 1.000000 throughout — T1.7's `Action{0}`-sentinel
+  defect class did not recur). Outcomes on the same 2,048 start states
+  improved monotonically through generation ~8 (deaths 30.9%→17.6%, exit
+  V0s 0.248→0.304) and then **plateaued**: generations 8–13 oscillate in a
+  narrow band (deaths 17.5–19.3%, exit V0s 0.298–0.308) with no further
+  trend. One integration defect found: generation 2's learner, launched via
+  `std::system()` while the parent process held its own CUDA context,
+  exited `0xC0000142` (`STATUS_DLL_INIT_FAILED`) with no stderr; the
+  identical command run standalone seconds later succeeded, and the
+  transient did not recur over the other 14 launches — worked around by
+  resuming with `--gen-offset`/`--init-weights` (the loop's own
+  per-generation-directory design is what makes that a clean resume point),
+  not fixed; carried to the Deferred table as a bounded-retry obligation.
+
+  **The frozen combat suite.** 2,500 entries (bar: ≥ 2,000), from a FRESH
+  `bank_harvest` over seeds `[5001, 8001)` — disjoint by construction from
+  training's `[1, 1850)` — 20,026 raw snapshots from 473 runs in 53.5 s.
+  `combat_actor --mode freeze`: Act-1 COMBAT, non-terminal, ≥2-legal-action
+  states, stratified round-robin over 13 (floor, phase, HP) cells. Suite
+  sha256 `70353ce4a269cabcf554f055f41828c31ae840caae5bb2cc3300cf8b0a550bb7`;
+  `--mode eval --suite` re-derives every `public_hash` from the reloaded
+  state before playing a decision, 2,500/2,500 both evaluation runs.
+
+  **Paired evaluation — the bars, evaluated on gen14 (the registered
+  checkpoint; gen10 is materially the same conclusion).** `search,policy,
+  sim_search,greedy_damage`, greedy at `--default-evals 48`, `eval_stats.py
+  --bootstrap 20000 --alpha 0.01`.
+  * **Bar 1 (search > policy): NOT MET.** Mean diff −0.00075, 99% CI
+    [−0.00459, +0.00302], p(one-sided) = 0.689.
+  * **Bar 2 (policy > both scripted baselines): NOT MET.** vs `sim_search`:
+    mean diff −0.01996, 99% CI [−0.02420, −0.01575], **p = 1.0** (never
+    contradicted in 20,000 resamples; McNemar p = 9.2e-18). vs
+    `greedy_damage`: mean diff −0.00153, p = 0.864 (null result).
+  * **Bar 3 (student retains ≥60% of the search gain): NOT MEANINGFULLY
+    MET.** Both `search_gain_over_baseline` (−0.0207) and
+    `policy_gain_over_baseline` (−0.0200) are NEGATIVE — neither agent beats
+    `sim_search` at all, so the 96.4% "retention" ratio is a vacuous
+    near-1-over-1 of two negative numbers, not evidence of anything
+    retained. Full per-pair CIs/p-values for both checkpoints:
+    `D:\STS_BG_Mod\_train_data\t22\eval_stats_gen{10,14}.json`.
+
+  **HP-bucketed calibration** (gen14, `search` agent's root evaluations,
+  n=18,102): the value head is mildly optimistic in every HP bucket except
+  the near-dead one (gap +0.011 to +0.025, an order of magnitude tighter
+  than T1.7's raw-`v0s.1` mid-combat gap of 0.13–0.16 — the distillation IS
+  tightening the signal even though the policy it drives does not yet win);
+  the death head is well calibrated at the extremes (bucket 0: predicted
+  0.718 vs realized 0.717) and under-confident mid-combat; ensemble
+  disagreement is small and nearly flat across buckets (sd 0.014–0.018 of a
+  `[-1,1]` value) — not much epistemic signal yet for T3.4's future LCB use.
+  `ens_mean_vs_root_value_max_abs_diff = 0.0`, confirmed rather than
+  assumed.
+
+  **Search-config sweep (deliverable 5): CONFIRMED, not moved.**
+  `e48-c8-puct-rc-w0` beats the default on every quality axis (exit V0s
+  0.2976 vs 0.2865, death 17.2% vs 20.3%) at **7.1x lower throughput** (38.0
+  vs 268.9 dec/s). `STS_TRAIN_SEARCH_CONFIG_ID` stays `e48-c8-gsh-rc-w0`:
+  the headline finding is that the value function underneath EITHER
+  configuration does not beat `sim_search`, so PUCT's ~4% relative gain
+  would not by itself fix what actually failed, and adopting a 7.1x
+  production-throughput cost as a side effect of a sweep table is exactly
+  the kind of silent lever-pull this task's acceptance text warns against.
+  Carried to the Deferred table as a candidate for whichever follow-up
+  tackles the value-function gap.
+
+  **Plumbing.** Atomic hot swap (episode-boundary, 0.03–0.11 s/swap, 15
+  swaps); day-one telemetry live every generation including the NEW
+  `aux heads (root)` counter (ensemble sd, P(death), E[exit HP]); the
+  permanent debug-preset worker (`--mode worker`, `win-debug`, NDEBUG
+  undefined, 25 s / 11 passes / 1,408 episodes / 21,938 mask-contract
+  checks / **0 violations**).
+
+  **Acceptance (real runs; no gtest cases written).** All six presets
+  configure + build green: `win-release` (the real LibTorch run above),
+  `win-debug` (the worker-mode run above, CPU-reference backend),
+  `win-asan`; `debug`/`asan`/`release` via `tools/wsl_run.sh debug asan
+  release` — whole suite green (a ctest run the evidence rule does not require; recorded, not relied on).
+  `tools/training/check_omniscient_boundary.sh` clean (55 files);
+  `tools/check_submodule_pin.sh` clean. T1.5's micro-combat ground-truth
+  suite is **not yet on `master`** — owed, not run; cannot be checked until
+  it lands (a different agent's worktree, untouched here).
+
+  **Verdict, per the task's own binding rule** ("if a bar is NOT met after
+  the declared exploration kit is exhausted: say so and STOP; the
+  contingency is the orchestrator's decision"): **none of the three bars
+  are met**, on either checkpoint tested, and the outcome telemetry shows a
+  genuine plateau from generation ~8 onward that five further generations
+  at the same net size / teacher budget / episode count did not move. The
+  plan §4.3 assist-annealed-generation contingency is **NOT adopted** —
+  that is explicitly the orchestrator's call, not this task's. Three
+  hypotheses for the plateau are offered in the report as hypothesis, not
+  established: an information gap against `sim_search` (which is not
+  information-limited, by design); a teacher search budget too weak
+  relative to `sim_search`'s effective depth; and `v0s.1` itself being
+  calibrated against the very opponent the loop is failing to beat. None
+  were disambiguated — doing so is open-ended tuning outside the declared
+  exploration kit, which is exactly what this task's own rule says to stop
+  short of.
 
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
@@ -1271,12 +1502,25 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
 ### GT2 `[ ]` **Gate: combat agent (E2 / M8-equivalent)**
 **Deps:** T2.2, T2.3
 - [ ] T2.2 paired metrics hold on the frozen suite at the declared budget.
-- [ ] HP-bucketed value calibration report sane (plan §3.3).
+      **NOT MET as of 2026-09-03** — none of the three T2.2 bars hold
+      (search vs `sim_search` p=1.0 against search, not for it; see
+      `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo)).
+      Gate blocked here until a T2.2 follow-up (orchestrator-directed —
+      the plan §4.3 contingency, a bigger net/teacher budget, or a currency
+      change) produces a checkpoint that clears the bars.
+- [x] HP-bucketed value calibration report sane (plan §3.3). Produced
+      2026-09-03 by T2.2 (`tools/training/calibration_report.py`, report
+      §"HP-bucketed... calibration") — sane in the sense of being
+      well-formed and directionally reasonable (small, consistent value-head
+      optimism; a death head calibrated at the extremes), independent of
+      whether the AGENT built on top of it clears the paired bars above.
 - [ ] A checkpoint routed through the TE.1 campaign harness as an
       oracle-campaign driver (training output becomes verification input).
 - [ ] The weekly three-tier report cadence (plan §6 item 4) starts at this
       gate.
-**Log:** —
+**Log:** 2026-09-03 — T2.2 landed `[~]` with its calibration deliverable
+but its paired bars unmet; gate remains blocked on the first checklist item.
+See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
 
 ---
 
@@ -1324,6 +1568,32 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   elite-entry HP states, harvested from the T2.1 bank and live
   trajectories; labels from mega-budget search under the current champion,
   re-derived on champion upgrade per plan §6.
+  **Inherited (2026-09-03, from T2.1):** harvest from the bank with
+  `BankReader` + `bank_restore_state`, and stratify on the record's own header
+  keys (floor, act, phase, HP bucket, deck bucket, relic count, gold, policy,
+  provenance) rather than on the payload. The bank's quota cell is
+  (floor bucket, phase, HP bucket) — `bank_cell` in `trajectory_schema.hpp` —
+  so the per-category counts this task owes are a group-by over fields that are
+  already there. Categories the bank does NOT separate (lethal puzzles, path
+  forks) are a filter over restored states, which is this task's own work.
+  **Inherited (2026-09-03, from T1.5): the label class's container and gate
+  are built — this task populates them, it does not design them.**
+  `LabelledCaseRecord` (`trajectory_schema.hpp`, `kLabelledCase`) is a T1.2
+  shard record carrying a full `engine::CombatState`, a champion identity
+  (`label_version`, `pack_label_version`/`unpack_label_version`,
+  `include/sts/training/label_suite.hpp`), and up to
+  `kSuiteActionCap` (16) weighted actions; `write_labelled_suite` /
+  `read_labelled_suite` round-trip it exactly as `decision_suite.hpp`'s
+  exact-case shard does. `compute_label_agreement` joins two generations by
+  `case_id` and compares root (top-weight) actions;
+  `evaluate_agreement_trend` (`TrendGateConfig`: `trailing_window`,
+  `max_regression`, `min_joined_for_gate`) is the promotion ladder's
+  agreement-trend gate the Acceptance line below names. All of it is
+  demonstrated ONLY on a synthetic toy set
+  (`label_suite_demo`, `SpireTrainer/docs/verification/t1-5-eval-harness.md` (training repo) §4) — no
+  real champion, no real search label, and no tuning of `TrendGateConfig`'s
+  defaults against a real trend has happened yet; that tuning is this task's
+  to do once a champion exists.
   **Deps:** T2.1 **Acceptance:** per-category snapshot counts committed
   (≥ 1k per category); label-refresh machinery demonstrated on one
   champion bump; agreement-trend gating wired into the promotion
@@ -1451,6 +1721,17 @@ desired.
   assist-annealing fallback sentence. T2.x edits mirrored verbatim into
   `SpireTrainer/docs/training-tasks.md` per its tracked-in-both-places
   rule.
+- 2026-09-04 — T1.5 (`7b70570`) landed and T2.2 (`d8510df`) stopped at `[~]`
+  in SpireTrainer: the first durable combat expert-iteration run (15
+  generations) plateaued at generation ~8 and NONE of the three pre-registered
+  bars is met — `sim_search` (which reads the true draw order) beats both the
+  search and the distilled policy at p=1.0 in a 20k-resample paired bootstrap.
+  Orchestrator decision: the assist-annealing contingency is NOT adopted (it
+  addresses reach, not a value-function gap). Instead: an information-limited
+  scripted baseline `SIM_SEARCH_BLIND` (engine) to measure the information
+  premium, and a T2.2b scale-and-diagnose run (longer horizon, larger episode
+  count, teacher budget and learner epochs swept, PUCT in-tree evaluated
+  paired) before any plan change. Blocks, rows and GT2's checklist mirrored.
 - 2026-09-03 (night) — T1.7 (`ee2af52`) landed in SpireTrainer: three
   non-durable generations end to end, four integration defects found and
   fixed; block, T2.2's Inherited line and deferred rows mirrored; GT1's
