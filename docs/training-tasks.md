@@ -57,9 +57,12 @@ one exists, mirroring the Stage B convention.
 |---|---|---|---|
 | Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Training side DISCHARGED 2026-09-03 (T1.1b, SpireTrainer `33a99a0`):** pin `bfd95a2` → `6c50a0b`, `ExternalProject_Add` replaced by `add_subdirectory`, `sts_engine` a real target, googletest fetched once |
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
-| Stored records carry `outcome_kind = kOpen` and zeroed outcome/value/aux targets — an append-only writer cannot go back once a run ends | T1.2 | T2.3 | Filling them is a read-old-shard / write-new-shard pass, which is exactly the shape of T2.3's **reanalyze** operation, so T1.2 deliberately did not half-build it. `RecordedRunStats::outcome_kind` carries the answer for a caller that wants it immediately. A loader must never read `outcome_return` from a `kOpen` record as if it were a target. |
+| Stored records carry `outcome_kind = kOpen` and zeroed outcome/value/aux targets — an append-only writer cannot go back once a run ends | T1.2 | T2.3 (**narrowed 2026-09-03 by T1.4s**) | Filling them is a read-old-shard / write-new-shard pass, which is exactly the shape of T2.3's **reanalyze** operation, so T1.2 deliberately did not half-build it. `RecordedRunStats::outcome_kind` carries the answer for a caller that wants it immediately. A loader must never read `outcome_return` from a `kOpen` record as if it were a target. **T1.4s discharges this for OFFLINE producers** (`floor_rollout.hpp`): a run's rows are held in memory until the run terminates, stamped with the outcome block and `value_target` there, and only then appended — nothing on disk is rewritten and the buffer is bounded by one run's floor count. What remains for T2.3 is the ONLINE case, an actor that must publish rows before its run ends, which is the only one that genuinely needs a rewrite pass. `outcome_return` is still 0 in T1.4s's shards, and correctly so: `weights_version` is `none`, i.e. no currency is named. |
 | Quarantine has no **committed** `CommitOrder` — the ordered list of sim commits this repo has ever pinned | T1.2 | T2.3 | Git shas are unordered, so "the range from A to B" is only evaluable against a declared order (`quarantine.hpp`). T1.2 demonstrated the filter with an order built in the tool; the lifecycle operation needs one in the repo, appended by the same reviewed change that moves the pin (conventions, "Moving the engine pin"). Until it exists, every real shard is `kUnknownCommit` to any policy but a hand-built one. |
-| The keyframe interval (default 64) is unswept, and `SidecarReader::reconstruct` linear-scans both sidecar streams | T1.2 | T2.1 | The interval trades bytes/run against replayed steps; T1.2 measured both at 64 (see `SpireTrainer/docs/verification/t1-2-storage-numbers.md` (training repo)) but the bank is what should choose it. The linear scan is deliberate — an index built inside the reader would be a cache with a lifetime nobody asked for; the bank harvester wants one **on disk**. |
+| The keyframe interval (default 64) is unswept, and `SidecarReader::reconstruct` linear-scans both sidecar streams | T1.2 | T2.1 | The interval trades bytes/run against replayed steps; T1.2 measured both at 64 (see [verification/t1-2-storage-numbers.md](verification/t1-2-storage-numbers.md)) but the bank is what should choose it. The linear scan is deliberate — an index built inside the reader would be a cache with a lifetime nobody asked for; the bank harvester wants one **on disk**. |
+| The value-artifact registry has no CHECKER that a registered `sha256` still matches the file it names | T1.4s | T2.3 | `artifacts/value-artifacts.json` records each artifact's digest, and `v0s_fit.py` writes it — but nothing re-verifies it on the way in. A registry whose hashes are never checked is a comment. T2.3 owns the registry's lifecycle (promote / retire / reanalyze against a champion), so the guard belongs in the same change as the first operation that reads an entry it did not write. Until then, `python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())"` is the manual check. |
+| `v0s.1` has only ever seen FLOOR-BOUNDARY states, so a search that queries it at a mid-combat leaf is extrapolating | T1.4s | T1.7 | The corpus is one row per floor, by construction (it is what makes the label per-act-boss and the volume tractable). The tracer-bullet loop is the first consumer that will call a value function from inside a search, so it is the first thing that can measure how bad the extrapolation is — and, if it is bad, the first place a combat-state corpus becomes worth generating. The generator already supports it: recording at every decision instead of every floor is a one-line change to the boundary test in `roll_floor_rows`. |
+| The V0s → V0h comparison is PRE-REGISTERED but not run | T1.4s | T1.4 | The protocol — features, target re-labelling, split, the paired-bootstrap statistic, and the four registered deltas with what each triggers — is section 9 of [verification/t1-4s-v0s.md](verification/t1-4s-v0s.md), written before the human dump exists so the comparison cannot be designed around its result. T1.4 runs it. If the dump cannot support the bootstrapped-horizon re-labelling, the protocol says to declare the comparison impossible and record that, not to weaken it. |
 
 ---
 
@@ -534,7 +537,7 @@ force run 1 with `workflow_dispatch` after this lands).
   acquiring it is a user action, so this task starts when the data is on
   disk, not before. **Log:** —
 
-- **T1.4s** `[ ]` ∥ **Sim-fitted V0s (the first currency rung).** A
+- **T1.4s** `[x]` ∥ **Sim-fitted V0s (the first currency rung).** A
   scripted-rollout generator in the training repo that links the engine's
   `fuzz_core` scripted policies (`SIM_SEARCH` / `SIM_SEARCH_SKIP`, plus the
   E0 kinds for state diversity — all pure functions of (state, mask,
@@ -563,7 +566,120 @@ force run 1 with `workflow_dispatch` after this lands).
   `docs/verification/`; V0s beats the per-(act, floor) base-rate predictor
   on held-out Brier by a margin the report states; the V0s→V0h comparison
   protocol pre-registered in the same doc (features, split, the delta that
-  would trigger re-fitting downstream heads). **Log:** —
+  would trigger re-fitting downstream heads).
+  **Inherited (2026-09-03):** T2.3 takes the value-artifact registry this task
+  creates, T1.7 takes the generator as its snapshot source and `v0s.1` as its
+  leaf currency, and T1.4 takes the pre-registered V0s→V0h protocol — all three
+  are on their own `**Inherited:**` lines and in the Deferred table above.
+  **Log:** 2026-09-03 — landed on engine pin `6c50a0b`. Report:
+  [verification/t1-4s-v0s.md](verification/t1-4s-v0s.md); artifact
+  `artifacts/v0s.1/v0s_table.npz` (sha256
+  `3ea63a2220fc0550957c60a83708c7c4b2c75f9bbccc31f21ee4850a3a00e4c4`, 126,094 B)
+  registered as the first entry of `artifacts/value-artifacts.json`.
+
+  **`fuzz_core` needed NO engine change.** The block allowed one CMake option as
+  the single permitted sim-side edit; it was not needed and was not made. The
+  engine's `tools/fuzz` directory sits inside its `if(STS_BUILD_TESTS)` block,
+  which this repo's `STS_TRAIN_ENGINE_TESTS=ON` already turns on, so
+  `if(TARGET fuzz_core)` in `src/training/CMakeLists.txt` links it exactly as
+  `storage_numbers` has since T1.2. With `STS_TRAIN_ENGINE_TESTS=OFF` the
+  generator still builds and refuses a scripted policy by name instead of
+  silently substituting one.
+
+  **What landed.** `rollout_floor_rows`
+  (`src/training/main_rollout_floor_rows.cpp`) over
+  `include/sts/training/floor_rollout.hpp` + `src/training/floor_rollout.cpp`,
+  plus `sha256.{hpp,cpp}` so the tool prints its own artifacts' digests rather
+  than quoting an external `sha256sum`; and the fit,
+  `tools/training/v0s_fit.py` (numpy only; scikit-learn optional and only for
+  the GBM comparison — **no torch/CUDA was installed, that env is T1.3's**).
+
+  **The `kOpen` obligation, discharged for offline producers.** A run's
+  floor-boundary rows are held in memory until the run TERMINATES, stamped there
+  with the outcome block and `value_target`, and only then appended. Nothing on
+  disk is rewritten — the shard stays strictly append-only — and the buffer is
+  bounded by one run's floor count (≤ ~56 records), not by the shard. What
+  remains for T2.3 is the ONLINE case (an actor publishing rows before its run
+  ends), which is the only one that needs a rewrite pass. `outcome_return` stays
+  0 because `weights_version` is `none`: no currency is named, so writing a
+  number there would be inventing one.
+
+  **Generation (real runs, the acceptance).** Fit cohort: seeds `[1, 36001)` x
+  {`sim_search`, `sim_search_skip`}, policy seed 20260903, A20 Ironclad —
+  **72,000 runs, 1,259,568 floor-boundary rows**, 65,175,786 decisions, 3,901.5 s
+  wall (**322.8 rows/s, 18.5 runs/s** at 16 threads), 63 shards x 20,000 records
+  (17.6 GB, uncommitted, at `D:\STS_BG_Mod\_train_data\v0s\main`). Deepest
+  floor 51; rows by act 1,095,356 / 163,379 / 833; boss fights 50,720 / 1,993 / 7
+  and kills 26,242 / 156 / 0. Out-of-cohort corpus: seeds `[500001, 508001)` x
+  {random, greedy_damage, greedy_block, hoard_gold, always_event, ladder} —
+  48,000 runs, 345,380 rows, 83 s (4,137.7 rows/s). The ~8 rows/s the block
+  quoted from `seed_scan` was pessimistic by ~40x for this workload.
+
+  **Determinism, asserted.** The whole 1,259,568-row sweep was generated TWICE —
+  16 threads / chunk 512, then 10 threads / chunk 1024 — and all **63 shard
+  sha256s and `runs.csv` are identical** (first shard
+  `9d7c6aaf40d96511…`, last `415a9ba4b6472145…`, `runs.csv`
+  `c60c8b72f94b4627…`). `v0s_fit.py --verify-manifest` is the comparison and
+  refuses to fit on a single mismatch — it reads only the manifest, so the
+  second sweep's 17.6 GB of shards were deleted after the comparison and its
+  `manifest.json` + `runs.csv` kept, which is all a re-check needs. Additionally byte-identical
+  **across hosts**: seeds `[1, 201)` x 4 policies under WSL/GCC `release`
+  (12 threads) and Windows/clang-cl `win-release` (4 threads) produced identical
+  digests. Three negative controls, each refused by name and exiting non-zero:
+  a verification manifest from a different sweep
+  (`the verification sweep is not the same sweep: seed_begin is 500001 there and
+  1 here`); one tampered digest inside a valid verification manifest
+  (`shard digests differ in 1 shard(s): floor_rows_00002.stsshard`); and one
+  altered `sim_commit` byte inside a real shard (`sim_commit_mismatch: … shard
+  'zc50a0ba…' != manifest '6c50a0ba…'`), which is the Python reader holding the
+  same refuse-on-mismatch line as `shard.hpp`'s `open()`.
+
+  **The label, cross-checked twice.** Bootstrapped horizon: a state in act *k*
+  is 1 iff act *k*'s boss was killed in that run, the boss probe copied in shape
+  from the engine's own fuzz driver (a transition into `COMBAT` with
+  `room_type == Boss`; a kill is that combat LEAVING `COMBAT` with
+  `combat_outcome == KILLED`, which is the only probe that works for Act 3,
+  whose kill opens no screen at all). The record's `value_target` and the
+  per-run `runs.csv` boss bits agree on **1,259,568 of 1,259,568** rows; act-3
+  kills and `run_is_victory` terminals agree at 0 = 0, which the report flags as
+  VACUOUS on this corpus rather than counting it as evidence.
+
+  **The fit and its calibration.** Hierarchical additive smoothing, L1
+  (act, floor-in-act) → L2 (+hp, max-hp) → L3 (+gold, deck, upgrades, relics),
+  each level shrunk toward its parent with a per-level alpha chosen on dev
+  (1 / 100 / 200); the prior is STRUCTURAL (`cell // divisor`), which is what
+  gives an unoccupied cell its parent's value — a data-averaged prior sent every
+  empty cell to the global rate and was measured LOSING to its own L1 baseline
+  by 5 % before the fix. 248,832 cells, 20,645 occupied in train. Seed-disjoint
+  70/10/20 split: 882,619 / 125,274 / 251,675 rows over 25,200 / 3,600 / 7,200
+  seeds. On the never-selected-on test split: **V0s Brier 0.201164 vs the
+  per-(act, floor) base-rate predictor's 0.205597** — a margin of **0.004433
+  (2.16 % relative)**, whose paired bootstrap over the 14,400 test RUNS gives a
+  95 % interval of **[0.003901, 0.004917], excluding 0**. Level by level:
+  0.235175 → 0.205597 → 0.202346 → 0.201164. Excluding the 5,290 already-settled
+  rows (post-boss floors, p ≥ 0.9, all label 1 — the report names them rather
+  than letting them flatter the aggregate) the numbers are 0.205483 vs 0.210011.
+  The sanctioned GBM fallback was fitted and **won by 0.81 % on dev** — under the
+  1 % threshold the `CHOICE_RULE` declared before either model existed, so the
+  table ships and the report says plainly that the GBM was the better model by
+  less than the pre-declared margin. Out-of-cohort (the policy-skill bias, made
+  a number): on the E0/ladder corpus V0s scores 0.128224 against that corpus's
+  own base-rate constant of 0.002755, because these policies kill an act boss
+  0.28 % of the time.
+
+  **Builds and guards.** All six presets configure + build green — win-debug /
+  win-asan / win-release through a `t14senv`-style vcvars+LLVM wrapper, and
+  debug / asan / release through `tools/wsl_run.sh --script`. A real
+  **ASan/UBSan** generation (60 runs over sim_search / greedy_damage / ladder,
+  686 rows) exits 0 clean. `tools/training/check_omniscient_boundary.sh` clean;
+  `tools/check_submodule_pin.sh` clean. No gtest cases were added and `ctest` was
+  not used as acceptance (owner direction 2026-09-03, conventions §7).
+
+  **Conventions fixed in passing (§5, stop-the-line):** §3 still said
+  Claude-authored commits carry a `Co-Authored-By` trailer. The 2026-09-03
+  ledger-mirror commit announced the opposite in its subject and changed only
+  `training-tasks.md`, leaving the losing document unfixed; §3 now says **no
+  attribution trailer**.
 
 - **T1.5** `[ ]` ∥ **Eval harness + decision suite v0.** Three seed
   populations provisioned (dev / frozen paired-validation /
@@ -861,6 +977,9 @@ desired.
   assist-annealing fallback sentence. T2.x edits mirrored verbatim into
   `SpireTrainer/docs/training-tasks.md` per its tracked-in-both-places
   rule.
+- 2026-09-03 (later still) — T1.4s landed in SpireTrainer (`0d5484e`): 1.26M
+  floor-boundary rows under SIM_SEARCH/SIM_SEARCH_SKIP, value artifact
+  `v0s.1`; block + rows mirrored verbatim.
 - 2026-09-03 (later) — T1.1b and T1.2 landed in SpireTrainer (`33a99a0`, `4f731d4`);
   their Log text and T1.2's three deferred rows mirrored here verbatim. The
   same-day T1.x amendments below were mirrored into the SpireTrainer ledger.

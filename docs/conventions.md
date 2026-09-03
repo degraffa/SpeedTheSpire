@@ -101,7 +101,7 @@ G5 (design §3.2: bridge first, then registry migration, then mass content).
   block`); body lists the acceptance evidence (test target names that ran
   green, incl. asan; for bridge tasks, the Windows-host command that ran and
   its recorded result) and cites provenance for any behavior derived from the
-  game. Claude-authored commits carry the `Co-Authored-By: Claude` trailer.
+  game. Commits carry no attribution trailer (owner direction 2026-09-03; the earlier `Co-Authored-By: Claude` rule is withdrawn).
 - Commit only from a green tree — **debug and asan presets pass; release too
   at gates**. Never `--no-verify`, never amend or rebase committed work; fix
   forward.
