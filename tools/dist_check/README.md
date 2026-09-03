@@ -224,6 +224,79 @@ tools/wsl_run.sh release
 tools/wsl_run.sh --script tools/dist_check/s2_run.sh release --seeds 20000
 ```
 
+## Pre-registered S3 tier-4 family
+
+The S3.63 family (s3-tasks.md S3.63, s3-design §5 traps 1/9 and the Act-4
+monster `getMove` tables) is `dist_check_s3` — a **separate family alongside**
+B5.3's and S2.44's, the same non-reopening discipline as S2.44's own. It is
+fixed at these **six** hypotheses, family-wise alpha **0.01**,
+Holm-Bonferroni, with S2.44's two-stage replicate-before-flagging rule
+applied uniformly to the family and to its negative controls:
+
+1. `s3.monster.spire_shield_case0_coin` — SpireShield.getMove case 0
+   (Fortify/Bash, 50/50, off the opening decision)
+2. `s3.monster.spire_spear_case2_coin` — SpireSpear.getMove case 2
+   (Piercer/BurnStrike, 50/50, the DEFAULT arm at moveCount == 2)
+3. `s3.monster.corrupt_heart_case0_coin` — CorruptHeart.getMove phase 0
+   (BloodShots/EchoAttack, 50/50, the second decision — the opener,
+   DEBILITATE, is an early return that does not advance moveCount)
+4. `s3.map.emerald_gate_elite_index` — setEmeraldElite's node choice,
+   stratified by the observed elite-node count (an ancillary statistic, not a
+   tuned parameter — the conditional law, uniform 1/k, is the fixed claim)
+5. `s3.relic.act4_shop_can_spawn_front_scan` — the Act-4 floor-gated canSpawn
+   family (12/33 COMMON, 9/30 UNCOMMON, 6/28 RARE rows permanently closed at
+   floor 55) at the shop draw site
+6. `s3.relic.act4_reward_can_spawn_front_scan` — the same family at the elite
+   combat-reward draw site
+
+Every OBSERVED count drives the REAL engine entry points
+(`spire_shield_init`/`_roll_move`, `spire_spear_init`/`_roll_move`,
+`corrupt_heart_init`/`_roll_move`/`_take_turn`, `assign_room_types` off
+`generate_map`, `return_random_relic_key`) from deterministic seeds. Rows 5/6
+reuse S2.44's `front_scan_blocked_law` **unmodified**: Act-4's non-BOSS-tier
+canSpawn rejection walks front-then-end-inward rather than BOSS tier's pure
+front-scan, but by a permutation-symmetry argument (any FIXED,
+outcome-independent traversal order over a uniformly shuffled pool visits
+allowed/blocked labels with the same distribution as left-to-right order) the
+"blocked entries consumed before the first allowed one" law is identical
+either way — stated in full in `s3_main.cpp`'s header, which is the
+authority on the registration; this section only summarises it.
+
+**The negative controls are one per mechanism class**, not one per row
+(S2.44's economy — 13 hypotheses, 4 mutants):
+
+- `mutant.spire_shield_case0_always_fortify` — the coin's `randomBoolean`
+  draw dropped (every seed reports Fortify);
+- `mutant.emerald_gate_always_first_node` — the draw's result ignored (the
+  row-major rank hardcoded to 0);
+- `mutant.act4_can_spawn_rejection_returns_relic` — a canSpawn rejection
+  puts the relic back instead of permanently consuming it (S2.44's own M3,
+  replayed against the Act-4 reward context).
+
+**Exact/support checks, outside the Holm family** (any failure flags the
+campaign directly, the B5.3/S2.44 precedent): the emerald-gate two-arm
+paired comparison itself (trap 1's core claim — byte-identical room grids, an
+identical elite-node count and an mapRng counter delta of exactly the one
+skipped draw between `has_emerald_key=false` and `=true` on the SAME
+generated map); the three coin flips' "deterministic surround" (every OTHER
+`ai_rng` draw around each coin costs exactly what the header notes claim, on
+every seed, regardless of the coin's own outcome); and the Heart's buffCount
+LADDER (Artifact(2) → Beat of Death(1) → Painful Stabs(−1) → Strength(10) →
+Strength(50) forever, read off the actual queued `ActionQueueItem`s
+`corrupt_heart_take_turn` produces, confirming the 3-bit saturating counter
+never drifts past rung 4).
+
+Run it at the B5.3/S2.44 scale through the sanctioned WSL entry point;
+`--seeds` rejects values below 10,000, exactly as `run.sh`/`s2_run.sh` do:
+
+```bash
+tools/wsl_run.sh release
+tools/wsl_run.sh --script tools/dist_check/s3_run.sh release --seeds 20000
+```
+
+Full result table, per-row p-values and the standing limits are in
+[../../docs/verification/s3-63-tier4.md](../../docs/verification/s3-63-tier4.md).
+
 ## Pre-registered oracle spot family
 
 `oracle_spot.py` consumes one completed, distinct campaign of at least 200

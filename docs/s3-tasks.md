@@ -2822,7 +2822,7 @@ this tree, not a Log carried forward.
   S3-G1 reduced to **zero**; the coverage join exact.
   **Log:** —
 
-- **S3.63** `[ ]` ∥ **Distributional (tier-4) additions.** Pre-registered
+- **S3.63** `[x]` ∥ **Distributional (tier-4) additions.** Pre-registered
   hypotheses, Holm-corrected as one family with the B5.3/S2.44 α discipline
   and the replicate-before-flagging rule: the emerald-gate map divergence
   (trap 1) as a two-arm comparison over paired seeds; the three Act-4 coin
@@ -2833,7 +2833,39 @@ this tree, not a Log carried forward.
   **Deps:** S3-G1 **Acceptance:** the registered family run at its
   pre-declared scale with `RESULT PASS`, negative controls two-stage rejected,
   and the re-run command recorded in the report.
-  **Log:** —
+
+  **Log (2026-09-03):** `tools/dist_check/dist_check_s3` (+ `s3_run.sh` beside
+  `run.sh`/`s2_run.sh`), a **new family alongside** B5.3's and S2.44's, not an
+  extension of either. Six hypotheses, family-wise α **0.01**,
+  Holm-Bonferroni: the three coin flips (Shield case 0, Spear case 2, Heart
+  phase 0) driven off the real `*_init`/`*_roll_move` entry points; the
+  emerald-gate elite-node index, stratified by the observed elite-node count
+  (an ancillary statistic, not a tuned parameter); and the Act-4 floor-gated
+  `canSpawn` family (12/33 COMMON, 9/30 UNCOMMON, 6/28 RARE rows permanently
+  closed past floor 52, read in full from
+  `src/engine/relics/relic_pickup_{common,uncommon,rare}.cpp`) at both the
+  shop and the elite-reward draw sites. Rows 5/6 reuse S2.44's
+  `front_scan_blocked_law` **unmodified** — Act-4's non-BOSS canSpawn
+  rejection walks front-then-end-inward rather than BOSS tier's pure
+  front-scan, but a permutation-symmetry argument (any fixed,
+  outcome-independent traversal order over a uniformly shuffled pool visits
+  allowed/blocked labels with the law) makes the two consumption patterns
+  distributionally identical; the argument is stated in full in
+  `s3_main.cpp`'s header. Three negative controls (one per mechanism class,
+  S2.44's economy), each `CONTROL-REJECTED` in **both** stages of the
+  replicate rule. `RESULT PASS` at the pre-declared 20,000-seed scale on
+  `release`, reproduced at 10,000 seeds on `debug`, `asan` (zero sanitizer
+  findings) and `win-release` (byte-identical statistics across GCC/Clang/
+  clang-cl). Zero exact/support-check failures: the emerald-gate two-arm
+  paired comparison (trap 1's core claim — byte-identical room grids and an
+  mapRng counter delta of exactly the one skipped draw between the two
+  `has_emerald_key` arms of the SAME generated map), the three coin flips'
+  deterministic surround, and the Heart's `buffCount` ladder (Artifact(2) →
+  Beat of Death(1) → Painful Stabs(−1) → Strength(10) → Strength(50) forever,
+  read off the actual queued `ActionQueueItem`s, saturating at rung 4 with no
+  drift over 1,536 ladder observations) all held on every seed of both seed
+  blocks. Full report, p-value table and re-run command:
+  [verification/s3-63-tier4.md](verification/s3-63-tier4.md).
 
 - **S3.64** `[ ]` ∥ **Throughput: the S2 attribution, and the first honest
   whole-run baseline.** Two halves. (a) Discharge the S2.45 attribution
