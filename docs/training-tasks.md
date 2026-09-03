@@ -32,10 +32,15 @@ one exists, mirroring the Stage B convention.
   deliverable), after which this file keeps only the cross-repo gates.
   Training-repo tasks never modify this repo except where a task block
   explicitly says so.
-- **Capacity rule (plan §4.4):** sim-repo agent capacity is prioritized
-  **G7 close → T0.x → TE.2 (S2 authoring)**, in that order. Nothing in this
-  ledger may starve the open G7 gate in
-  [stage-b-tasks.md](stage-b-tasks.md).
+- **Capacity rule (plan §4.4):** sim-repo agent capacity was prioritized
+  **G7 close → T0.x → TE.2 (S2 authoring)** while those were open (all
+  three are `[x]`). **Since 2026-09-03 (S2-G2 taken):** S2.V3 residue
+  closure (fixes already in hand) → the training-repo unblockers (engine
+  pin bump, T1.2) → S3 planning (its own ledger once it lands) → the
+  T1.4s value-bootstrap accelerant → TE.3. The plan's §4.4 accelerant
+  clause is now load-bearing in the other direction: S3 verification at
+  depth is expected to use the trained Act-1–3 agent as its driver, so
+  training-first is also headline-first.
 - Task body prose before the `**Deps:**` line is the block's Deliverables
   field (conventions §3 shape, folded for brevity).
 - `tools/check_stale_counts.sh` exempts ledger `[x]`/`[!]` lines and
@@ -334,7 +339,10 @@ force run 1 with `workflow_dispatch` after this lands).
   7 UNVERIFIED markers each owned by a ledger row). G7 "Then:" updated;
   Wave 1 (S2.01–S2.04) dispatched by the orchestrator at landing.
 
-- **TE.3** `[ ]` ∥ **Handicap-assisted deep-state generator.** Sim-side
+- **TE.3** `[ ]` ∥ **Handicap-assisted deep-state generator.** *(Priority
+  note 2026-09-03: behind T1.4s/T2.1 — the Act-1 bank comes from
+  `SIM_SEARCH`, which kills the Act-1 boss on ~37 % of A20 seeds; TE.3 is
+  needed when Act-2/3 strata are, i.e. before T4, not before T2.)* Sim-side
   driver that reaches Act 2–3 states cheaply for the T2.1 snapshot bank
   (and any S2-side coverage use), closing the measured gap that scripted
   policies lose ~×30 per act (S2-G1 soak: `victories = 0`, so unassisted
@@ -420,9 +428,17 @@ force run 1 with `workflow_dispatch` after this lands).
   **Acceptance:** a committed numbers doc: R at ≥ 3 batch sizes and ≥ 2 net
   widths, t_enc, batch-fill and queue-wait histograms, and the plan §5
   budget numbers re-derived from measured values; sweep-selected search
-  config recorded as the Phase T2 default. **Log:** —
+  config recorded as the Phase T2 default.
+  **Inherited (2026-09-03):** the box's Python environment cannot drive the
+  GPU — Python 3.9.7 with a CPU-only torch 1.8.1, while the RTX 5070 Ti
+  (Blackwell) needs CUDA ≥ 12.8 and a 2025+ PyTorch. A dedicated env (a
+  fresh venv or conda env, Python 3.12, current CUDA PyTorch) is the first
+  deliverable of this task, and the C++ actor's inference path (LibTorch vs
+  TensorRT vs ONNX Runtime — plan §5 names the first two) is a **recorded
+  decision** in the numbers doc, with the env's exact versions pinned in a
+  requirements/lock file the training repo commits. **Log:** —
 
-- **T1.4** `[ ]` ∥ **Dataset ingestion + tabular V0.** Acquire the public
+- **T1.4** `[ ]` ∥ **Dataset ingestion + tabular V0h (human data).** Acquire the public
   run dataset; verify `seed_played` and player-identifier availability
   (recording the answer — it gates split design); filters (character,
   ascension, patch era); the **minimal tabular V0** P(win | floor, HP,
@@ -433,7 +449,44 @@ force run 1 with `workflow_dispatch` after this lands).
   run-disjoint split, choice recorded; V0 additionally validated against
   sim-rollout outcomes on ≥ 20 reconstructed floor-boundary states with
   the vintage-bias delta recorded (plan §4.2); damage-record table row
-  counts and schema documented. **Log:** —
+  counts and schema documented.
+  **Priority note (2026-09-03):** this is an **accelerant off the critical
+  path** — GT1's "V0 shipped" bar is satisfied by T1.4s's sim-fitted V0s,
+  and V0h's job becomes the pre-registered V0s→V0h bias measurement (plan
+  §4.1). No local copy of the dump exists on this box (checked 2026-09-03);
+  acquiring it is a user action, so this task starts when the data is on
+  disk, not before. **Log:** —
+
+- **T1.4s** `[ ]` ∥ **Sim-fitted V0s (the first currency rung).** A
+  scripted-rollout generator in the training repo that links the engine's
+  `fuzz_core` scripted policies (`SIM_SEARCH` / `SIM_SEARCH_SKIP`, plus the
+  E0 kinds for state diversity — all pure functions of (state, mask,
+  PolicyRng), no engine-stream draws) and records the `PublicView` + mask at
+  **every floor boundary** into T1.2 shards, with the run's outcome labels
+  (max floor, per-act boss fight/kill, death floor, victory). The fit is the
+  bootstrapped-horizon rule V1 already uses: a state in act *k* is labelled
+  by whether act *k*'s boss was killed. Tabular P(kill current-act boss |
+  act, floor-in-act, hp bucket, max-hp bucket, gold bucket, deck size,
+  upgrade count, relic count) with additive smoothing; if the buckets starve
+  at the tails, a small gradient-boosted model over the same features is
+  the sanctioned fallback, chosen by held-out calibration and recorded.
+  Ships as value artifact `v0s.1` in the T2.3-style versioned registry
+  (this task creates the registry's first entry; T2.3 inherits it). Known
+  biases, stated in the doc: the scripted policy's skill and its
+  truncated horizon. If the engine's `tools/fuzz` targets are not built when
+  the engine is embedded by `add_subdirectory`, the one sim-side change is a
+  CMake option exposing `fuzz_core` — that edit lands in this repo under
+  full conventions and is the only engine change this task may make.
+  **Deps:** T1.2, and the engine pin at ≥ 6c50a0b (three-act content)
+  **Acceptance:** ≥ 1M floor-boundary rows generated deterministically
+  (same seed set → byte-identical shards, asserted); the training repo's
+  own `check_omniscient_boundary` clean over the generator; calibration
+  report (reliability diagram + Brier, per act and per hp bucket) on a
+  seed-disjoint split committed under the training repo's
+  `docs/verification/`; V0s beats the per-(act, floor) base-rate predictor
+  on held-out Brier by a margin the report states; the V0s→V0h comparison
+  protocol pre-registered in the same doc (features, split, the delta that
+  would trigger re-fitting downstream heads). **Log:** —
 
 - **T1.5** `[ ]` ∥ **Eval harness + decision suite v0.** Three seed
   populations provisioned (dev / frozen paired-validation /
@@ -457,14 +510,40 @@ force run 1 with `workflow_dispatch` after this lands).
   net; probe harness demonstrably detects a deliberately-leaked
   observation (negative control) and passes on the clean encoder. **Log:** —
 
+- **T1.7** `[ ]` **Tracer-bullet expert-iteration loop (non-durable).** One
+  end-to-end cycle of the T2.2 shape, run BEFORE GT1 and deliberately
+  throwaway — permitted by the plan's rule, which forbids *durable*
+  training before the gate, and existing to pull integration failures
+  (batch starvation, hot-swap races, shard/loader mismatches, learner
+  ingest lagging actor production) forward by months. Graph: ≥ 1k Act-1
+  combat snapshots (the T1.4s generator's floor-boundary states advanced
+  into their next combat, or the T2.1 bank if it exists) → the T1.3 actor
+  with real search and `resample_hidden` worlds → T1.2 shards → a Python
+  learner step on the tiny net (policy + value, leaf currency V0s if landed,
+  else a constant labelled as such) → weights exported and hot-swapped into
+  the running actor → next generation. Every plan §5 day-one telemetry
+  counter live (per-decision time breakdown, batch-fill and queue-wait
+  histograms, steps-per-run per weights version, learner ingest vs actor
+  production).
+  **Deps:** T1.2, T1.3 (T1.4s is an accelerant, not a dep)
+  **Acceptance:** three generations complete unattended; a per-generation
+  report (throughput, batch-fill, ingest-vs-production, wall-clock per
+  generation) committed under the training repo's `docs/verification/`;
+  every artifact the loop produced is deleted or labelled non-durable and
+  nothing from it is registered as a value artifact or checkpoint; the
+  list of integration defects found and fixed is in the Log. **Log:** —
+
 ### GT1 `[ ]` **Gate: trainer contract live (completes InitialPlan M6) — no durable training before this**
 **Deps:** T1.1–T1.6
 (M7 deliberately maps to no gate: E1 is demoted from gate to accelerant per
 plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
 - [ ] Leak gates green (T0.5, T0.6, T1.6).
 - [ ] R and t_enc measured; budget table re-derived (T1.3).
-- [ ] V0 shipped with calibration report (T1.4).
+- [ ] V0 shipped with calibration report — V0s (T1.4s), or V0h (T1.4) if
+      the dump landed first.
 - [ ] Eval harness + seed populations frozen (T1.5).
+- [ ] The tracer-bullet loop ran ≥ 3 generations and its report is
+      committed (T1.7).
 **Log:** —
 
 ---
@@ -481,7 +560,11 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   accelerant, not a dep), stratified by
   floor/deck-archetype/HP; branch-K memcpy reset tooling; bank format
   versioned with the trajectory schema.
-  **Deps:** GT1 **Acceptance:** bank of ≥ 100k snapshots with the
+  **Deps:** T1.2 (the versioned schema) — GT1 is deliberately **not** a
+  dep since 2026-09-03: bank harvesting is data generation from scripted
+  policies that already exist, and waiting on V0/eval/leak gates for it
+  put the whole T2 phase behind an external data acquisition
+  **Acceptance:** bank of ≥ 100k snapshots with the
   stratification report: ≥ 20 % of snapshots from floors 8+ and every
   RunPhase represented (vs the random-policy baseline's 97.6 % floor-1–7
   mass), with a provenance breakdown (survival-biased vs handicap-assisted)
@@ -701,6 +784,15 @@ desired.
   assist-annealing fallback sentence. T2.x edits mirrored verbatim into
   `SpireTrainer/docs/training-tasks.md` per its tracked-in-both-places
   rule.
+- 2026-09-03 — *shortest path to the first training loop* (owner-directed:
+  reach training as early as possible). Mirrors the same-day plan change-log
+  entry: T1.4 renamed V0h and demoted to an accelerant; **T1.4s** (sim-fitted
+  V0s) and **T1.7** (non-durable tracer-bullet loop) added; GT1's V0 bar
+  satisfiable by either V0; T2.1's dep relaxed from GT1 to T1.2; T1.3 gains
+  the GPU-environment Inherited line; TE.3 carries a priority note; the
+  capacity rule restated for the post-S2-G2 world. The T1.x edits are to be
+  mirrored verbatim into `SpireTrainer/docs/training-tasks.md` at the next
+  training-repo landing (tracked-in-both-places rule).
 - 2026-09-02 — the `CMAKE_SOURCE_DIR` deferred obligation is DISCHARGED on the
   sim side: the engine now builds correctly under `add_subdirectory` from a
   foreign top level, guarded by `tools/check_embed_consumer.sh` and written up

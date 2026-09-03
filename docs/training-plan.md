@@ -255,10 +255,21 @@ recreate the CVaR mistake); (iii) promotion-gate calibration reports
 
 Each rung is a versioned artifact with a pre-registered validation event:
 
-- **V0** — run-level P(win | floor, HP, deck, relics, gold) fit on the
-  public human run dataset (~77M runs; wins *and* losses; weighted to high
-  ascension). Known biases: human skill, human deck distributions,
-  2018–2020 patch vintage.
+- **V0s** *(added 2026-09-03)* — the first rung: a tabular
+  P(kill the current act's boss | floor-boundary public state) fit on the
+  engine's own scripted-policy rollouts (`SIM_SEARCH`, the S2.V2
+  sim-consulting driver, plus the E0 kinds for diversity), labelled with
+  the bootstrapped-horizon rule V1 uses. Learned from data, not
+  hand-written; costs an afternoon of sim time. Known biases: the scripted
+  policy's skill and its truncated horizon — both *measured* by the
+  pre-registered V0s→V0h delta when the human fit lands.
+- **V0h** (formerly V0) — run-level P(win | floor, HP, deck, relics, gold)
+  fit on the public human run dataset (~77M runs; wins *and* losses;
+  weighted to high ascension). Known biases: human skill, human deck
+  distributions, 2018–2020 patch vintage. Since 2026-09-03 an accelerant
+  and a cross-check rather than a gate input: the dump is an external
+  acquisition of unknown availability and a ~100 GB ingest, and holding
+  the first training loop on it was the plan's largest avoidable delay.
 - **V1** — re-fit on the agent's own Act-1 runs (bootstrapped horizon:
   episodes end at the act boss, exits valued by current V). The V0→V1 delta
   is the first *coarse signal* about human-data bias (it conflates skill
@@ -308,7 +319,10 @@ Phases and gates are the Phase T ledger's structure
   production batch) and t_enc (observation encode cost) — the two
   unmeasured numbers every budget hangs on; dataset ingestion + tabular V0;
   eval harness. **No durable training before the leak gates are green and R
-  is measured.**
+  is measured.** A deliberately *non-durable* tracer-bullet expert-iteration
+  loop (ledger T1.7) runs before the gate — permitted by that rule, and
+  there to pull integration failures forward by months. The T2 snapshot
+  bank depends only on the trajectory schema, not on the gate (2026-09-03).
 - **T2 (combat expert iteration, parallel with S2):** snapshot bank from
   survival-biased play *and* from TE.3's handicap-assisted deep-state
   generator (driver-side assist only — interpreter-enqueued real damage
@@ -348,7 +362,9 @@ Phases and gates are the Phase T ledger's structure
 
 T0's sim-side deliverables, G7 closure, and S2 authoring compete for the
 same sim-repo orchestrator capacity. Priority order: **G7 close →
-PublicView layer → S2 authoring.** S2/S3 verification gates must be
+PublicView layer → S2 authoring.** After S2-G2 (2026-09-03): S2.V3
+residue closure → training-repo unblockers → S3 planning →
+value-bootstrap accelerants (V0s, TE.3). S2/S3 verification gates must be
 satisfiable by *scripted* survival drivers, with trained checkpoints an
 accelerant — otherwise combat training lands on the engine critical path,
 reversing the intended dependency arrow.
@@ -388,6 +404,12 @@ ranges strand their sidecars — accepted and logged. Instrument from day
 one: per-decision time breakdown (encode/step/copy/tree/NN-wait),
 batch-size and queue-wait histograms, steps-per-run per weights version,
 learner ingest vs actor production.
+
+**Environment, measured 2026-09-03:** the training box runs Python 3.9.7
+with a CPU-only torch 1.8.1; the RTX 5070 Ti is Blackwell and needs CUDA
+≥ 12.8 with a 2025+ PyTorch. The spike (T1.3) therefore begins with a
+dedicated, version-pinned environment, and the C++ actor's inference path
+(LibTorch vs TensorRT) is one of its recorded outputs.
 
 ## 6. Evaluation and promotion
 
@@ -470,6 +492,15 @@ scheduling before touching anything else.
 - 2026-08-01 — document created (proposed, uncommitted).
 - 2026-08-01 — landed; the §8.9 InitialPlan.md patches were discharged in
   the same change per conventions §4.
+- 2026-09-03 — *shortest path to the first training loop* (owner-directed).
+  §4.1: the ladder gains **V0s**, a sim-fitted first rung; the human fit
+  becomes **V0h**, an accelerant and bias cross-check, and GT1's "V0
+  shipped" bar accepts either. §4.3: a non-durable tracer-bullet loop
+  (T1.7) precedes GT1; T2.1 depends on the schema alone. §4.4: the
+  post-S2-G2 capacity order. §5: the GPU-environment prerequisite. Reason
+  in one line: every remaining item on the path to a first training run
+  was internal engineering except the human-data acquisition, so the plan
+  stops waiting on it. Ledger mirrored the same day.
 - 2026-08-26 — §4.3 T2 amended: the snapshot bank gains a second source,
   the TE.3 handicap-assisted deep-state generator (sim-repo task; assist
   damage through the effect interpreter + rollback-on-death, legal states
