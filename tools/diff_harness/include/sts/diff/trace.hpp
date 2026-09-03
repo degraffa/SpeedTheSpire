@@ -75,9 +75,16 @@ namespace sts::diff {
 // (state_kind + both struct sizes in the header) is unchanged; a stale-sized
 // CombatState/RunState trace is refused both by the stamped version and by the
 // header's size checks. No v2/RUN goldens are committed, so nothing on disk
-// needs regeneration.
+// needs regeneration. The schema-v9 pad carve (S3.31 -- RunState::victory_kind
+// and RunState::act4_floor_base cut out of pad_gold_align[2]) moves NEITHER
+// struct's sizeof, so it is the first bump carried by MEANING alone: a v8
+// record's bytes are a valid v9 record and read back identically, and the tag
+// follows to 9 purely so a reader knows the two former padding bytes are now
+// interpretable. Again nothing on disk needs regeneration; the 20 v1 combat
+// fixtures are regenerated anyway (the single sanctioned pass) and come out
+// byte-identical, which is the proof rather than a formality.
 inline constexpr uint32_t kTraceFormatV1 = 1;
-inline constexpr uint32_t kTraceFormatV2 = 8;
+inline constexpr uint32_t kTraceFormatV2 = 9;
 static_assert(kTraceFormatV2 == engine::SCHEMA_VERSION,
               "v2 trace format tag must equal the current engine::SCHEMA_VERSION");
 

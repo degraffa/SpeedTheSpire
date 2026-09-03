@@ -188,7 +188,60 @@ struct RunState {
     //    widths (int16) so combat_begin()/fold is a plain copy. --
     int16_t hp;
     int16_t max_hp;
-    uint8_t pad_gold_align[2];        // explicit padding (see the PADDING note)
+
+    // ========================================================================
+    // schema-v9 pad carve (S3.31): the run-outcome kind + the Act-4 floor base
+    // ========================================================================
+    // TWO LIVE BYTES CUT OUT OF `pad_gold_align[2]`, the alignment slack that
+    // used to sit between max_hp and the 4-aligned `gold`. NO OFFSET MOVES and
+    // `sizeof(RunState)` is unchanged -- the same terms as the S2.13
+    // `event_flags_hi` carve -- so every pre-v9 RunState still reads back
+    // byte-identically, with both new fields 0 (which is exactly their
+    // "nothing happened yet" value: NONE and "no Act-4 base written").
+    //
+    // WHY THE VERSION STILL MOVES 8 -> 9 even though no byte moved: a v8 reader
+    // cannot tell "0 because this byte was padding" from "0 because the run has
+    // no outcome yet", and a v8 WRITER left the byte indeterminate on any path
+    // that did not value-initialise. The stamp is what says these two bytes are
+    // now interpretable. The bump is planned in exactly one place
+    // (docs/s3-tasks.md's "Registry id blocks granted": S3.31 only,
+    // conventions.md §5), and it front-loads S3.32's field so the Act-4
+    // crossing needs no second bump.
+
+    // RunVictoryKind (below). WRITTEN ONCE, at the run's terminal, and never
+    // cleared: NONE while the run is live or lost, ACT3_STOP when the
+    // `Spire Heart` dialog's DEATH arm ends the run at the Act-3 stop
+    // (SpireHeart.java:170-177), HEART when the Act-4 TrueVictoryRoom is
+    // reached (S3.33). It is the engine's rendering of the game's two
+    // INDEPENDENT metrics booleans `victory` and `trueVictor`
+    // (Metrics.java:82,107; DeathScreen.java:291-299 vs
+    // VictoryScreen.java:254-269): `victory` is `kind != NONE` and `trueVictor`
+    // is `kind == HEART`.
+    //
+    // NO CAPTURE ATTESTS IT. Neither CommunicationMod's `game_state` nor the
+    // fork's oracle block exposes either boolean, so the replay differ derives
+    // the expected value from the ARTIFACT's own trailing `record_kind:
+    // terminal` outcome instead of from a dump field (translate.cpp; the same
+    // shape as the boss-chest `seen` gate, not a neutralisation).
+    uint8_t victory_kind;
+
+    // The floor at which Act 4 was CONSTRUCTED -- the Act-4 analogue of
+    // act_floor_base(act) (run_advance.hpp), which is exact only for acts 1-3.
+    // 0 means "no Act-4 crossing has happened".
+    //
+    // IT IS RUN STATE RATHER THAN A FUNCTION OF THE ACT because it is
+    // A20-DEPENDENT: 51 below A20 and 52 at A20, since the A20 second Act-3
+    // boss room is a real floor and the `Spire Heart` VictoryRoom is another
+    // (s3-design §4.3). `(act - 1) * kActFloorSpan` is 51 for act 4 and would
+    // therefore be wrong at A20 only -- the exact shape of the s2-design §4.2
+    // floor-pair trap, one act later.
+    //
+    // CARVED HERE, WRITTEN BY S3.32 (the Act-4 crossing) and READ by
+    // run_cur_row. It is deliberately populated by no writer yet: the whole
+    // point of carving it in the one sanctioned bump is that the crossing does
+    // not need a second one.
+    uint8_t act4_floor_base;
+
     int32_t gold;
     uint8_t ascension;                // A0..A20
     uint8_t act;                      // 1..4
@@ -367,6 +420,21 @@ static_assert(offsetof(RunState, pad_rng_align_lo) ==
                   offsetof(RunState, pad_relic_pools) + 3,
               "the carve must start where pad_relic_pools ended");
 
+// THE S3.31 PAD-CARVE PROOF. `victory_kind` and `act4_floor_base` were cut out
+// of the two bytes `pad_gold_align[2]` declared between max_hp and gold, so
+// together they must exactly close that hole and leave `gold` -- and therefore
+// every byte after it -- where it was. If either assert fires the carve does
+// NOT fit, and the answer is a TAIL APPEND (the S2.47 shape) rather than
+// reordering members.
+static_assert(offsetof(RunState, victory_kind) ==
+                  offsetof(RunState, max_hp) + sizeof(int16_t),
+              "victory_kind must start where max_hp ended -- the schema-v9 pad "
+              "carve may not gap");
+static_assert(offsetof(RunState, act4_floor_base) + sizeof(uint8_t) ==
+                  offsetof(RunState, gold),
+              "act4_floor_base must exactly close the alignment hole ahead of "
+              "gold -- no offset may move");
+
 // THE S2.47 TAIL-APPEND PROOF. boss_chest must start exactly where neow_rng
 // ends (no compiler gap ahead of it -- RngStream is 8-aligned and
 // BossChestState needs only 2, so none is possible, but the layout asserts it
@@ -390,6 +458,27 @@ static_assert(sizeof(RunState) ==
 inline constexpr uint8_t kKeyEmerald = 1u << 0;
 inline constexpr uint8_t kKeyRuby = 1u << 1;
 inline constexpr uint8_t kKeySapphire = 1u << 2;
+
+// How a finished run finished -- the value stored in RunState::victory_kind.
+//
+// It REPLACES a boolean, and the reason is the game's own: `victory` and
+// `trueVictor` are two INDEPENDENT metrics booleans, not one (Metrics.java:82,
+// :107). The Act-3 stop submits `victory = true, trueVictor = false` through
+// DeathScreen (DeathScreen.java:291-299) -- the `Spire Heart` dialog's DEATH
+// arm literally opens a DeathScreen (SpireHeart.java:170-177) even though the
+// run is a win -- while only VictoryScreen submits both (VictoryScreen.java:
+// 254-269). Collapsing them loses the distinction training and the differ both
+// need, so the engine carries the three-valued outcome and derives each
+// boolean from it (run_advance.hpp: run_is_victory / run_is_true_victor).
+//
+// Values are append-only; NONE is the value-init default, which is what lets
+// the field live in a former padding byte without moving any offset.
+enum class RunVictoryKind : uint8_t {
+    NONE = 0,       // the run is live, or it was LOST (a death, at any depth)
+    ACT3_STOP = 1,  // the `Spire Heart` DEATH arm: victory, not trueVictor
+    HEART = 2,      // the Corrupt Heart killed and the TrueVictoryRoom entered
+                    // (S3.33); victory AND trueVictor
+};
 
 // Settings.isFinalActAvailable (Settings.java:64, computed at Settings.java:642):
 // the AND of all three characters' profile _WIN prefs -- PROFILE-derived and

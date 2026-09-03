@@ -1498,6 +1498,39 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
             rc.run.boss_chest = roll_boss_chest(rc.run);
             rc.phase = static_cast<uint8_t>(RunPhase::BOSS_TREASURE);
             break;
+        case RoomType::Victory: {
+            // VictoryRoom.onPlayerEntry (VictoryRoom.java:26-34): hide the
+            // proceed button, then -- for EventType.HEART, which is the only
+            // type goToVictoryRoomOrTheDoor ever constructs
+            // (ProceedButton.java:203) -- `this.event = new SpireHeart()` and
+            // `event.onEnterRoom()`.
+            //
+            // IT GRANTS NOTHING. The class has no reward, heal, relic, gold or
+            // RNG anywhere in it; its constructor (:21-24) sets only
+            // `phase = RoomPhase.EVENT` and the event type. The floor-stream
+            // reseed and the relic onEnterRoom / justEnteredRoom fan-outs that
+            // DID happen belong to the TRANSITION, above and at the top of this
+            // function -- Maw Bank's 12 gold lands there, exactly as it does
+            // entering the boss chest.
+            //
+            // The screen resets mirror the other room-entry arms: the reward
+            // screen and rest state are stale from the Act-3 boss fight and
+            // must not leak into this room's masks.
+            rc.combat = CombatState{};
+            reseed_floor_streams(rc.combat, seed, floor);
+            rc.rewards = RewardScreen{};
+            rc.rewards.open_card_item = kNoOpenCardReward;
+            rc.rest = RestSiteState{};
+            rc.treasure_chest = TreasureChest{};
+            // NOT a pool draw: no eventRng, no generate_event, no membership
+            // bookkeeping. The room hands itself the body by name, so the
+            // dialog opens on the reserved non-pool id (event_framework.hpp).
+            rc.event = EventDialogState{};
+            rc.event.event_id = kSpireHeartEventId;
+            rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
+            event_dialog_impl(kSpireHeartEventId)->on_enter(rc, rc.event);
+            break;
+        }
         case RoomType::Event: {
             // Relic.onEnterRoom already ran, above, against RoomType::Event --
             // the ORIGINAL EventRoom, before the game replaces it with the
@@ -1636,6 +1669,9 @@ enum class TransitionTarget : uint8_t {
     MapNode = 0,
     Boss = 1,
     BossChest = 2,
+    // The `Spire Heart` VictoryRoom (ProceedButton.java:199-208) -- a third
+    // synthetic MapRoomNode(-1, 15), on the same terms as BossChest.
+    VictoryRoom = 3,
 };
 
 void next_room_transition_impl(RunController& rc, uint8_t dst_x,
@@ -1712,6 +1748,14 @@ void next_room_transition_impl(RunController& rc, uint8_t dst_x,
     //            room adds the one this block itself performs: 14.
     //   MARGIN   Act 1: 16 - 14 = 2.  Acts 2-3: 15 - 14 = 1.
     //
+    // S3.31 SPENDS THE ACT-3 MARGIN AT A20, and it is written down here rather
+    // than discovered: the A20 double boss adds a SECOND Act-3 boss room, and
+    // until S3.31 that second room was never LEFT (the run ended in it), so
+    // demand stayed at 14. Walking into the `Spire Heart` VictoryRoom leaves
+    // it, which is the 15th pop against a supply of exactly 15 -- margin 0, and
+    // the `<=` above still holds. Nothing after it consumes monsterList: the
+    // VictoryRoom is not a MonsterRoom, and the Door adds no transition at all.
+    //
     // Elites and bosses draw their own lists and never touch this one. The
     // margin is thinner in Acts 2-3 but still positive, so the regeneration body
     // is deliberately NOT written -- writing untestable machinery for an
@@ -1745,6 +1789,14 @@ void next_room_transition_impl(RunController& rc, uint8_t dst_x,
             // with no outgoing map edges.
             rc.cur_x = static_cast<uint8_t>(kBossCol);
             room = RoomType::TreasureBoss;
+            break;
+        case TransitionTarget::VictoryRoom:
+            // MapRoomNode(-1, 15) again (ProceedButton.java:202-203): off-grid,
+            // so cur_x stays at the boss column and rc.room_type is what tells
+            // the three off-grid rooms apart -- the BossChest note above
+            // carries the reasoning verbatim.
+            rc.cur_x = static_cast<uint8_t>(kBossCol);
+            room = RoomType::Victory;
             break;
         case TransitionTarget::MapNode:
         default: {
@@ -1786,6 +1838,14 @@ void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexce
 // rather than a screen change.
 void next_room_transition_boss_chest(RunController& rc) noexcept {
     next_room_transition_impl(rc, 0, TransitionTarget::BossChest);
+}
+
+// The full transition to the off-map `Spire Heart` VictoryRoom -- see
+// run_advance.hpp for the goToVictoryRoomOrTheDoor -> nextRoomTransitionStart
+// -> updateFading -> nextRoomTransition chain that makes this a real floor
+// (floor++, trap-7 reseed, relic room-entry fan-outs) rather than a screen.
+void next_room_transition_victory_room(RunController& rc) noexcept {
+    next_room_transition_impl(rc, 0, TransitionTarget::VictoryRoom);
 }
 
 // --- the act transition (S2.12) ----------------------------------------------
@@ -2756,8 +2816,8 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
     // draw, and for the same reason: modelling the stream, not the cosmetic.
     //
     // Routing to the VictoryRoom / the Door (goToVictoryRoomOrTheDoor,
-    // ProceedButton.java:199-208) is the S3 keys surface and deliberately out of
-    // scope; the run ends here.
+    // ProceedButton.java:199-208) IS MODELLED as of S3.31: the run does not end
+    // here any more, it walks one more real floor.
     // The guard is on ROOM and DUNGEON only -- no outcome clause -- so this
     // branch deliberately does not read `outcome` either. Neither surviving
     // alternative is reachable in a boss room anyway: Smoke Bomb's canUse
@@ -2895,17 +2955,39 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
             return;
         }
 
-        rc.combat_outcome = static_cast<uint8_t>(outcome);
-        rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
-        res = StepResult{};
-        res.terminal = true;
-        res.reward = 1.0f;  // the run-level win: the +1 analogue of the DEFEAT
-                            // path's -1 above. run_is_victory() reads exactly
-                            // the state this branch writes. EXACTLY ONCE per
-                            // winning run, including an A20 one -- the
-                            // double-boss branch above returns without writing
-                            // either, so the first Act-3 boss kill is not a
-                            // terminal and pays no reward.
+        // === THE LAST ACT-3 BOSS: goToVictoryRoomOrTheDoor (S3.31) ==========
+        //
+        // ProceedButton's SAME branch, one `else if` down from the double boss:
+        //
+        //     if (ascensionLevel >= 20 && bossList.size() == 2) goToDoubleBoss();
+        //     else if (!Settings.isEndless) goToVictoryRoomOrTheDoor();
+        //
+        // (:102-105). `Settings.isEndless` is pinned false (s3-design §8), so
+        // the fall-through is unconditional -- and :199-208 has NO key branch
+        // in it, despite the name. It builds the synthetic MapRoomNode(-1, 15)
+        // with `new VictoryRoom(VictoryRoom.EventType.HEART)` and calls
+        // nextRoomTransitionStart(), which is a FULL transition for the same
+        // reason the double boss's is: isDungeonBeaten is still false (only the
+        // DOOR, one dialog later, sets it -- DoorUnlockScreen.java:159), so
+        // updateFading takes its `!isDungeonBeaten` arm (:2317-2325). ++floor,
+        // the trap-7 five-stream reseed, the relic room-entry fan-outs.
+        //
+        // RUN INLINE OFF THE KILL, exactly as goToDoubleBoss is, and for the
+        // identical reason: the proceed press has no alternative. The boss room
+        // opens no reward screen (AbstractRoom.java:327) and offers no map, so
+        // there is nothing to decide and no action verb to spend. The replay
+        // differ answers the capture's parked proceed the same way it answers
+        // the double boss's -- see command_map.hpp's COMPLETE-screen arm.
+        //
+        // THE RUN'S TERMINAL IS NOW INSIDE THE DIALOG (SpireHeart.java:170-177,
+        // src/engine/events/spire_heart.cpp), so this branch writes neither
+        // RUN_OVER nor the +1 reward; `res` is non-terminal and the four clicks
+        // follow. It also does not write `combat_outcome`: on_player_entry
+        // clears it for the room being ARRIVED at, so a write here would be
+        // dead, and `outcome` is KILLED in every reachable state anyway (the
+        // paragraph above the branch says why).
+        next_room_transition_victory_room(rc);
+        fill_run_result(rc, res);
         return;
     }
 
@@ -3872,6 +3954,13 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
             // Dialog choices; illegal ones are non-corrupting no-ops (the
             // MAP_CHOICE contract). Legality is re-derived from the live
             // menu, so a stale mask can never pick a disabled option.
+            //
+            // ONE EVENT BODY CAN NOW END THE RUN AS A WIN: the `Spire Heart`
+            // dialog's DEATH arm (SpireHeart.java:170-177) is the Act-3
+            // victory terminal since S3.31, and it reaches it through
+            // TRANSITIONED like any other body-installed phase. The +1
+            // run-level reward, which used to be written at the Act-3 boss
+            // kill, is paid at the bottom of this arm instead.
             if (action_verb(a) == ActionVerb::CHOOSE) {
                 const EventDialogImpl* impl =
                     event_dialog_impl(rc.event.event_id);
@@ -3898,6 +3987,14 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 }
             }
             fill_run_result(rc, res);
+            // EXACTLY ONCE per winning run: reaching this line means the step
+            // STARTED in EVENT_DIALOG, so the outcome cannot already have been
+            // written (only a terminal writes it, and a terminal is not a
+            // dialog). Every later advance() on the finished run falls to the
+            // RUN_OVER arm below and pays 0, as it always did.
+            if (run_is_victory(rc)) {
+                res.reward = 1.0f;  // the +1 analogue of the DEFEAT path's -1
+            }
             break;
         }
 

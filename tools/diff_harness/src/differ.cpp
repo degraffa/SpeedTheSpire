@@ -453,6 +453,15 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
     cmp_u(r, "ascension", e.ascension, a.ascension);
     cmp_u(r, "act", e.act, a.act);
     cmp_u(r, "floor", e.floor, a.floor);
+    // The schema-v9 pair (S3.31). `victory_kind` has no dump counterpart --
+    // the game's victory / trueVictor are Metrics upload fields, not run state
+    // -- so the expected side is derived once, on a victory artifact's last
+    // record, from the driver's own terminal verdict (translate.cpp).
+    // `act4_floor_base` is written by the Act-4 crossing (S3.32) and is 0 on
+    // both sides until then; it is compared from today so the crossing's first
+    // capture cannot land it silently.
+    cmp_u(r, "victory_kind", e.victory_kind, a.victory_kind);
+    cmp_u(r, "act4_floor_base", e.act4_floor_base, a.act4_floor_base);
 
     // -- master deck (counted, in order) --
     cmp_deck(r, "master_deck", e.master_deck, e.master_deck_count, a.master_deck,

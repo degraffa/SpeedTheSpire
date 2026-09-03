@@ -70,10 +70,22 @@
 //     with its own setEmeraldElite draw, and the act's BGM miscRng draw -- and
 //     lands at MAP_CHOICE on the new act's row 0. Floor numbering is continuous
 //     (Act 2 opens at floor 17, Act 3 at 34; see act_floor_base).
-//   * the VICTORY terminal: the ACT-3 BOSS kill (RunPhase::RUN_OVER,
-//     run_is_victory() true). It opens no reward screen and no chest
-//     (AbstractRoom.java:327), so the gold add at :286-297 is the last thing
-//     that happens.
+//   * the `Spire Heart` VICTORY ROOM (S3.31): the last Act-3 boss opens no
+//     reward screen and no chest (AbstractRoom.java:327), so its gold add at
+//     :286-297 is the last thing the FIGHT does -- and then
+//     goToVictoryRoomOrTheDoor (ProceedButton.java:104-105, :199-208) runs a
+//     FULL room transition into an off-grid VictoryRoom(EventType.HEART):
+//     ++floor, the trap-7 five-stream reseed, the relic room-entry fan-outs
+//     (Maw Bank pays its 12 gold here). The room grants nothing and runs the
+//     four-click `Spire Heart` dialog (RunPhase::EVENT_DIALOG,
+//     kSpireHeartEventId), whose third click reads the key gate
+//     (SpireHeart.java:151).
+//   * the VICTORY terminal: the dialog's DEATH arm (SpireHeart.java:170-177)
+//     -- RunPhase::RUN_OVER with RunVictoryKind::ACT3_STOP. The GO_TO_ENDING
+//     arm is the DOOR (goToFinalAct :94-98 -> DoorUnlockScreen.java:143-161:
+//     nextDungeon = "TheEnding", isDungeonBeaten = true, and NO extra floor);
+//     Act 4 itself is S3.32, so the Door parks at ROOM_UNIMPLEMENTED with the
+//     crossing's entry state intact.
 // ROOM CONTENT is fully live in Acts 2-3 as of the S2.2x/S2.3x waves: the
 // Act-2/3 monsters, elites and bosses landed with S2.21-S2.28, the per-act
 // event/shrine lists with S2.13 and the event bodies with S2.31-S2.33, so no
@@ -83,8 +95,10 @@
 // along.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
-//   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
-//     (combat_rewards.hpp).
+//   * ACT 4 (TheEnding): the `Spire Heart` dialog's GO_TO_ENDING arm opens the
+//     Door and then parks at ROOM_UNIMPLEMENTED, because the Act-4 dungeon
+//     construction, map and rooms are S3.32/S3.33. Everything up TO the Door
+//     -- the VictoryRoom floor, the four clicks, the three-key gate -- is live.
 //   * ? rooms RESOLVE (event_framework.hpp): the one committed eventRng roll
 //     picks MONSTER (a real monster combat, consuming monsterList) / SHOP
 //     (parks, like a map shop) / TREASURE (the chest flow) / EVENT, and an
@@ -164,16 +178,19 @@ enum class RunPhase : uint8_t {
     ROOM_UNIMPLEMENTED = 5,// entered a room kind / encounter not yet implemented.
     RUN_OVER = 6,          // terminal: the player died (combat DEFEAT, or an
                            // event kill with outcome NONE), or the VICTORY.
-                           // The victory terminal has moved twice as the rooms
-                           // behind it were modelled: S1 put it at the Act-1
-                           // boss REWARD screen's proceed, S2.11 at the boss
-                           // CHEST's proceed, and S2.12 at its real place --
-                           // the ACT-3 BOSS kill, which opens no reward screen
-                           // at all (AbstractRoom.java:327, s2-design §1). The
-                           // Act-1/2 chest proceeds are now act TRANSITIONS,
-                           // not terminals. run_is_victory() (below) tells a
-                           // win from a death; no separate phase value is
-                           // spent on it.
+                           // The victory terminal has moved three times as the
+                           // rooms behind it were modelled: S1 put it at the
+                           // Act-1 boss REWARD screen's proceed, S2.11 at the
+                           // boss CHEST's proceed, S2.12 at the ACT-3 BOSS kill
+                           // (which opens no reward screen at all,
+                           // AbstractRoom.java:327, s2-design §1), and S3.31 at
+                           // its real place -- the `Spire Heart` dialog's DEATH
+                           // arm, one off-grid VictoryRoom floor later
+                           // (SpireHeart.java:170-177). The Act-1/2 chest
+                           // proceeds are act TRANSITIONS, not terminals.
+                           // run_victory_kind() (below) tells a win from a
+                           // death AND an Act-3 stop from a Heart kill; no
+                           // separate phase value is spent on either.
     REST_SITE = 7,         // campfire menu / grid / Dream Catcher card pick.
     TREASURE_ROOM = 8,     // unopened Act-1 non-boss chest (open or skip).
     EVENT_DIALOG = 9,      // a ?-room resolved to an event with a live dialog
@@ -795,6 +812,26 @@ void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexce
 // edges (s2-tasks.md deferred obligations, "Exact Act-2/3 entry floors").
 void next_room_transition_boss_chest(RunController& rc) noexcept;
 
+// The full transition to the OFF-MAP `Spire Heart` VictoryRoom (S3.31).
+//
+// ProceedButton.goToVictoryRoomOrTheDoor (ProceedButton.java:199-208) is the
+// SAME shape as goToTreasureRoom above -- a synthetic MapRoomNode(-1, 15)
+// carrying `new VictoryRoom(VictoryRoom.EventType.HEART)`, then
+// nextRoomTransitionStart() -- and it reaches the same
+// AbstractDungeon.updateFading `if (!isDungeonBeaten)` arm (:2317-2325),
+// because isDungeonBeaten is written only by the DOOR that comes AFTER this
+// room (DoorUnlockScreen.java:159). So it is a real floor: ++floorNum, the
+// trap-7 five-stream reseed, the relic onEnterRoom / justEnteredRoom fan-outs.
+//
+// THE NAME IS A LIE ABOUT WHERE THE BRANCH IS: `OrTheDoor` suggests a key test
+// here, and there is none (:199-208 has no branch at all). The three-key gate
+// is inside the event, on its THIRD click (SpireHeart.java:151).
+//
+// Called inline off the last Act-3 boss's death, exactly as goToDoubleBoss is
+// -- neither proceed press offers the player an alternative, so neither is a
+// decision the run layer has to surface (see finish_combat_after_action).
+void next_room_transition_victory_room(RunController& rc) noexcept;
+
 // --- The act boundary (S2.12) ------------------------------------------------
 //
 // FLOOR NUMBERING IS CONTINUOUS ACROSS ACTS. dungeonTransitionSetup
@@ -980,26 +1017,38 @@ void sync_live_gold(RunController& rc) noexcept;
 
 // Whether a terminal controller is the VICTORY rather than a death.
 //
-// IT MOVED WITH ITS PRODUCER, TWICE, and that coupling is the point. In S1 the
-// terminal was the Act-1 boss REWARD screen's proceed; S2.11 moved it one room
-// later to the boss CHEST's proceed; S2.12 moves it to the real one, because the
-// chest's proceed now starts Act 2. The run ends when the ACT-3 BOSS kill settles
-// its gold (s2-design §1, frozen): AbstractRoom.java:327 suppresses dropReward()
-// and combatRewardScreen.open() for a non-endless TheBeyond boss, so no reward
-// screen and no chest ever follow it, and ProceedButton's chest branch
-// (:111-113) requires screen == COMBAT_REWARD. The terminal surface is the gold
-// add of AbstractRoom.java:286-297 -- see the Act-3 arm of
-// finish_combat_after_action.
+// IT MOVED WITH ITS PRODUCER, THREE TIMES, and that coupling is the point. In
+// S1 the terminal was the Act-1 boss REWARD screen's proceed; S2.11 moved it
+// one room later to the boss CHEST's proceed; S2.12 moved it to the ACT-3 BOSS
+// kill, because the chest's proceed had become an act transition; and S3.31
+// moves it one room later again, to the `Spire Heart` dialog's DEATH arm
+// (SpireHeart.java:170-177). The Act-3 boss's proceed is NOT the end of the
+// run: `else if (!Settings.isEndless) goToVictoryRoomOrTheDoor()`
+// (ProceedButton.java:104-105, :199-208) builds a real off-grid VictoryRoom
+// floor, and only the dialog inside it ends anything.
 //
-// The (act, room) read is what keeps a death out: a death parks at RUN_OVER with
-// whatever room it died in, and only a WON Act-3 boss room reaches this shape.
-// `combat_outcome == KILLED` is asserted too rather than inferred -- a defeat in
-// the Act-3 boss room has exactly the same act and room_type.
+// SO IT IS NO LONGER A STATE-SHAPE TEST. It used to read (phase, act, room,
+// combat_outcome) and infer the win, which worked only while the winning shape
+// was unique; the outcome is now STORED, written exactly once at whichever
+// terminal produced it (RunState::victory_kind / RunVictoryKind, run_state.hpp).
+// A death still parks at RUN_OVER with kind NONE, at any depth, so this
+// predicate keeps its name and its meaning and no existing consumer breaks.
+[[nodiscard]] constexpr RunVictoryKind run_victory_kind(
+    const RunController& rc) noexcept {
+    return static_cast<RunVictoryKind>(rc.run.victory_kind);
+}
+
 [[nodiscard]] constexpr bool run_is_victory(const RunController& rc) noexcept {
-    return rc.phase == static_cast<uint8_t>(RunPhase::RUN_OVER) &&
-           rc.run.act == kFinalAct &&
-           rc.room_type == static_cast<uint8_t>(RoomType::Boss) &&
-           rc.combat_outcome == static_cast<uint8_t>(RunCombatOutcome::KILLED);
+    return run_victory_kind(rc) != RunVictoryKind::NONE;
+}
+
+// The game's SECOND, independent metrics boolean (Metrics.java:82,107): only a
+// VictoryScreen submits `trueVictor = true` (VictoryScreen.java:254-269), and
+// the Act-3 stop reaches a DeathScreen instead (DeathScreen.java:291-299), so
+// an Act-3 stop is a victory that is not a true victory. S3.33's TrueVictoryRoom
+// is the only producer of HEART.
+[[nodiscard]] constexpr bool run_is_true_victor(const RunController& rc) noexcept {
+    return run_victory_kind(rc) == RunVictoryKind::HEART;
 }
 
 }  // namespace sts::engine

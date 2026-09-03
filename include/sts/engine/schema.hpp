@@ -184,6 +184,41 @@ namespace sts::engine {
 //   16-byte member left the controller as its RunState grew by 16), and
 //   BossChestState's byte classification (offers hidden until `seen`) carries
 //   over verbatim into the RunState table in byte_class.hpp.
-inline constexpr uint32_t SCHEMA_VERSION = 8;
+// v9 (=9): the run-outcome kind and the Act-4 floor base (S3.31 -- the
+//   s3-tasks.md row is the conventions-§5 planned site for this bump, and the
+//   ledger names it as the ONLY owner of 8 -> 9). A PAD CARVE, not an append:
+//   `RunState::victory_kind` (u8) and `RunState::act4_floor_base` (u8) are cut
+//   out of the two bytes `pad_gold_align[2]` declared between max_hp and the
+//   4-aligned gold, so NO OFFSET MOVES, sizeof(RunState) stays 2200 and
+//   sizeof(CombatState) is untouched (two static_asserts at run_state.hpp prove
+//   the carve closes the hole exactly). Both former padding bytes were
+//   value-init zero on every path that produces a RunState, and 0 is exactly
+//   the correct v9 reading of them -- RunVictoryKind::NONE and "no Act-4
+//   crossing" -- so every v8 record still reads back byte-identically AND
+//   meaning-identically.
+//   WHY THE VERSION MOVES AT ALL when no byte did: a v8 reader cannot tell "0
+//   because this byte is padding" from "0 because the run has no outcome yet",
+//   and a v8 WRITER left the byte INDETERMINATE on any path that did not
+//   value-initialise (the conventions-§8 "a struct compared with memcmp must
+//   declare its padding" incident is exactly that hazard). The stamp is what
+//   says these two bytes are now interpretable. It also front-loads the Act-4
+//   crossing's field so S3.32 needs no second bump -- which is the whole point
+//   of the ledger naming one owner.
+//   `victory_kind` replaces the `run_is_victory` BOOLEAN with the game's own
+//   independent victory / trueVictor pair (Metrics.java:82,107;
+//   DeathScreen.java:291-299 vs VictoryScreen.java:254-269); run_is_victory()
+//   keeps its name and meaning as `kind != NONE`.
+//   sizeof(CombatState) is UNCHANGED, so the 20 frozen v1 combat fixtures are
+//   REGENERATED via the checked-in generator (tools/fixture_gen/
+//   gen_combat_fixtures.cpp) and come out BYTE-IDENTICAL -- the strongest form
+//   of the zero-diff-in-meaning proof, since the fixtures stamp the DECOUPLED
+//   on-disk tag kTraceFormatV1 (=1) and their state_size reads sizeof(
+//   CombatState), neither of which moved. No RUN/v2 trace goldens are
+//   committed. kTraceFormatV2 follows this constant to 9.
+//   PublicView is UNCHANGED and PUBLIC_VIEW_VERSION stays 6: the outcome kind
+//   enters the observation record at S3.51, which owns the 6 -> 7 bump
+//   (s3-design §7). The twin fixture file is not committed, so nothing on disk
+//   moves for the header's engine_schema_version stamp either.
+inline constexpr uint32_t SCHEMA_VERSION = 9;
 
 }  // namespace sts::engine

@@ -102,14 +102,14 @@ granted windows (`monsters` 48 and 66, `powers` 112–135, `cards` 133,
 | `cards.yaml` | **134–135** contingency — design §2.5 predicts **zero** | S3.4x, release unspent |
 | `relics.yaml` | **155–156** contingency — design §2.5 predicts **zero** | S3.4x, release unspent |
 | `a20.yaml` | no new rows; six existing rows' notes refreshed | S3.41 |
-| `RunPhase` (`run_advance.hpp`) | **12** contingency — the preferred model rides `EVENT_DIALOG` (design §4.1); release unspent | S3.31 |
-| `RoomType` (`map_rooms.hpp`) | **9** `Victory`, **10** `TrueVictory`; `kRoomTypeCount` 9 → 11 with its `static_assert` | S3.31 / S3.33 |
+| `RunPhase` (`run_advance.hpp`) | **12** contingency — the preferred model rides `EVENT_DIALOG` (design §4.1); release unspent | S3.31 — **RELEASED UNSPENT 2026-09-03.** The `Spire Heart` dialog rides `EVENT_DIALOG` exactly as predicted, and the Act-3 boss's proceed needed no phase either (it is run inline off the kill, the goToDoubleBoss precedent), so no new run phase exists. 12 gaps permanently; `RunPhase::BOSS_TREASURE` (11) remains the last enumerator and `legal_actions`' `static_assert` on it is unmoved |
+| `RoomType` (`map_rooms.hpp`) | **9** `Victory`, **10** `TrueVictory`; `kRoomTypeCount` 9 → 11 with its `static_assert` | S3.31 **spent 9 `Victory`** (`kRoomTypeCount` 9 → 10, the `static_assert` and the fuzz coverage mirror re-pinned on it) / S3.33 owns 10 |
 | fuzz `MoveCat` (`tools/fuzz/.../policy.hpp`) | **32–35** (`REWARD_CLAIM_KEY`, the Act-4 map choice, the Spire-Heart dialog, one reserve); `COUNT` → 36 | S3.52 |
 | Opcode (`interp.hpp`, `vocab.py`) | **75–77** contingency — design §2.3 expects the four powers to be native binders on existing opcodes; release unspent | S3.42 / S3.43 |
 | power `Hook` | **18** `on_attacked_to_change_damage` contingency (`kHookCount` → 19) — Invincible may instead ride the existing `apply_buffer` site natively, in which case release it | S3.43 |
 | `RewardItemKind` (`combat_rewards.hpp`) | **two new values** `EMERALD_KEY` (6), `SAPPHIRE_KEY` (7); `kRewardKindCount` 5 → **8**, not 7 — see S3.11's Log for why the granted arithmetic was wrong (the constant lived only in the fuzz coverage table and already under-covered `STOLEN_GOLD`) | S3.11 `[x]` |
 | `MonsterState.flags` | a **type-scoped block** for the three Act-4 classes' per-instance counters (Shield/Spear `moveCount` 2 bits each; Heart `isFirstMove` 1 bit + `moveCount` 2 bits + a saturating `buffCount` ≥ 3 bits); exact bits claimed at dispatch | S3.42 / S3.43 |
-| `SCHEMA_VERSION` | **8 → 9**, one site | **S3.31 only** |
+| `SCHEMA_VERSION` | **8 → 9**, one site | **S3.31 only — SPENT 2026-09-03.** A PAD CARVE of `pad_gold_align[2]` into `victory_kind` + `act4_floor_base`: no offset moved, neither `sizeof` moved, and the Act-4 floor base is front-loaded so S3.32 needs no second bump |
 | `PUBLIC_VIEW_VERSION` | **6 → 7**, one site | **S3.51 only** |
 
 **No new `MonsterIntent`, `RelicHook`, `CardTrigger`, `ChoiceKind` or
@@ -147,13 +147,13 @@ are S3's own.
 | Archived soak kv summaries predating the `victories` counter no longer parse | fix-postboss-shop (stage-b, UNASSIGNED) | **RE-DEFERRED** | S3.52 rewrites the soak's counters again (four-act buckets, key coverage), so any parser work done now is thrown away; the loud-failure behaviour is correct in the meantime |
 | --- | --- | --- | --- |
 | **conventions.md still carries the superseded unit-test wording** | this planning exercise (S3 ledger creation, 2026-09-03) | **DISCHARGED 2026-09-03** — conventions `dd15937` (§1 owner-directive block, §5 "no rule without its witness") | Recorded while this ledger was drafted, before the orchestrator amended conventions.md the same day. No S3 brief was dispatched in between, so the condition ("before the first S3 task is dispatched") held. A real document conflict under conventions §4, recorded rather than silently tolerated. conventions §1 ("Tests land in the same change as the code they verify. Registry YAML is code: entries land with their tier-2 tests in one commit"), §5's "No rule without its test — … for registry entries the test is the tier-2 table test", and §6's three-ways-the-test-suite-lies subsection all describe a practice the 2026-09-03 owner directive retires. This planning exercise was scoped to two new documents plus two one-line cross-references and could not edit that file. conventions.md is the authority that wins on conflict, so **it must be amended to carry the directive before it is quoted at an S3 agent**, or the first brief will cite a rule the ledger contradicts |
-| **The `SpireHeart$CUR_SCREEN` enum order is derived, not read** | s3-design §4.1 | **S3.31** | The inner enum was stripped from the decompile source jar, so CFR rendered the switch with bare integer labels. The mapping (INTRO=1, MIDDLE=2, MIDDLE_2=3, DEATH=4, GO_TO_ENDING=5) is derived unambiguously from the arms' bodies, but "derived" is not "read in full" (stage-a §1). Recover it mechanically via `RECOVERED-INNER-CLASSES.md` §2 and cite the recovered file, or record the derivation as the provenance with the reason |
+| **The `SpireHeart$CUR_SCREEN` enum order is derived, not read** | s3-design §4.1 | **DISCHARGED 2026-09-03 by S3.31** — recovered mechanically, and the derivation was RIGHT: `INTRO 0, MIDDLE 1, MIDDLE_2 2, DEATH 3, GO_TO_ENDING 4`. The `RECOVERED-INNER-CLASSES.md` §2 procedure was run against the shipped `desktop-1.0.jar` (SHA-256 `cfad868a…e081673`, the value that file pins, re-verified at task time) — but with `javap` rather than CFR, because the tree's `cfr-0.152.jar` and `sts-classes.jar` are no longer on disk and the switch-map is more legible as bytecode anyway. `javap -c -p 'SpireHeart$1'` shows `$SwitchMap[INTRO.ordinal()] = 1 … [GO_TO_ENDING.ordinal()] = 5` in order, and `javap -p 'SpireHeart$CUR_SCREEN'` declares the five constants in that same order, so the decompile's bare `case N:` labels are the ordinals plus one. `VictoryRoom$EventType` was recovered in the same pass (`HEART = 1`, `NONE = 2`), confirming that `VictoryRoom.onPlayerEntry`'s `case 1:` is the HEART arm. The recovered classes are NOT committed (conventions §2 licence hygiene); the derivation is recorded at `src/engine/events/spire_heart.cpp`'s header, and `EventDialogState::screen` IS the game's ordinal so no second numbering exists to drift | The inner enum was stripped from the decompile source jar, so CFR rendered the switch with bare integer labels. The mapping (INTRO=1, MIDDLE=2, MIDDLE_2=3, DEATH=4, GO_TO_ENDING=5) is derived unambiguously from the arms' bodies, but "derived" is not "read in full" (stage-a §1). Recover it mechanically via `RECOVERED-INNER-CLASSES.md` §2 and cite the recovered file, or record the derivation as the provenance with the reason |
 | **Back-attack facing: model it, or collapse it?** | s3-design §2.3 | **S3.42** | `applyBackAttack` (AbstractMonster.java:1015-1017) reads the player's `flipHorizontal`, which changes when a target is hovered (AbstractPlayer.java:1291-1293) and is re-evaluated on every hand layout (CardGroup.java:204-223). The proposed collapse — "with exactly two guards, the one the player is not facing takes 1.5×" — must be proven exact or rejected, against those three methods read in full **and** against a live Shield-and-Spear capture where the player attacks each guard in turn |
 | **Act-4 first-row map choice width** | s3-design §4.4 | **S3.32** | `MapRoomNode.update`'s first-room arm gates only on `y == 0` and hover (:254-279), and Act 4's row 0 has six roomless nodes beside the rest room. Whether the game offers 1 or 7 candidates decides the legal-action mask; an over-wide mask is a leak-gate problem, not a cosmetic one. Answer from the fork's own `ChoiceScreenUtils` output on the first Act-4 capture, and pin the same source for the elite→boss action kind (`MAP_BOSS` vs `MAP_NODE`, DungeonMap.java:68) |
 | **The Act-4 floor pair is A20-dependent** | s3-design §4.3 | **S3.32** | Act 4's floor base is 51 below A20 and 52 at A20, because the A20 second Act-3 boss room is a real floor. That breaks `act_floor_base(act) = (act-1) * kActFloorSpan`, so the base must be run state written at the crossing and `run_cur_row` must read it. Both halves need **separate** witnesses at **both** ascension bands — a single matching number on one band hides the pair, which is the mistake s2-design §4.2's row existed to prevent |
 | **The emerald key's CLAIM, and with it §5 trap 1, has no capture** | S3.11 | **S3.23** | The engine assembles the `EMERALD_KEY` row, skips `setEmeraldElite`'s `mapRng` draw once the key is held, and both are corpus-clean — but no committed capture ever *presses* the key row, and none takes a key and then crosses an act. So the highest-risk change in S3 is landed on a source read plus a zero-diff that cannot see it. The discharging capture is a PAIR on one seed: emerald claimed → next act generated, and emerald skipped → next act generated, with the two acts' maps **differing**. A single matching run is not evidence, because a sim that kept drawing would still match a capture that never took the key |
 | **`RunState.keys` is neutralized on both sides of every replay comparison** | S3.11 (inherited shape from the ruby bit) | **S3.21** | `neutralize_incomparable` and `neutralize_presentation_only` both zero `keys`: the sim has three writers now (Recall, and S3.11's two key-row claims) while neither CommunicationMod's `game_state` nor the fork's oracle block exposes `Settings.hasRubyKey/hasEmeraldKey/hasSapphireKey`, so the capture side is structurally 0. Until S3.21 (a) emits the three booleans, every key claim is proved only through its CONSEQUENCES — the spent campfire, the abandoned relic still popped from `relic_pool_*`, the moved `map_rng`. Remove both zeroings in the same change that lands the emit, or the new field is emitted and still not compared. **DISCHARGED 2026-09-03 by S3.21** — both zeroings are gone. The field is compared as a **pair**, not unconditionally (`neutralize_unattested_keys`, gated on `TranslatedRecord::has_keys`): deleting the zeroing and stopping there REDs `act1_a20_50/STS71037`, whose seq 83 claims the `SAPPHIRE_KEY` row so the sim rightly holds `kKeySapphire` while the pre-redeploy capture has no key block and translates to a structural 0 (`keys: 0 -> 4`). Every capture from the new jar on is compared; only unattested pre-redeploy records are neutralized |
-| **`Spire Heart` clicks 1–2: collapse or model?** | s3-design §4.1 | **S3.31** | Clicks 1 and 2 change no run state and are exactly the shape the engine already collapses (shrines.cpp / beyond_events.cpp, accepted at G7), and the follower's glue rule 3 answers collapsed one-click dialogs either way. But the differ compares **record counts**, so the choice must be made once, recorded, and reflected in the follower — not discovered during scoring |
+| **`Spire Heart` clicks 1–2: collapse or model?** | s3-design §4.1 | **DISCHARGED 2026-09-03 by S3.31 — MODEL, all four.** The decision was made on the differ's record counts, exactly as the row demanded, and it is now witnessed rather than argued: every three-act victory capture carries a five-record post-victory tail (four `Spire Heart` `choose 0` action records plus `__terminal_observed__`), and the engine answers each of the four with its own `CHOOSE 0` on `EventDialogState::screen`. Collapsing clicks 1–2 would have left the sim with no press for records 2 and 3, which the follower's glue rule 3 cannot repair on the DIFFER side. The corpus reads **5 of 5 compared, zero-diff** on both double-boss victories (0 of 5 before). The collapse convention itself is untouched: the clicks really do change nothing, and the whole dialog is presentation — the only STATE is the room transition ahead of it and the terminal that ends it | Clicks 1 and 2 change no run state and are exactly the shape the engine already collapses (shrines.cpp / beyond_events.cpp, accepted at G7), and the follower's glue rule 3 answers collapsed one-click dialogs either way. But the differ compares **record counts**, so the choice must be made once, recorded, and reflected in the follower — not discovered during scoring |
 
 ---
 
@@ -666,7 +666,7 @@ are S3's own.
 
 ## Phase S3.3 — The Act-3 terminal and the Act-4 run layer
 
-- **S3.31** `[ ]` **The `Spire Heart` dialog, the Door, and the run-outcome
+- **S3.31** `[x]` **The `Spire Heart` dialog, the Door, and the run-outcome
   kind.** The room S2 collapsed. `goToVictoryRoomOrTheDoor`
   (ProceedButton.java:199-208) as a **full room transition** — `++floorNum`,
   the trap-7 five-stream reseed, the relic `onEnterRoom` fan-outs (Maw Bank's
@@ -700,7 +700,141 @@ are S3's own.
   ended before, so their trailing records stop being skipped and start being
   compared (that is the whole point, and a RED is a finding, not a blocker);
   `check_doc_links.sh` clean.
-  **Log:** —
+  **Log:** 2026-09-03. The run no longer ends at the Act-3 boss; it walks one
+  more real floor and ends inside a dialog.
+
+  *The room is a transition, not a screen.* The last Act-3 boss's arm of
+  `finish_combat_after_action` used to write `RUN_OVER`; it now calls
+  `next_room_transition_victory_room` (a third `TransitionTarget`, beside
+  `Boss` and `BossChest`, for the third synthetic off-grid
+  `MapRoomNode(-1, 15)`), so the floor gets everything
+  `nextRoomTransitionStart` → `updateFading`'s `!isDungeonBeaten` arm gives
+  it: the left boss room's `monsterList`/`bossList` pops, `++floor`, the
+  trap-7 five-stream reseed, and the relic `onEnterRoom` / `justEnteredRoom`
+  fan-outs. **It is run INLINE off the kill, exactly as `goToDoubleBoss` is**,
+  and for the reason that decided that one: the proceed press has no
+  alternative (no reward screen exists, AbstractRoom.java:327), so it is not a
+  decision the run layer has to surface — which is why **`RunPhase` 12 was
+  released unspent** and no new action verb or fuzz `MoveCat` was needed.
+  `RoomType::Victory` (**9**) is claimed, `kRoomTypeCount` 9 → 10, and both
+  the enum's own `static_assert` and the fuzz coverage mirror re-pin on the
+  new last enumerator. `on_player_entry`'s new arm is `VictoryRoom
+  .onPlayerEntry` (VictoryRoom.java:26-34) and grants **nothing** — the class
+  has no reward, heal, relic, gold or RNG in it.
+
+  *The dialog.* `src/engine/events/spire_heart.cpp`, four screens, one
+  always-enabled option each (`buttonEffect`, SpireHeart.java:118-188 — every
+  arm rewrites the label, never the count). It rides `EVENT_DIALOG` on a
+  RESERVED NON-POOL id, `kSpireHeartEventId` (0xFFFE), on the
+  `kSyntheticEventId` model and for the translator's own reason: SpireHeart is
+  a member of no act event/shrine/special list — its ROOM constructs it — so a
+  pool `EventId` would put a non-pool entry into the three membership bitsets
+  that pool ids index (s3-design §7). **`registry/events.yaml` is deliberately
+  untouched**: row 52 `SPIRE_HEART` is S3.41's grant and is a behaviour /
+  metadata row, not a join key, and adding it here would also have needed the
+  generator's `conditions.acts` validator to learn "no act", which is the
+  loader change §7 names and this task does not own. The CONSTRUCTOR
+  (:64-92) changes no run state — publisher stats, win streak, leaderboard,
+  `calcScore` — and the MIDDLE arm's `MathUtils.random` VFX loop (:146) is a
+  static libGDX generator no seeded stream feeds, so neither is modelled.
+  Screen indices ARE the game's `CUR_SCREEN` ordinals (deferred row
+  discharged), and the key gate is all four conjuncts of :151 verbatim.
+
+  *The two terminals.* DEATH (:170-177) writes
+  `RunVictoryKind::ACT3_STOP` and `RUN_OVER`, and the run-level `+1` moved
+  here from the boss kill (latched on the phase before the step, so a finished
+  run still pays 0 on every later `advance`). GO_TO_ENDING (:178-184 →
+  `goToFinalAct` :94-98 → DoorUnlockScreen.java:143-161) is the DOOR:
+  `nextDungeon = "TheEnding"`, `isDungeonBeaten = true`, **no extra floor**
+  (that flag is precisely what skips `updateFading`'s transition arm), and it
+  parks at `ROOM_UNIMPLEMENTED`. **The handoff state S3.32 continues from**,
+  stated exactly and repeated at the call site: `floor` unchanged at 51 / 52
+  — *that number IS the Act-4 base and is what S3.32 writes into
+  `act4_floor_base`* — `act` still 3, `room_type` `Victory`, the five floor
+  streams still at `seed + floor` (which is what `TheEnding`'s construction
+  observes, §4.3), and `victory_kind` still `NONE`, because the Door is not a
+  victory and a run that dies in Act 4 is a loss.
+
+  *The schema — a CARVE, not an append.* `SCHEMA_VERSION` **8 → 9**, the
+  ledger's single planned site. `RunState::victory_kind` (u8) and
+  `RunState::act4_floor_base` (u8) come out of `pad_gold_align[2]`, so **no
+  offset moved, `sizeof(RunState)` stays 2200 and `sizeof(CombatState)` is
+  untouched**; two new `static_assert`s prove the carve closes the hole
+  exactly, `byte_class.hpp` classifies both rows PUBLIC (so the total-byte
+  tripwire still tiles with no `STS_BC_GAP`), and `state_test.cpp`'s member
+  walk names them. Both bytes were value-init zero on every path, and 0 is the
+  correct v9 reading of them, so every v8 record is a valid v9 record; the
+  version moves because a v8 reader cannot tell "0 because padding" from "0
+  because no outcome yet". `kTraceFormatV2` follows to 9.
+  **`PUBLIC_VIEW_VERSION` does NOT move** — it stays 6 and S3.51 owns 6 → 7;
+  [public-view-audit.md](public-view-audit.md) gains both rows as
+  `public / excluded` with that reason, plus a `Spire Heart` line in the
+  per-event scratch table. S3.11's reward-row kinds needed no schema byte
+  (its Log says so), so they did not ride.
+
+  *`RunVictoryKind` replaces the boolean.* `{ NONE, ACT3_STOP, HEART }`, the
+  game's own INDEPENDENT `victory` / `trueVictor` pair (Metrics.java:82,107 —
+  the Act-3 stop submits through DeathScreen.java:291-299 with `trueVictor`
+  false, and only VictoryScreen.java:254-269 submits both).
+  `run_is_victory()` keeps its name and meaning as `kind != NONE`, so no
+  consumer broke; `run_victory_kind()` and `run_is_true_victor()` are new. It
+  stopped being a state-SHAPE test, which is the point: the winning shape is
+  no longer unique.
+
+  *The differ.* `command_map.hpp`'s COMPLETE-screen `proceed` arm gained
+  `is_victory_room_handoff` — the exact sibling of `is_double_boss_handoff`,
+  because the two are consecutive arms of one `ProceedButton` branch that the
+  run layer runs the same way — and the old `run_is_victory` TERMINAL there
+  moved four records later, onto the artifact's own `__terminal_observed__`.
+  `main.cpp` takes the SAME shifted comparison for both crossings rather than
+  a second mechanism (the summary counter is renamed to name both). The
+  translator derives the expected `victory_kind` once, on a victory
+  artifact's last record, from the driver's own trailing `record_kind:
+  terminal` verdict — no dump exposes `victory`/`trueVictor`, they are Metrics
+  upload fields — with `act >= 4` reserved for S3.33's true victory; both new
+  fields are compared by name in `diff_run_states`.
+
+  *Evidence.* Six presets **build**: `win-debug` / `win-asan` / `win-release`
+  via the vcvars64 + LLVM wrapper (`s331env.cmd`), `debug` / `asan` /
+  `release` through `tools/wsl_run.sh --script tools/build_presets.sh debug
+  asan release` (configure + build, no ctest, per the 2026-09-03 owner
+  directive). The **20 Stage-A fixtures were regenerated exactly once** via
+  the checked-in `gen_combat_fixtures` and came out **BYTE-IDENTICAL** (md5
+  before == after on all 20; `git status tests/golden/` clean) — the strongest
+  available form of zero-diff-in-meaning, and the expected one: the fixtures
+  stamp the decoupled `kTraceFormatV1` and their `state_size` reads
+  `sizeof(CombatState)`, neither of which moved. The golden vectors are
+  untouched for the same reason. Both committed corpora replay **zero-diff**
+  through `tools/corpus_replay.sh` with both injected-divergence controls
+  failing loud, and `--replay --vitals` over the three-act corpus is
+  vitals-clean. **The headline number: the post-victory tail went from `0 of
+  5` compared to `5 of 5` on BOTH double-boss victories**
+  (`s2v2_db47_b__STS128113`, seq 666 handoff then seq 667-671; and
+  `s2v2_dbv_103509a__STS103509`, seq 662 then 663-667), zero-diff, with the
+  new `HANDOFF` line naming `goToVictoryRoomOrTheDoor`. A **negative control**
+  was run rather than assumed: forcing the translator to expect `HEART`
+  REDs at exactly `seq=671 floor=52 screen=GAME_OVER` with `victory_kind:
+  2 → 1` and nowhere else — which also witnesses design §5 trap 11's A20 row
+  (the terminal is at floor **52**, not 51) and proves the field is really
+  compared. `check_doc_links.sh` / `check_stale_counts.sh` clean.
+
+  *Recorded, not hidden.* Leaving the second A20 Act-3 boss room is the
+  15th `monsterList` pop against a supply of exactly 15, so the Act-3 margin
+  the `next_room_transition_impl` counting argument reports is now **0** at
+  A20 (it was 1, because that room was never left before). The assert is
+  `<=` and still holds; nothing after the VictoryRoom consumes the list. The
+  arithmetic is written into that comment so the next reader does not
+  rediscover it. Also touched minimally, and owned elsewhere:
+  `tools/fuzz/include/sts/fuzz/coverage.hpp` and `tools/fuzz/src/coverage.cpp`
+  (two lines — the `kRoomTypeCount` `static_assert` and the room-name switch,
+  which has no `default:` and would not compile without the new arm).
+
+  *Owed.* The `Spire Heart` room's **Maw Bank +12 gold** is still unwitnessed:
+  neither corpus victory holds Maw Bank, so the relic half of design §5 trap
+  11 stays `UNVERIFIED-until-captured` and belongs with S3.62's captures. The
+  Door's GO_TO_ENDING arm is likewise unwitnessed — no capture has ever held
+  three keys — and is discharged by S3.32/S3.62 together with the Act-4
+  crossing it hands over to.
 
 - **S3.32** `[ ]` **Act-4 construction, the special map, and the crossing.**
   `TheEnding`'s constructor chain (TheEnding.java:40-52): the frozen
@@ -720,7 +854,17 @@ are S3's own.
   planner's `kMaxActs` — because an unaudited reader makes an Act-4 run
   silently read Act-1 tables. Writes the **Act-4 floor base as run state at
   the crossing** (51 below A20, 52 at A20 — design §4.3) and makes
-  `run_cur_row` read it. Resolves the first-row map-choice width and the
+  `run_cur_row` read it. **The FIELD already exists:** S3.31 carved
+  `RunState::act4_floor_base` in the one sanctioned `SCHEMA_VERSION` bump
+  precisely so this task needs no second one, and it is 0 (no writer) today —
+  so S3.32 writes and reads it, and does **not** bump the schema.
+  **Where the crossing starts:** the `Spire Heart` dialog's GO_TO_ENDING arm
+  (`src/engine/events/spire_heart.cpp`) currently parks at
+  `ROOM_UNIMPLEMENTED` with the Door's exact post-state intact — floor 51/52
+  unchanged (that number IS the base), act still 3, `room_type`
+  `RoomType::Victory`, the five floor streams at `seed + floor`,
+  `victory_kind` still NONE. Replace the park with the crossing; the handoff
+  is written out in full at that call site. Resolves the first-row map-choice width and the
   elite→boss action kind against the fork (deferred rows).
   **Deps:** S3.31 **Acceptance:** six presets **build**; the committed corpora
   replay **zero-diff** (Acts 1–3 are untouched by this task and a RED means

@@ -68,7 +68,7 @@ enum class EndReason : uint8_t {
 // the guard exists at both ends of the dependency.
 inline constexpr int kRoomTypeCount = engine::kRoomTypeCount;
 static_assert(
-    kRoomTypeCount == static_cast<int>(engine::RoomType::TreasureBoss) + 1,
+    kRoomTypeCount == static_cast<int>(engine::RoomType::Victory) + 1,
     "kRoomTypeCount must cover every RoomType enumerator");
 // Same discipline as kRoomTypeCount above, and for the same reason: this was a
 // hand-written 5 with nothing checking it, so it had ALREADY silently

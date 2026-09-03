@@ -896,6 +896,39 @@ struct ShopTarget {
            static_cast<int>(rc.run.floor) == s.floor + 1;
 }
 
+// THE LAST ACT-3 BOSS'S PROCEED, the sibling of is_double_boss_handoff above
+// and the same shape for the same reason (S3.31).
+//
+// ProceedButton's branch falls from the double-boss arm to
+// `else if (!Settings.isEndless) goToVictoryRoomOrTheDoor()`
+// (ProceedButton.java:104-105, :199-208), which builds an off-grid
+// VictoryRoom(EventType.HEART) through a FULL nextRoomTransition -- ++floor,
+// the five-stream reseed, the relic room-entry fan-outs. The run layer runs
+// that inline off the boss's death, exactly as it runs goToDoubleBoss, because
+// neither press offers the player an alternative. So when the capture shows the
+// bare proceed button the sim is ALREADY standing in the VictoryRoom with the
+// `Spire Heart` dialog up, one floor ahead -- and the four `choose 0` records
+// that follow are answered by the dialog itself.
+//
+// Until S3.31 this record was the replay's TERMINAL (run_is_victory was a
+// state-shape test that the Act-3 boss kill satisfied), and the five-record
+// ending tail behind it was reached by nothing. Moving the terminal into the
+// dialog is what makes that tail comparable.
+[[nodiscard]] inline bool is_victory_room_handoff(const RunController& rc,
+                                                  const ScreenInfo& s) noexcept {
+    return s.screen_type == "COMPLETE" && s.room_type == "MonsterRoomBoss" &&
+           rc.run.act == sts::engine::kFinalAct &&
+           // The sim is in the VictoryRoom's dialog -- next_room_transition
+           // entered the room and VictoryRoom.onPlayerEntry constructed the
+           // event. The event id is checked too, not just the phase: it is the
+           // one thing that cannot be reached by any other route.
+           rc.phase == static_cast<uint8_t>(RunPhase::EVENT_DIALOG) &&
+           rc.room_type == static_cast<uint8_t>(RoomType::Victory) &&
+           rc.event.event_id == sts::engine::kSpireHeartEventId &&
+           // ...and the crossing the capture has not made yet.
+           static_cast<int>(rc.run.floor) == s.floor + 1;
+}
+
 [[nodiscard]] inline MappedCommand map_command(const RunController& rc, const ScreenInfo& s,
                                         const std::string& cmd) {
     const std::vector<std::string> p = split_ws(cmd);
@@ -989,21 +1022,28 @@ struct ShopTarget {
                 m.kind = MapKind::NOOP;
                 return m;
             }
-            // 2. The LAST Act-3 boss. The same ProceedButton branch falls to
-            //    `else if (!Settings.isEndless) goToVictoryRoomOrTheDoor()`
-            //    (:104-105, :199-208) -- the VictoryRoom / Door surface that
-            //    belongs to S3's keys, which is exactly where the run layer
-            //    ends the run instead (run_advance.hpp's run_is_victory, and
-            //    the Act-3 arm's "the run ends here"). The records after it are
-            //    the Spire-Heart cinematic the translator already drops.
+            // 2. The LAST Act-3 boss (see is_victory_room_handoff): the press
+            //    is goToVictoryRoomOrTheDoor, which run_advance.cpp likewise
+            //    ran inline off the kill, so the sim is already in the
+            //    VictoryRoom's `Spire Heart` dialog. The replay's terminal is
+            //    now FOUR RECORDS LATER -- the dialog's DEATH arm ends the run
+            //    and the artifact's own `__terminal_observed__` closes the
+            //    walk.
+            if (is_victory_room_handoff(rc, s)) {
+                m.kind = MapKind::NOOP;
+                return m;
+            }
+            // 3. A finished run still parked on a COMPLETE screen: the sim has
+            //    reached its terminal (a victory here; a death never gets a
+            //    proceed button) and there is nothing left to press.
             if (sts::engine::run_is_victory(rc)) {
                 m.kind = MapKind::TERMINAL;
                 return m;
             }
             m.reason =
-                "a COMPLETE-screen `proceed` that is neither the A20 "
-                "double-boss handoff nor the finished Act-3 victory; the sim "
-                "is in " +
+                "a COMPLETE-screen `proceed` that is none of the A20 "
+                "double-boss handoff, the `Spire Heart` VictoryRoom crossing "
+                "or a finished victory; the sim is in " +
                 std::string(phase_name(rc.phase)) + " at floor " +
                 std::to_string(static_cast<int>(rc.run.floor)) +
                 " (capture floor " + std::to_string(s.floor) +

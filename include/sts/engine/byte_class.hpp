@@ -247,7 +247,18 @@ inline constexpr ClassRow kRunStateRows[] = {
     STS_BC_ROW(RunState, master_deck_count, ByteClass::PUBLIC, ""),
     STS_BC_ROW(RunState, hp, ByteClass::PUBLIC, "always-block"),
     STS_BC_ROW(RunState, max_hp, ByteClass::PUBLIC, "always-block"),
-    STS_BC_ROW(RunState, pad_gold_align, ByteClass::PADDING, ""),
+    // The schema-v9 pad carve (S3.31): the two bytes that used to be
+    // `pad_gold_align[2]`. Both are PUBLIC -- the run's outcome is the one
+    // thing a finished trajectory exists to report, and the Act-4 floor base
+    // is derivable from the ascension and the floor sequence a player already
+    // saw, so neither hides anything a viewer could not compute.
+    STS_BC_ROW(RunState, victory_kind, ByteClass::PUBLIC,
+               "the run-outcome kind (RunVictoryKind), written once at the "
+               "terminal; the engine's rendering of the game's victory / "
+               "trueVictor pair (Metrics.java:82,107)"),
+    STS_BC_ROW(RunState, act4_floor_base, ByteClass::PUBLIC,
+               "the floor Act 4 was constructed at -- 51 below A20, 52 at A20 "
+               "(s3-design 4.3); carved here, written by the Act-4 crossing"),
     STS_BC_ROW(RunState, gold, ByteClass::PUBLIC, "always-block"),
     STS_BC_ROW(RunState, ascension, ByteClass::PUBLIC, "always-block"),
     STS_BC_ROW(RunState, act, ByteClass::PUBLIC, "always-block"),

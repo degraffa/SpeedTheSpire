@@ -735,6 +735,8 @@ struct Verdict {
     int post_victory_ending_records = 0;      // ...in the artifact ending tail
     int post_victory_ending_compared = 0;     // ...of those, actually compared
     int double_boss_handoff_records = 0;  // ...compared against the NEXT record
+                                          // (goToDoubleBoss and, since S3.31,
+                                          // goToVictoryRoomOrTheDoor)
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
 
@@ -861,11 +863,17 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
     // HAS, and `post_victory_ending_compared` is how many the replay actually
     // REACHED -- the ordinary loop below compares them like any other record,
     // and where it stops is a fact about the ENGINE, not about this differ.
-    // Today it stops one record earlier, at run_is_victory's terminal
+    // It USED to stop one record earlier, at run_is_victory's terminal
     // (command_map.hpp's COMPLETE-screen `proceed` arm), because the run layer
-    // still ends the run at the last Act-3 boss instead of walking into the
-    // VictoryRoom the game builds; S3.31 moves that terminal, and this counter
-    // is what reports the tail becoming compared with no further change here.
+    // ended the run at the last Act-3 boss instead of walking into the
+    // VictoryRoom the game builds -- so this counter read `0 of 5` on every
+    // victory artifact. S3.31 moved that terminal into the `Spire Heart`
+    // dialog's own DEATH arm, four presses later, and the counter now reads
+    // `5 of 5` with no change here: the four clicks and the artifact's
+    // `__terminal_observed__` are compared like any other record. The counter
+    // stays because it is the honest denominator -- if a later change stops
+    // reaching part of the tail, this line says so instead of the tail
+    // silently shrinking.
     v.post_victory_ending_records = run.post_victory_ending_records;
     const int ending_tail_first = run.first_post_victory_ending_record;
     if (screens.size() != run.records.size())
@@ -954,9 +962,25 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
         // full strength, because a field the capture leaves equal across its
         // own two records is compared against a value identical to this
         // record's.
-        const bool double_boss_handoff =
+        //
+        // S3.31 ADDS THE SECOND PRODUCER OF EXACTLY THIS SHAPE: the LAST Act-3
+        // boss's proceed is goToVictoryRoomOrTheDoor, which the run layer also
+        // runs inline off the kill, so the capture is parked on the boss room's
+        // bare proceed button while the sim already stands in the `Spire Heart`
+        // VictoryRoom one floor ahead. The reasoning above transfers verbatim
+        // -- same ProceedButton branch, same nextRoomTransition, same "this
+        // record's own state cannot be the comparand but the next one is" -- so
+        // it takes the same shifted comparison rather than a second mechanism.
+        // Which of the two fired is reported, because they are different
+        // crossings.
+        const bool double_boss_handoff_shape =
             !rep.empty() && is_double_boss_handoff(rc, s) &&
             k + 1 < run.records.size() && screens[k + 1].floor == s.floor + 1;
+        const bool victory_room_handoff_shape =
+            !rep.empty() && is_victory_room_handoff(rc, s) &&
+            k + 1 < run.records.size() && screens[k + 1].floor == s.floor + 1;
+        const bool double_boss_handoff =
+            double_boss_handoff_shape || victory_room_handoff_shape;
         sts::diff::DiffReport handoff_rep;
         // Set by every RACE branch below: the capture's dump is mid-animation
         // for this record, so the run-level compare excuses it and the vitals
@@ -981,14 +1005,21 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             if (handoff_rep.empty()) {
                 ++v.double_boss_handoff_records;
                 std::printf(
-                    "HANDOFF seq=%d floor=%d screen=COMPLETE cmd='%s': the A20 "
-                    "double boss -- the capture is holding the first Act-3 boss "
-                    "room's proceed button (no reward screen exists, "
+                    "HANDOFF seq=%d floor=%d screen=COMPLETE cmd='%s': %s -- the "
+                    "capture is holding an Act-3 boss room's proceed "
+                    "button (no reward screen exists, "
                     "AbstractRoom.java:327) while the sim already ran "
-                    "goToDoubleBoss (ProceedButton.java:210-220) off the kill; "
-                    "compared against the capture's own post-proceed record "
-                    "instead, zero-diff\n",
-                    rec.seq, s.floor, rec.action_command.c_str());
+                    "%s off the kill; compared against the capture's "
+                    "own post-proceed record instead, zero-diff\n",
+                    rec.seq, s.floor, rec.action_command.c_str(),
+                    victory_room_handoff_shape
+                        ? "the `Spire Heart` VictoryRoom crossing"
+                        : "the A20 double boss",
+                    victory_room_handoff_shape
+                        ? "goToVictoryRoomOrTheDoor "
+                          "(ProceedButton.java:199-208)"
+                        : "goToDoubleBoss "
+                          "(ProceedButton.java:210-220)");
             } else {
                 if (v.diverged_at < 0) {
                     v.diverged_at = static_cast<int>(k);
@@ -1000,10 +1031,13 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
                 std::printf(
                     "DIFF seq=%d floor=%d screen=%s sim_phase=%s cmd='%s' "
                     "(%zu field%s, against the capture's POST-proceed record: "
-                    "the A20 double-boss crossing itself)\n",
-                    rec.seq, s.floor, s.screen_type.c_str(), phase_name(rc.phase),
-                    rec.action_command.c_str(), handoff_rep.size(),
-                    handoff_rep.size() == 1 ? "" : "s");
+                    "the %s itself)\n",
+                    rec.seq, s.floor, s.screen_type.c_str(),
+                    phase_name(rc.phase), rec.action_command.c_str(),
+                    handoff_rep.size(), handoff_rep.size() == 1 ? "" : "s",
+                    victory_room_handoff_shape
+                        ? "`Spire Heart` VictoryRoom crossing"
+                        : "A20 double-boss crossing");
                 std::printf("%s\n", handoff_rep.to_string().c_str());
                 if (opts.stop_on_diff) {
                     v.stop_reason = "first divergence";
@@ -3632,10 +3666,16 @@ int main(int argc, char** argv) {
             // line as a CAPTURE artifact, and this is not one. Nothing lagged
             // capture-side; the simulator collapses a screen the game shows,
             // and the record is compared shifted rather than excused.
+            // TWO PRODUCERS since S3.31, counted together because they are
+            // one mechanism: goToDoubleBoss (ProceedButton.java:210-220)
+            // and goToVictoryRoomOrTheDoor (:199-208) are consecutive arms
+            // of one branch, and the run layer runs both inline off the
+            // boss's death. The per-record HANDOFF line above names which
+            // one fired.
             if (v.double_boss_handoff_records > 0)
-                std::printf("      %d A20 double-boss handoff record(s) "
-                            "compared against the capture's own post-proceed "
-                            "record (ProceedButton.java:210-220)\n",
+                std::printf("      %d post-boss-room proceed handoff "
+                            "record(s) compared against the capture's own "
+                            "post-proceed record (ProceedButton.java:199-208, :210-220)\n",
                             v.double_boss_handoff_records);
             // The frontier, always on its own line and never folded into the
             // stop -- see `Verdict`. "no divergence" is said out loud too: a

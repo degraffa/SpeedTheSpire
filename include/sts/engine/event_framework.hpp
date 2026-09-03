@@ -699,4 +699,40 @@ void event_combat_reopen(RunController& rc) noexcept;
 // until the first real event body lands; it is unreachable in production play.
 inline constexpr uint16_t kSyntheticEventId = 0xFFFF;
 
+// --- `Spire Heart`: the Act-3 terminal dialog (S3.31) ------------------------
+//
+// A RESERVED NON-POOL EVENT ID, on the kSyntheticEventId model, and the reason
+// is the same one the translator gives for recognising `"Spire Heart"` beside
+// `"Neow Event"` rather than joining it to an events.yaml row (translate.cpp):
+// SpireHeart is a member of NO act event / shrine / special list. It is
+// CONSTRUCTED BY ITS ROOM -- `VictoryRoom.onPlayerEntry` does `this.event = new
+// SpireHeart()` (VictoryRoom.java:26-34) -- and is never drawn, so
+// generate_event can no more return it than it can return Neow.
+//
+// A pool `EventId` would therefore be actively wrong here. The three
+// membership bitsets (event_membership / shrine_membership /
+// special_membership, run_state.hpp) index by POSITION IN AN ACT'S CANONICAL
+// INIT LIST, and this event is in none of them -- so it has no position to
+// occupy, and giving it one would put a non-pool entry into a bitset whose
+// whole meaning is "still drawable". That is the hazard s3-design §7 names,
+// and it is also why the registry emitter requires a non-empty
+// `conditions.acts` on every row. The events.yaml row s3-tasks.md grants for
+// `SPIRE_HEART` (52) is a BEHAVIOUR/metadata row and belongs to S3.41, along
+// with the loader change that lets a row say "no act"; this constant is the
+// join-free dispatch key, and the two do not conflict.
+//
+// The BODY is four screens (SpireHeart.buttonEffect, SpireHeart.java:118-188)
+// with exactly one always-enabled option each (:70-72 adds one dialog option
+// and every arm only rewrites its label). Screen indices ARE the game's own
+// `CUR_SCREEN` ordinals -- INTRO 0, MIDDLE 1, MIDDLE_2 2, DEATH 3,
+// GO_TO_ENDING 4 -- recovered mechanically from the stripped inner classes
+// rather than inferred; the derivation is recorded at the body.
+inline constexpr uint16_t kSpireHeartEventId = 0xFFFE;
+static_assert(kSpireHeartEventId != kSyntheticEventId);
+
+// The `Spire Heart` dialog body (src/engine/events/spire_heart.cpp). Reached
+// only through event_dialog_impl's explicit id check, never through the
+// generated native-event dispatch.
+[[nodiscard]] const EventDialogImpl* event_spire_heart() noexcept;
+
 }  // namespace sts::engine

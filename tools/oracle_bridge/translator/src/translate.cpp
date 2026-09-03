@@ -2014,6 +2014,38 @@ TranslatedRun translate_lines(const std::vector<std::string>& lines,
         }
         translate_record(rec, ctx, run);
     }
+
+    // S3.31: the RUN-OUTCOME KIND, derived from the artifact rather than from a
+    // dump field.
+    //
+    // `RunState::victory_kind` has no counterpart in any dump: neither
+    // CommunicationMod's `game_state` nor the fork's oracle block exposes
+    // `victory` or `trueVictor` (they are Metrics.java:82,107 upload fields,
+    // not run state), so a record-by-record join is impossible. What the
+    // ARTIFACT does carry is the driver's own trailing `record_kind: terminal`
+    // verdict, and `victory_terminal` above already reads it -- so the expected
+    // value is written onto the LAST translated record, which for a victory run
+    // is the `__terminal_observed__` action record whose state is the one the
+    // sim reaches after the `Spire Heart` dialog's final click.
+    //
+    // This is a real comparison, not a neutralisation: a sim that ended the run
+    // in the wrong place, or that reached a DEATH where the capture recorded a
+    // win, diverges on this field at that record. It is written only for a
+    // victory artifact; every other run leaves NONE on both sides, which is
+    // what a loss is.
+    //
+    // ACT3_STOP vs HEART is read off that record's own act. The Act-3 stop
+    // (SpireHeart.java:170-177) happens in act 3 -- the `Spire Heart`
+    // VictoryRoom does not raise actNum -- while a true victory can only be
+    // reached from inside Act 4 (TrueVictoryRoom, S3.33). No Act-4 capture
+    // exists yet, so today this always resolves to ACT3_STOP; the act read is
+    // written now so the S3.33 terminal needs no second pass here.
+    if (victory_terminal && !run.records.empty()) {
+        eng::RunState& last = run.records.back().run;
+        last.victory_kind = static_cast<uint8_t>(
+            last.act >= 4 ? eng::RunVictoryKind::HEART
+                          : eng::RunVictoryKind::ACT3_STOP);
+    }
     return run;
 }
 

@@ -929,6 +929,12 @@ const EventDialogImpl* event_dialog_impl(uint16_t event_id) noexcept {
     if (event_id == kSyntheticEventId) {
         return &kSyntheticImpl;
     }
+    // The Act-3 terminal's dialog, on the same reserved-id footing: it is
+    // constructed by VictoryRoom rather than drawn from a pool, so it has no
+    // events.yaml row to dispatch through (event_framework.hpp).
+    if (event_id == kSpireHeartEventId) {
+        return event_spire_heart();
+    }
     switch (static_cast<EventId>(event_id)) {
 #define STS_DISPATCH_EVENT_BODY(id, fn) \
         case EventId::id: return fn();

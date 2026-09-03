@@ -93,6 +93,17 @@ enum class RoomType : uint8_t {
     // Value 8 is the S2 Wave-2 allocation (docs/stage-b-tasks.md "S2 Wave-2
     // allocations"); values are append-only and never renumbered.
     TreasureBoss = 8,
+    // VictoryRoom(EventType.HEART) -- the room the last Act-3 boss's proceed
+    // builds (ProceedButton.goToVictoryRoomOrTheDoor, ProceedButton.java:
+    // 199-208) as another synthetic off-grid MapRoomNode(-1, 15), so like Boss
+    // and TreasureBoss it can never be written into a grid node. It is a REAL
+    // FLOOR (a full nextRoomTransition: ++floorNum, the five-stream reseed, the
+    // relic onEnterRoom fan-outs) whose phase is EVENT (VictoryRoom.java:21-33)
+    // and whose event is the `Spire Heart` dialog; it grants nothing.
+    // Value 9 is the S3 Wave-1 allocation (docs/s3-tasks.md "Registry id blocks
+    // granted to Wave 1"); 10 is TrueVictory and belongs to S3.33. Values are
+    // append-only and never renumbered.
+    Victory = 9,
 };
 
 // One past the last RoomType enumerator, for consumers that index an array by
@@ -100,8 +111,8 @@ enum class RoomType : uint8_t {
 // declared HERE, beside the enum, and static_asserted against it, so a new room
 // kind cannot silently leave a downstream array one short -- which is exactly
 // what the fuzz coverage table had no guard against before TreasureBoss landed.
-inline constexpr int kRoomTypeCount = 9;
-static_assert(static_cast<int>(RoomType::TreasureBoss) + 1 == kRoomTypeCount,
+inline constexpr int kRoomTypeCount = 10;
+static_assert(static_cast<int>(RoomType::Victory) + 1 == kRoomTypeCount,
               "kRoomTypeCount must be one past the last RoomType enumerator");
 
 // The game's mapSymbol for a room (RoomTypeAssigner dump / oracle golden).
@@ -121,6 +132,12 @@ static_assert(static_cast<int>(RoomType::TreasureBoss) + 1 == kRoomTypeCount,
         // chest; a map-generation test can never produce this case (the
         // RoomTypeAssigner writes only values 1..6).
         case RoomType::TreasureBoss: return 'T';
+        // VictoryRoom's constructor (VictoryRoom.java:21-24) assigns no
+        // `mapSymbol` either, and the room is off-grid for the same reason, so
+        // no map dump can contain this value. 'V' is returned rather than '.'
+        // on the same terms as TreasureBoss's 'T': a dump that somehow held one
+        // should be readable, and the RoomTypeAssigner writes only 1..6.
+        case RoomType::Victory:  return 'V';
         case RoomType::None:     return '.';
     }
     return '.';

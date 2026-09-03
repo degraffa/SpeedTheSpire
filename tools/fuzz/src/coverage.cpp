@@ -41,6 +41,7 @@ const char* room_name(int r) noexcept {
         case engine::RoomType::Treasure: return "treasure";
         case engine::RoomType::Boss: return "boss";
         case engine::RoomType::TreasureBoss: return "boss_chest";
+        case engine::RoomType::Victory: return "victory_room";
     }
     return "?";
 }

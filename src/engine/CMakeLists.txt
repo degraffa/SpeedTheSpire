@@ -175,6 +175,10 @@ add_library(sts_engine
     # embeds) + the five act-gated one-timer bodies.
     events/city_events_ii.cpp
     events/city_one_timers.cpp
+    # S3.31 -- the `Spire Heart` dialog: the Act-3 terminal and the Door. Not a
+    # pool event (VictoryRoom constructs it), so it dispatches off the reserved
+    # kSpireHeartEventId rather than through the generated native-event table.
+    events/spire_heart.cpp
     # The floor-0 Neow blessing: category tables, payouts, sub-screens.
     neow.cpp
     run_advance.cpp
