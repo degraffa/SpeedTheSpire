@@ -132,7 +132,7 @@ are S3's own.
 |---|---|---|---|
 | **Keys as obtainable content** — emerald-elite node flag + `EMERALD_KEY` reward row; `SAPPHIRE_KEY` linked-row claim semantics | stage-b design §1.1 "Out" / s2-design §1; owner-directed to S3 planning 2026-08-10 | **DISCHARGED 2026-09-03 by S3.11** (engine surface), with its behaviour evidence `UNVERIFIED-until-captured` under **S3.23** — see the two forward rows below the rule | **ACCEPTED INTO S3 SCOPE, and the row's premise is corrected.** The row says "the mapRng draw is already modelled — combat_rewards.hpp:107-112 records that only the node flag is missing". The node flag is **not** missing: `setEmeraldElite`'s chosen node has been stored as `emerald_x`/`emerald_y` since the S1 map work (map_rooms.hpp:226-243, :414-435) and the entry buff is applied (`run_advance.cpp` step (9)). What is actually owed is (a) the `EMERALD_KEY` reward row at the burning elite (MonsterRoomElite.java:90,94-98), (b) the sapphire chest's real two-way claim semantics (RewardItem.java:85-90, :298-301, :317-326), and (c) the item the row never mentions — the `!Settings.hasEmeraldKey` guard that **removes the `mapRng` draw from every act generated after the key is taken** (AbstractDungeon.java:543), which changes later maps and is S3's highest-risk trap (design §5 trap 1). Ruby is already live. The S2 row stays as written (it is history); s3-design §9 carries the correction |
 | **The Courier's restocked colored-card identity** (the one unseeded value in scope) | S1 shop model (`shop.hpp` `kShopRestockedUnknownCard`); owner-directed 2026-08-10 to a post-S2-G2 task | **S3.24** | **ACCEPTED INTO S3 SCOPE, sized to ride the one fork redeploy S3 is doing anyway** — which is exactly the condition the row set ("ride it with one that is happening anyway"). Both halves land together: sim-side a dedicated seeded stream reproducing retail's uniform draw over the eligible (rarity, type) pool, fork-side one patched call consuming the same stream under the patched-fork oracle-contract precedent. S3.21 carries the patch into the redeploy; S3.24 owns the sim half and the zero-diff shop capture that witnesses it. **DISCHARGED 2026-09-03 by S3.24** — both halves landed in one commit: `courier_restock_stream` (shop.hpp, a derived stream, no schema byte) and `patches/CourierRestockSeedPatch` (flag `oracleCourierRestockSeed`), with `kShopRestockedUnknownCard` and its buy-refusal deleted. Two live tails remain, each owned elsewhere and named in the S3.24 Log: the jar redeploy + `PROTOCOL.md` §5.5 are **S3.21**'s (hand-over in the fork tree), and the witnessing restock capture is **S3.62**'s, so the S3.24 row stands `UNVERIFIED-until-captured` |
-| **Per-step throughput attribution across S2** (×0.712 combat step / ×0.498 batch vs B5.5) | S2.45 | **S3.64** | **ACCEPTED INTO S3 SCOPE.** The named A/B is `d57e077` against `646bd18` on `bench_advance_mask` + `bench_throughput`, interleaved through `tools/bench_ab.sh` (never two sequential runs), with `RESULT: UNMEASURED` an acceptable answer. S3.64 also owns the *new* honest whole-run baseline: S2's "three-act runs/sec" was unquotable because no weight-free policy leaves Act 1 ([verification/s245-throughput.md](verification/s245-throughput.md)), and S3 is the first stage with a policy that finishes runs |
+| **Per-step throughput attribution across S2** (×0.712 combat step / ×0.498 batch vs B5.5) | S2.45 | **S3.64** | **ACCEPTED INTO S3 SCOPE.** The named A/B is `d57e077` against `646bd18` on `bench_advance_mask` + `bench_throughput`, interleaved through `tools/bench_ab.sh` (never two sequential runs), with `RESULT: UNMEASURED` an acceptable answer. S3.64 also owns the *new* honest whole-run baseline: S2's "three-act runs/sec" was unquotable because no weight-free policy leaves Act 1 ([verification/s245-throughput.md](verification/s245-throughput.md)), and S3 is the first stage with a policy that finishes runs. **DISCHARGED 2026-09-03 by S3.64, and the ratios stay UNATTRIBUTED — that is the finding, not a shortfall.** The named A/B ran at n=5, 8 and 12 interleaved pairs on both benchmarks and answered `RESULT: UNMEASURED` every time: the A/B windows landed under host CPU 90-98% (a sibling WSL build under `vmmemWSL`, independently corroborated by a cross-worktree `ccache` hit against `_wt/s3g1` during S3.64's own `debug` rebuild), 4-8× this box's own ±2.8% calibration spread, and growing `-n` did not converge toward significance. The ×0.712/×0.498 ratios remain attributed only to S2.45's leading candidate (state size against the 96 MiB L3 — `sizeof(CombatState)` unmoved at 8,088 B), still unconfirmed. The whole-run baseline half re-measured S2.45's exact pair fresh on the S3 tree — corpus-conditional runs/sec 126,034 + length-independent run-steps/sec 5,929,760, all three floors HOLDING by ≥98× at the worst reading, `act2_runs=0 act3_runs=0` unchanged — and states plainly that this reruns the *existing* `PolicyKind::RANDOM` `bench_throughput` harness, not a new benchmark over a policy that actually finishes three-act runs (SIM_SEARCH does that live, in campaigns, already; wiring it into `benchmarks/` is future work, named rather than assumed done). A repo-hygiene finding rode along: `debug`/`asan` with `-DSTS_BUILD_BENCHMARKS=ON` could not link `bench_throughput` (`undefined reference to sts::fuzz::sim_search_pick`, only `release`'s LTO proved the call dead) — fixed by adding `policy_search.cpp` as a second source, the same reason CI had already dropped the flag (S3.66, `3d1906c`, same day). Full methodology, every round, and the new `encode_public_view`/`public_hash` per-state number (median 1.09 us on `PublicView` v7): [verification/s3-64-throughput.md](verification/s3-64-throughput.md) |
 | **Sharp Hide THORNS retaliation on the killing blow** | TE.1 (stage-b table: "UNASSIGNED — S1 pump semantics, owner-approved task") | **S3.44** | **ACCEPTED INTO S3 SCOPE.** Witness STS420252 (te1_survival_b160) already exists and is a promoted reproducer — under the 2026-09-03 evidence rule this row is unusually well placed, because the capture that proves the fix is already on disk. Act 4 sharpens the motive: `BeatOfDeathPower` fires a THORNS-typed hit after **every** card the player plays (BeatOfDeathPower.java:40-44), so terminal adjudication at the Heart is exactly this ordering question at its most consequential. **DISCHARGED by S3.44, 2026-09-03, and the "already on disk" premise did not hold.** The `te1_survival_b160` group and its promoted reproducer are gone from the §7.3 data root, and the row's own defect had already been closed by `86fc2be` (S2.43's four-arm survivor set, which names the Sharp Hide retaliation and seed STS431342) and `d57e077` (S2.49's THORNS exemption) — both later than TE.1's 2026-08-03 finding. S3.44 re-witnessed the family from a 21-instance same-shape cohort mined out of the 184 on-disk Sharp Hide captures and fixed the **residual**: the terminal resolver drained a snapshot, so an action a survivor queued while resolving was never popped — which is precisely the Heart's `BeatOfDeathPower` case. See the S3.44 Log |
 | **~60 out-of-yaml MIRROR sites carrying citations `wave3-citations` corrected in `registry/*.yaml`** | wave3-citations, 2026-07-28 (stage-b, UNASSIGNED) | **S3.65** | **ACCEPTED INTO S3 SCOPE**, together with the three sibling citation rows the same sweep left open (the nine repo-wide out-of-range `File.java:line`s, the eleven and fifteen `relics.yaml` +1000-class ones, the nine `cards.yaml` ones). Folded into one provenance task because S3 touches `src/`, `include/` and `tools/` broadly and a split-brain between the registry and its mirrors is precisely the thing that makes a re-read at task time untrustworthy. Comment/provenance only — a behaviour change discovered mid-sweep is stop-the-line, not a drive-by |
 | **Windows CI job** | build effort (stage-b, UNASSIGNED) | **S3.66** | **ACCEPTED INTO S3 SCOPE**, and promoted in importance by the evidence rule: with unit tests gone, CI's job is to prove the six presets still **build** and that the committed corpora still replay zero-diff, which is now the whole automated safety net. **Pin the LLVM version** (the googletest `/WX-` workaround exists because a clang release added a warning gtest trips over). The proposed workflow is unverified because Actions cannot run locally; S3.67 owes a green run on a real push, not a plausible YAML — **DISCHARGED by S3.66, 2026-09-03.** `ci.yml`'s `build-and-test` matrix drops `ctest` for a build + direct real-run step (`fixture_oracle_test`/`twin_test`/`tripwire_test`, plus `tools/corpus_replay.sh` on the release leg); a new `windows` job builds `win-debug` under a pinned **LLVM 22.1.8** (`ilammy/msvc-dev-cmd` for the MSVC environment, the exact tagged release installed and verified rather than trusted from the runner image) and runs the identical real-run set through Git-for-Windows' own bash, no WSL. See the S3.66 Log for the full step list, the LLVM-pin rationale, what the Windows job does not cover, and the `-DSTS_BUILD_BENCHMARKS=ON` finding it routed around (spawned as a separate suggestion rather than fixed in this task, since `benchmarks/CMakeLists.txt` is S3.64's surface, not this task's). The **green-run-on-a-real-push** half of this row's acceptance is confirmed on the landing push, not locally — see the Log |
@@ -2867,7 +2867,7 @@ this tree, not a Log carried forward.
   blocks. Full report, p-value table and re-run command:
   [verification/s3-63-tier4.md](verification/s3-63-tier4.md).
 
-- **S3.64** `[ ]` ∥ **Throughput: the S2 attribution, and the first honest
+- **S3.64** `[x]` ∥ **Throughput: the S2 attribution, and the first honest
   whole-run baseline.** Two halves. (a) Discharge the S2.45 attribution
   obligation: the interleaved `tools/bench_ab.sh` A/B of **`d57e077` against
   `646bd18`** on `bench_advance_mask` + `bench_throughput`, two binaries built
@@ -2883,7 +2883,59 @@ this tree, not a Log carried forward.
   worst-of-N discipline; per-step and per-combat floors green; the A/B's
   pair-wise deltas, mean, sd and standard error printed by the sanctioned
   script (never two sequential runs).
-  **Log:** —
+  **Log:** 2026-09-03 — landed. Full report:
+  [verification/s3-64-throughput.md](verification/s3-64-throughput.md).
+
+  **(a) `RESULT: UNMEASURED`, on both flagged benchmarks, at every sample
+  size tried (n=5, 8, 12 interleaved pairs)** — not a shortfall, an honest
+  answer: the A/B windows landed under host CPU 90-98% (a sibling WSL build
+  under `vmmemWSL`, corroborated by a cross-worktree `ccache` hit against
+  `_wt/s3g1` during this task's own `debug` rebuild), four to eight times
+  this box's own ±2.8% calibration spread, and growing `-n` did not converge
+  toward significance. The ×0.712 combat-step / ×0.498 batch ratios stay
+  attributed only to S2.45's leading candidate (state size against the 96
+  MiB L3, unmoved: `sizeof(CombatState)` still 8,088 B), unconfirmed.
+
+  **(b) All three B5.5/S2.45 floors HOLD**, by ≥ 98× at the worst of five
+  release-preset readings this session (batch 7.36M steps/sec/core, combats
+  29,457/sec/core, runs 105,452/sec whole-machine — medians 10.22M / 38,772
+  / 126,034). `act2_runs=0 act3_runs=0` in every reading and
+  `terminal_act_sum == runs_counted` exactly, so the policy ceiling S2.41/
+  S2.42/S2.45 measured is unchanged and the S3 baseline is recorded, again,
+  as S2.45's pair (corpus-conditional runs/sec 126,034 + length-independent
+  run-steps/sec 5,929,760), re-measured fresh on the gated S3 tree. **Scope
+  note:** this re-runs the *existing* `bench_throughput` harness (still
+  `PolicyKind::RANDOM`), not a new SIM_SEARCH-driven whole-machine
+  benchmark — the report's §7 states plainly that "a policy that actually
+  finishes runs" (SIM_SEARCH already does, live, in campaigns) was not
+  built into `benchmarks/` here; that remains future work, named rather
+  than assumed done.
+
+  **Plus the new number the training program needs**: `encode_public_view`
+  + `public_hash` costs a median **1.09 us/state** (0.71 encode + 0.38
+  hash) over `PublicView` v7 (8,992 B) — a new benchmark,
+  `benchmarks/bench_public_view.cpp`, over a 4,096-snapshot bank drawn from
+  the same fixed random-policy corpus `bench_throughput` uses. Comparable
+  in shape, not value, to T1.3's 1.43 us figure (earlier schema, separate
+  training repo, no interleaving between the two).
+
+  **A CMake finding, folded in on the coordinator's note**: `debug`/`asan`
+  with `-DSTS_BUILD_BENCHMARKS=ON` failed to link `bench_throughput`
+  (`undefined reference to sts::fuzz::sim_search_pick`) before this task —
+  `policy.cpp`'s dispatch calls into `policy_search.cpp` unconditionally
+  since SIM_SEARCH landed (S2.V2, after S2.45), and only `release`'s LTO
+  proved able to prove the call dead. Fixed by adding
+  `tools/fuzz/src/policy_search.cpp` as a second source on both
+  `bench_throughput` and the new `bench_public_view`; no new link library
+  needed. **CI had already dropped `-DSTS_BUILD_BENCHMARKS=ON` for this
+  exact reason** (S3.66, `3d1906c`, same day, ahead of this task); with the
+  fix landed, the flag can return to CI in a follow-up, not done here.
+
+  Six presets **build** (WSL `debug`/`asan`/`release` and
+  `win-debug`/`win-asan`/`win-release`, all six with
+  `-DSTS_BUILD_BENCHMARKS=ON`, `/EHsc` verified on every `win-*` cache).
+  `check_stale_counts.sh` / `check_doc_links.sh` clean. No ctest run, per
+  brief and the 2026-09-03 owner directive.
 
 - **S3.65** `[ ]` ∥ **Provenance sweep: the ~60 mirror sites and the four
   citation families.** Comment/provenance only. Bring `src/`, `include/`,
