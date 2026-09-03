@@ -426,11 +426,25 @@ void set_event_flag_block(eng::RunState& rs, uint16_t first_id, int count,
     ps.power_id = static_cast<uint16_t>(join_power(game_id, ctx, path + ".id"));
     fr.mapped();
     if (vitals != nullptr) {
-        // The raw capture id, not the normalised one: The Bomb's per-instance
-        // suffix is what tells two fuses apart in a report, and an unresolved
-        // id must be named verbatim (combat_vitals.hpp).
-        vitals->id = game_id;
+        // A RESOLVED power is keyed by its JOINED id, an unresolved one by the
+        // raw capture string (combat_vitals.hpp: an id the registry does not
+        // know must be nameable verbatim).
+        //
+        // The raw string cannot be the key for a resolved power. `powers` is a
+        // MULTISET keyed by game id, and the sim side builds its key from the
+        // registry game id -- which for TheBombPower is the constant
+        // "TheBomb", while the live id is "TheBomb" plus an ever-increasing
+        // STATIC counter (TheBombPower.java:22,27,31-32). Keying the capture
+        // by the raw string therefore guaranteed a mismatch on every record a
+        // fuse was alive, with equal amounts on both sides. Witness (S3.23):
+        // s323_STS508459_keys, floor 33, seq 485-506 -- 22 consecutive vitals
+        // records reporting `TheBomb0: 3 -> (absent)` beside `TheBomb:
+        // (absent) -> 3`. Two live fuses still read distinctly, as the
+        // multiset's sorted amounts (`TheBomb: [3, 1]`), which is the
+        // projection's own contract.
         vitals->known = ps.power_id != static_cast<uint16_t>(eng::PowerId::NONE);
+        vitals->id = vitals->known ? normalize_instanced_power_id(game_id)
+                                   : game_id;
     }
     if (const json* a = fr.take("amount")) {
         const int64_t amt = as_i64(*a, ctx, path + ".amount");
