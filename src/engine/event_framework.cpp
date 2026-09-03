@@ -225,11 +225,18 @@ void reinit_act_event_pools(RunState& rs) noexcept {
     // cleared both lists (:2576-2577). Both are draw-free. Deliberately does
     // NOT touch special_membership: that list is carried by reference across
     // the crossing (CardCrawlGame.java:1102-1119) -- see the header.
+    //
+    // ACT 4 REFILLS NEITHER (S3.32): TheEnding's two overrides have empty
+    // bodies (TheEnding.java:198-200, :211-213), so both bitsets stay at the
+    // zero dungeonTransitionSetup's clear left them. That is what
+    // event_list_count(4) == 0 and shrine_list_count(4) == 0 say, and both
+    // shifts below are then a shift of 0 -- `(1u << 0) - 1u == 0` -- so the
+    // act-4 answer falls out of the same two lines rather than out of a branch.
     const int act = static_cast<int>(rs.act);
     rs.event_membership =
         static_cast<uint16_t>((1u << event_list_count(act)) - 1u);
     rs.shrine_membership =
-        static_cast<uint8_t>((1u << kShrineListCount) - 1u);        // bits 0..5
+        static_cast<uint8_t>((1u << shrine_list_count(act)) - 1u);  // bits 0..5
 }
 
 void init_event_pools(RunState& rs) noexcept {
@@ -312,7 +319,16 @@ int event_map_row(const RunState& rs) noexcept {
     // spellings are pinned equal across every act x floor by
     // S213EventGates.EventMapRowAgreesWithRunCurRow, which is the control that
     // stops them drifting and silently moving Colosseum's gate.
-    const int base = (static_cast<int>(rs.act) - 1) * 17;
+    //
+    // S3.32: the ACT-4 arm of the same pair. Act 4's base is not (act-1)*17 --
+    // it is the A20-dependent byte the crossing wrote (run_state.hpp,
+    // act4_floor_base) -- so this restatement takes the same branch
+    // act_floor_base_of does. Act 4 has no event pool at all
+    // (event_list_count(4) == 0), so nothing downstream of here can act on the
+    // row; the branch exists so the two spellings stay equal, which is the only
+    // property this function has ever been asked for.
+    const int base = rs.act >= 4 ? static_cast<int>(rs.act4_floor_base)
+                                 : (static_cast<int>(rs.act) - 1) * 17;
     const int row = static_cast<int>(rs.floor) - base - 1;
     return row < -1 ? -1 : row;
 }

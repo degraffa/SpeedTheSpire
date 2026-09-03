@@ -317,7 +317,12 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
     }
     if (engine::run_is_victory(rc)) {
         w->victory = true;
-        w->boss_killed_acts |= act_bit(engine::kFinalAct);
+        // S3.32: kActBeyond, not kFinalAct. run_is_victory is the `Spire Heart`
+        // dialog's DEATH arm, one floor after the ACT-3 boss, so the kill this
+        // latches is act 3's. Once kFinalAct became 4 this would have set the
+        // act-4 bit off an act-3 event and made --need-boss-kill-act 4 answer
+        // yes for every won run.
+        w->boss_killed_acts |= act_bit(engine::kActBeyond);
     }
     // --- S3.22 keys, elite kills, and the A20 double-boss room --------------
     //
@@ -333,11 +338,17 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
         w->elite_killed_acts |= act_bit(act);
     }
     // The A20 second Act-3 boss room. boss_cursor counts boss rooms COMPLETED,
-    // so >= 1 inside a final-act boss room means the first one is already dead
-    // and this is goToDoubleBoss's synthetic node -- the exact witness the
-    // S2.V2 report's §6.1 correction had to reconstruct from max_floor.
+    // so >= 1 inside an ACT-3 boss room means the first one is already dead and
+    // this is goToDoubleBoss's synthetic node -- the exact witness the S2.V2
+    // report's §6.1 correction had to reconstruct from max_floor.
+    //
+    // S3.32: kActBeyond, not kFinalAct. This probe was written when the two
+    // were the same number; Act 4 has NO double boss at any ascension
+    // (ProceedButton.java:101-109, s3-design §5 trap 8), so at kFinalAct == 4
+    // the column would have started reporting the ordinary single Act-4 boss
+    // room as a double boss the moment an Act-4 line existed.
     if (rc.room_type == static_cast<uint8_t>(engine::RoomType::Boss) &&
-        act == static_cast<unsigned>(engine::kFinalAct) &&
+        act == static_cast<unsigned>(engine::kActBeyond) &&
         rc.boss_cursor >= 1) {
         w->double_boss_room = true;
     }

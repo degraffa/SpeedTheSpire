@@ -969,8 +969,11 @@ struct OracleAnchors {
     // mark all eleven Exordium events plus all six shrines FIRED off two empty
     // arrays -- a fabricated RunState the differ would then compare. Act 4 is
     // therefore handled here rather than by widening event_framework.hpp's
-    // per-act tables, which is S3.32's grant (it owns the kFinalAct 3->4 move
-    // and the audit of every reader).
+    // per-act tables, which was S3.32's grant. S3.32 has since LANDED the
+    // engine half: `event_list_count(4)` and `shrine_list_count(4)` are both 0,
+    // so the sim now produces the same empty bitsets this branch asserts, and
+    // the two sides agree by construction rather than by both refusing to
+    // look.
     const bool act4_empty_pools = rec_act >= 4;
     if (act4_empty_pools) {
         for (const char* key : {"eventList", "shrineList"}) {

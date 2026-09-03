@@ -228,11 +228,14 @@ struct RelicObs {
 // (run_state.hpp:51), so nothing widens underneath it. The act masks stay
 // uint8_t with four bits spare.
 //
-// NOTE what this does NOT move: `engine::kFinalAct` is still 3, and that is
-// S3.32's single-owner change. This constant is the planner's *vocabulary*
-// (which acts a filter may name); kFinalAct is the engine's *terminal* (which
-// act ends a run). Until S3.32 lands, a `--need-boss-kill-act 4` scan is a
-// legal question with the honest answer "no seed matched".
+// NOTE what this does NOT move: it is the planner's *vocabulary* (which acts a
+// filter may name), while `engine::kFinalAct` is the engine's *terminal* (which
+// act ends a run). S3.22 wrote this note while kFinalAct was still 3; S3.32
+// moved kFinalAct to 4 and the two now coincide numerically, which is a
+// coincidence and not an invariant -- kMaxActs stays a planner constant.
+// A `--need-boss-kill-act 4` scan is answerable rather than vacuous from S3.32
+// on, but only once an Act-4 boss room exists (S3.33): the Act-4 rooms park on
+// entry today, so the honest answer is still "no seed matched".
 inline constexpr int kMaxActs = 4;
 
 // Bit for one act in the `boss_reached_acts` / `boss_killed_acts` masks. Acts
@@ -408,10 +411,11 @@ struct Filter {
     uint8_t need_keys = 0;
     // The Corrupt Heart killed. Today the probe is the act-4 boss-kill bit,
     // i.e. this clause is `--need-boss-kill-act 4` under the name its consumer
-    // uses; `engine::kFinalAct` is still 3 (S3.32 owns the move), so nothing
-    // can set that bit and the honest answer is zero. When S3.31's
-    // RunVictoryKind lands, the probe sharpens to `kind == HEART` here and the
-    // flag's spelling at every call site is unchanged.
+    // uses. S3.32 moved `engine::kFinalAct` to 4 and Act 4 is now reachable,
+    // but its BOSS ROOM still parks on entry (S3.33), so nothing can set that
+    // bit yet and the honest answer is still zero. When the Act-4 boss becomes
+    // playable the probe sharpens to `run_victory_kind(rc) == HEART` here and
+    // the flag's spelling at every call site is unchanged.
     bool need_heart_kill = false;
 
     // Relic clauses. UNLIKE need_events, each list is an ANY-OF within its

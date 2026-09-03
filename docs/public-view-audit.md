@@ -254,7 +254,7 @@ does.
 | `combat_active` | derived | `rc.phase == COMBAT`. |
 | `monsters[i].occupied` | derived | `i < monster_count`. |
 | `boss_relic_choice_reserved[3]` | populated (was reserved) | Additive case 1, populated by the S2.11 boss chest: the three offered boss-relic ids while `phase == BOSS_TREASURE`, and ONLY once the chest has been opened (`boss_chest.seen`) — before that they are drawn-but-unseen and the field stays zero. Source moved to `run.boss_chest` at S2.47 (schema v8) with no PublicView change. This row said "still zero in v2" until S2.47 — S2.11 populated the field without updating it. |
-| `second_boss_reserved` | derived | **v5 (S2.28):** the `EncounterDef` id of the SECOND Act-3 boss of an A20 double-boss run (`boss_list[1]`), carried from the moment the double-boss transition reveals it (`act == kFinalAct && boss_cursor >= 1`); 0 otherwise. Public because the player is looking at those monsters; the sampler preserves the same boss-list prefix, so the hidden twin agrees. Unlike `current_encounter_id` it survives into `RUN_OVER`, which is the state a finished run is observed in. |
+| `second_boss_reserved` | derived | **v5 (S2.28):** the `EncounterDef` id of the SECOND Act-3 boss of an A20 double-boss run (`boss_list[1]`), carried from the moment the double-boss transition reveals it (`act == kActBeyond && boss_cursor >= 1`; the predicate said `kFinalAct` until S3.32 moved that constant to 4 -- it has always meant Act 3, which is the only act with a double boss); 0 otherwise. Public because the player is looking at those monsters; the sampler preserves the same boss-list prefix, so the hidden twin agrees. Unlike `current_encounter_id` it survives into `RUN_OVER`, which is the state a finished run is observed in. |
 | `pad_tail[3]` | padding | Always zero. Retained as a member at its v1 offset — the v2 tail appends *after* it, so no v1 offset moves. |
 | `current_encounter_id` | derived | The encounter of the room being occupied, resolved from `lists` + the matching cursor while in COMBAT / COMBAT_REWARD. 0 for event combats (their monsters are on screen in the combat section) and outside such a room. |
 | `rewards.active` / `shop.active` / `event.active` / `neow.active` | derived | 1 iff that screen is the one on screen. Zero elsewhere is the declared "not present" value the additive-append rule requires. |
@@ -610,7 +610,8 @@ lifecycle rule; no in-place reinterpretation exists):
   a reserved field).** The field carries the `EncounterDef` id of the SECOND
   Act-3 boss of an A20 double-boss run (`boss_list[1]`), from the moment the
   double-boss transition puts the player in the second boss room
-  (`act == kFinalAct && boss_cursor >= 1`), and 0 in every other state.
+  (`act == kActBeyond && boss_cursor >= 1` -- spelled `kFinalAct` before S3.32
+  moved that constant to 4), and 0 in every other state.
   - *The v4-record reinterpretation is exact*: no v4 engine could take the
     double-boss transition at all (the Act-3 bosses and the transition both
     land in v5), so every stored v4 record truthfully reads "no second boss

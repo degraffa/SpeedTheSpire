@@ -1395,6 +1395,37 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
         dispatch_just_entered_room_relics(rc.run, room == RoomType::Shop);
     }
 
+    // === ACT-4 ROOM BEHAVIOUR IS S3.33's (S3.32 handoff) =====================
+    //
+    // THIS IS THE PARK, and it is the one place to look for it. S3.32 builds
+    // the act -- the crossing, the fixed lists, the special map, the floor base
+    // -- so the run really walks onto Act 4's map and really picks its nodes.
+    // What it does NOT build is what happens INSIDE the four rooms:
+    //
+    //   rest  (3,0)  RestRoom with NO Recall option (CampfireUI.java:94-96:
+    //                reaching Act 4 implies the ruby key, so `!hasRubyKey` is
+    //                false) -- S3.33.
+    //   shop  (3,1)  an ordinary ShopRoom -- S3.33.
+    //   elite (3,2)  "Shield and Spear" with MonsterRoomElite's own hard-coded
+    //                relic tiers and NO emerald key / NO emerald buff -- S3.33
+    //                for the room, S3.41/S3.42 for the encounter.
+    //   boss  (3,3)  "The Heart", whose reward screen is suppressed but whose
+    //                miscRng gold add is not (§5 trap 5) -- S3.33 for the room
+    //                and the goToTrueVictoryRoom terminal, S3.41/S3.43 for the
+    //                encounter.
+    //
+    // Parking is placed HERE rather than at each of the four cases so that the
+    // relic onEnterRoom / justEnteredRoom fan-outs above still run -- they are
+    // act-general and already correct, and Maw Bank's +12 gold on an Act-4 floor
+    // is real. Two of the four rooms would park anyway (their encounter keys
+    // have no registry row until S3.41); the other two would run S1 bodies that
+    // S3.33 has to review, so all four are parked together and the census reads
+    // one cause instead of two.
+    if (rc.run.act >= kFinalAct && room != RoomType::None) {
+        stall(room);
+        return;
+    }
+
     switch (room) {
         case RoomType::Monster:
             if (rc.monster_cursor < rc.lists.monster_list_count) {
@@ -1892,9 +1923,95 @@ void next_room_transition_victory_room(RunController& rc) noexcept {
 //     is simply not touched.
 namespace {
 
+// --- TheEnding's fixed content (S3.32) ---------------------------------------
+//
+// generateMonsters (TheEnding.java:162-172) and initializeBoss (:191-196) are
+// three literal adds each, with no RNG and no shuffle. The KEYS are the
+// encounter game_ids S3.41's registry rows will carry; until those land the
+// join in on_player_entry finds nothing and the room parks, which is the
+// honest answer and the reason the strings are spelled here rather than looked
+// up. Three is the Java's own count, not a cap: `monsterList` is popped once
+// per boss room left and `eliteMonsterList` once per elite room left, and Act 4
+// has exactly one of each.
+constexpr std::string_view kActEndingEncounter = "Shield and Spear";
+constexpr std::string_view kActEndingBoss = "The Heart";
+constexpr uint8_t kActEndingListLen = 3;
+static_assert(kActEndingListLen <= kMaxMonsterList &&
+              kActEndingListLen <= kMaxEliteList &&
+              kActEndingListLen <= kMaxBossList);
+
+// TheEnding.generateSpecialMap (TheEnding.java:72-139), read in full.
+//
+// THE MAP IS A CONSTANT. There is no MapGenerator, no RoomTypeAssigner, no
+// Collections.shuffle and no mapRng draw -- five rows of seven hand-built
+// MapRoomNodes, of which only the x == 3 column carries a room:
+//
+//     y=4   . . . V . . .   TrueVictoryRoom   (:84-85)  -- NO inbound edge
+//     y=3   . . . B . . .   MonsterRoomBoss   (:82-83)
+//     y=2   . . . E . . .   MonsterRoomElite  (:80-81)
+//     y=1   . . . $ . . .   ShopRoom          (:78-79)
+//     y=0   . . . R . . .   RestRoom          (:76-77)
+//
+// with ONE-DIRECTIONAL edges rest->shop and shop->elite (connectNode, :86-87,
+// :141-143 -- `src.addEdge(...)` only, the destination gets nothing) and an
+// explicit elite->boss MapEdge (:88). The 28 non-column-3 nodes have
+// `room == null` and no edges at all.
+//
+// THREE ENCODING DECISIONS, each with its consequence:
+//
+//  1. THE ELITE'S ONWARD EDGE IS kEdgeBoss, NOT kEdgeCenter, even though the
+//     Java writes an ordinary MapEdge to (3,3). What the player is offered is
+//     decided by DungeonMap.update's boss-hitbox gate, `currMapNode.y == 14 ||
+//     (id.equals("TheEnding") && currMapNode.y == 2)` (DungeonMap.java:68) --
+//     and the fork reports exactly that: ChoiceScreenUtils.bossNodeAvailable
+//     repeats the same disjunction and getMapScreenChoices RETURNS EARLY with
+//     the single choice "boss", never consulting the node list. So from the
+//     Act-4 elite the mask is one MAP_BOSS action and no MAP_NODE action, which
+//     is what kEdgeBoss alone produces. Taking it runs the same synthetic
+//     `MapRoomNode(-1, 15)` + `new MonsterRoomBoss()` the row-14 boss uses
+//     (DungeonMap.java:77-79), so the (3,3) node below is never entered through
+//     the map -- exactly like the victory node.
+//  2. THE VICTORY NODE (3,4) IS LEFT `RoomType::None`. `RoomType::TrueVictory`
+//     is value 10 and belongs to S3.33 (docs/s3-tasks.md's id-block table);
+//     claiming it here would be spending another task's id. Nothing observes
+//     the gap: the node has no inbound edge, so no mask and no transition can
+//     ever reach it, and `goToTrueVictoryRoom` builds a FRESH MapRoomNode(3, 4)
+//     rather than looking this one up (ProceedButton.java:191-192). S3.33 fills
+//     it in when it claims the value.
+//  3. `RoomType::Boss` (7) IS written into a grid node here, which Acts 1-3
+//     never do. That is the game's own shape (:82-83 puts a MonsterRoomBoss in
+//     the map array) and it is inert for the same reason as (1): the boss is
+//     entered off-grid. map_rooms.hpp's enum comment carries the amendment.
+//
+// Rows 5..14 stay `None` with no edges. RunState.map is 15x7 single-act storage
+// (the game throws the old DungeonMap away with the old dungeon object), so
+// overwriting the whole array in place is the faithful model.
+void generate_special_map(RunState& rs) noexcept {
+    for (int y = 0; y < kMapRows; ++y) {
+        for (int x = 0; x < kMapCols; ++x) {
+            rs.map[run_state_map_index(x, y)] = MapNode{};
+        }
+    }
+    constexpr int kCol = 3;
+    rs.map[run_state_map_index(kCol, 0)] = MapNode{
+        static_cast<uint8_t>(RoomType::Rest), kEdgeCenter};   // :76-77, :86
+    rs.map[run_state_map_index(kCol, 1)] = MapNode{
+        static_cast<uint8_t>(RoomType::Shop), kEdgeCenter};   // :78-79, :87
+    rs.map[run_state_map_index(kCol, 2)] = MapNode{
+        static_cast<uint8_t>(RoomType::Elite), kEdgeBoss};    // :80-81, :88
+    rs.map[run_state_map_index(kCol, 3)] = MapNode{
+        static_cast<uint8_t>(RoomType::Boss), 0};             // :82-83
+    // (3,4) TrueVictoryRoom -- decision (2) above; left None for S3.33.
+}
+
+// S3.32: `next_act == 4` is TheEnding, and the four places it differs from
+// TheCity/TheBeyond are marked ACT-4 below. Nothing else forks -- the whole of
+// dungeonTransitionSetup is shared, which is the point of AbstractDungeon
+// running it from the base constructor.
 void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept {
     assert(next_act >= 2 && next_act <= static_cast<int32_t>(kFinalAct) &&
-           "the only act crossings in S2 are 1->2 and 2->3");
+           "the only act crossings are 1->2, 2->3 and (through the Door) 3->4");
+    const bool to_ending = next_act == static_cast<int32_t>(kFinalAct);
 
     // === dungeonTransitionSetup (AbstractDungeon.java:2562-2604) =============
 
@@ -1971,10 +2088,41 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     //     so the Act-2 lists continue the exact stream the Act-1 lists left.
     //     Acts 2-3 draw TWO weak entries, not three (weak_segment_for_act), and
     //     initializeBoss spends exactly one randomLong on the shuffle.
-    generate_monster_lists(next_act, rs.monster_rng, rc.lists);
+    //
+    // ACT-4 SPENDS NO monsterRng AT ALL (s3-design §5 trap 3). TheEnding
+    // overrides generateMonsters with three literal "Shield and Spear" adds to
+    // each of monsterList and eliteMonsterList (:162-172), initializeBoss with
+    // three literal "The Heart" adds (:191-196) and generateWeakEnemies /
+    // generateStrongEnemies / generateElites with EMPTY bodies (:174-184), so
+    // the base class's draw sites are all overridden away. There is also NO
+    // Collections.shuffle in TheEnding.initializeBoss, so not even the one
+    // randomLong the other three acts spend seeding it is drawn. A shared code
+    // path that "just ran generateMonsters" here would shift the run-lifetime
+    // monsterRng under the Act-4 shop and everything after it -- which is why
+    // this is a branch and not a table of counts.
+    if (to_ending) {
+        rc.lists.monster_list_count = 0;
+        rc.lists.elite_list_count = 0;
+        rc.lists.boss_list_count = 0;
+        for (int i = 0; i < kActEndingListLen; ++i) {
+            rc.lists.monster_list[static_cast<std::size_t>(i)] =
+                kActEndingEncounter;
+            rc.lists.elite_list[static_cast<std::size_t>(i)] =
+                kActEndingEncounter;
+            rc.lists.boss_list[static_cast<std::size_t>(i)] = kActEndingBoss;
+        }
+        rc.lists.monster_list_count = kActEndingListLen;
+        rc.lists.elite_list_count = kActEndingListLen;
+        rc.lists.boss_list_count = kActEndingListLen;
+    } else {
+        generate_monster_lists(next_act, rs.monster_rng, rc.lists);
+    }
 
     // setBoss(bossList.get(0)) (:290) mirrored into save-parity state, the same
-    // registry join run_begin uses for Act 1.
+    // registry join run_begin uses for Act 1. At act 4 the key is "The Heart",
+    // whose encounters.yaml row is S3.41's grant and does not exist yet, so
+    // encounter_by_game_id returns nullptr and boss_ids[3] stays 0 until it
+    // lands -- an honest zero, not a fabricated id.
     if (rc.lists.boss_list_count > 0) {
         const sts::registry::EncounterDef* boss =
             sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
@@ -2030,16 +2178,33 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     //      end-of-generateMap mapRng and its whole room grid differ from the
     //      same seed without the key (s3-design §5 trap 1). Act 1 cannot see it
     //      -- no key can be held before the first map exists.
-    const GeneratedMap g = generate_map(rs.run_seed, static_cast<int>(next_act));
-    const RoomAssignment ra =
-        assign_room_types(g, static_cast<int>(rs.ascension),
-                          (rs.keys & kKeyEmerald) != 0u);
-    encode_paths_into_run_state(g, rs);
-    encode_rooms_into_run_state(ra, rs);
-    rc.emerald_x = ra.emerald_x < 0 ? kNoEmeraldNode
-                                    : static_cast<uint8_t>(ra.emerald_x);
-    rc.emerald_y = ra.emerald_y < 0 ? kNoEmeraldNode
-                                    : static_cast<uint8_t>(ra.emerald_y);
+    //
+    //      ACT 4 CALLS generateSpecialMap, NOT generateMap (TheEnding.java:50),
+    //      and that single substitution carries three separate negatives:
+    //      no MapGenerator / RoomTypeAssigner / Collections.shuffle, hence NO
+    //      mapRng draw at all beyond the seeding (s3-design §5 trap 2); and
+    //      setEmeraldElite NEVER RUNS in Act 4, because its only call site is
+    //      inside generateMap (AbstractDungeon.java:539) -- so Act 4 has no
+    //      burning elite whether or not the key is held, and rc.emerald_x/y
+    //      must read kNoEmeraldNode rather than carry Act 3's node forward.
+    if (to_ending) {
+        rs.map_rng = map_stream(rs.run_seed, static_cast<int>(next_act));
+        generate_special_map(rs);
+        rc.emerald_x = kNoEmeraldNode;
+        rc.emerald_y = kNoEmeraldNode;
+    } else {
+        const GeneratedMap g =
+            generate_map(rs.run_seed, static_cast<int>(next_act));
+        const RoomAssignment ra =
+            assign_room_types(g, static_cast<int>(rs.ascension),
+                              (rs.keys & kKeyEmerald) != 0u);
+        encode_paths_into_run_state(g, rs);
+        encode_rooms_into_run_state(ra, rs);
+        rc.emerald_x = ra.emerald_x < 0 ? kNoEmeraldNode
+                                        : static_cast<uint8_t>(ra.emerald_x);
+        rc.emerald_y = ra.emerald_y < 0 ? kNoEmeraldNode
+                                        : static_cast<uint8_t>(ra.emerald_y);
+    }
 
     // (14) CardCrawlGame.music.changeBGM(id) (TheCity.java:48 / TheBeyond.java:46)
     //      -- AFTER generateMap in both. changeBGM unconditionally constructs a
@@ -2049,7 +2214,21 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     //      floor-17 / floor-34 misc stream; which track plays is not run state,
     //      so the value is discarded. Act 1's twin lives in run_begin, and the
     //      reason it is easy to miss is the same one recorded there: STS00052.
-    (void)random(rc.combat.misc_rng, 1);
+    //
+    //      ACT 4 DRAWS NOTHING HERE, and this is the trap the design doc's
+    //      "the frozen chain applies unchanged" sentence does not cover.
+    //      changeBGM still runs (TheEnding.java:51) and still constructs a
+    //      MainMusic, but MainMusic.getSong's switch has NO miscRng arm for
+    //      "TheEnding" -- `case "TheEnding": return newMusic(LEVEL_4_1_BGM);`
+    //      (MainMusic.java:81-83) is a bare return, where the Exordium / TheCity
+    //      / TheBeyond arms (:57-80) each roll `miscRng.random(1)` to pick
+    //      between two tracks. Act 4 ships one track, so it makes no choice.
+    //      Spending the draw here anyway would have desynchronised the
+    //      floor-51/52 misc stream under the whole act -- and miscRng is the
+    //      stream the Act-4 boss's own discarded gold add reads (§5 trap 5).
+    if (!to_ending) {
+        (void)random(rc.combat.misc_rng, 1);
+    }
 
     // (15) currMapNode. TheCity RESETS it to MapRoomNode(0, -1) with an EmptyRoom
     //      (TheCity.java:49-50); TheBeyond DOES NOT (TheBeyond.java:35-47 has no
@@ -2085,6 +2264,40 @@ void on_boss_chest_proceed(RunController& rc, RunState& rs,
     act_transition(rc, rs, static_cast<int32_t>(rs.act) + 1);
     rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
     fill_run_result(rc, res);
+}
+
+// --- THE DOOR: the Act-3 -> Act-4 crossing (S3.32) ---------------------------
+//
+// The header carries the chain and the isDungeonBeaten argument. What is worth
+// repeating AT the code is the ORDER of the two statements below, because it is
+// the whole of the floor-pair trap:
+//
+//   * `rs.floor` is UNCHANGED by the Door -- 51 below A20, 52 at A20 -- and
+//     THAT number is the Act-4 base. It is captured BEFORE act_transition
+//     raises `rs.act`, because from the instant `act` reads 4 every
+//     run_cur_row() in the engine goes through act4_floor_base_of and reads
+//     this byte. Writing it after would leave one window in which the row is
+//     computed off a base of 0.
+//   * `act_transition` then runs the frozen chain with its four ACT-4 forks.
+//
+// The engine stores the base as a uint8_t (the schema-v9 pad carve, S3.31), and
+// the widest floor it can ever hold is 52. The clamp is a total-function guard
+// on an off-nominal controller, not a reachable path.
+void act4_crossing(RunController& rc) noexcept {
+    RunState& rs = rc.run;
+    rs.act4_floor_base =
+        rs.floor > 255u ? uint8_t{255} : static_cast<uint8_t>(rs.floor);
+    act_transition(rc, rs, static_cast<int32_t>(kFinalAct));
+    // AbstractDungeon's constructor tail (:303-306): every non-Exordium dungeon
+    // opens on `screen = MAP, isScreenUp = true`, and TheEnding's
+    // `firstRoomChosen = false` (:137) makes that a FIRST-ROW pick --
+    // run_cur_row() is -1 here because floor == act4_floor_base. The one
+    // candidate is the rest node at x == 3 (the only row-0 node with an edge),
+    // which is what ChoiceScreenUtils.getMapScreenNodeChoices' `!firstRoomChosen`
+    // arm reports too: it filters row 0 by `node.hasEdges()`, and Act 4's six
+    // empty row-0 nodes have none. The width is ONE, not seven.
+    rc.event = EventDialogState{};
+    rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
 }
 
 // --- run_begin ---------------------------------------------------------------
@@ -2824,8 +3037,18 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
     // refuses a MonsterRoomBoss, and no boss encounter holds a thief, so
     // `outcome` is KILLED here in every reachable state and is carried through
     // rather than overwritten.
+    // S3.32 -- THIS IS `kActBeyond`, NOT `kFinalAct`, and the rename is the
+    // reader audit's headline. ProceedButton's gate is an ID TEST,
+    // `AbstractDungeon.id.equals("TheBeyond")` (:101-103), so it names Act 3
+    // and nothing else. While kFinalAct was 3 the two spellings coincided;
+    // once Act 4 exists they do not, and leaving `>= kFinalAct` here would have
+    // routed the ACT-4 boss (S3.33) into the Act-3 double-boss / VictoryRoom
+    // branch -- a second Heart fight and a second `Spire Heart` dialog. Act 4's
+    // boss proceed goes to goToTrueVictoryRoom (ProceedButton.java:107-109),
+    // which is S3.33's; until it lands the Act-4 boss room parks on entry and
+    // never reaches this function at all.
     if (static_cast<RoomType>(rc.room_type) == RoomType::Boss &&
-        rc.run.act >= kFinalAct) {
+        rc.run.act == kActBeyond) {
         apply_meat_on_the_bone_pre_victory(rc.combat);
         dispatch_relics_on_victory(rc.combat, rc.combat.relics,
                                    rc.combat.relic_count);
@@ -2869,7 +3092,7 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
         // entry pop the remaining count is 1 and this gate fails, so the second
         // boss falls through to the terminal below.
         //
-        // ACT-3 ONLY, and that is the `act >= kFinalAct` this whole block already
+        // ACT-3 ONLY, and that is the `act == kActBeyond` this whole block already
         // sits under. Acts 1 and 2 ALSO reach a remaining count of 2 after their
         // entry pop -- their bossLists are three keys too -- and are excluded by
         // the `AbstractDungeon.id.equals("TheBeyond")` test, not by the count.

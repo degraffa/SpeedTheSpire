@@ -4206,7 +4206,8 @@ TEST(BossVictory, TheA20DoubleBossHandoffMovesTheActsBossIdToTheSecondBoss) {
 // and is excluded from goToDoubleBoss only by
 // `AbstractDungeon.id.equals("TheBeyond")` (ProceedButton.java:101). It must
 // therefore leave `boss_ids` alone -- the reassignment lives inside the same
-// `act >= kFinalAct` block the whole double-boss branch does, and an Act-2 boss
+// `act == kActBeyond` block the whole double-boss branch does (it read
+// `act >= kFinalAct` until S3.32 split the constant), and an Act-2 boss
 // goes to its CHEST, not to a second boss room.
 TEST(BossVictory, AnActTwoBossVictoryLeavesTheActsBossIdWhereItWas) {
     RunController rc = enter_boss_combat(kSeed);

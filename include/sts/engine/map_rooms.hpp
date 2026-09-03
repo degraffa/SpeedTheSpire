@@ -83,7 +83,16 @@ enum class RoomType : uint8_t {
     Rest = 4,      // "R"  RestRoom
     Shop = 5,      // "$"  ShopRoom
     Treasure = 6,  // "T"  TreasureRoom
-    Boss = 7,      // "B"  MonsterRoomBoss (not placed on a grid node; reserved)
+    // "B"  MonsterRoomBoss. In Acts 1-3 it is NEVER placed on a grid node --
+    // DungeonMap.update builds a synthetic MapRoomNode(-1, 15) for it
+    // (DungeonMap.java:77-79) and no RoomTypeAssigner path emits the value.
+    // ACT 4 IS THE EXCEPTION, AND ONLY ON PAPER (S3.32): TheEnding
+    // .generateSpecialMap really does put a MonsterRoomBoss in the map array
+    // at (3,3) (TheEnding.java:82-83), so the engine mirrors it there -- but
+    // the node is still never ENTERED through the map, because the boss
+    // button at the Act-4 elite runs that same synthetic-node path
+    // (DungeonMap.java:68 extends the gate to `TheEnding && y == 2`).
+    Boss = 7,
     // TreasureRoomBoss -- the post-boss chest (TreasureRoomBoss.java:22-36).
     // Like Boss it is NEVER written into a grid node: ProceedButton
     // .goToTreasureRoom (ProceedButton.java:179-187) builds a synthetic

@@ -296,7 +296,9 @@ std::vector<double> ordered_pair_law(std::size_t n) {
 // is what makes bossList[1] public once the player is standing in the second
 // room. The engine's rendering of that is encode_public_view's
 // `second_boss_reserved` beside `boss_prefix[0]` (public_view.cpp:405-422),
-// gated on `act == kFinalAct && boss_cursor >= 1`. Sampling the PAIR off that
+// gated on `act == kActBeyond && boss_cursor >= 1` (it read `kFinalAct` until
+// S3.32 moved that constant to 4; the gate has always meant Act 3, the only act
+// with a double boss). Sampling the PAIR off that
 // surface tests the shuffle and the conditioning together; a second boss that
 // repeated the first would land on the impossible diagonal.
 void double_boss_sweep(Campaign& c, std::vector<uint64_t>& act3_pair,

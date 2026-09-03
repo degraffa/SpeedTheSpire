@@ -268,7 +268,15 @@ inline constexpr float kExordiumCardUpgradedChance = 0.0f;  // Exordium.java:107
     if (act == 2) {
         return ascension >= 12 ? 0.125f : 0.25f;
     }
-    if (act == 3) {
+    // ACT 4 SHARES ACT 3's ROW, and it is the only one of TheEnding's thirteen
+    // level-specific chances that is BOTH different from Exordium's and LIVE:
+    // `cardUpgradedChance = ascensionLevel >= 12 ? 0.25f : 0.5f`
+    // (TheEnding.java:159) is character-for-character TheBeyond's, and its one
+    // consumer (AbstractDungeon.java:1470) runs in the Act-4 shop and the Act-4
+    // elite's card reward. Falling through to Exordium's 0.0 here would have
+    // silently un-upgraded every Act-4 reward card -- s3-design §2.6, §5 trap
+    // 10 (the OTHER eleven constants are dead in Act 4 and are frozen dead).
+    if (act >= 3) {
         return ascension >= 12 ? 0.25f : 0.5f;
     }
     return kExordiumCardUpgradedChance;

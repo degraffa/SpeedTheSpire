@@ -1525,7 +1525,7 @@ TEST(FuzzCoverage, PerActTablesAgreeWithTheActBlindOnesOverASweep) {
     // The two independent probes for the same event. `victories` is
     // run_is_victory() at the terminal; act_boss_kills[3] is the act-3 boss
     // combat leaving COMBAT with KILLED. They cannot disagree.
-    EXPECT_EQ(cov.act_boss_kills[engine::kFinalAct], cov.victories);
+    EXPECT_EQ(cov.act_boss_kills[engine::kActBeyond], cov.victories);
 
     // Act 2 is a REACH result and a 200-case sweep is not guaranteed to contain
     // one, so the assertion is on the machinery -- the act-1 boss chest is the
@@ -1554,7 +1554,7 @@ TEST(FuzzCoverage, PerActTablesWitnessTheSeed116ActTwoCrossing) {
     EXPECT_GE(cov.max_act, 2u);
     EXPECT_GT(cov.act_boss_fights[1], 0u);
     EXPECT_GT(cov.act_boss_kills[1], 0u);
-    EXPECT_EQ(cov.act_boss_kills[engine::kFinalAct], cov.victories);
+    EXPECT_EQ(cov.act_boss_kills[engine::kActBeyond], cov.victories);
 }
 
 TEST(FuzzCoverage, ReportWitnessesActsAndNamesTheUnreachedOnes) {

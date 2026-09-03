@@ -83,9 +83,9 @@
 //   * the VICTORY terminal: the dialog's DEATH arm (SpireHeart.java:170-177)
 //     -- RunPhase::RUN_OVER with RunVictoryKind::ACT3_STOP. The GO_TO_ENDING
 //     arm is the DOOR (goToFinalAct :94-98 -> DoorUnlockScreen.java:143-161:
-//     nextDungeon = "TheEnding", isDungeonBeaten = true, and NO extra floor);
-//     Act 4 itself is S3.32, so the Door parks at ROOM_UNIMPLEMENTED with the
-//     crossing's entry state intact.
+//     nextDungeon = "TheEnding", isDungeonBeaten = true, and NO extra floor).
+//     As of S3.32 the Door CROSSES: act4_crossing builds TheEnding and the run
+//     opens Act 4 on the first-row map pick.
 // ROOM CONTENT is fully live in Acts 2-3 as of the S2.2x/S2.3x waves: the
 // Act-2/3 monsters, elites and bosses landed with S2.21-S2.28, the per-act
 // event/shrine lists with S2.13 and the event bodies with S2.31-S2.33, so no
@@ -95,10 +95,13 @@
 // along.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
-//   * ACT 4 (TheEnding): the `Spire Heart` dialog's GO_TO_ENDING arm opens the
-//     Door and then parks at ROOM_UNIMPLEMENTED, because the Act-4 dungeon
-//     construction, map and rooms are S3.32/S3.33. Everything up TO the Door
-//     -- the VictoryRoom floor, the four clicks, the three-key gate -- is live.
+//   * ACT-4 ROOM BEHAVIOUR (S3.33). The act itself is CONSTRUCTED as of S3.32 --
+//     dungeonTransitionSetup, the fixed lists, mapRng = seed + 1200, the
+//     hand-built 5x7 special map, the floor base -- and the run really walks
+//     onto its map. But the four playable rooms (rest 3,0 / shop 3,1 / elite
+//     3,2 / boss 3,3) park at ROOM_UNIMPLEMENTED on ENTRY, at the act-4 arm of
+//     on_player_entry_impl (run_advance.cpp), because their bodies and the
+//     TrueVictoryRoom terminal are S3.33's and their encounters are S3.41's.
 //   * ? rooms RESOLVE (event_framework.hpp): the one committed eventRng roll
 //     picks MONSTER (a real monster combat, consuming monsterList) / SHOP
 //     (parks, like a map shop) / TREASURE (the chest flow) / EVENT, and an
@@ -832,6 +835,26 @@ void next_room_transition_boss_chest(RunController& rc) noexcept;
 // decision the run layer has to surface (see finish_combat_after_action).
 void next_room_transition_victory_room(RunController& rc) noexcept;
 
+// --- THE DOOR: the Act-3 -> Act-4 crossing (S3.32) ---------------------------
+//
+// SpireHeart.buttonEffect's GO_TO_ENDING arm (:178-184) -> goToFinalAct (:94-98)
+// -> DoorUnlockScreen.exit (:143-161) -> CardCrawlGame.getDungeon's
+// `new TheEnding(p, theList)` (CardCrawlGame.java:1114-1116).
+//
+// IT COSTS NO FLOOR, which is the whole reason the Act-4 base is state and not
+// arithmetic: DoorUnlockScreen.exit sets `isDungeonBeaten = true` (:159), and
+// that flag is exactly what makes AbstractDungeon.updateFading skip its
+// `if (!isDungeonBeaten) nextRoomTransition()` arm (:2317-2326) -- the same
+// mechanism the boss-chest crossing uses. So TheEnding is constructed AT the
+// `Spire Heart` VictoryRoom's own floor, 51 below A20 and 52 at A20, and THAT
+// number is written into RunState::act4_floor_base.
+//
+// Called from the dialog body (events/spire_heart.cpp) rather than from a
+// transition, because the Door is a SCREEN over the VictoryRoom, not a room.
+// It leaves the controller at RunPhase::MAP_CHOICE with run_cur_row() == -1,
+// i.e. TheEnding's `firstRoomChosen = false` (TheEnding.java:137).
+void act4_crossing(RunController& rc) noexcept;
+
 // --- The act boundary (S2.12) ------------------------------------------------
 //
 // FLOOR NUMBERING IS CONTINUOUS ACROSS ACTS. dungeonTransitionSetup
@@ -870,19 +893,60 @@ void next_room_transition_victory_room(RunController& rc) noexcept;
 // the mistake the row exists to prevent.
 inline constexpr int kActFloorSpan = 17;
 
-// The last act S2 models. Act 4 (TheEnding / the Heart) is S3 and is reached
-// only through the keys + the Door, which S2 does not grant (s2-design §1), so
-// the Act-3 boss is the run's terminal.
-inline constexpr uint8_t kFinalAct = 3;
+// TheBeyond -- the last act with a GENERATED map, a monsterRng-drawn list trio,
+// an event/shrine pool and a 15-row grid. It is NOT the last act any more, and
+// the distinction is the whole of S3.32's reader audit: everything that meant
+// "Act 3" because Act 3 happened to end the run has to say kActBeyond, and only
+// the things that mean "the last act the run can be in" may say kFinalAct.
+//
+// The three families that had to stay on THIS constant when kFinalAct moved:
+//   * the A20 DOUBLE BOSS (`AbstractDungeon.id.equals("TheBeyond")`,
+//     ProceedButton.java:101-103) -- ProceedButton's gate is an id test, and
+//     Act 4 has no double boss at any ascension (s3-design §5 trap 8);
+//   * the VICTORY probes -- `run_is_victory` is written by the `Spire Heart`
+//     dialog that sits one floor after the ACT-3 boss (SpireHeart.java:170-177),
+//     so every "the run was won" counter is an Act-3 statement;
+//   * the two replay HANDOFF predicates (command_map.hpp), which recognise
+//     Act-3 boss-room COMPLETE records.
+inline constexpr uint8_t kActBeyond = 3;
+
+// The last act a run can be in: TheEnding, reached only through the three keys
+// and the Door (SpireHeart.java:151, :178-184 -> DoorUnlockScreen.java:143-161).
+// Moved 3 -> 4 by S3.32, which built the act; before that it was 3 because S2
+// granted no Act 4 at all (s2-design §1) and the Act-3 boss was the terminal.
+inline constexpr uint8_t kFinalAct = 4;
 
 // The floor at which `act` was constructed == the floor BELOW its first playable
 // room. 0 / 17 / 34 for acts 1 / 2 / 3.
+//
+// EXACT ONLY FOR ACTS 1-3, and deliberately not extended to 4. Act 4's base is
+// A20-DEPENDENT -- 51 below A20 and 52 at A20, because the A20 second Act-3
+// boss room is a real floor and the `Spire Heart` VictoryRoom is another
+// (s3-design §4.3) -- so `(act - 1) * kActFloorSpan`, which reads 51 for act 4,
+// is right on one ascension band and wrong on the other. That is precisely the
+// s2-design §4.2 floor-pair trap one act later, so the Act-4 base is RUN STATE
+// written at the crossing (`RunState::act4_floor_base`) and read back through
+// act_floor_base_of below. Callers that hold a RunState must use that form; the
+// int overload survives for the three acts it is exact for and for the
+// compile-time asserts that pin them.
 [[nodiscard]] constexpr int act_floor_base(int act) noexcept {
     return (act - 1) * kActFloorSpan;
 }
 static_assert(act_floor_base(1) == 0);
 static_assert(act_floor_base(2) == 17);
 static_assert(act_floor_base(3) == 34);
+
+// The act-general form: the floor below `rs.act`'s first playable room.
+//
+// Acts 1-3 are the arithmetic above. Act 4 reads the byte the crossing wrote.
+// A controller that has never crossed carries 0 there, which would make
+// run_cur_row read `floor - 1` -- but no state has act == 4 without having gone
+// through act4_crossing, and run_cur_row saturates at -1 anyway, so an
+// off-nominal pair cannot index the map out of range.
+[[nodiscard]] constexpr int act_floor_base_of(const RunState& rs) noexcept {
+    return rs.act >= kFinalAct ? static_cast<int>(rs.act4_floor_base)
+                               : act_floor_base(static_cast<int>(rs.act));
+}
 
 // TRAP 1 -- the cardRng counter snap at dungeonTransitionSetup
 // (AbstractDungeon.java:2564-2570). Returns the counter the stream must be
@@ -993,8 +1057,13 @@ void sync_live_gold(RunController& rc) noexcept;
 // than allowed to run negative: an off-nominal (act, floor) pair built by a
 // directed test must not be able to index the map array below zero.
 [[nodiscard]] constexpr int run_cur_row(const RunController& rc) noexcept {
-    const int row = static_cast<int>(rc.run.floor) -
-                    act_floor_base(static_cast<int>(rc.run.act)) - 1;
+    // S3.32: act_floor_base_of, not act_floor_base(act) -- Act 4's base is the
+    // A20-dependent byte the crossing wrote, not a function of the act. Act 4's
+    // own first-row pick depends on this: the crossing leaves floor == base, so
+    // this returns -1 and MAP_CHOICE offers the row-0 pick (the rest node), the
+    // same shape as `firstRoomChosen = false` (TheEnding.java:137).
+    const int row =
+        static_cast<int>(rc.run.floor) - act_floor_base_of(rc.run) - 1;
     return row < 0 ? -1 : row;
 }
 

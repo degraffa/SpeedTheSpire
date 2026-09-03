@@ -882,7 +882,11 @@ struct ShopTarget {
 [[nodiscard]] inline bool is_double_boss_handoff(const RunController& rc,
                                                  const ScreenInfo& s) noexcept {
     return s.screen_type == "COMPLETE" && s.room_type == "MonsterRoomBoss" &&
-           rc.run.ascension >= 20 && rc.run.act == sts::engine::kFinalAct &&
+           // S3.32: kActBeyond -- this predicate recognises an ACT-3 boss-room
+           // COMPLETE record, and ProceedButton's own gate is the id test
+           // `AbstractDungeon.id.equals("TheBeyond")` (:101-103).
+           rc.run.ascension >= 20 &&
+           rc.run.act == sts::engine::kActBeyond &&
            // The sim is INSIDE the second fight -- next_room_transition enters
            // the room and MonsterRoomBoss.onPlayerEntry starts its combat.
            rc.phase == static_cast<uint8_t>(RunPhase::COMBAT) &&
@@ -917,7 +921,10 @@ struct ShopTarget {
 [[nodiscard]] inline bool is_victory_room_handoff(const RunController& rc,
                                                   const ScreenInfo& s) noexcept {
     return s.screen_type == "COMPLETE" && s.room_type == "MonsterRoomBoss" &&
-           rc.run.act == sts::engine::kFinalAct &&
+           // S3.32: kActBeyond, for the same reason as its sibling above --
+           // goToVictoryRoomOrTheDoor is the `else` of that same id-gated
+           // branch, so this record is an Act-3 one.
+           rc.run.act == sts::engine::kActBeyond &&
            // The sim is in the VictoryRoom's dialog -- next_room_transition
            // entered the room and VictoryRoom.onPlayerEntry constructed the
            // event. The event id is checked too, not just the phase: it is the

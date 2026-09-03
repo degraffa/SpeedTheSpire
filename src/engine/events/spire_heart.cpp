@@ -176,29 +176,36 @@ EventDialogStatus spire_heart_choose(RunController& rc, EventDialogState& es,
             // crossing uses. So Act 4 is CONSTRUCTED AT the VictoryRoom's own
             // floor: 51 below A20, 52 at A20 (s3-design §4.3).
             //
-            // THE HANDOFF TO S3.32, stated exactly, because Act 4 does not
-            // exist yet and this park is where it will be replaced by the
-            // crossing:
+            // THE STATE act4_crossing READS, unchanged from the park this
+            // arm held between S3.31 and S3.32:
             //   * rc.run.floor    -- unchanged (51 / 52); this IS the Act-4
-            //                        floor base, and it is what S3.32 must
-            //                        write into rc.run.act4_floor_base.
-            //   * rc.run.act      -- still 3. S3.32's act transition raises it.
+            //                        floor base, and act4_crossing's first
+            //                        statement copies it into
+            //                        rc.run.act4_floor_base.
+            //   * rc.run.act      -- still 3 on entry; the crossing's
+            //                        `++actNum` raises it to 4.
             //   * rc.room_type    -- RoomType::Victory, phase COMPLETE in the
             //                        game's terms; the room is left, not
-            //                        re-entered, so no transition pops a list.
+            //                        re-entered, so no transition pops a list,
+            //                        and TheEnding (unlike TheCity) does not
+            //                        replace currMapNode, so it stays Victory
+            //                        until the first Act-4 node transition.
             //   * the five floor streams -- still seed + floor from the
             //                        VictoryRoom's own reseed, which is what
-            //                        TheEnding's construction observes (§4.3).
-            //   * rc.run.victory_kind -- still NONE. The Door is not a victory;
-            //                        HEART is written by the TrueVictoryRoom
-            //                        (S3.33), and a run that walks through the
-            //                        Door and then dies in Act 4 is a LOSS.
-            // Parking at ROOM_UNIMPLEMENTED is the engine's standing honest
-            // answer for content that is scoped and not yet written
-            // (run_advance.hpp's deferred list), and it keeps every one of the
-            // fields above intact for the crossing to read.
+            //                        TheEnding's construction observes (§4.3)
+            //                        and what its BGM change would have drawn
+            //                        from if Act 4 had a second track.
+            //   * rc.run.victory_kind -- still NONE, and act4_crossing does not
+            //                        touch it. The Door is not a victory; HEART
+            //                        is written by the TrueVictoryRoom (S3.33),
+            //                        and a run that walks through the Door and
+            //                        then dies in Act 4 is a LOSS.
+            //
+            // The dialog is dismissed before the crossing rather than after it
+            // so that no Act-4 state is ever observed with a stale event id up;
+            // act4_crossing clears rc.event again and leaves MAP_CHOICE.
             rc.event = EventDialogState{};
-            rc.phase = static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED);
+            act4_crossing(rc);
             return EventDialogStatus::TRANSITIONED;
         }
     }

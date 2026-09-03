@@ -231,14 +231,38 @@ void dispatch_on_enter_room_relics(RunState& rs, RoomType room) noexcept;
 //    table is the identity).
 //
 // The per-act EVENT list. Acts 2 and 3 are S2.02's registry ids; the counts are
-// the Java list lengths, re-read in full at those lines. `act` is 1..3
-// (kFinalAct == 3, run_advance.hpp) and anything else falls to Act 1 -- Act 4 /
-// TheEnding is out of S2 scope (s2-design §1) and has no eventList of its own.
+// the Java list lengths, re-read in full at those lines.
+//
+// ACT 4 IS AN EXPLICIT ZERO, not a fall-through (S3.32). TheEnding overrides
+// initializeEventList AND initializeShrineList with EMPTY bodies
+// (TheEnding.java:198-200, :211-213), so both lists dungeonTransitionSetup
+// cleared (:2576-2577) stay cleared for the whole act -- Act 4 has no ? rooms
+// to draw from anyway (generateSpecialMap places no EventRoom). This used to be
+// one of the readers that made `anything else falls to Act 1` dangerous: at
+// act 4 it would have refilled `event_membership` with Exordium's eleven bits
+// and made the crossing's save-parity state a fabrication. The translator
+// already refuses a non-empty Act-4 eventList/shrineList (S3.21, translate.cpp
+// `act4_empty_pools`), so the two sides now agree by construction.
+//
+// `act` outside 1..4 still falls to Act 1 -- the function is total over a
+// possibly-off-nominal RunState byte, like every other reader here.
 [[nodiscard]] constexpr uint16_t event_list_first_id(int act) noexcept {
-    return act == 2 ? 32 : (act == 3 ? 45 : 1);
+    return act == 2 ? 32 : (act == 3 ? 45 : (act == 4 ? 0 : 1));
 }
 [[nodiscard]] constexpr int event_list_count(int act) noexcept {
-    return act == 2 ? 13 : (act == 3 ? 7 : 11);
+    return act == 2 ? 13 : (act == 3 ? 7 : (act == 4 ? 0 : 11));
+}
+static_assert(event_list_count(4) == 0 && event_list_first_id(4) == 0,
+              "TheEnding.initializeEventList is empty (TheEnding.java:198-200)");
+
+// The per-act SHRINE list length. Six in Acts 1-3 (Exordium.java:238-246 ==
+// TheCity.java:210-218 == TheBeyond.java:198-206) and ZERO in Act 4, for the
+// same reason and from the same pair of empty overrides. kShrineListCount below
+// stays 6 -- it sizes the BITSET and the draw-order tables, whose bit meanings
+// are act-independent by design (see the note above it) -- so the act-4 answer
+// is a separate function rather than a variable count.
+[[nodiscard]] constexpr int shrine_list_count(int act) noexcept {
+    return act == 4 ? 0 : 6;
 }
 // The widest event list (Act 2's 13) bounds every `tmp[]` and every
 // `event_membership` mask. uint16_t event_membership covers it with room.

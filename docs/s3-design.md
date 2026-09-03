@@ -533,10 +533,30 @@ prevent, one act later. Both halves need SEPARATE witnesses (§6.0): a
 capture of the `Spire Heart` floor and a capture of the first Act-4 room, at
 both ascension bands, because a single number that happens to match on one
 band hides the pair.
-`UNVERIFIED — needs decompile check`: the above assumes only the transitions
-enumerated here occur between floor 50 and the Act-4 rest; confirm against a
-live capture's `floor` sequence at the S3.32 task (the oracle answers this
-directly and cheaply once the fork emits an Act-4 dump).
+`RESOLVED at S3.32 for the decompile half; the capture half is S3.62's`:
+the transition list above is complete — no other `nextRoomTransition` occurs
+between floor 50 and the Act-4 rest — and the engine now walks it. The S3.32
+witness runs reproduce the whole column on one seed (STS103509 / `sim_search`
+ps347) at both bands, with the three keys forced at the dialog because no keyed
+sim victory exists yet (S3.22): the Door is at floor **51** at A19 and **52** at
+A20, `act4_floor_base` takes exactly that number, and the direct mask probe puts
+the rest at 52/53, the shop at 53/54, the elite at 54/55 and the boss at 55/56 —
+the table above, unchanged. A live capture is still owed (§5 traps 2, 3 and 11)
+and it is S3.62's.
+
+**A CORRECTION THIS SECTION OWES ITS OWN "unchanged" SENTENCE** (found at S3.32;
+conventions §4 fixes the losing document in the change that finds it).
+"Everything s2-design §4.2 says about the crossing applies **unchanged**" is true
+of `dungeonTransitionSetup` and false of the **BGM draw** that follows the map in
+every other act. `CardCrawlGame.music.changeBGM(id)` (TheEnding.java:51) still
+runs and still constructs a `MainMusic`, but `MainMusic.getSong`'s switch has
+**no `miscRng` arm for `"TheEnding"`**: `case "TheEnding": return
+newMusic(LEVEL_4_1_BGM);` (MainMusic.java:81-83) is a bare return, where the
+`Exordium` / `TheCity` / `TheBeyond` arms (:57-80) each roll `miscRng.random(1)`
+to choose between two tracks. Act 4 ships one track and therefore makes no
+choice. **The Act-4 crossing spends no `miscRng` draw**, and spending one would
+have desynchronised the floor-51/52 misc stream under the whole act — the same
+stream §5 trap 5's Heart-kill gold add reads.
 
 Stream lifetimes are unchanged: `mapRng` is the only per-act reseed
 (`seed + 1200`), the floor-scoped five (`monsterHpRng, aiRng, shuffleRng,
@@ -573,21 +593,29 @@ beyond the seeding** — the Act-4 `mapRng` is created and then never drawn from
 (run_state.hpp:135-149, :209) holds it with rows 5–14 `None`, so **no schema
 change is needed for the map itself**.
 
-`UNVERIFIED — needs decompile check` (and cheaply answered by the oracle): the
-Act-4 first-row map choice. `MapRoomNode.update`'s first-room arm (:254-279)
-gates only on `y == 0` and hover, so the six empty `y == 0` nodes have live
-hitboxes; whether the game actually offers them (and what CommunicationMod's
-`ChoiceScreenUtils` reports) decides whether the Act-4 map choice has 1 or 7
-legal actions. Resolve against the fork before the mask is authored — an
-over-wide mask is a leak-gate and a differ problem, not a cosmetic one. Owned
-by the S3.32 row.
+**RESOLVED at S3.32 — the width is ONE, not seven.** The question was whether
+the game actually offers the six empty `y == 0` nodes, and the fork answers it
+directly: `ChoiceScreenUtils.getMapScreenNodeChoices`' `!firstRoomChosen` arm
+iterates `map.get(0)` and adds a node **only if `node.hasEdges()`**
+(ChoiceScreenUtils.java, read in full). Act 4's row 0 has exactly one node with
+an edge — the rest node's rest→shop edge (:86) — so the Act-4 first-row choice
+list is the single entry `x=3`. `MapRoomNode.update`'s live hitboxes are a
+rendering fact with no choice-list consequence. The engine reproduces it for
+free: its first-row mask arm is already `map[x][0].edges != 0`.
 
 Boss entry: `DungeonMap.java:68` enables the boss icon when `y == 14` **or**
 (`id.equals("TheEnding")` and `getCurrMapNode().y == 2`), so from the Act-4
 elite the boss is reachable by the boss button *as well as* by the :88 edge.
-Which action kind the engine emits (`MAP_BOSS` vs `MAP_NODE`) is a
-capture-parity question with the same answer source; pin it with the choice
-above.
+**RESOLVED at S3.32 — it is `MAP_BOSS`, and it is the ONLY choice.**
+`ChoiceScreenUtils.bossNodeAvailable` repeats that same disjunction verbatim,
+and `getMapScreenChoices` **returns early** with the single choice `"boss"`
+whenever it holds — the node list is never consulted, so the :88 edge produces
+no `x=3` alternative, and `makeMapChoice` mirrors the gate and throws on any
+index but 0. The engine encodes the Act-4 elite node's onward edge as
+`kEdgeBoss` alone for exactly this reason, so its mask is one `MAP_BOSS` action
+and no `MAP_NODE` action; taking it runs the same synthetic `MapRoomNode(-1, 15)`
++ `new MonsterRoomBoss()` the row-14 boss uses (DungeonMap.java:77-79), so the
+(3,3) map node is decorative in the engine exactly as it is in the game.
 
 ### 4.5 The Act-4 rooms and the true-victory terminal
 
@@ -960,12 +988,22 @@ scan**, in three sanctioned steps with a pre-registered escalation:
 - New `RoomType` values are needed for the two terminal rooms (the
   `VictoryRoom` and the `TrueVictoryRoom`); `kRoomTypeCount` and the fuzz
   coverage array follow, with the `static_assert` S2.11 added.
-- `engine::kFinalAct` moves **3 → 4** (run_advance.hpp:848) and every reader
-  is a site to audit: `run_is_victory` (:992), the fuzz `kActBuckets` sizing
-  (`coverage.hpp:80-88`, which already reserves the act-4 slot on purpose),
-  `event_framework.hpp:233-240`'s per-act event-list fall-through, and the
-  planner's `kMaxActs` (`seed_scan.hpp:221-229`). Changing the constant without
-  the audit is how an act-4 run silently reads Act-1 tables.
+- `engine::kFinalAct` moves **3 → 4** and every reader is a site to audit.
+  **DONE at S3.32**, and the audit's own finding is that the constant was
+  overloaded: most readers meant *TheBeyond*, not *the terminal act*. S3.32
+  therefore introduced `engine::kActBeyond` (3) beside `kFinalAct` (4) and moved
+  every Act-3-meaning reader onto it — the A20 double-boss gate and the
+  `VictoryRoom` arm (`run_advance.cpp`), `PublicView::second_boss_reserved`
+  (`public_view.cpp`), the fuzz victory cross-check (`coverage.cpp`), the
+  planner's victory latch (`seed_scan.cpp`) and both replay handoff predicates
+  (`command_map.hpp`). The genuinely-terminal readers stayed on `kFinalAct`, and
+  three had to change with it: the fuzz `kActBuckets` term (`+ 2` → `+ 1`, the
+  act-4 reserve slot having become act 4), `event_framework.hpp`'s per-act
+  event/shrine fall-through (act 4 is now an explicit ZERO, not Act 1's table)
+  and `combat_rewards.hpp`'s `card_upgraded_chance` (act 4 shares Act 3's row,
+  §2.6). Changing the constant without the audit is how an act-4 run silently
+  reads Act-1 tables; changing it without SPLITTING it is how an Act-4 boss
+  silently becomes a second Act-3 double boss.
 - **`SCHEMA_VERSION` 8 → 9 is planned, once, in S3** (`schema.hpp:187`). Its
   contents: the run-outcome kind (§4.5), the Act-4 floor base (§4.3), and the
   reward-row key kinds plus the sapphire link (§3.3, `RewardItemKind` gains
@@ -1063,6 +1101,19 @@ scan**, in three sanctioned steps with a pre-registered escalation:
   moved from `rest_sites.hpp` to `run_state.hpp` beside the `kKey*` bits: four
   gates in four modules read it now, and `relic_pools.hpp` includes
   `map_rooms.hpp`, so map generation could never have reached `rest_sites.hpp`.
+- 2026-09-03 — **§4.3 / §4.4 resolutions and one correction, from S3.32's
+  implementation** (conventions §4). (i) The two `UNVERIFIED — needs decompile
+  check` notes are discharged from the fork's own `ChoiceScreenUtils`: the Act-4
+  first-row map choice is **one** candidate (`x=3`), not seven, because the
+  `!firstRoomChosen` arm filters row 0 by `node.hasEdges()`; and the elite→boss
+  action kind is **`MAP_BOSS`, exclusively**, because `getMapScreenChoices`
+  returns early with the single `"boss"` entry whenever `bossNodeAvailable()`
+  holds. (ii) §4.3's "the crossing applies **unchanged**" is corrected: the
+  crossing's **BGM `miscRng` draw does not happen in Act 4**, because
+  `MainMusic.getSong`'s `"TheEnding"` arm (MainMusic.java:81-83) has no
+  `random(1)` where the other three acts do. (iii) §7's `kFinalAct` bullet is
+  rewritten around the audit's finding that the constant was overloaded, and now
+  records `engine::kActBeyond`.
 - 2026-09-03 — **scoping correction recorded against the S2 deferred-obligations
   row for keys** (s2-tasks.md, "Keys as obtainable content"): its premise that
   "only the node flag is missing" is stale. `setEmeraldElite`'s chosen node

@@ -87,13 +87,19 @@ inline constexpr int kFloorBuckets = 16;      // floor 0..14, then 15+
 // PER-ACT BUCKETS, indexed by RunState::act DIRECTLY (1-based), so index 0 is a
 // slot that can never be written and every table below reads act N at [N].
 //
-// It is sized from engine::kFinalAct plus one rather than the literal 4, and it
-// keeps a slot for act 4 on purpose: `RunState::act` is documented 1..4, the
-// Ending act is unmodelled today, and a bucket array that silently DROPPED an
-// act it was handed would turn "we never got there" and "we got there and did
-// not count it" into the same zero -- which is the exact confusion the shop
-// entry hole (fuzz_run.cpp) already cost this tool once.
-inline constexpr int kActBuckets = engine::kFinalAct + 2;  // 0 unused, 1..4
+// It is sized from engine::kFinalAct rather than the literal 4, so a bucket
+// array cannot silently DROP an act it was handed -- which would turn "we never
+// got there" and "we got there and did not count it" into the same zero, the
+// exact confusion the shop entry hole (fuzz_run.cpp) already cost this tool
+// once.
+//
+// S3.32 MOVED kFinalAct 3 -> 4 AND THE `+ 2` WITH IT. The old spelling was
+// `kFinalAct + 2` for a reason that has now expired: it bought one slot past
+// the terminal act so Act 4 kept a bucket while the Ending was unmodelled. With
+// kFinalAct == 4 that slot IS act 4, so the term is `+ 1` and the array is the
+// same five entries -- the static_assert below is what caught the change, and
+// keeping it at 5 is what says the width did not silently grow.
+inline constexpr int kActBuckets = engine::kFinalAct + 1;  // 0 unused, 1..4
 static_assert(kActBuckets == 5, "acts are 1..4; index 0 is the unused sentinel");
 
 // A fixed-capacity "which registry rows did we ever see" bitset. Sized from the

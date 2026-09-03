@@ -406,17 +406,23 @@ void encode_always_block(const RunController& rc, PublicView& out) noexcept {
     encode_prefix(rc.lists.boss_list.data(), rc.lists.boss_list_count,
                   boss_public, out.boss_prefix, kMaxBossList);
     // THE A20 SECOND BOSS (S2.28; the reserved slot public_view.hpp declares).
-    // boss_cursor advances when a boss room is LEFT, and in the FINAL act the
-    // only way to leave one with the run still going is the double-boss
-    // transition -- a non-A20 Act-3 boss kill terminates the run instead. So
-    // `act == kFinalAct && boss_cursor >= 1` IS "the player is in (or has
+    // boss_cursor advances when a boss room is LEFT, and in ACT 3 the only way
+    // to leave one with the run still going is the double-boss transition -- a
+    // non-A20 Act-3 boss kill walks into the `Spire Heart` VictoryRoom and ends
+    // there. So `act == kActBeyond && boss_cursor >= 1` IS "the player is in
+    // (or has
     // finished) the second boss room", which is exactly when boss_list[1] stops
     // being a hidden realization and starts being the monsters on screen.
     //
     // The belief sampler preserves the same prefix (condition_boss_list's `keep`,
     // resample.cpp), so a hidden twin agrees with the truth here -- which is what
     // makes populating this safe rather than a leak.
-    if (rc.run.act == kFinalAct && rc.boss_cursor >= 1 &&
+    // S3.32: kActBeyond, not kFinalAct. This slot is the A20 SECOND ACT-3 BOSS
+    // and nothing else -- Act 4 has no double boss at any ascension
+    // (ProceedButton.java:101-109, s3-design §5 trap 8) and its boss_list is
+    // three identical "The Heart" entries, so reading it at act 4 would publish
+    // a reserved-slot id for a second boss that does not exist.
+    if (rc.run.act == kActBeyond && rc.boss_cursor >= 1 &&
         rc.lists.boss_list_count > 1) {
         out.second_boss_reserved = encounter_id_of(rc.lists.boss_list[1]);
     }

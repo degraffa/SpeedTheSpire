@@ -509,17 +509,26 @@ std::string Coverage::report(double elapsed_s) const {
         }
         os << "\n";
     }
-    // act_boss_kills[kFinalAct] and `victories` count the same event from two
+    // act_boss_kills[kActBeyond] and `victories` count the same event from two
     // sides (the combat outcome vs run_is_victory). They can differ ONLY if one
     // of the two probes is wrong, so the disagreement is printed rather than
     // left for a reader to notice by comparing two tables.
-    if (act_boss_kills[engine::kFinalAct] != victories) {
+    //
+    // S3.32: kActBeyond, not kFinalAct. `run_is_victory` is written by the
+    // `Spire Heart` dialog one floor after the ACT-3 boss, so both sides of
+    // this identity are Act-3 statements; at kFinalAct == 4 the left-hand side
+    // would have read act 4's (currently always zero) bucket and printed the
+    // disagreement on every soak that won a run. ONE EXPECTED ASYMMETRY
+    // remains and is not a bug: a line that walks through the Door kills the
+    // Act-3 boss but never sets victory_kind (the Door is not a victory), so
+    // `act_boss_kills[3] > victories` is the correct reading of an Act-4 entry.
+    if (act_boss_kills[engine::kActBeyond] != victories) {
         std::snprintf(buf, sizeof(buf),
                       "  !! act-%d boss kills (%llu) != victories (%llu) -- the "
                       "two probes for the same event disagree\n",
-                      static_cast<int>(engine::kFinalAct),
+                      static_cast<int>(engine::kActBeyond),
                       static_cast<unsigned long long>(
-                          act_boss_kills[engine::kFinalAct]),
+                          act_boss_kills[engine::kActBeyond]),
                       static_cast<unsigned long long>(victories));
         os << buf;
     }
