@@ -1016,6 +1016,31 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
             // load-bearing: a primary end-of-turn action (Feel No Pain block)
             // runs before the marker, while a secondary action it queues
             // (Juggernaut damage) runs after it.
+            //
+            // It is ALSO where `turnHasEnded` flips. AbstractRoom$1.update
+            // queues [EndTurnAction, WaitAction, MonsterStartTurnAction] in one
+            // go, and EndTurnAction.update's whole body is
+            // `AbstractDungeon.actionManager.endTurn()`
+            // (EndTurnAction.java:12-19), i.e. `this.turnHasEnded = true`
+            // (GameActionManager.java:179-183). So the flag is FALSE for the
+            // entire end-of-turn window -- the relic hooks, Metallicize, the
+            // hand cards' end-of-turn self-plays, Combust, and the hand discard
+            // -- and only true from here to the next
+            // GainEnergyAndEnableControlsAction.
+            //
+            // WHY IT MATTERS: `VulnerablePower`'s ctor latches justApplied on
+            // `actionManager.turnHasEnded && isSourceMonster`
+            // (VulnerablePower.java:36-38) -- BOTH clauses -- and a latched
+            // Vulnerable skips its first atEndOfRound decrement (:44-48). A
+            // Fungi Beast killed by the player's own Combust dies inside the
+            // end-of-turn window, so its Spore Cloud's
+            // `new VulnerablePower(player, amount, true)`
+            // (SporeCloudPower.java:36-43) is built with turnHasEnded still
+            // FALSE and DOES decrement that round. Flipping the flag at the
+            // end-turn sentinel instead left the player on Vulnerable 2 where
+            // the game reads 1 (capture s2v3_wave1_STS207337_ps96, floor 14,
+            // seq 199).
+            s.turn_has_ended = 1;
             apply_pre_turn_logic(s);
         } else {
             execute_opcode(s, r.executed);
@@ -1059,7 +1084,18 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     if (s.card_queue_count > 0) {
         const CardQueueItem head = s.card_queue[0];
         if (is_end_turn_sentinel(head)) {
-            s.turn_has_ended = 1;              // (endTurn(): turnHasEnded = true)
+            // NOT `turn_has_ended = 1` -- that flag flips at the MARKER below,
+            // not here. `GameActionManager.endTurn()` (:179-183) is the only
+            // writer of `turnHasEnded = true`, and its only caller is
+            // `EndTurnAction.update` (EndTurnAction.java:12-19), which
+            // AbstractRoom$1.update queues to the BOTTOM together with the
+            // MonsterStartTurnAction this marker stands for -- i.e. AFTER
+            // everything AbstractRoom.endTurn (:393-411) queued ahead of it:
+            // applyEndOfTurnTriggers' power actions (Combust's
+            // DamageAllEnemies), ClearCardQueueAction and
+            // DiscardAtEndOfTurnAction. Setting it here instead put the whole
+            // end-of-turn window on the wrong side of the flag; see the
+            // marker branch for the divergence that measured it.
             s.monster_attacks_queued = 0;      // prime step 4 (see hpp note (2))
             // AbstractRoom.endTurn:397-405: the moment the turn ends,
             // every draw/discard/hand card's costForTurn resets to its cost --
