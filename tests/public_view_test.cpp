@@ -97,7 +97,7 @@ static_assert(sizeof(PvPower) == 6);
 static_assert(sizeof(PvMonster) == 20 + 6 * kPowerCap);
 // v3's size; the v1 prefix's 3760 bytes are pinned by V2TailHasNoImplicitPadding
 // asserting that offsetof(PublicView, gold) is still exactly 3760.
-static_assert(sizeof(PublicView) == 8988);  // v6: event caps 12 -> 20 (Library board) on top of v4's kMonsterCap move
+static_assert(sizeof(PublicView) == 8992);  // v7: victory_kind + act4_floor_base tail append on top of v6's event caps
 
 // --- Layout walk (the header's promised "no implicit padding" proof) ---------
 
@@ -654,7 +654,7 @@ static_assert(sizeof(PvRelic) == 4);
 static_assert(sizeof(PvMapNode) == 2);
 static_assert(sizeof(PvShopSlot) == 6);
 static_assert(sizeof(PvEventBoardCard) == 6);
-static_assert(sizeof(PublicView) == 8988);  // v6: event caps 12 -> 20 (Library board) on top of v4's kMonsterCap move
+static_assert(sizeof(PublicView) == 8992);  // v7: victory_kind + act4_floor_base tail append on top of v6's event caps
 
 // --- Layout walk over the v2 element types and the appended tail -------------
 
@@ -828,6 +828,11 @@ TEST(PublicViewLayout, V2TailHasNoImplicitPadding) {
         // asserted 4-sized-and-4-aligned, so this abuts action_mask with no
         // pad, and the walk below proves it rather than assuming it.
         STS_MEMBER_SPAN(PublicView, event_flags_hi),
+        // v7 (S3.51) tail append -- the run-outcome kind and the Act-4 floor
+        // base, plus the explicit pad rounding the addition back to 4 bytes.
+        STS_MEMBER_SPAN(PublicView, victory_kind),
+        STS_MEMBER_SPAN(PublicView, act4_floor_base),
+        STS_MEMBER_SPAN(PublicView, pad_v7),
     };
     std::string holes;
     std::size_t cursor = offsetof(PublicView, gold);
@@ -923,10 +928,10 @@ TEST(PublicViewRun, AlwaysBlockScalarsRoundTrip) {
     PublicView pv{};
     encode_public_view(rc, pv);
 
-    EXPECT_EQ(pv.public_view_version, 6u);  // v6: event caps 12 -> 20 (the
-                                            // Library board) -- breaking, the
-                                            // v4 shape; v5 populated
-                                            // second_boss_reserved (additive)
+    EXPECT_EQ(pv.public_view_version, 7u);  // v7: victory_kind +
+                                            // act4_floor_base tail append
+                                            // (additive) on top of v6's event
+                                            // caps 12 -> 20 (breaking)
     EXPECT_EQ(pv.run_phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
     EXPECT_EQ(pv.combat_active, 0);
 

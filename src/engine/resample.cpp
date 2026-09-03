@@ -371,22 +371,47 @@ void resample_hidden(RunController& rc, SamplerRng& rng) noexcept {
     // (next_room_transition), so the observed length is the cursor plus one
     // while standing in a room of that kind. rc.room_type is the RESOLVED room
     // kind, which is what makes a ?-room that rolled MONSTER count here.
-    const RoomType room = static_cast<RoomType>(rc.room_type);
-    const uint8_t monster_keep = static_cast<uint8_t>(
-        rc.monster_cursor + (room == RoomType::Monster ? 1 : 0));
-    const uint8_t elite_keep = static_cast<uint8_t>(
-        rc.elite_cursor + (room == RoomType::Elite ? 1 : 0));
-    continue_monster_lists(static_cast<int32_t>(rs.act), rng.stream,
-                           monster_keep, elite_keep, rc.lists);
-    // The boss list conditions on the public prefix. That is boss_list[0]
-    // (named on the map from act start) in every ordinary run -- and ONE MORE at
-    // the A20 double boss, where entering the second Act-3 boss room reveals
-    // boss_list[1] to the player as surely as entering any other room reveals its
-    // encounter. Same shape as the two prefixes above: the cursor, plus one while
-    // standing in a room of that kind.
-    const uint8_t boss_keep = static_cast<uint8_t>(
-        rc.boss_cursor + (room == RoomType::Boss ? 1 : 0));
-    condition_boss_list(rc.lists, rng.stream, boss_keep);
+    //
+    // ACT 4 IS A PURE COPY, NOT A CONDITION (S3.51, s3-design §7's "Act 4's
+    // content is public and constant" fact). `act4_crossing` fills all three
+    // lists to `kActEndingListLen` in ONE step (run_advance.cpp) -- there is no
+    // monsterRng suffix left to continue, and `build_pool(4, ...)` legitimately
+    // returns an EMPTY pool for every one of the three EncounterPool kinds
+    // (encounters.yaml's two Act-4 rows are `weight: 0.0`, outside every pool).
+    // Calling continue_monster_lists/condition_boss_list here anyway is not
+    // merely redundant: `monster_keep`/`elite_keep` are the CURSOR (0 before
+    // the room is entered), while `monster_target`/`elite_target` are already
+    // `kActEndingListLen` from construction, so `[keep, target)` looks
+    // unfulfilled and `populate_monster_list` draws from the empty pool --
+    // `roll_pool` on an empty span returns `kNoEncounterKey` (no UB, but WRONG:
+    // it overwrites the real "Shield and Spear"/"The Heart" entries with NONE
+    // in a particle taken before the elite/boss room is entered, e.g. at the
+    // Act-4 rest or shop). The fixed lists are public from the crossing, so a
+    // twin must carry them unchanged -- the same "pure copy" treatment already
+    // given to the map, the shop stock and the Neow options below.
+    if (rs.act == kFinalAct) {
+        // condition_boss_list's PERMUTATION would be harmless in isolation
+        // (every Act-4 boss_list entry is the identical "The Heart" id), but
+        // skipping it too keeps this branch a single, checkable statement: at
+        // Act 4 nothing about `rc.lists` is hidden, so nothing here draws.
+    } else {
+        const RoomType room = static_cast<RoomType>(rc.room_type);
+        const uint8_t monster_keep = static_cast<uint8_t>(
+            rc.monster_cursor + (room == RoomType::Monster ? 1 : 0));
+        const uint8_t elite_keep = static_cast<uint8_t>(
+            rc.elite_cursor + (room == RoomType::Elite ? 1 : 0));
+        continue_monster_lists(static_cast<int32_t>(rs.act), rng.stream,
+                               monster_keep, elite_keep, rc.lists);
+        // The boss list conditions on the public prefix. That is boss_list[0]
+        // (named on the map from act start) in every ordinary run -- and ONE
+        // MORE at the A20 double boss, where entering the second Act-3 boss
+        // room reveals boss_list[1] to the player as surely as entering any
+        // other room reveals its encounter. Same shape as the two prefixes
+        // above: the cursor, plus one while standing in a room of that kind.
+        const uint8_t boss_keep = static_cast<uint8_t>(
+            rc.boss_cursor + (room == RoomType::Boss ? 1 : 0));
+        condition_boss_list(rc.lists, rng.stream, boss_keep);
+    }
 
     // Row "Mid-event hidden state": pin the flips, permute the rest. Guarded on
     // the phase so a stale board left in the transient struct after the event
@@ -441,8 +466,11 @@ void resample_hidden(RunController& rc, SamplerRng& rng) noexcept {
     // (rs.map), the live reward screen (rc.rewards), the rest-site menu
     // (rc.rest), the pending-bottle overlay, master deck, relics, potions,
     // gold/hp/floor/act/ascension, the pity counters and the membership
-    // bitsets. Every one of them is public, so the sampler must not touch it --
-    // and does not.
+    // bitsets, `run.victory_kind` / `run.act4_floor_base` (S3.51: both are
+    // written once, from an observed event, never redrawn), and -- ONLY at
+    // Act 4 (S3.51, the `if (rs.act == kFinalAct)` branch above) -- the whole
+    // of `rc.lists`. Every one of them is public, so the sampler must not
+    // touch it -- and does not.
 }
 
 RunController resample_hidden(const RunController& rc,

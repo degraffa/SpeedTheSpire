@@ -130,7 +130,29 @@ namespace sts::engine {
 //             offsets after each move. A v5 record cannot be reinterpreted as
 //             v6; consumers re-encode. Match and Keep's twelve slots keep
 //             their indices; board slots >= 12 are simply empty for it.
-inline constexpr uint32_t PUBLIC_VIEW_VERSION = 6;
+// v7: S3.51 -- `victory_kind` (RunVictoryKind) and `act4_floor_base`, the two
+//             live bytes of RunState's schema-v9 pad carve (S3.31/S3.32).
+//             ADDITIVE, case 2 (tail append): both are appended AFTER
+//             `event_flags_hi`, i.e. at the struct's true physical tail (the
+//             v3 note's reasoning applies again -- the mask channel is a
+//             member, so "the tail" is past it), with two explicit pad bytes
+//             rounding the addition back to a 4-byte multiple so nothing
+//             compiler-inserted appears. No v6 offset moves; `sizeof` grows
+//             8988 -> 8992. Declared "not present" value: **zero**, i.e.
+//             RunVictoryKind::NONE and "no Act-4 crossing yet" -- and it is a
+//             truthful reading of every ACTUAL v6-era PublicView: `victory_kind`
+//             is written only at a run's terminal and no observable view is
+//             ever taken after one (the run is over; legal_actions is empty),
+//             while `act4_floor_base` is written only from the Act-4 crossing
+//             onward (S3.32) and nothing in this tree calls encode_public_view
+//             against such a state before this task -- the only consumer
+//             (the training repo) does not exist yet. So no stored v6 record
+//             anywhere loses information by this bump; it simply could not
+//             have needed the two new bytes. keys_reserved/act_reserved/the
+//             map array needed NO changes: they already carry Act 4's keys,
+//             act index and the constant 5x7 special map generically (they
+//             are copied wholesale regardless of which act is current).
+inline constexpr uint32_t PUBLIC_VIEW_VERSION = 7;
 
 // --- PvCard -----------------------------------------------------------------
 
@@ -572,6 +594,15 @@ struct PublicView {
     //
     // PvMask is asserted 4-aligned-and-4-sized above, so this needs no pad.
     uint32_t event_flags_hi;
+
+    // ======================= v7 (S3.51) tail append ==========================
+    // The run-outcome kind and the Act-4 floor base -- RunState's schema-v9
+    // pad carve (S3.31/S3.32), encoded here from v7 on. Both are excluded from
+    // v6 (docs/public-view-audit.md: "S3.32 writes it, S3.51 encodes it").
+    uint8_t victory_kind;      // RunVictoryKind (run_state.hpp); 0 == NONE
+    uint8_t act4_floor_base;   // the floor Act 4 was constructed at; 0 == none
+    uint8_t pad_v7[2];         // explicit padding, always zero -- rounds the
+                               // v7 tail back to a 4-byte multiple
 };
 
 static_assert(std::is_trivially_copyable_v<PublicView>,
@@ -594,12 +625,16 @@ static_assert(std::is_trivially_copyable_v<PublicView>,
 // v6 (S2.32): kEventBoardCap 12 -> 20 grows PvEvent's board by 8 x 6 B, so the
 // fixed part goes 8312 -> 8360 (the mask channel's own growth is in PvMask).
 inline constexpr std::size_t kPublicViewFixedBytes = 8360;
-static_assert(sizeof(PublicView) ==
-                  kPublicViewFixedBytes + sizeof(PvMask) + sizeof(uint32_t),
+// v7 (S3.51): 4 more tail bytes AFTER event_flags_hi and the mask channel --
+// victory_kind + act4_floor_base + pad_v7[2].
+inline constexpr std::size_t kPublicViewV7TailBytes = 4;
+static_assert(sizeof(PublicView) == kPublicViewFixedBytes + sizeof(PvMask) +
+                                        sizeof(uint32_t) +
+                                        kPublicViewV7TailBytes,
               "PublicView size changed -- bump PUBLIC_VIEW_VERSION, update the "
               "audit table (docs/public-view-audit.md) and its schema-evolution "
               "note, and re-check the layout-walk asserts");
-static_assert(sizeof(PublicView) == 8988,
+static_assert(sizeof(PublicView) == 8992,
               "PublicView size changed -- see the assert above. This literal is "
               "pinned deliberately: a RunActionMask that grows is a public-view "
               "schema change too, and must be reviewed like any other. It was "
@@ -607,7 +642,8 @@ static_assert(sizeof(PublicView) == 8988,
               "grew kMonsterCap 7 -> 23, which moves the monster block, the "
               "roll arrays AND the mask channel's target grids (8932); v6 grew "
               "the two event caps 12 -> 20 for The Library's board (+48 fixed, "
-              "+8 mask -> 8988)");
+              "+8 mask -> 8988); v7 tail-appended victory_kind + "
+              "act4_floor_base + 2 pad bytes (8992)");
 static_assert(offsetof(PublicView, action_mask) == kPublicViewFixedBytes,
               "the fixed part must end exactly where kPublicViewFixedBytes "
               "says. A TAIL APPEND may never move the mask channel; a "

@@ -14,8 +14,11 @@
 // here: a twin is exactly one draw from the belief `resample_hidden`
 // (resample.hpp) defines, so this file DELEGATES the whole plan §2.4 table --
 // draw-suffix permutation, fresh streams, relic-pool remainder re-permutation,
-// encounter-suffix Markov continuation, Match-and-Keep pin-and-permute, chest
-// contents under the public size band, the fresh fake run seed. Duplicating
+// encounter-suffix Markov continuation (a PURE COPY at Act 4, S3.51: TheEnding
+// fills all three lists at the crossing with no further monsterRng draw, so
+// they are public and constant, not a suffix to continue), Match-and-Keep
+// pin-and-permute, chest contents under the public size band, the fresh fake
+// run seed. Duplicating
 // those rows would create two definitions of "hidden" that could drift, and the
 // one that drifts silently is the one the leak gate is built on.
 //

@@ -153,6 +153,10 @@ constexpr FieldSpan kFields[] = {
     // scanned in ascending offset order by public_view_field_at, so a tail
     // append belongs at the end here too.
     STS_PV_FIELD(event_flags_hi),
+    // v7 (S3.51) tail append -- the run-outcome kind and the Act-4 floor base.
+    STS_PV_FIELD(victory_kind),
+    STS_PV_FIELD(act4_floor_base),
+    STS_PV_FIELD(pad_v7),
 };
 
 #undef STS_PV_FIELD

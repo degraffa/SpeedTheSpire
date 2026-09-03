@@ -362,6 +362,12 @@ void encode_always_block(const RunController& rc, PublicView& out) noexcept {
     out.keys_reserved = rs.keys;
     out.act_reserved = rs.act;
 
+    // v7 (S3.51) tail append: RunState's schema-v9 pad carve. Both are 0 on
+    // every path that predates the Act-4 crossing / a run's terminal, which is
+    // exactly the declared "not present" value.
+    out.victory_kind = rs.victory_kind;
+    out.act4_floor_base = rs.act4_floor_base;
+
     // Master deck: ENGINE ORDER. Unlike the draw pile this order is not a
     // hidden realization -- it is the fold of observed acquisitions -- and it
     // is the index space the mask's can_choose_master_deck[] addresses, so

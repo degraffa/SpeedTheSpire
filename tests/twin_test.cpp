@@ -62,11 +62,13 @@
 #include "sts/engine/interp.hpp"
 #include "sts/engine/knowledge.hpp"
 #include "sts/engine/event_framework.hpp"
+#include "sts/engine/map_gen.hpp"
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/monster_dispatch.hpp"
 #include "sts/engine/neow.hpp"
 #include "sts/engine/public_view.hpp"
 #include "sts/engine/resample.hpp"
+#include "sts/engine/rest_sites.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/treasure_rooms.hpp"
 #include "sts/fuzz/case_id.hpp"
@@ -357,6 +359,190 @@ TEST(TwinPhaseCoverage, UnimplementedRoomParkIsTwinInvariant) {
 }
 
 // =============================================================================
+// 1b. Act 4 directed coverage (S3.51): the Door, the crossing, the four
+//     rooms, and both terminal kinds.
+// =============================================================================
+//
+// A random policy walk cannot reach ANY of this -- S3.22 measured 0/39,296
+// keyed sim victories -- so this is directed construction on the same
+// "non-real inputs, named where they are applied" terms S3.32/S3.33's own
+// witness harness used: the three keys are forced directly on RunState rather
+// than earned across three acts of play. Everything downstream of the forced
+// keys is the REAL engine -- the `Spire Heart` dialog's four-click state
+// machine (events/spire_heart.cpp) and act4_crossing (run_advance.cpp) run
+// exactly as they would for a live run, which is what makes this a genuine
+// regression test for the resample_hidden Act-4 list fix above: the states it
+// drives through MAP_CHOICE / REST_SITE / SHOP are exactly the ones where
+// `continue_monster_lists`/`condition_boss_list` would have corrupted the
+// fixed "Shield and Spear" / "The Heart" list entries before that fix.
+//
+// The Elite room and beyond are driven for real too, EXCEPT the Heart fight
+// itself: killing a 750/800 HP boss via scripted actions is out of this
+// gate's scope, so the boss room and the true-victory terminal are hand-set
+// fields on a copy of the real Act-4 crossing state (same idiom as
+// UnimplementedRoomParkIsTwinInvariant above) -- named as such below.
+
+// Hand-place a RunController at the Act-3 `Spire Heart` dialog's INTRO screen,
+// the state VictoryRoom::onPlayerEntry builds (run_advance.cpp's
+// RoomType::Victory arm). `floor` is the Act-3 boss's own floor -- 51 below
+// A20, 52 at A20 (s3-design §4.3) -- which act4_crossing later copies into
+// `act4_floor_base` UNCHANGED, so setting it here is what pins that value.
+RunController at_the_door(int64_t seed, uint8_t ascension, bool grant_keys) {
+    RunController rc = run_begin(seed, ascension);
+    rc.run.act = kActBeyond;
+    rc.run.floor = ascension >= kA20 ? 52 : 51;
+    if (grant_keys) {
+        rc.run.keys = kKeyRuby | kKeyEmerald | kKeySapphire;
+    }
+    rc.combat = CombatState{};
+    rc.rewards = RewardScreen{};
+    rc.rewards.open_card_item = kNoOpenCardReward;
+    rc.rest = RestSiteState{};
+    rc.treasure_chest = TreasureChest{};
+    rc.room_type = static_cast<uint8_t>(RoomType::Victory);
+    rc.event = EventDialogState{};
+    rc.event.event_id = kSpireHeartEventId;
+    rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
+    return rc;
+}
+
+// Click through the dialog's four always-enabled options (spire_heart.cpp:
+// INTRO -> MIDDLE -> MIDDLE_2 -> {DEATH, GO_TO_ENDING} -> terminal/crossing).
+// Without keys this lands on RunPhase::RUN_OVER / RunVictoryKind::ACT3_STOP;
+// with all three it crosses for real into Act 4, landing on
+// RunPhase::MAP_CHOICE with `run.act == kFinalAct`.
+RunController click_through_spire_heart(RunController rc) {
+    for (int i = 0; i < 4; ++i) {
+        step(rc, make_action(ActionVerb::CHOOSE, 0));
+    }
+    return rc;
+}
+
+TEST(TwinPhaseCoverage, Act4DoorCrossingRoomsAndTerminalAreTwinInvariant) {
+    std::map<std::string, int> coverage;
+    auto check = [&](const RunController& truth, const std::string& label) {
+        ++coverage[label];
+        for (int64_t seed = 1; seed <= 15; ++seed) {
+            const RunController t = make_hidden_twin(truth, seed);
+            ASSERT_TRUE(TwinViewsAgree(truth, t, label + ", twin seed " +
+                                                     std::to_string(seed)));
+        }
+    };
+
+    for (uint8_t asc : {static_cast<uint8_t>(15), kA20}) {
+        const std::string suffix = " (A" + std::to_string(asc) + ")";
+
+        // -- The Door, without keys: real DEATH-arm terminal (ACT3_STOP). --
+        const RunController door_no_keys = at_the_door(401, asc, false);
+        check(door_no_keys, "Door, no keys" + suffix);
+        const RunController act3_stop = click_through_spire_heart(door_no_keys);
+        ASSERT_EQ(act3_stop.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+        ASSERT_EQ(act3_stop.run.victory_kind,
+                  static_cast<uint8_t>(RunVictoryKind::ACT3_STOP));
+        check(act3_stop, "RUN_OVER / ACT3_STOP" + suffix);
+
+        // -- The Door, keys forced: the real crossing. --
+        const RunController door_keys = at_the_door(401, asc, true);
+        check(door_keys, "Door, keys forced" + suffix);
+        const RunController act4_map = click_through_spire_heart(door_keys);
+        ASSERT_EQ(act4_map.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+        ASSERT_EQ(act4_map.run.act, kFinalAct);
+        ASSERT_EQ(act4_map.run.act4_floor_base, act4_map.run.floor)
+            << "act4_crossing must copy floor into act4_floor_base unchanged";
+        ASSERT_EQ(
+            act4_map.run.map[run_state_map_index(3, 3)].room_type,
+            static_cast<uint8_t>(RoomType::Boss))
+            << "the Act-4 special map must be the real generate_special_map "
+               "output, not something this test rolled itself";
+        ASSERT_EQ(act4_map.run.map[run_state_map_index(3, 4)].room_type,
+                  static_cast<uint8_t>(RoomType::TrueVictory));
+        check(act4_map, "Act4 MAP_CHOICE" + suffix);
+
+        // -- Rest (3,0): real REST option, real finish_sleep. --
+        RunController act4_rest = act4_map;
+        step(act4_rest,
+             make_action(ActionVerb::CHOOSE, first_legal_column(act4_rest)));
+        ASSERT_EQ(act4_rest.phase, static_cast<uint8_t>(RunPhase::REST_SITE));
+        ASSERT_EQ(act4_rest.room_type, static_cast<uint8_t>(RoomType::Rest));
+        check(act4_rest, "Act4 REST_SITE" + suffix);
+
+        RunController after_rest = act4_rest;
+        {
+            const RestMenu menu = build_rest_menu(after_rest.run);
+            uint8_t rest_index = 0xFF;
+            for (uint8_t i = 0; i < menu.count; ++i) {
+                if (static_cast<RestOptionKind>(menu.entries[i].kind) ==
+                        RestOptionKind::REST &&
+                    menu.entries[i].usable) {
+                    rest_index = i;
+                    break;
+                }
+            }
+            ASSERT_NE(rest_index, 0xFF) << "REST is always usable (rest_sites.cpp)";
+            step(after_rest, make_action(ActionVerb::CHOOSE, rest_index));
+        }
+        ASSERT_EQ(after_rest.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+
+        // -- Shop (3,1): real entry, real kChooseProceed leave. --
+        RunController act4_shop = after_rest;
+        step(act4_shop,
+             make_action(ActionVerb::CHOOSE, first_legal_column(act4_shop)));
+        ASSERT_EQ(act4_shop.phase, static_cast<uint8_t>(RunPhase::SHOP));
+        ASSERT_EQ(act4_shop.room_type, static_cast<uint8_t>(RoomType::Shop));
+        check(act4_shop, "Act4 SHOP" + suffix);
+
+        RunController after_shop = act4_shop;
+        step(after_shop, make_action(ActionVerb::CHOOSE, kChooseProceed));
+        ASSERT_EQ(after_shop.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+
+        // -- Elite (3,2): real entry, whichever way it currently lands.
+        //    Shield-and-Spear's body (S3.42) may not be landed in this tree
+        //    yet -- if not, the room parks at ROOM_UNIMPLEMENTED, exactly the
+        //    S3.33 witness-harness finding; if it is, this reaches a real
+        //    COMBAT. Both are checked, because both are Act-4 states this
+        //    gate must not leak on. --
+        RunController act4_elite = after_shop;
+        step(act4_elite,
+             make_action(ActionVerb::CHOOSE, first_legal_column(act4_elite)));
+        ASSERT_EQ(act4_elite.room_type, static_cast<uint8_t>(RoomType::Elite));
+        ASSERT_TRUE(
+            act4_elite.phase == static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED) ||
+            act4_elite.phase == static_cast<uint8_t>(RunPhase::COMBAT))
+            << "unexpected phase " << static_cast<int>(act4_elite.phase)
+            << " entering the Act-4 elite room";
+        check(act4_elite,
+              std::string("Act4 Elite, phase ") +
+                  (act4_elite.phase == static_cast<uint8_t>(RunPhase::COMBAT)
+                       ? "COMBAT"
+                       : "ROOM_UNIMPLEMENTED") +
+                  suffix);
+
+        // -- The boss room and the true-victory terminal: HAND-CONSTRUCTED,
+        //    named as such (the UnimplementedRoomParkIsTwinInvariant idiom).
+        //    Fighting the Heart to death is out of this gate's scope; what
+        //    this task adds is the TERMINAL FIELDS (victory_kind,
+        //    act4_floor_base), and those are exercised directly. Everything
+        //    else here (keys, map, act4_floor_base) is the real crossing
+        //    state above, copied forward. --
+        RunController true_victory = act4_map;
+        true_victory.combat = CombatState{};
+        true_victory.rewards = RewardScreen{};
+        true_victory.rewards.open_card_item = kNoOpenCardReward;
+        true_victory.room_type = static_cast<uint8_t>(RoomType::TrueVictory);
+        true_victory.run.victory_kind = static_cast<uint8_t>(RunVictoryKind::HEART);
+        true_victory.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
+        check(true_victory, "RUN_OVER / HEART (TrueVictory)" + suffix);
+    }
+
+    std::string table;
+    for (const auto& kv : coverage) {
+        table += "\n  " + kv.first + ": " + std::to_string(kv.second) +
+                 " state(s) x 15 twin seeds";
+    }
+    GTEST_LOG_(INFO) << "Act 4 directed coverage:" << table;
+}
+
+// =============================================================================
 // 2. Reveal timing
 // =============================================================================
 
@@ -633,13 +819,13 @@ TEST(TwinDiagnostics, PublicViewFieldTableIsOrderedAndReachesTheEnd) {
             << "' -- every failure message after it would name the wrong field";
     }
     // The last entry must be the last member, so no byte falls off the table.
-    // v3 (S2.13) tail-appended event_flags_hi AFTER the mask channel, so the
-    // table's last row moved with it -- which is exactly what this assertion
-    // exists to force.
-    EXPECT_EQ(public_view_field(n - 1).offset,
-              offsetof(PublicView, event_flags_hi))
+    // v3 (S2.13) tail-appended event_flags_hi AFTER the mask channel, and v7
+    // (S3.51) tail-appended victory_kind/act4_floor_base/pad_v7 after THAT --
+    // so the table's last row moved again, which is exactly what this
+    // assertion exists to force.
+    EXPECT_EQ(public_view_field(n - 1).offset, offsetof(PublicView, pad_v7))
         << "a PublicView member was appended without a diagnostic-table row";
-    EXPECT_STREQ(public_view_field_at(sizeof(PublicView) - 1), "event_flags_hi");
+    EXPECT_STREQ(public_view_field_at(sizeof(PublicView) - 1), "pad_v7");
     EXPECT_STREQ(public_view_field_at(offsetof(PublicView, action_mask)),
                  "action_mask");
     EXPECT_STREQ(public_view_field_at(sizeof(PublicView)), "<out of range>");

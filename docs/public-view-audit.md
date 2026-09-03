@@ -107,6 +107,20 @@ are carried whole, so every allocated bit is classified) and the
 | `counter` | public | → `counter` | Second oracle-visible number (The Bomb / Panache damage). For Vulnerable/Weak/Frail it is the justApplied latch — derivable (the application was observed) and 0 at every WAITING_ON_USER boundary anyway. |
 | `pad0` | padding | excluded | |
 
+#### Per-power counter semantics — S3.43's Act-4 boss powers (no new fields)
+
+Named here because the generic `amount`/`counter` rows above are complete for
+these two powers, and the S3.51 ledger entry explicitly calls for the ROWS
+(not fields) that say so — a reader of the generic table cannot otherwise tell
+that `Invincible.counter` means "per-turn refill target" rather than nothing.
+Both powers land as ordinary `PvPower` slots today (v6 already carries them
+whole); this section adds no `PublicView` byte.
+
+| Power (`powers.yaml` id) | `amount` | `counter` | Notes |
+|---|---|---|---|
+| `BeatOfDeath` (138) | the per-card THORNS hit dealt on `onAfterUseCard`, climbing via the buff-ladder's additive second application (buffCount == 1) and via the A19+ pre-battle value (1 → 2) | unused (0) | The displayed stack number IS the damage; `PainfulStabsPower` explicitly excludes THORNS, so no other power's number depends on it. |
+| `Invincible` (139) | the REMAINING per-turn damage-capacity pool — drained by `onAttackedToChangeDamage`'s cap-and-drain, so it can read anywhere from `maxAmt` down to 0 within a turn | `maxAmt`, the refill target `atStartOfTurn` restores `amount` to (300, or 200 at A19+) — the same "second oracle-visible per-instance number" the generic `counter` row already documents (The Bomb / Panache precedent), so it needed no new PublicView plumbing, only S3.21's `power.misc_field` on the oracle-bridge side | Both numbers are genuinely public: the icon renders `amount` every frame (`InvinciblePower.updateDescription`) and `counter`/`maxAmt` is the fixed cap the same icon's math implies. |
+
 ### CardInstance → PvCard (all pile projections)
 
 | CardInstance member | Class | v1 | Notes |
@@ -175,6 +189,9 @@ latches a consequence of an observed event:
 | 0x0700 | Guardian shift count | public | Count of observed Defensive-Mode flips. |
 | 0x3800 | Hexaghost orb count | public | The orbs are drawn. |
 | 0x4000 | Hexaghost burnUpgraded | public | Follows the observed first Inferno. |
+| 0x0800 | **Corrupt Heart** `isFirstMove` (S3.43) | public | Whether the Heart's opening debuff move has been telegraphed; a consequence of the observed move-history, same reasoning as every other type-scoped latch in this table. Type-scoped REUSE of the bit Hexaghost's orb-count span (0x3800) partially occupies — legal because `The Heart` is a SOLO encounter group, so no state ever carries both monsters' flags words at once (s3-tasks.md S3.51 Inherited note). |
+| 0x3000 | **Corrupt Heart** `moveCount` (S3.43), stored **MOD 3** | public | How many of the Heart's telegraphed moves have resolved, wrapped exactly the way `CorruptHeart`'s own `% 3` reader wraps it — a consumer reading this bitfield sees the same distinction the game's branch makes, nothing coarser. |
+| 0x1C000 | **Corrupt Heart** `buffCount` (S3.43), **SATURATING at 4** | public | How many BUFF moves the Heart has resolved, capped exactly where `CorruptHeart`'s own `== k` / `default:` arms stop distinguishing further counts. |
 | 1<<24 | ESCAPED (global) | public | The escape was observed. |
 | others | unallocated | — | Zero. |
 
@@ -218,8 +235,8 @@ does.
 | `run_seed` | **hidden** | excluded | Explicitly hidden by plan §2.6b — knowing it is seed-cracking. |
 | `master_deck[128]` + `master_deck_count` | public | → `master_deck[128]`, `master_deck_count` | Always-block. Carried in ENGINE ORDER, not sorted: unlike the draw pile this order is not a hidden realization (it is the fold of observed acquisitions), and it is the index space the mask's `can_choose_master_deck[]` addresses — sorting would desynchronize the observation from the action space. Plan §2.1's word "multiset" is about *content*, which is complete either way. |
 | `hp` / `max_hp` | public | → `run_hp` / `run_max_hp` | Always-block. Separate fields from the combat block's `player_hp`, which is zero outside combat. |
-| `victory_kind` | public | excluded | The schema-v9 run-outcome kind (`RunVictoryKind`, S3.31), carved out of what was `pad_gold_align[2]`. PUBLIC -- a finished run's outcome is the one thing every viewer of it has seen -- but deliberately NOT encoded yet: `PublicView` carries the outcome kind only from **v7**, which is S3.51's single planned `PUBLIC_VIEW_VERSION` 6 -> 7 bump (s3-design §7). Until then the field is engine-and-differ state, and no observable `PublicView` is taken after the terminal anyway (the run is over; `legal_actions` is empty). |
-| `act4_floor_base` | public | excluded | The other half of the v9 carve: the floor Act 4 was constructed at, 51 below A20 and 52 at A20 (s3-design §4.3). PUBLIC -- it is a floor number the player watched go by -- and excluded on the same terms as `victory_kind`: S3.32 writes it, S3.51 encodes it. It is 0 on every path that exists today. |
+| `victory_kind` | public | → `victory_kind` | **S3.51, v7.** The schema-v9 run-outcome kind (`RunVictoryKind`, S3.31), carved out of what was `pad_gold_align[2]`. PUBLIC -- a finished run's outcome is the one thing every viewer of it has seen. Tail-appended after `event_flags_hi` (the v7 version-log entry). |
+| `act4_floor_base` | public | → `act4_floor_base` | **S3.51, v7.** The other half of the v9 carve: the floor Act 4 was constructed at, 51 below A20 and 52 at A20 (s3-design §4.3). PUBLIC -- it is a floor number the player watched go by, unchanged by `act4_crossing` from the Door's own floor. Tail-appended beside `victory_kind`. |
 | `gold` | public | → `gold` | Always-block. |
 | `ascension` | public | → `ascension` | Always-block. |
 | `act` | public | → `act_reserved` | POPULATED from v2 (1..4). The declared reader rule stands: a record with `public_view_version < 2` reads 0 and maps to act 1, exact for S1 data. |
@@ -671,3 +688,50 @@ lifecycle rule; no in-place reinterpretation exists):
   (its 6 → 7 bump has exactly one owner, s3-tasks.md S3.51). The audit rows for
   `RunRewardItem.kind` and for the reward screen's `can_claim_reward` mask bits
   are extended in §8.1 with the classification argument.
+- v7 — S3.51: `victory_kind` (`RunVictoryKind`) and `act4_floor_base`, the two
+  live bytes of `RunState`'s schema-v9 pad carve (S3.31/S3.32). **ADDITIVE,
+  case 2 (tail append).** Both are appended AFTER `event_flags_hi`, i.e. at the
+  struct's TRUE physical tail exactly as v3's own field was (the mask channel
+  is a member, so "the tail" is past it) — `PUBLIC_VIEW_VERSION` is the only
+  namespace this task owns (s3-tasks.md's "Registry id blocks granted" table),
+  and this is its one spend. `sizeof` grows 8988 → 8992; two explicit
+  `pad_v7[2]` bytes round the addition back to a 4-byte multiple so nothing
+  compiler-inserted appears (the same no-implicit-padding discipline every
+  earlier append kept).
+  - *Declared "not present" value:* **zero**, i.e. `RunVictoryKind::NONE` and
+    "no Act-4 crossing yet" — and it is a truthful reading of every ACTUAL
+    v6-era record, on two different arguments per field. `victory_kind` is
+    written only at a run's terminal, and no observable `PublicView` is ever
+    taken after one (the run is over; `legal_actions` is empty) — the same
+    argument the pre-S3.51 audit row already carried. `act4_floor_base` is
+    written only from the Act-4 crossing onward (S3.32), and — unlike
+    `victory_kind` — a live Act-4 run genuinely COULD have called
+    `encode_public_view` before this bump landed; the reason no v6 record
+    loses information is that nothing in this tree ever did: the only
+    consumer of `PublicView` is the training repo, which does not exist yet
+    (Phase T1.1), so zero real v6-stamped records exist that would need this
+    reinterpretation to hold. This is weaker than the "could not have
+    happened at all" argument S2.28's `second_boss_reserved` row makes, and is
+    recorded as such rather than overclaimed.
+  - `keys_reserved`, `act_reserved` and the map array needed **no changes at
+    all**: they already carry Act 4's keys, act index and the constant 5×7
+    special map generically, because `encode_public_view` copies each of them
+    wholesale regardless of which act is current (`public_view.cpp`'s
+    `encode_always_block`). This is why the bump's only real cost is the two
+    new bytes — s3-design §7's "S3.51 spends only the run-outcome kind and the
+    Act-4 map shape" undersold it slightly: the map shape needed no bytes
+    either, once actually checked against the encoder.
+  - Companion fixes that landed in the same change without moving the version
+    a second time: `resample_hidden` (`resample.cpp`) now treats `rc.lists`
+    (the monster/elite/boss encounter lists) as a PURE COPY at Act 4 rather
+    than calling `continue_monster_lists`/`condition_boss_list` — those draw
+    from `build_pool(4, ...)`, which is legitimately EMPTY for all three
+    `EncounterPool` kinds (Act 4's two registry rows are `weight: 0.0`,
+    outside every pool), so before this fix a particle taken before the
+    elite/boss room was entered had its real "Shield and Spear"/"The Heart"
+    list entries overwritten with `kNoEncounterKey`. Two new `PvPower`-table
+    ROWS (no fields) document `BeatOfDeath`/`Invincible`'s counters (§2) and
+    three new `MonsterState.flags` bit-audit ROWS (no fields) document the
+    Corrupt Heart's `isFirstMove`/`moveCount`/`buffCount` (§4) — both were
+    already complete in v6's carried-whole words.
+  - `twins_v1.bin` regenerated with its checked-in generator, as at v4/v5/v6.

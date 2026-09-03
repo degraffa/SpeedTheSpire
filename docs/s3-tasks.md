@@ -2325,7 +2325,7 @@ are S3's own.
 
 ## Phase S3.5 — Information layer and harness
 
-- **S3.51** `[ ]` **PublicView, KnowledgeState and the belief sampler for
+- **S3.51** `[x]` **PublicView, KnowledgeState and the belief sampler for
   keys + Act 4.** The consumer-facing half of S3. `keys_reserved` and
   `act_reserved` are **already populated** (public_view.hpp:438-446), so the
   additive tail is the run-outcome kind (S3.31's `RunVictoryKind`), the Act-4
@@ -2371,7 +2371,124 @@ are S3's own.
   checked-in generator; six presets **build**; committed corpora zero-diff;
   `check_doc_links.sh` clean. A leak gate is not a unit test — it plays runs
   and compares bytes — and the 2026-09-03 directive does not retire it.
-  **Log:** —
+  **Log:** 2026-09-03. **The version decision: `PUBLIC_VIEW_VERSION` 6 → 7,
+  ADDITIVE, one field group.** `victory_kind` (`RunVictoryKind`) and
+  `act4_floor_base` are tail-appended AFTER `event_flags_hi` — the struct's
+  TRUE physical tail, past the mask channel, on the v3 precedent — with two
+  explicit `pad_v7[2]` bytes rounding the addition back to a 4-byte multiple
+  so nothing compiler-inserted appears. `sizeof(PublicView)` 8988 → 8992; no
+  v6 offset moved. Declared "not present" value is zero on two different
+  arguments (full argument in `public_view.hpp`'s v7 version-log comment and
+  the audit's matching entry): `victory_kind` because no observable
+  `PublicView` is ever taken after a run's terminal, `act4_floor_base`
+  because nothing in this tree has ever called `encode_public_view` against
+  a live Act-4 state before this task (the training repo, the only
+  consumer, does not exist yet) — weaker than "could not have happened",
+  and recorded as such rather than overclaimed. **`keys_reserved`,
+  `act_reserved` and the map array needed NO changes**: `encode_public_view`
+  already copies each of them wholesale regardless of act, so s3-design §7's
+  predicted "map shape" spend turned out to be zero bytes, exactly the
+  S3.11 reward-row precedent.
+
+  **A second, more important finding: `resample_hidden` had a live infinite
+  loop at Act 4.** `continue_monster_lists`/`condition_boss_list` are the
+  ordinary per-act suffix continuation, called unconditionally before this
+  task. At Act 4, `act4_crossing` fills `monster_list`/`elite_list`/
+  `boss_list` to `kActEndingListLen` in ONE step with no further
+  `monsterRng` draw, while `build_pool(4, ...)` legitimately returns an
+  EMPTY pool for every `EncounterPool` kind (the two Act-4 registry rows
+  are `weight: 0.0`, outside every pool). `populate_monster_list`'s
+  "no-immediate-repeat" rejection loop (`--i; continue;`) never terminates
+  against an empty pool, because `roll_pool` on an empty span deterministically
+  returns the same `kNoEncounterKey` every draw — so a particle taken before
+  the elite/boss room was entered (e.g. at the Act-4 rest or shop) hung
+  forever instead of merely corrupting the list. Proven, not asserted: with
+  the fix reverted (`git stash` on `resample.cpp` alone), the new directed
+  Act-4 twin test hung past three separate timeouts (120s, 300s, 590s,
+  cumulative ~18 minutes) and had to be killed; rebuilt with the fix restored,
+  the same test passes in 4-16 ms. The fix (`resample.cpp`): at
+  `rs.act == kFinalAct`, `rc.lists` is a PURE COPY — the same treatment
+  already given the map, the shop stock and the Neow options — documented at
+  the branch and in `resample.hpp`'s overview comment, `twin.hpp`'s
+  delegation note, and `training-contract.md` §5.
+
+  **Audit rows added** (`docs/public-view-audit.md`): §6 `victory_kind` and
+  `act4_floor_base` moved `excluded` → `→ field`; a new §2 subsection
+  "Per-power counter semantics — S3.43's Act-4 boss powers (no new fields)"
+  with two rows (`BeatOfDeath.amount`, `Invincible.amount`/`.counter`/
+  `maxAmt`), satisfying the S3.43 Inherited note's "two ROWS, not two
+  fields"; three new §4 `MonsterState.flags` bit-audit rows for the Corrupt
+  Heart's `isFirstMove` (0x0800), `moveCount` (0x3000, MOD 3) and
+  `buffCount` (0x1C000, saturating at 4), satisfying the "three entries"
+  half of the same note; a v7 entry in the schema-evolution note's version
+  log. `docs/training-contract.md` updated: §1's version line, a new v7 tail
+  row in §2's group table, and a new paragraph in §5 recording the Act-4
+  "public and constant" fact and the `resample_hidden` fix. `byte_class.hpp`
+  needed NO new rows — it classifies `RunController`/`RunState`, and
+  `RunState.victory_kind`/`act4_floor_base` were already `PUBLIC` rows from
+  S3.31/S3.32; `MonsterState.flags` is one `MIXED` row deferring bit detail
+  to the audit doc, which already covers the Heart's bits by reference.
+
+  **Twin per-phase table** (`TwinSweep.PublicViewAndMaskAreByteIdenticalInEveryRunPhase`,
+  the fuzz-harvested sweep, unmodified by this task): `10802 states; phase0=0
+  phase1=345 phase2=693 phase3=7528 phase4=1601 phase6=120 phase7=69 phase8=18
+  phase9=362 phase10=66` — zero failures, as before (a random A20 policy walk
+  still cannot reach Act 4: S3.22 measured 0/39,296 keyed sim victories, so
+  this table is unchanged in shape by this task, and Act-4 coverage is the
+  NEW directed test below rather than a widened sweep). **New:**
+  `TwinPhaseCoverage.Act4DoorCrossingRoomsAndTerminalAreTwinInvariant` drives
+  the S3.32/S3.33 witness path for real wherever the engine allows it (the
+  `Spire Heart` dialog's real four-click state machine, the real
+  `act4_crossing`, a real REST option, a real shop `kChooseProceed` leave,
+  a real Elite-room entry) and hand-constructs only the two states nothing
+  in this tree can drive for real yet (an actual Heart kill is out of a leak
+  gate's scope): 16 states × 15 twin seeds = 240 twin checks, zero leaks, at
+  both A15 and A20 — `Door, no keys`, `Door, keys forced`, `Act4 MAP_CHOICE`,
+  `Act4 REST_SITE`, `Act4 SHOP`, `Act4 Elite, phase ROOM_UNIMPLEMENTED`
+  (Shield-and-Spear/S3.42 not landed in this worktree at test time — the
+  S3.33 finding, reproduced), `RUN_OVER / ACT3_STOP` and
+  `RUN_OVER / HEART (TrueVictory)`.
+
+  **Tripwire:** `Tripwire`/`TripwireNegative`, 10/10, unchanged rows (no new
+  ones needed) — `EveryClassifiedStructIsTiledExactly` still tiles
+  `sizeof(RunController)` exactly and all four negative controls still fire
+  by name (e.g. "unclassified bytes [11144, 11152) of RunController between
+  `stolen_live` and `<end>`").
+
+  **Corpus verdicts** (`tools/corpus_replay.sh`, release preset): all three
+  committed corpora (`act1_a20_50`, `three_act_a20_5`, `keys_a20_4`)
+  ZERO-DIFF under `--replay`, `--costs` and `--masks`, all nine injected
+  negative controls fail loud; `--replay --vitals` clean on
+  `three_act_a20_5`. Sampler distributional suite
+  (`tools/dist_check/sampler_dist.sh release`): 5/5, all nine pre-registered
+  hypotheses retained under Holm (including the three `encounter.*_suffix_pair`
+  rows this task's Act-4 branch runs beside, unaffected since it is act-1-3
+  scoped) and all three mutants correctly rejected. Omniscient boundary
+  (`tools/check_omniscient_boundary.sh`): clean, 5 files. Twin fixtures
+  regenerated via `gen_twin_fixtures` for the v7 stamp (18 cases, 9 phases);
+  `twin_fixture_test` 5/5.
+
+  **Six presets build**, all from a clean configure: `debug`/`asan`/`release`
+  via `tools/wsl_run.sh --script tools/build_presets.sh <preset>` and
+  `win-debug`/`win-asan`/`win-release` via the vcvars64+LLVM wrapper
+  (`s351env.cmd`). `twin_test`/`tripwire_test` additionally run directly (not
+  via ctest) on `debug`, `asan` and `win-debug` — same pass counts on every
+  host. `check_doc_links.sh` / `check_stale_counts.sh` clean.
+
+  **Kept compiling, not extended** (2026-09-03 directive: gtest suites are
+  not maintained/extended/run as acceptance, but they must still build):
+  the two `static_assert(sizeof(PublicView) == ...)` literals in
+  `tests/public_view_test.cpp` and `TwinDiagnostics`'s
+  `public_view_field_at(sizeof(PublicView) - 1)` expectation in
+  `tests/twin_test.cpp` needed their literals moved to track the new size —
+  done, since these are compile/link-level consequences of the schema change
+  a fresh build would otherwise not produce cleanly. The
+  `V2TailHasNoImplicitPadding` member-span table and the
+  `AlwaysBlockScalarsRoundTrip` version-stamp check were ALSO given their
+  three new rows / the `7u` literal (a one-line, mechanical, directly-caused
+  fix in each case) rather than left red; every `public_view_test` case is
+  green on every preset it was run on, though it is not part of this task's
+  Acceptance surface.
 
 - **S3.52** `[ ]` ∥ **Fuzz/soak across four acts.** The determinism and reach
   instrument, extended: per-act buckets to act 4 (the `kActBuckets` slot has

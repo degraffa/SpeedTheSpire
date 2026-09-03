@@ -28,7 +28,7 @@ that §2.7 draws, restated once because everything here follows from it:
 
 ## 1. `PUBLIC_VIEW_VERSION` and the stamps you must record
 
-`PUBLIC_VIEW_VERSION` is **6**
+`PUBLIC_VIEW_VERSION` is **7**
 ([../include/sts/engine/public_view.hpp](../include/sts/engine/public_view.hpp)).
 (It read **2** here until S2.2F: S2.13's v3 bump did not update this line. The
 number lives in the header; this file quotes it, and a quoted number goes stale
@@ -41,7 +41,14 @@ S2.32's `kEventOptionCap`/`kEventBoardCap` 12 → 20 for The Library's
 twenty-card board — is BREAKING again, the v4 shape: `PvEvent.board` sits
 mid-record and `can_choose_event_option` is embedded in the mask channel, so
 offsets after each move and `sizeof(PublicView)` goes 8932 → 8988; v5 shards
-are reanalyze-or-quarantine under v6.)
+are reanalyze-or-quarantine under v6. v7 — S3.51's `victory_kind` +
+`act4_floor_base` tail append (the run-outcome kind and the Act-4 floor base)
+— is ADDITIVE over v6: both are appended after `event_flags_hi`, past the
+mask channel exactly as v3's field was, so no v6 offset moved and
+`sizeof(PublicView)` goes 8988 → 8992; a v6 record's zero at both reads
+truthfully for every ACTUAL stored v6 record (see the audit's v7 version-log
+entry for the two-part argument — nobody has ever captured a live Act-4 run
+through `encode_public_view` yet, since the training repo does not exist).)
 It is a real field of every `PublicView` instance (`public_view_version`), not
 just a compile-time constant, so a stored record carries its own schema
 identity and a loader can refuse without out-of-band metadata.
@@ -90,6 +97,8 @@ The header groups the struct into these sections, in layout order:
 | knowledge projection | `draw_constraint_rank[]` / `draw_exact_pos[]` + chain scalars (§5) |
 | per-phase screens | reward / shop / event / Neow / rest / treasure, each behind its own `active` gate |
 | mask channel | `PvMask` — always live (§4) |
+| *v7 tail append →* | S3.51: appended after `event_flags_hi`, past the mask channel; no earlier offset moved |
+| run outcome | `victory_kind` (`RunVictoryKind`: NONE/ACT3_STOP/HEART) and `act4_floor_base` (the floor Act 4 was constructed at, 51 below A20 / 52 at A20) |
 
 Two layout decisions a reader will otherwise re-litigate, both recorded in the
 audit's version log:
@@ -240,6 +249,22 @@ What reaches the view, and how to read it:
 These are the plan §3.1 order-constraint flags a card token reads. They are
 also exactly the class of field the audit exists for: an omitted constraint
 flag is twin-invariant, so no test class downstream would catch it.
+
+**Act 4's encounter lists are public and constant (S3.51).** `TheEnding`
+fills `monster_list`/`elite_list`/`boss_list` in ONE step at the crossing —
+three literal "Shield and Spear" / "The Heart" entries, no further
+`monsterRng` draw — so once `run.act == 4` there is no hidden suffix left to
+continue. `resample_hidden` (`resample.cpp`) therefore copies `rc.lists`
+unchanged at Act 4 rather than calling the ordinary
+`continue_monster_lists`/`condition_boss_list` conditioning it uses at every
+other act. This *narrows* the posterior (a fake Act-4 future becomes
+deterministic) rather than widening it, so none of the four declared
+coarsenings below move. It was also a real fix, not a no-op tidy-up: calling
+the ordinary path at Act 4 drew from `build_pool(4, ...)`, which is
+legitimately EMPTY for every `EncounterPool` kind there (the two Act-4
+registry rows are `weight: 0.0`, outside every pool), so a particle taken
+before the elite/boss room was entered had its real list entries silently
+overwritten with `NONE`.
 
 ### 5a. The four declared contract coarsenings (plan §2.2 / §2.6d)
 
