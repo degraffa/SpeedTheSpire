@@ -131,7 +131,7 @@ are S3's own.
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
 | **Keys as obtainable content** — emerald-elite node flag + `EMERALD_KEY` reward row; `SAPPHIRE_KEY` linked-row claim semantics | stage-b design §1.1 "Out" / s2-design §1; owner-directed to S3 planning 2026-08-10 | **S3.11** | **ACCEPTED INTO S3 SCOPE, and the row's premise is corrected.** The row says "the mapRng draw is already modelled — combat_rewards.hpp:107-112 records that only the node flag is missing". The node flag is **not** missing: `setEmeraldElite`'s chosen node has been stored as `emerald_x`/`emerald_y` since the S1 map work (map_rooms.hpp:226-243, :414-435) and the entry buff is applied (`run_advance.cpp` step (9)). What is actually owed is (a) the `EMERALD_KEY` reward row at the burning elite (MonsterRoomElite.java:90,94-98), (b) the sapphire chest's real two-way claim semantics (RewardItem.java:85-90, :298-301, :317-326), and (c) the item the row never mentions — the `!Settings.hasEmeraldKey` guard that **removes the `mapRng` draw from every act generated after the key is taken** (AbstractDungeon.java:543), which changes later maps and is S3's highest-risk trap (design §5 trap 1). Ruby is already live. The S2 row stays as written (it is history); s3-design §9 carries the correction |
-| **The Courier's restocked colored-card identity** (the one unseeded value in scope) | S1 shop model (`shop.hpp` `kShopRestockedUnknownCard`); owner-directed 2026-08-10 to a post-S2-G2 task | **S3.24** | **ACCEPTED INTO S3 SCOPE, sized to ride the one fork redeploy S3 is doing anyway** — which is exactly the condition the row set ("ride it with one that is happening anyway"). Both halves land together: sim-side a dedicated seeded stream reproducing retail's uniform draw over the eligible (rarity, type) pool, fork-side one patched call consuming the same stream under the patched-fork oracle-contract precedent. S3.21 carries the patch into the redeploy; S3.24 owns the sim half and the zero-diff shop capture that witnesses it |
+| **The Courier's restocked colored-card identity** (the one unseeded value in scope) | S1 shop model (`shop.hpp` `kShopRestockedUnknownCard`); owner-directed 2026-08-10 to a post-S2-G2 task | **S3.24** | **ACCEPTED INTO S3 SCOPE, sized to ride the one fork redeploy S3 is doing anyway** — which is exactly the condition the row set ("ride it with one that is happening anyway"). Both halves land together: sim-side a dedicated seeded stream reproducing retail's uniform draw over the eligible (rarity, type) pool, fork-side one patched call consuming the same stream under the patched-fork oracle-contract precedent. S3.21 carries the patch into the redeploy; S3.24 owns the sim half and the zero-diff shop capture that witnesses it. **DISCHARGED 2026-09-03 by S3.24** — both halves landed in one commit: `courier_restock_stream` (shop.hpp, a derived stream, no schema byte) and `patches/CourierRestockSeedPatch` (flag `oracleCourierRestockSeed`), with `kShopRestockedUnknownCard` and its buy-refusal deleted. Two live tails remain, each owned elsewhere and named in the S3.24 Log: the jar redeploy + `PROTOCOL.md` §5.5 are **S3.21**'s (hand-over in the fork tree), and the witnessing restock capture is **S3.62**'s, so the S3.24 row stands `UNVERIFIED-until-captured` |
 | **Per-step throughput attribution across S2** (×0.712 combat step / ×0.498 batch vs B5.5) | S2.45 | **S3.64** | **ACCEPTED INTO S3 SCOPE.** The named A/B is `d57e077` against `646bd18` on `bench_advance_mask` + `bench_throughput`, interleaved through `tools/bench_ab.sh` (never two sequential runs), with `RESULT: UNMEASURED` an acceptable answer. S3.64 also owns the *new* honest whole-run baseline: S2's "three-act runs/sec" was unquotable because no weight-free policy leaves Act 1 ([verification/s245-throughput.md](verification/s245-throughput.md)), and S3 is the first stage with a policy that finishes runs |
 | **Sharp Hide THORNS retaliation on the killing blow** | TE.1 (stage-b table: "UNASSIGNED — S1 pump semantics, owner-approved task") | **S3.44** | **ACCEPTED INTO S3 SCOPE.** Witness STS420252 (te1_survival_b160) already exists and is a promoted reproducer — under the 2026-09-03 evidence rule this row is unusually well placed, because the capture that proves the fix is already on disk. Act 4 sharpens the motive: `BeatOfDeathPower` fires a THORNS-typed hit after **every** card the player plays (BeatOfDeathPower.java:40-44), so terminal adjudication at the Heart is exactly this ordering question at its most consequential |
 | **~60 out-of-yaml MIRROR sites carrying citations `wave3-citations` corrected in `registry/*.yaml`** | wave3-citations, 2026-07-28 (stage-b, UNASSIGNED) | **S3.65** | **ACCEPTED INTO S3 SCOPE**, together with the three sibling citation rows the same sweep left open (the nine repo-wide out-of-range `File.java:line`s, the eleven and fifteen `relics.yaml` +1000-class ones, the nine `cards.yaml` ones). Folded into one provenance task because S3 touches `src/`, `include/` and `tools/` broadly and a split-brain between the registry and its mirrors is precisely the thing that makes a re-read at task time untrustworthy. Comment/provenance only — a behaviour change discovered mid-sweep is stop-the-line, not a drive-by |
@@ -220,7 +220,14 @@ are S3's own.
   (`seed_scan.hpp:221-229`) so `--need-*-act 4` stops being a refusal
   (`planner/src/main.cpp:285-300`).
   **Inherited:** the stage-b "translator power `misc` fields" row (see
-  Deferred obligations).
+  Deferred obligations); **S3.24's Courier restock patch** —
+  `patches/CourierRestockSeedPatch` + the `oracleCourierRestockSeed` flag are
+  in the tree and build, and this task carries them into the jar, records the
+  new SHA-256 with them, and writes the **`PROTOCOL.md` §5.5** section the
+  patch and `shop.hpp` already cite by name. Everything S3.21 needs (before/
+  after, the exact seed formula, the offline seam verification, the three
+  differ consequences) is in
+  [../tools/oracle_bridge/communicationmod-oracle/COURIER-RESTOCK-HANDOVER.md](../tools/oracle_bridge/communicationmod-oracle/COURIER-RESTOCK-HANDOVER.md).
   **Deps:** S3.24 (the Courier patch, so one redeploy carries both)
   **Acceptance:** the new jar's SHA-256 recorded and **live-preflighted** by a
   clean single-seed campaign, the way every prior redeploy was; every S2
@@ -271,7 +278,7 @@ are S3's own.
   discharged **in this task's commit**; zero untriaged findings.
   **Log:** —
 
-- **S3.24** `[ ]` ∥ **The Courier, fully.** Both halves of the standing
+- **S3.24** `[x]` ∥ **The Courier, fully.** Both halves of the standing
   refusal, landing together (the row's own condition). Sim side: draw the
   restocked colored card's identity from a dedicated seeded stream
   reproducing retail's uniform draw over the eligible (rarity, type) pool —
@@ -290,7 +297,73 @@ are S3's own.
   handed over with its own before/after description. The zero-diff **restock
   capture** that witnesses the draw is scheduled by S3.62 and named here;
   until it lands the row is `UNVERIFIED-until-captured`.
-  **Log:** —
+  **Log:** 2026-09-03 — **both halves landed together; the row is
+  `UNVERIFIED-until-captured` pending S3.62's restock capture.**
+
+  *Sim side.* The colored restock's identity now comes from
+  `courier_restock_stream(run_seed, card_rng.counter)`
+  (`include/sts/engine/shop.hpp`), a stream **constructed at the draw and held
+  nowhere**: seed `run_seed + kCourierRestockSeedOffset(1000003) +
+  cardRng.counter`, read after the restock's own `rollRarity` draw, then ONE
+  index draw through the shared `shop_card_from_pool` walk — the same
+  type-filtered, game-id-sorted view, the same downward fallthrough / POWER
+  recursion, the same "an empty view costs no draw" rule
+  (`CardGroup.java:539-553`, `AbstractDungeon.java:1538-1576`). Because the
+  stream is derived rather than stored, **no `RunState` byte is added, no
+  `ByteClass` row changes and `SCHEMA_VERSION` does not move** (the 8→9 bump
+  stays S3.31's alone), and `cardRng`/`merchantRng`/`potionRng` motion per
+  restock is byte-for-byte what wave2cap_courier_* measured. The
+  `kShopRestockedUnknownCard` sentinel and its buy-refusal are **deleted**: a
+  restocked slot is a real `CardId`, egg-previewed, priced off its own drawn
+  rarity, on the legal-action mask (still derived from public state alone —
+  the whole shelf is public on room entry), and buyable, so a colored slot can
+  now restock repeatedly in one visit. `run_advance.hpp`'s unimplemented list,
+  `public_view.hpp` and
+  [public-view-audit.md](public-view-audit.md) lost the deviation with it.
+
+  *Fork side.* `patches/CourierRestockSeedPatch` — a `@SpireInstrumentPatch`
+  on `ShopScreen.purchaseCard(AbstractCard)` whose `ExprEditor` replaces the
+  two `AbstractDungeon.getCardFromPool` calls at `ShopScreen.java:615-617`
+  with a helper that makes the identical `new Random(Settings.seed + 1000003L
+  + cardRng.counter)` draw; flag `oracleCourierRestockSeed`, default on, off =
+  retail bit for bit (so it joins `oraclePlaytimePin` and the three strip
+  flags in the equivalence baseline). Under the **patched-fork
+  oracle-contract precedent** (Discovery wasted-regens, Explosive-Potion
+  THORNS, the SecretPortal playtime pin): the contract is the patched fork,
+  not the retail client. The jar was built to prove the patch compiles
+  (`build_fork.ps1 -NoDeploy`, JDK 8 — `CommunicationMod-oracle.jar`
+  carrying `CourierRestockSeedPatch.class`) and **deliberately not deployed or
+  committed**; S3.21 owns the single redeploy, the recorded SHA-256 and
+  `PROTOCOL.md` §5.5. Hand-over:
+  [../tools/oracle_bridge/communicationmod-oracle/COURIER-RESTOCK-HANDOVER.md](../tools/oracle_bridge/communicationmod-oracle/COURIER-RESTOCK-HANDOVER.md).
+
+  *Evidence.* Six presets **build** (`win-debug`/`win-asan`/`win-release` via
+  the vcvars64 + LLVM wrapper; `debug`/`asan`/`release` through
+  `tools/wsl_run.sh --script`, configure + build, no ctest per the 2026-09-03
+  owner directive). Both committed corpora replay **zero-diff** through
+  `replay_run_diff --replay --stop-on-diff` in WSL — 50/50
+  `act1_a20_50` and 5/5 `three_act_a20_5`, the expected no-op since no shop in
+  either corpus restocks, and the check that the new stream was threaded
+  without disturbing anything else. The fork patch's **seam** was verified
+  offline the way `OraclePlaytimePinPatch` was: ModTheSpire's own
+  `InstrumentPatchInfo.doPatch` sequence run against the real `ShopScreen`
+  bytecode from `desktop-1.0.jar` gives 2 `getCardFromPool` calls before,
+  `instrumentedCalls == 2`, 0 `getCardFromPool` / 2 `restockCardFromPool`
+  after, `getColorlessCardFromPool` still 1 and `setPrice` still 2, and the
+  class still recompiles. `check_stale_counts.sh` / `check_doc_links.sh`
+  clean.
+
+  *Owed — the capture S3.62 must schedule.* A **Courier restock capture**: a
+  seed on which the driver owns **The Courier** (a SHOP-tier relic — so a
+  shop stocking it, or a Neow/boss grant) and then reaches a shop with enough
+  gold to buy a **colored** card **twice**, the second purchase being the
+  restocked row. Find it by filtering `seed_scan` for a shop floor plus the
+  relic, then script it through `driver/script_policy_cmd.py` buying **by
+  name** (a restock renumbers the choice list under a script written in
+  advance — the wave2cap_courier_* runbook §4 already does this). Acceptance:
+  the capture replays zero-diff through `replay_run_diff --replay` **and**
+  `--shop`, with the restocked row's id matching. Until then this row reads
+  `UNVERIFIED-until-captured`.
 
 ## Phase S3.3 — The Act-3 terminal and the Act-4 run layer
 

@@ -249,13 +249,13 @@ void apply_price_discount(ShopState& shop, float multiplier) noexcept {
 }
 
 [[nodiscard]] bool slot_buyable(const RunState& rs, const ShopSlot& slot) noexcept {
-    // kShopRestockedUnknownCard is the Courier deviation's guard (shop.hpp):
-    // the restocked colored slot exists but its identity is MathUtils.random
-    // (unseeded, ShopScreen.java:615-617), so buying it is refused fail-loud
-    // here -- which keeps it off the legal mask AND makes a stale-mask CHOOSE
-    // a non-corrupting no-op through the same door every purchase re-derives.
+    // Since S3.24 there is no unbuyable row: the Courier's restocked colored
+    // slot draws a real identity from courier_restock_stream (shop.hpp), so
+    // the only gates left are the game's own -- an unsold, occupied row the
+    // player can afford. A restocked slot is therefore ON the legal mask, and
+    // the mask stays derived from public state alone (the whole shelf is
+    // public the moment the room is entered; public_view.hpp).
     return slot.sold == 0 && slot.id != 0 &&
-           slot.id != kShopRestockedUnknownCard &&
            rs.gold >= static_cast<int32_t>(slot.price);
 }
 
@@ -297,35 +297,13 @@ void apply_price_discount(ShopState& shop, float multiplier) noexcept {
     return static_cast<int16_t>(p);
 }
 
-// The pool a useRng=false getCardFromPool draw indexes, WITHOUT the index draw
-// itself (that index is the unseeded MathUtils call): the same empty-view
-// walk shop_card_from_pool spends a cardRng draw on, made pure. This is what
-// keeps the restocked colored slot's RARITY -- and therefore its price --
-// seeded even though its identity is not.
-[[nodiscard]] RewardCardRarity restock_drawn_rarity(RewardCardRarity rolled,
-                                                    CardType type) noexcept {
-    if (type == CardType::POWER) {
-        for (int r = static_cast<int>(rolled);
-             r <= static_cast<int>(RewardCardRarity::RARE); ++r) {
-            if (typed_pool(static_cast<RewardCardRarity>(r), type).count > 0) {
-                return static_cast<RewardCardRarity>(r);
-            }
-        }
-        return RewardCardRarity::RARE;
-    }
-    for (int r = static_cast<int>(rolled);
-         r >= static_cast<int>(RewardCardRarity::COMMON); --r) {
-        if (typed_pool(static_cast<RewardCardRarity>(r), type).count > 0) {
-            return static_cast<RewardCardRarity>(r);
-        }
-    }
-    return RewardCardRarity::COMMON;
-}
-
 // Merchant.cards1's slot layout: ATTACK, ATTACK, SKILL, SKILL, POWER. A
-// restock replaces in place with `hoveredCard.type`, so the layout is stable
-// across restocks (and a restocked slot cannot itself be bought, so at most
-// one restock per colored slot).
+// restock replaces in place with `hoveredCard.type` -- the type of the card
+// just bought -- and getCardFromPool filters the pool by that same type, so a
+// slot's type is invariant no matter how many times it restocks. Since S3.24 a
+// restocked slot IS buyable, so a colored slot can restock repeatedly within
+// one visit; deriving the type from the index rather than the resident card is
+// what keeps that correct.
 [[nodiscard]] CardType shop_colored_slot_type(uint8_t index) noexcept {
     return index < 2 ? CardType::ATTACK
                      : (index < 4 ? CardType::SKILL : CardType::POWER);
@@ -568,16 +546,29 @@ bool shop_buy_card(RunState& rs, ShopState& shop, uint8_t index,
                                             card_base_price(rarity),
                                             /*colorless=*/true);
         } else {
-            // rollRarity() is seeded (ONE cardRng.random(99) through the
-            // ShopRoom table, :615); the pool INDEX is MathUtils.random
-            // (useRng=false, :615-617) and is the permanent named deviation:
-            // the slot restocks as unknown-identity, priced off the seeded
-            // rarity, and slot_buyable refuses it (shop.hpp).
+            // rollRarity() is seeded by retail itself (ONE cardRng.random(99)
+            // through the ShopRoom table, :615). The pool INDEX is retail's
+            // MathUtils.random (useRng=false, :615-617) and is the ONE value
+            // (seed, actions) cannot determine, so it comes from the
+            // oracle-contract stream instead (shop.hpp) -- constructed here
+            // from the run seed and cardRng's counter AS OF the rollRarity
+            // draw above, spending nothing on any stored stream. The patched
+            // fork reads the identical seed at the identical point.
             const RewardCardRarity rolled = shop_roll_rarity(rs);
-            const RewardCardRarity drawn =
-                restock_drawn_rarity(rolled, shop_colored_slot_type(index));
-            slot.id = kShopRestockedUnknownCard;
-            slot.upgrade = 0;
+            RngStream restock_rng =
+                courier_restock_stream(rs.run_seed, rs.card_rng.counter);
+            RewardCardRarity drawn = rolled;
+            // The same walk shop init uses, so the empty-view fallthrough and
+            // the "an empty view costs no draw" rule (CardGroup.java:539-547)
+            // are shared rather than re-derived. `drawn` is the pool the card
+            // actually came from == the card's own rarity, which is what
+            // setPrice reads (AbstractCard.getPrice(card.rarity)).
+            const CardId id = shop_card_from_pool(
+                restock_rng, rolled, shop_colored_slot_type(index), &drawn);
+            slot.id = static_cast<uint16_t>(id);
+            // purchaseCard :618-620 previews the replacement with every owned
+            // relic, exactly as the colorless branch above does.
+            slot.upgrade = preview_upgrade(rs, id);
             slot.price = restock_card_price(rs, rs.merchant_rng,
                                             card_base_price(drawn),
                                             /*colorless=*/false);
@@ -642,8 +633,8 @@ bool shop_buy_relic_impl(RunState& rs, RngStream& misc_rng, ShopState& shop,
     // stocked card. The eggs are the only S1 onPreviewObtainCard bodies, so a
     // Molten/Toxic/Frozen Egg bought mid-shop upgrades its matching shelf
     // cards (the instance later bought is the upgraded one). Skips sold slots
-    // (the game removed them from its lists) and the restocked-unknown
-    // sentinel (no identity to upgrade, and it is refused anyway).
+    // (the game removed them from its lists); since S3.24 every live slot
+    // carries a real identity, restocked ones included.
     {
         CardType egg_type;
         bool is_egg = true;
@@ -656,8 +647,7 @@ bool shop_buy_relic_impl(RunState& rs, RngStream& misc_rng, ShopState& shop,
         if (is_egg) {
             auto preview = [&](ShopSlot* slots, int n) noexcept {
                 for (int i = 0; i < n; ++i) {
-                    if (slots[i].sold != 0 || slots[i].id == 0 ||
-                        slots[i].id == kShopRestockedUnknownCard) {
+                    if (slots[i].sold != 0 || slots[i].id == 0) {
                         continue;
                     }
                     const CardDef* def =

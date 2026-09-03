@@ -260,9 +260,9 @@ static_assert(sizeof(PvReward) == 4 + kRewardItemCap * sizeof(PvRewardItem),
 
 // One shop shelf row. The whole current-visit stock is public once the floor is
 // entered (plan §2.4): the merchant draws every card, relic and potion with its
-// price. `id == kShopRestockedUnknownCard` is itself public information -- the
-// Courier's one unmodelled restock slot (shop.hpp) is a card that IS on the
-// shelf whose identity this engine cannot name.
+// price -- including a Courier-restocked row, whose identity has been a real,
+// seeded CardId since S3.24 (shop.hpp's courier_restock_stream) rather than an
+// unnameable sentinel.
 struct PvShopSlot {
     uint16_t id;     // CardId / RelicId / PotionId per shelf
     int16_t price;   // the priced-through cost for this visit

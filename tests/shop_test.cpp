@@ -694,15 +694,16 @@ TEST(ShopPurchase, EggsPreviewUpgradeTheStockedCardsTheyMatch) {
 // The Courier's restock (the deferred row's restock half)
 // =============================================================================
 //
-// Provenance: ShopScreen.purchaseCard :598-643 (cards, incl. the unseeded
-// useRng=false colored identity at :615-617 and setPrice :660-673),
+// Provenance: ShopScreen.purchaseCard :598-643 (cards, incl. the colored
+// identity at :615-617 -- retail's one useRng=false draw, since S3.24 taken
+// from courier_restock_stream instead -- and setPrice :660-673),
 // StoreRelic.purchaseRelic :105-112, StorePotion.purchasePotion :86-89,
 // ShopScreen.getNewPrice :386-411. Stream expectations are replayed beside the
 // engine draw for draw, exactly like the draw-order pin above. The live-game
 // stream measurement backing these numbers is the wave2cap_courier_* capture
 // (tools/oracle_bridge/driver/wave2cap_capture_runbook.md).
 
-TEST(CourierRestock, ColoredPurchaseSpendsOneCardRngOneMerchantRngAndRefusesTheSlot) {
+TEST(CourierRestock, ColoredPurchaseSpendsOneCardRngOneMerchantRngAndRestocksSeeded) {
     RunState rs = bare_run(4242);
     give_relic(rs, RelicId::THE_COURIER);
     rs.gold = 9999;
@@ -711,7 +712,9 @@ TEST(CourierRestock, ColoredPurchaseSpendsOneCardRngOneMerchantRngAndRefusesTheS
     // Replay streams beside the purchase: the restock is ONE cardRng draw
     // (rollRarity through the ShopRoom 9/37 table, blizz READ not written)
     // and ONE merchantRng draw (setPrice's 0.9-1.1 jitter). The identity draw
-    // is MathUtils.random and costs the seeded streams NOTHING.
+    // is retail's MathUtils.random, and since S3.24 it comes from
+    // courier_restock_stream -- a stream CONSTRUCTED at the draw, so it still
+    // costs the stored streams NOTHING and this pin is unchanged.
     RngStream card_replay = rs.card_rng;
     RngStream merchant_replay = rs.merchant_rng;
     const RngStream potion_before = rs.potion_rng;
@@ -736,19 +739,29 @@ TEST(CourierRestock, ColoredPurchaseSpendsOneCardRngOneMerchantRngAndRefusesTheS
     EXPECT_EQ(rs.card_blizz_randomizer, blizz_before)
         << "rollRarity in a ShopRoom READS the blizz counter, never writes it";
 
-    EXPECT_EQ(shop.colored[0].id, kShopRestockedUnknownCard);
+    // The identity, drawn from the S3.24 oracle-contract stream: the same
+    // type-filtered sorted view shop init walks, indexed by one draw of a
+    // stream seeded from (run_seed + kCourierRestockSeedOffset + cardRng's
+    // counter AS OF the rollRarity draw above).
+    RngStream restock_replay =
+        courier_restock_stream(rs.run_seed, card_replay.counter);
+    RewardCardRarity drawn = rolled;
+    const CardId expected_id = shop_card_from_pool(
+        restock_replay, rolled, CardType::ATTACK, &drawn);
+    EXPECT_EQ(shop.colored[0].id, static_cast<uint16_t>(expected_id));
+    EXPECT_NE(shop.colored[0].id, 0) << "a real card, not a sentinel";
     EXPECT_EQ(shop.colored[0].sold, 0) << "the slot exists; it is not sold";
     EXPECT_EQ(shop.colored[0].price, expected_price)
         << "setPrice: one float product (base x jitter x 0.8 Courier), one "
            "truncation -- NO A16 x1.1 and no sale halving";
 
-    // The named deviation's guard: off the mask, and a byte-stable refusal.
-    EXPECT_FALSE(shop_buy_card_legal(rs, shop, 0, false));
-    const RunState rs_before = rs;
-    const ShopState shop_before = shop;
-    EXPECT_FALSE(shop_buy_card(rs, shop, 0, false));
-    EXPECT_EQ(std::memcmp(&rs, &rs_before, sizeof rs), 0);
-    EXPECT_EQ(std::memcmp(&shop, &shop_before, sizeof shop), 0);
+    // The refusal is LIFTED (S3.24): the restocked slot is on the mask and
+    // buying it restocks the slot again.
+    EXPECT_TRUE(shop_buy_card_legal(rs, shop, 0, false));
+    EXPECT_TRUE(shop_buy_card(rs, shop, 0, false));
+    EXPECT_EQ(rs.master_deck[rs.master_deck_count - 1].card_id,
+              static_cast<uint16_t>(expected_id));
+    EXPECT_EQ(shop.colored[0].sold, 0) << "restocked a second time";
 }
 
 TEST(CourierRestock, ColorlessRestockIsFullySeededAndPurchasable) {

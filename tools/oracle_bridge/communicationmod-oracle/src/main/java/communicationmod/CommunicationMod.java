@@ -67,11 +67,20 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
     // GameStateConverter for the anchor) go through getOraclePlaytimePin()
     // rather than the key. See that class and PROTOCOL.md §5.4.
     private static final String ORACLE_PLAYTIME_PIN_OPTION = "oraclePlaytimePin";
+    // SpeedTheSpire fork addition (s3-tasks S3.24): draw the identity of the card
+    // The Courier restocks into a colored shop slot from a dedicated seeded
+    // stream instead of libGDX's global MathUtils.random, so the one value
+    // retail leaves outside (seed, actions) becomes reproducible and diffable.
+    // Private like the two above: CourierRestockSeedPatch reads it through
+    // getOracleCourierRestockSeed() rather than the key. See that class and
+    // PROTOCOL.md §5.5.
+    private static final String ORACLE_COURIER_RESTOCK_SEED_OPTION = "oracleCourierRestockSeed";
     private static final String DEFAULT_COMMAND = "";
     private static final long DEFAULT_TIMEOUT = 10L;
     private static final boolean DEFAULT_VERBOSITY = true;
     private static final boolean DEFAULT_ORACLE_BLOCK = true;
     private static final boolean DEFAULT_ORACLE_PLAYTIME_PIN = true;
+    private static final boolean DEFAULT_ORACLE_COURIER_RESTOCK_SEED = true;
     public static final boolean DEFAULT_STRIP = true;
 
     public CommunicationMod(){
@@ -86,6 +95,7 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
             defaults.put(VERBOSE_OPTION, Boolean.toString(DEFAULT_VERBOSITY));
             defaults.put(ORACLE_BLOCK_OPTION, Boolean.toString(DEFAULT_ORACLE_BLOCK));
             defaults.put(ORACLE_PLAYTIME_PIN_OPTION, Boolean.toString(DEFAULT_ORACLE_PLAYTIME_PIN));
+            defaults.put(ORACLE_COURIER_RESTOCK_SEED_OPTION, Boolean.toString(DEFAULT_ORACLE_COURIER_RESTOCK_SEED));
             defaults.put(STRIP_DRAW_OPTION, Boolean.toString(DEFAULT_STRIP));
             defaults.put(STRIP_ANIM_OPTION, Boolean.toString(DEFAULT_STRIP));
             defaults.put(STRIP_CADENCE_OPTION, Boolean.toString(DEFAULT_STRIP));
@@ -280,6 +290,25 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
                 });
         settingsPanel.addUIElement(oraclePlaytimePinOption);
 
+        // SpeedTheSpire fork addition (s3-tasks S3.24): seed The Courier's
+        // restocked colored-card identity. Off = retail's unseeded
+        // MathUtils.random draw, i.e. the pre-2026-09-03 fork behaviour.
+        ModLabeledToggleButton oracleCourierRestockSeedOption = new ModLabeledToggleButton(
+                "Seed The Courier's restocked card (oracle contract)",
+                350, 200, Settings.CREAM_COLOR, FontHelper.charDescFont,
+                getOracleCourierRestockSeed(), settingsPanel, modLabel -> {},
+                modToggleButton -> {
+                    if (communicationConfig != null) {
+                        communicationConfig.setBool(ORACLE_COURIER_RESTOCK_SEED_OPTION, modToggleButton.enabled);
+                        try {
+                            communicationConfig.save();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+        settingsPanel.addUIElement(oracleCourierRestockSeedOption);
+
         // SpeedTheSpire fork additions (stage-b-design §2.2, task B1.3): one
         // toggle per rendering-strip family. Changing fast cadence only takes
         // effect on the next game launch (it is read at DesktopLauncher init).
@@ -445,6 +474,24 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
             return DEFAULT_ORACLE_PLAYTIME_PIN;
         }
         return communicationConfig.getBool(ORACLE_PLAYTIME_PIN_OPTION);
+    }
+
+    // SpeedTheSpire fork addition (s3-tasks S3.24): when true, the
+    // getCardFromPool calls in ShopScreen.purchaseCard (:615-617) -- the card The
+    // Courier restocks into a colored slot, and its dead colourless re-roll guard
+    // -- index their pool with a dedicated
+    // stream seeded from (Settings.seed + SEED_OFFSET + cardRng.counter) instead
+    // of libGDX's global MathUtils.random, which is not a function of
+    // (seed, actions) at all. Read live through the mod's SpireConfig: by the
+    // time a shop purchase happens the config is long loaded. Absent from an
+    // older config.properties it falls through to the Properties defaults (i.e.
+    // ON), which is why the campaign orchestrator's generated config need not
+    // name it. Read by CourierRestockSeedPatch only.
+    public static boolean getOracleCourierRestockSeed() {
+        if (communicationConfig == null) {
+            return DEFAULT_ORACLE_COURIER_RESTOCK_SEED;
+        }
+        return communicationConfig.getBool(ORACLE_COURIER_RESTOCK_SEED_OPTION);
     }
 
     // SpeedTheSpire fork additions (stage-b-design §2.2, task B1.3). The two

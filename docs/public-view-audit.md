@@ -313,7 +313,7 @@ Gate: `phase == SHOP`.
 | `purge_available` | public | → `purge_available` | |
 | `pad` / `pad2` | padding | excluded | |
 | `actual_purge_cost` | public | → `actual_purge_cost` | This visit's price, displayed on the service. |
-| `ShopSlot.id` | public | → `id` | `kShopRestockedUnknownCard` is itself public: the Courier's one unmodelled restock slot holds a card that IS on the shelf whose identity this engine cannot name (shop.hpp's Courier block). |
+| `ShopSlot.id` | public | → `id` | Every row on the shelf, Courier-restocked rows included: since S3.24 a restocked colored slot carries a real seeded CardId (shop.hpp's `courier_restock_stream`), so there is no longer an unnameable sentinel here. |
 | `ShopSlot.price` | public | → `price` | Post-discount, as shown. |
 | `ShopSlot.sold` | public | → `sold` | |
 | `ShopSlot.upgrade` | public | → `upgrade` | The eggs' preview upgrade is on the card the player sees. |

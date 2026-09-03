@@ -76,7 +76,7 @@ the same patch classes and would double-patch.
 | 1. Oracle state block (§2.5) | landed at B1.2 (`GameStateConverter`, flag `oracleBlock`) |
 | 2. Rendering-strip / fast-forward (§2.2) | landed at B1.3 (see below) |
 | 3. Campaign QoL (fast startup, restart hooks) | scoped at B1.4 with the driver |
-| 4. Oracle-contract pins (a retail behavior that is not a function of `(seed, actions)`) | `patches/OraclePlaytimePinPatch`, landed at S2.43 (2026-08-27), flag `oraclePlaytimePin` — see below |
+| 4. Oracle-contract pins (a retail behavior that is not a function of `(seed, actions)`) | `patches/OraclePlaytimePinPatch`, landed at S2.43 (2026-08-27), flag `oraclePlaytimePin`; `patches/CourierRestockSeedPatch`, source landed at S3.24 (2026-09-03), flag `oracleCourierRestockSeed` — see both below |
 
 B1.1 = build pipeline only: the fork jar must reproduce the stock jar's
 behavior byte-for-byte (B0.2 capture replay, uuid-normalized per PROTOCOL.md).
@@ -98,13 +98,40 @@ nine-reader audit, and the offline verification: `../PROTOCOL.md` §5.4.
 **on** and changes game behavior, so reproducing stock/pre-B1.3 behavior now
 means turning it off **as well as** the three strip flags below.
 
+## Oracle-contract seed: The Courier's restocked card (S3.24, `oracleCourierRestockSeed`)
+
+`ShopScreen.purchaseCard`'s Courier branch replaces the bought colored card with
+`getCardFromPool(rollRarity(), hoveredCard.type, **false**)`
+(`ShopScreen.java:615-617`). The `useRng = false` argument sends
+`CardGroup.getRandomCard(CardType, boolean)` down its `MathUtils.random` branch —
+libGDX's **global** RandomXS128, seeded from JVM-startup entropy and advanced by
+rendering — so the restocked card's identity is not a function of
+`(seed, actions)` at all, and it was the last such value in scope.
+`CourierRestockSeedPatch` is a `@SpireInstrumentPatch` that replaces **only those
+two calls** with a helper reproducing `getCardFromPool`'s pool walk exactly and
+indexing it with a dedicated stream,
+`new Random(Settings.seed + 1000003L + cardRng.counter)` — the same construction
+the simulator makes in `shop.hpp`'s `courier_restock_stream`. Nothing else is
+touched: `getColorlessCardFromPool` was already seeded, and every
+`getCardFromPool` caller outside `purchaseCard` keeps retail's behaviour.
+
+**This flag is part of the equivalence baseline**, like `oraclePlaytimePin`
+above: `oracleCourierRestockSeed` defaults **on**, so reproducing stock/pre-B1.3
+behaviour means turning it off as well.
+
+The patch source landed at S3.24; **the jar it rides is S3.21's single
+redeploy**, which also owns the `PROTOCOL.md` §5.5 write-up. Full before/after,
+the seeding contract and the offline verification:
+[COURIER-RESTOCK-HANDOVER.md](COURIER-RESTOCK-HANDOVER.md).
+
 ## Rendering-strip / fast-forward patches (B1.3, design §2.2)
 
 Three individually-toggleable patch families make wall-clock time stop mattering
 without changing gameplay state or queue order ("remove time and pixels, never
 order or state"). Config flags live in the same
 `SpireConfig("CommunicationMod","config")` store, all default **on**; with all
-three **off** — and, since S2.43, `oraclePlaytimePin` off too — the fork is
+three **off** — and, since S2.43 and S3.24, `oraclePlaytimePin` and
+`oracleCourierRestockSeed` off too — the fork is
 byte-identical to its pre-B1.3 behaviour (the strip-equivalence baseline). Each
 is also a toggle in the mod-settings panel.
 

@@ -89,6 +89,7 @@
 #include "sts/engine/potions.hpp"
 #include "sts/engine/relic_pools.hpp"
 #include "sts/engine/relics.hpp"
+#include "sts/engine/rng_stream.hpp"  // courier_restock_stream (the S3.24 derived stream)
 #include "sts/engine/run_state.hpp"
 
 namespace sts::engine {
@@ -130,29 +131,33 @@ static_assert(sizeof(ShopSlot) == 8);
 //
 // With The Courier owned, a purchase does not retire its slot: the merchant
 // RESTOCKS it (ShopScreen.purchaseCard :598-643, StoreRelic.purchaseRelic
-// :105-112, StorePotion.purchasePotion :86-89). Every restock half that the
-// game seeds is modelled faithfully; the ONE unseeded value gets a named,
-// permanent refusal:
+// :105-112, StorePotion.purchasePotion :86-89). Every half of every restock is
+// modelled; the ONE value retail draws unseeded is drawn here from a dedicated
+// seeded stream, and the fork is patched to draw from the same one (see the
+// oracle-contract block below):
 //
 //   colored card   rollRarity() is ONE cardRng.random(99) through the
 //                  ShopRoom's 9/37 table (the purchase still happens inside
-//                  the ShopRoom), then getCardFromPool(rolled, type, false)
-//                  -- useRng=FALSE, so the IDENTITY is drawn from libGDX's
-//                  unseeded MathUtils.random (ShopScreen.java:615-617) and
-//                  has no reproducible answer. The slot therefore restocks
-//                  as kShopRestockedUnknownCard: its RARITY (and so its
-//                  price) is still seeded -- the pool the draw indexes is a
-//                  pure function of (rolled rarity, slot type) -- but the
-//                  slot is kept OFF the legal-action mask and
-//                  shop_buy_card refuses it whole (the
-//                  potion_use_implemented precedent: fail-loud refusal of
-//                  the one thing the sim cannot answer, everything around
-//                  it exact). The `while (c.color == COLORLESS)` re-roll
-//                  guard is dead for the same reason it is dead at shop
-//                  init: the three RED rarity pools hold no colourless row.
-//   colorless card fully seeded: ONE merchantRng.random() float against
-//                  colorlessRareChance (0.3f, Exordium.java:106) picks
-//                  UNCOMMON/RARE, getColorlessCardFromPool spends ONE
+//                  the ShopRoom), then getCardFromPool(rolled, type, false).
+//                  useRng=FALSE means the pool INDEX comes from libGDX's
+//                  unseeded MathUtils.random (ShopScreen.java:615-617 ->
+//                  CardGroup.getRandomCard(CardType, boolean),
+//                  CardGroup.java:540-553). Everything AROUND that index is a
+//                  pure function of (rolled rarity, slot type): the same
+//                  type-filtered, game-id-sorted view shop_card_from_pool
+//                  walks, with the same empty-view fallthrough and the same
+//                  "an empty view costs no draw" rule. So the index -- and
+//                  ONLY the index -- is taken from courier_restock_stream()
+//                  below, which makes the restocked identity a function of
+//                  (seed, actions) exactly like every other draw in this
+//                  file. The slot restocks PURCHASABLE, previewed by the eggs
+//                  and priced off its own drawn rarity. The
+//                  `while (c.color == COLORLESS)` re-roll guard is dead for
+//                  the same reason it is dead at shop init: the three RED
+//                  rarity pools hold no colourless row.
+//   colorless card fully seeded by retail itself: ONE merchantRng.random()
+//                  float against colorlessRareChance (0.3f, Exordium.java:106)
+//                  picks UNCOMMON/RARE, getColorlessCardFromPool spends ONE
 //                  cardRng draw on the sorted rarity view, and the slot
 //                  restocks purchasable.
 //   relic          fully seeded: rollRelicTier (ONE merchantRng.random(99))
@@ -177,14 +182,71 @@ static_assert(sizeof(ShopSlot) == 8);
 // MathUtils.round(base x merchantRng.random(0.95f, 1.05f)), then a SEPARATE
 // round per owned discount relic (0.8f then 0.5f) -- again no A16 pass.
 //
-// The restocked-slot refusal is this simulator's one permanent, named
-// deviation for the merchant: the slot EXISTS (the game's shelf never
-// empties while The Courier is owned) but purchasing the unknowable colored
-// replacement is refused fail-loud rather than answered with an invented
-// card. The capture campaign wave2cap_courier_* measured the seeded stream
-// motion this file models (see the Courier rows in
-// tools/oracle_bridge/driver/wave2cap_capture_runbook.md).
-inline constexpr uint16_t kShopRestockedUnknownCard = 0xFFFF;
+// The capture campaign wave2cap_courier_* measured the seeded stream motion
+// this file models (see the Courier rows in
+// tools/oracle_bridge/driver/wave2cap_capture_runbook.md). That measurement
+// still holds after S3.24: the restock identity moved to a stream that is
+// CONSTRUCTED, never stored, so cardRng / merchantRng / potionRng motion per
+// restock is byte-for-byte what the capture recorded.
+
+// --- courier_restock_stream: the oracle-contract stream (S3.24) ----------------
+//
+// THE PROBLEM. `getCardFromPool(..., useRng=false)` indexes with libGDX's
+// global MathUtils.random -- a RandomXS128 seeded from JVM-startup entropy
+// whose position also advances with rendering and VFX draws. The value is
+// outside the sim's input domain in PRINCIPLE, not merely in practice: no
+// (seed, actions) pair determines it. The S1 answer was a named refusal (the
+// restocked slot held a `kShopRestockedUnknownCard` sentinel and was kept off
+// the legal mask); S3.24 replaces that with the established oracle-contract
+// shape -- **the contract is the patched fork, not the retail client**
+// (precedent: the Discovery wasted-regens boundary, the Explosive-Potion
+// THORNS boundary, and the SecretPortal playtime pin; PROTOCOL.md §5.4). The
+// fork patch that makes the one retail DRAW read this same stream is
+// CourierRestockSeedPatch; the hand-over is
+// tools/oracle_bridge/communicationmod-oracle/COURIER-RESTOCK-HANDOVER.md.
+//
+// THE STREAM. Constructed on demand, held NOWHERE: it is not a game stream and
+// does not join the stage-a-design §3.4 inventory, no RunState byte is added,
+// and SCHEMA_VERSION does not move. Its seed is
+//
+//     run_seed + kCourierRestockSeedOffset + cardRng.counter
+//
+// with the counter read AFTER the restock's own rollRarity draw, so:
+//   * both sides can compute it -- the fork reads `Settings.seed` and
+//     `AbstractDungeon.cardRng.counter` at exactly the same point;
+//   * successive restocks never repeat, because every colored restock spends
+//     one rollRarity draw on cardRng before the identity draw, so the counter
+//     strictly increases between them;
+//   * the derivation is the same shape the game itself uses for its derived
+//     streams (`floor_stream` = seed + floorNum, `map_stream` = seed + act
+//     offset, Neow's fresh `Random(seed)`), and RandomXS128's constructor
+//     murmur-scrambles the seed, so adjacent counters give uncorrelated
+//     streams.
+//
+// The offset is what keeps this stream from ALIASING one of those: floor
+// streams occupy seed + 0..~60 and act streams seed + {1, 200, 600, 1200}, so
+// a value comfortably past both -- 1000003, the smallest prime above 10^6 --
+// cannot collide for any counter a run reaches. It is an arbitrary but FROZEN
+// constant: changing it changes every restocked identity and would invalidate
+// the fork patch, so it is append-only in the same sense as a registry id.
+//
+// DISTRIBUTIONALLY EXACT, which is the property that matters for training:
+// retail draws uniformly over the type-filtered, sorted rarity view, and so
+// does this -- the same view, the same inclusive `random(size - 1)` bound,
+// only a different (reproducible) source of the index.
+inline constexpr int64_t kCourierRestockSeedOffset = 1000003;
+
+[[nodiscard]] constexpr RngStream courier_restock_stream(
+    int64_t run_seed, int32_t card_rng_counter) noexcept {
+    // Java's `seed + n` is a long addition with defined two's-complement wrap;
+    // C++ signed overflow is UB, so the sum goes through uint64_t exactly as
+    // floor_stream / map_stream spell it (rng_stream.hpp).
+    return from_seed(static_cast<int64_t>(
+        static_cast<uint64_t>(run_seed) +
+        static_cast<uint64_t>(kCourierRestockSeedOffset) +
+        static_cast<uint64_t>(static_cast<int64_t>(card_rng_counter))));
+}
+
 // kColorlessRareChance (Exordium.java:106) moved to combat_rewards.hpp
 // (included above) when Sensory Stone's colourless reward roll became its
 // second consumer (S2.33) -- one definition, one citation.
