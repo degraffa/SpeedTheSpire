@@ -4,7 +4,8 @@
 //   replay_run_diff <run.jsonl> [<run2.jsonl> ...]
 //                   [--replay | --neow | --shop | --treasure | --event]
 //                   [--verbose] [--pool-evidence] [--stop-on-diff]
-//                   [--combat] [--combat-summary]          (--replay triage aids)
+//                   [--combat] [--combat-summary] [--trace-powers] [--vitals]
+//                                                          (--replay triage aids)
 //
 // SIX MODES, one per acceptance read-out, all over the same artifacts:
 //
@@ -83,8 +84,31 @@
 // map -- and is elided the same way, keyed off the simulator's phase rather
 // than the button's label. The full citation trail is on `map_command`.
 //
+// --vitals (with --replay): THE COMBAT-VITALS COMPARE. The run-level differ
+// sees a combat-internal drift -- a different damage number on a monster, a
+// Time Warp count one off, a different randomly generated card in hand -- only
+// once it becomes a run-level symptom (a monster killed a play early, a
+// different draw), records after the cause. `--vitals` compares, at every
+// in-combat record, an INDEX-NORMALISED projection of both sides
+// (sts/translate/combat_vitals.hpp): turn, player block / energy / powers,
+// each monster slot's identity / hp / block / liveness / powers, and every
+// pile's CONTENTS as a (card, upgrades) multiset -- draw-pile order is hidden
+// by the protocol, so contents are exactly what is comparable there. It is a
+// second report beside the run-level one: the CLEAN/PART verdict, the exit
+// code and every existing line are unchanged, and its own summary line says
+// `vitals-clean` or `vitals-divergent` with the FIRST differing record. The
+// first vitals divergence is printed in full as a `VDIFF` block (GAME -> SIM);
+// later ones as one line each unless --verbose. Records the run-level compare
+// already tolerates as capture races (obtain / Entropic Brew / transform
+// preview / Smoke-Bomb escape) and the A20 double-boss handoff are skipped and
+// counted rather than compared, because their dump is mid-animation on the
+// capture side; a record where the sim has already left the fight is skipped
+// and counted too (the run-level DIFF owns that). `--combat` remains the raw
+// CombatState walk for diagnosis; the two are independent.
+//
 // The exit code is the number of files that ended with a divergence or an
-// unmapped command (0 == every file replayed clean to its terminal).
+// unmapped command (0 == every file replayed clean to its terminal); a vitals
+// divergence alone does not change it.
 
 #include <algorithm>
 #include <cctype>
@@ -93,6 +117,7 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <set>
 #include <span>
 #include <sstream>
 #include <string>
@@ -112,6 +137,7 @@
 #include "sts/engine/treasure_rooms.hpp"
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
+#include "sts/translate/combat_vitals.hpp"
 #include "sts/translate/translate.hpp"
 
 #include "command_map.hpp"
@@ -387,6 +413,7 @@ struct Options {
     bool combat = false;   // also diff the in-combat CombatState (diagnosis aid)
     bool trace_powers = false;  // per-record monster power lists, both sides
     bool combat_summary = false;  // print the sim's combat sheet per in-combat record
+    bool vitals = false;   // the index-normalised combat-vitals compare (--replay only)
     bool full_replay = false;  // whole-run replay instead of the reward spot-diff
     bool neow = false;         // the floor-0 blessing spot-diff
     bool shop = false;         // the merchant spot-diff
@@ -625,6 +652,17 @@ struct Verdict {
     int double_boss_handoff_records = 0;  // ...compared against the NEXT record
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
+
+    // --vitals (combat_vitals.hpp). Its own frontier, never folded into `clean`.
+    int vitals_records = 0;            // in-combat records vitals-compared
+    int vitals_diverged_records = 0;   // ...of which differed
+    int vitals_skipped_race = 0;       // in-combat records skipped: tolerated race / handoff
+    int vitals_skipped_phase = 0;      // ...skipped: the sim is already out of the fight
+    int vitals_first_seq = -1;         // the FIRST vitals divergence
+    int vitals_first_floor = -1;
+    int vitals_first_turn = -1;
+    std::size_t vitals_first_fields = 0;
+    std::set<std::string> vitals_unknown_ids;  // "<domain>:<id>", each reported once
 };
 
 // Print the sim's assembled reward offer beside the artifact's, which is the
@@ -822,6 +860,10 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             !rep.empty() && is_double_boss_handoff(rc, s) &&
             k + 1 < run.records.size() && screens[k + 1].floor == s.floor + 1;
         sts::diff::DiffReport handoff_rep;
+        // Set by every RACE branch below: the capture's dump is mid-animation
+        // for this record, so the run-level compare excuses it and the vitals
+        // compare must not judge it either.
+        bool capture_race = false;
         if (double_boss_handoff) {
             RunState after = run.records[k + 1].run;
             // Fold on a COPY: the real accumulator advances at k+1, in order.
@@ -881,6 +923,7 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             // capture side. Reported and counted, never a divergence -- the
             // same call `--event` makes, mirrored (see is_obtain_race).
             ++v.obtain_race_records;
+            capture_race = true;
             std::printf("RACE  seq=%d floor=%d screen=%s cmd='%s': the sim's deck holds "
                         "%u card%s this dump does not -- ShowCardAndObtainEffect is "
                         "still animating capture-side (the B1.3/B5.2 obtain-race "
@@ -898,6 +941,7 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             // classifier requires the very next capture record to hold exactly
             // these simulator identities, so a wrong roll cannot hide here.
             ++v.obtain_race_records;
+            capture_race = true;
             std::printf(
                 "RACE  seq=%d floor=%d screen=%s cmd='%s': the sim's potion "
                 "belt already holds %zu delayed Entropic-Brew obtain%s that "
@@ -911,6 +955,7 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
                        diff_field_names(rep), actual.card_rng,
                        expected.card_rng)) {
             ++v.preview_race_records;
+            capture_race = true;
             std::printf(
                 "RACE  seq=%d floor=%d screen=%s cmd='%s': the capture spent "
                 "%d wall-clock cardRng draws in a CURSE transform-confirm "
@@ -936,6 +981,7 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             // satisfy the narrow screen/phase/field-set gates, and the first
             // settled capture record stops matching them.
             ++v.escape_race_records;
+            capture_race = true;
             std::printf("RACE  seq=%d floor=%d screen=%s cmd='%s': the sim settled a "
                         "Smoke-Bomb escape (victory heal + battle-over assembly) that "
                         "this dump catches mid-escape-animation "
@@ -969,6 +1015,66 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             std::printf("ok   seq=%d floor=%d screen=%-13s sim_phase=%-18s cmd='%s'\n",
                         rec.seq, s.floor, s.screen_type.c_str(),
                         phase_name(rc.phase), rec.action_command.c_str());
+        }
+
+        // --vitals: the index-normalised combat-vitals compare
+        // (sts/translate/combat_vitals.hpp; the file header has the contract).
+        // Both sides are the state BEFORE this record's command -- the dump by
+        // construction, the sim because the command is applied below -- so the
+        // comparison is like-for-like in time as well as in shape. A record the
+        // run-level compare excused as a capture race, or compared SHIFTED as
+        // the double-boss handoff, is skipped and counted: its dump is not the
+        // state the rules describe. A record where the sim has already left
+        // the fight (the run-level DIFF is what owns that) is skipped and
+        // counted separately.
+        if (opts.vitals && rec.in_combat) {
+            if (capture_race || double_boss_handoff) {
+                ++v.vitals_skipped_race;
+            } else if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT)) {
+                ++v.vitals_skipped_phase;
+            } else {
+                const sts::translate::CombatVitals sim_vitals =
+                    sts::translate::vitals_from_combat_state(rc.combat);
+                const sts::translate::VitalsReport vrep =
+                    sts::translate::diff_combat_vitals(rec.vitals, sim_vitals);
+                ++v.vitals_records;
+                // An unresolved id is named ONCE per file, not dropped: its
+                // slot is compared under its raw name and cannot match, so the
+                // rows below will carry it too -- this line says why.
+                for (const std::string& u : vrep.unknown_ids) {
+                    if (v.vitals_unknown_ids.insert(u).second) {
+                        std::printf("VITALS seq=%d floor=%d: unresolved id %s -- the "
+                                    "registry has no row for it; the slot is compared "
+                                    "under its raw name and cannot match\n",
+                                    rec.seq, s.floor, u.c_str());
+                    }
+                }
+                if (!vrep.empty()) {
+                    const bool first = v.vitals_diverged_records == 0;
+                    ++v.vitals_diverged_records;
+                    if (first) {
+                        v.vitals_first_seq = rec.seq;
+                        v.vitals_first_floor = s.floor;
+                        v.vitals_first_turn = rec.vitals.turn;
+                        v.vitals_first_fields = vrep.size();
+                    }
+                    if (first || opts.verbose) {
+                        std::printf("VDIFF seq=%d floor=%d turn=%d screen=%s cmd='%s' "
+                                    "(%zu field%s%s)\n%s\n",
+                                    rec.seq, s.floor, rec.vitals.turn,
+                                    s.screen_type.c_str(), rec.action_command.c_str(),
+                                    vrep.size(), vrep.size() == 1 ? "" : "s",
+                                    first ? "; the FIRST vitals divergence" : "",
+                                    vrep.to_string().c_str());
+                    } else {
+                        std::printf("VDIFF seq=%d floor=%d turn=%d cmd='%s' (%zu field%s; "
+                                    "--verbose prints the rows)\n",
+                                    rec.seq, s.floor, rec.vitals.turn,
+                                    rec.action_command.c_str(), vrep.size(),
+                                    vrep.size() == 1 ? "" : "s");
+                    }
+                }
+            }
         }
 
         // Optional diagnosis aid: when a run-level divergence appears mid-fight,
@@ -3141,6 +3247,7 @@ int main(int argc, char** argv) {
         else if (a == "--combat") opts.combat = true;
         else if (a == "--trace-powers") opts.trace_powers = true;
         else if (a == "--combat-summary") opts.combat_summary = true;
+        else if (a == "--vitals") opts.vitals = true;
         else if (a == "--replay") opts.full_replay = true;
         else if (a == "--neow") opts.neow = true;
         else if (a == "--shop") opts.shop = true;
@@ -3156,7 +3263,7 @@ int main(int argc, char** argv) {
                      "usage: replay_run_diff <run.jsonl> [...] "
                      "[--replay | --neow | --shop | --treasure | --event]\n"
                      "         [--verbose] [--pool-evidence] [--stop-on-diff] [--combat]\n"
-                     "         [--trace-powers]\n"
+                     "         [--trace-powers] [--combat-summary] [--vitals]\n"
                      "  default:    per-reward-screen spot-diff seeded from the capture\n"
                      "  --replay:   whole-run replay from run_begin, diffed per record\n"
                      "  --neow:     floor-0 blessing spot-diff (options / activation / "
@@ -3178,6 +3285,18 @@ int main(int argc, char** argv) {
                      "              only: the tag also fires on known dispositions (a\n"
                      "              hidden Curl Up, a spent Artifact at 0, Life Link /\n"
                      "              Minion), so read the named power, not the tag count\n"
+                     "  --combat:   (with --replay) also print the raw CombatState diff "
+                     "per in-combat\n"
+                     "              record -- a diagnosis aid, index-sensitive by nature\n"
+                     "  --vitals:   (with --replay) compare the index-normalised combat "
+                     "vitals per\n"
+                     "              in-combat record (turn, player block/energy/powers, "
+                     "monster hp/\n"
+                     "              block/liveness/powers by slot, pile contents as "
+                     "multisets) and\n"
+                     "              report the first differing record; the CLEAN/PART "
+                     "verdict and exit\n"
+                     "              code are unchanged\n"
                      "  the mode flags are mutually exclusive\n");
         return 2;
     }
@@ -3413,6 +3532,35 @@ int main(int argc, char** argv) {
             } else {
                 std::printf("      first divergence: none -- every compared "
                             "record was zero-diff\n");
+            }
+            // The --vitals report: its own verdict word and its own frontier,
+            // on lines of their own, never folded into CLEAN/PART or the exit
+            // code. (Worded without a `<N> <name>-race` field on purpose: the
+            // campaign pipeline scrapes those off the summary line above as
+            // capture-artifact counts.)
+            if (opts.vitals) {
+                std::printf("      vitals: %s -- %d in-combat record%s compared, %d "
+                            "differed; %d skipped on tolerated race/handoff records, "
+                            "%d skipped with the sim already out of the fight\n",
+                            v.vitals_diverged_records == 0 ? "vitals-clean"
+                                                           : "vitals-divergent",
+                            v.vitals_records, v.vitals_records == 1 ? "" : "s",
+                            v.vitals_diverged_records, v.vitals_skipped_race,
+                            v.vitals_skipped_phase);
+                if (v.vitals_first_seq >= 0) {
+                    std::printf("      first vitals divergence: seq=%d floor=%d turn=%d "
+                                "(%zu field%s)\n",
+                                v.vitals_first_seq, v.vitals_first_floor,
+                                v.vitals_first_turn, v.vitals_first_fields,
+                                v.vitals_first_fields == 1 ? "" : "s");
+                } else {
+                    std::printf("      first vitals divergence: none -- every "
+                                "vitals-compared record was zero-diff\n");
+                }
+                if (!v.vitals_unknown_ids.empty()) {
+                    std::printf("      %zu unresolved id(s) named above (VITALS lines)\n",
+                                v.vitals_unknown_ids.size());
+                }
             }
             if (!v.clean) ++failures;
         } catch (const std::exception& e) {

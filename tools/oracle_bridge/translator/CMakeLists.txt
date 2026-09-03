@@ -65,6 +65,7 @@ target_include_directories(nlohmann_json SYSTEM INTERFACE "${nlohmann_json_SOURC
 # The translator library: pure JSON->schema translation + the disposition table.
 add_library(oracle_translator STATIC
     src/translate.cpp
+    src/combat_vitals.cpp
 )
 target_include_directories(oracle_translator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # diff_harness (PUBLIC-links sts_engine) gives write_trace + the engine's POD

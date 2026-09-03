@@ -8,6 +8,8 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -346,8 +348,12 @@ void set_event_flag_block(eng::RunState& rs, uint16_t first_id, int count,
 // `CardFlag`s -- a different namespace, where bit 0 means EXHAUST -- and the
 // bottled instance's combat rendering is the INNATE bit the combat builder
 // derives itself (run_deck.hpp's encoding note).
+// `vitals`, when given, receives the card's IDENTITY by game id -- the raw
+// capture string, kept even when the registry join fails under tolerant
+// translation, so `--vitals` can name an unresolved id (combat_vitals.hpp).
 [[nodiscard]] eng::CardInstance parse_card(const json& j, const std::string& path,
-                                           Ctx& ctx, bool master_deck = false) {
+                                           Ctx& ctx, bool master_deck = false,
+                                           VitalsCard* vitals = nullptr) {
     FieldReader fr(j, path, ctx);
     eng::CardInstance ci{};
     struct BottleKey {
@@ -368,11 +374,17 @@ void set_event_flag_block(eng::RunState& rs, uint16_t first_id, int count,
         }
     }
     // id -> card_id (the translator join key, §2.6). Mapped.
-    ci.card_id = static_cast<uint16_t>(join_card(as_str(fr.require("id"), ctx, path + ".id"),
-                                                 ctx, path + ".id"));
+    const std::string game_id = as_str(fr.require("id"), ctx, path + ".id");
+    ci.card_id = static_cast<uint16_t>(join_card(game_id, ctx, path + ".id"));
     fr.mapped();
+    if (vitals != nullptr) {
+        vitals->id = game_id;
+        vitals->known = ci.card_id != static_cast<uint16_t>(eng::CardId::NONE);
+    }
     if (const json* u = fr.take("upgrades")) {  // timesUpgraded -> upgrade
-        ci.upgrade = static_cast<uint8_t>(as_i64(*u, ctx, path + ".upgrades"));
+        const int64_t up = as_i64(*u, ctx, path + ".upgrades");
+        ci.upgrade = static_cast<uint8_t>(up);
+        if (vitals != nullptr) vitals->upgrades = static_cast<int>(up);
         fr.mapped();
     }
     if (const json* cost = fr.take("cost")) {  // costForTurn -> cost_now (>=0 only)
@@ -406,14 +418,24 @@ void set_event_flag_block(eng::RunState& rs, uint16_t first_id, int count,
 }
 
 [[nodiscard]] eng::PowerSlot parse_power(const json& j, const std::string& path,
-                                         Ctx& ctx, uint32_t* player_combat_flags) {
+                                         Ctx& ctx, uint32_t* player_combat_flags,
+                                         VitalsPower* vitals = nullptr) {
     FieldReader fr(j, path, ctx);
     eng::PowerSlot ps{};
-    ps.power_id = static_cast<uint16_t>(
-        join_power(as_str(fr.require("id"), ctx, path + ".id"), ctx, path + ".id"));
+    const std::string game_id = as_str(fr.require("id"), ctx, path + ".id");
+    ps.power_id = static_cast<uint16_t>(join_power(game_id, ctx, path + ".id"));
     fr.mapped();
+    if (vitals != nullptr) {
+        // The raw capture id, not the normalised one: The Bomb's per-instance
+        // suffix is what tells two fuses apart in a report, and an unresolved
+        // id must be named verbatim (combat_vitals.hpp).
+        vitals->id = game_id;
+        vitals->known = ps.power_id != static_cast<uint16_t>(eng::PowerId::NONE);
+    }
     if (const json* a = fr.take("amount")) {
-        ps.amount = static_cast<int16_t>(as_i64(*a, ctx, path + ".amount"));
+        const int64_t amt = as_i64(*a, ctx, path + ".amount");
+        ps.amount = static_cast<int16_t>(amt);
+        if (vitals != nullptr) vitals->amount = static_cast<int>(amt);
         fr.mapped();
     }
     fr.ignore("name");
@@ -473,7 +495,8 @@ void set_event_flag_block(eng::RunState& rs, uint16_t first_id, int count,
 // Parse a powers list into a fixed slot array + count. Loud on overflow.
 void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
                   eng::PowerSlot* slots, uint8_t& count,
-                  uint32_t* player_combat_flags = nullptr) {
+                  uint32_t* player_combat_flags = nullptr,
+                  std::vector<VitalsPower>* vitals = nullptr) {
     if (!arr.is_array()) throw TranslateError(loc(ctx) + " expected array at " + path);
     if (arr.size() > eng::kPowerCap) {
         throw TranslateError(loc(ctx) + " " + path + " has " +
@@ -482,26 +505,37 @@ void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
     }
     count = 0;
     for (std::size_t i = 0; i < arr.size(); ++i) {
+        VitalsPower vp;
         slots[count++] = parse_power(arr[i], path + "[" + std::to_string(i) + "]",
-                                     ctx, player_combat_flags);
+                                     ctx, player_combat_flags,
+                                     vitals != nullptr ? &vp : nullptr);
+        if (vitals != nullptr) vitals->push_back(std::move(vp));
     }
 }
 
 // ---- monster (PROTOCOL §3.12) --------------------------------------------
 
+// `vitals`, when given, receives the slot's identity / hp / block / liveness
+// flags and its power list by game id (combat_vitals.hpp).
 [[nodiscard]] eng::MonsterState parse_monster(const json& j, const std::string& path,
-                                              Ctx& ctx) {
+                                              Ctx& ctx, VitalsMonster* vitals = nullptr) {
     FieldReader fr(j, path, ctx);
     eng::MonsterState ms{};
-    ms.monster_id = static_cast<uint16_t>(
-        join_monster(as_str(fr.require("id"), ctx, path + ".id"), ctx, path + ".id"));
+    const std::string game_id = as_str(fr.require("id"), ctx, path + ".id");
+    ms.monster_id = static_cast<uint16_t>(join_monster(game_id, ctx, path + ".id"));
     fr.mapped();
+    if (vitals != nullptr) {
+        vitals->id = game_id;
+        vitals->known = ms.monster_id != static_cast<uint16_t>(eng::MonsterId::NONE);
+    }
     ms.hp = static_cast<int16_t>(as_i64(fr.require("current_hp"), ctx, path + ".current_hp"));
+    if (vitals != nullptr) vitals->hp = ms.hp;
     fr.mapped();
     ms.max_hp = static_cast<int16_t>(as_i64(fr.require("max_hp"), ctx, path + ".max_hp"));
     fr.mapped();
     if (const json* b = fr.take("block")) {
         ms.block = static_cast<int16_t>(as_i64(*b, ctx, path + ".block"));
+        if (vitals != nullptr) vitals->block = ms.block;
         fr.mapped();
     }
     if (const json* mv = fr.take("move_id")) {
@@ -515,7 +549,8 @@ void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
         fr.mapped();
     }
     if (const json* pw = fr.take("powers")) {
-        parse_powers(*pw, path + ".powers", ctx, ms.powers, ms.power_count);
+        parse_powers(*pw, path + ".powers", ctx, ms.powers, ms.power_count, nullptr,
+                     vitals != nullptr ? &vitals->powers : nullptr);
         fr.mapped();
     }
     fr.ignore("name");            // localization
@@ -528,8 +563,22 @@ void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
     fr.ignore("move_adjusted_damage");
     fr.defer("move_base_damage");  // semantic pre-power damage; no MonsterState slot yet
     fr.defer("move_hits");         // semantic attack multiplier; no slot yet
-    fr.defer("half_dead");        // no schema flag yet
-    fr.defer("is_gone");          // no schema flag yet
+    // The two liveness flags (AbstractMonster.halfDead; isDeadOrEscaped) are
+    // read into the vitals projection -- typed, like `price` -- but stay
+    // DEFERRED as a schema disposition: MonsterState carries kMonsterFlagHalfDead
+    // and kMonsterFlagEscaped, yet `is_gone` folds isDying into one boolean the
+    // flag word cannot hold without inferring which, so neither is written
+    // into the struct here.
+    if (const json* hd = fr.take("half_dead")) {
+        const bool v = as_bool(*hd, ctx, path + ".half_dead");
+        if (vitals != nullptr) vitals->half_dead = v;
+    }
+    fr.defer("half_dead");
+    if (const json* ig = fr.take("is_gone")) {
+        const bool v = as_bool(*ig, ctx, path + ".is_gone");
+        if (vitals != nullptr) vitals->gone = v;
+    }
+    fr.defer("is_gone");
     fr.oracle("last_move_id");        // stock 2-back; authoritative = oracle move history (§2.5 #9)
     fr.oracle("second_last_move_id"); // "
     fr.finish();
@@ -539,7 +588,7 @@ void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
 // ---- player (PROTOCOL §3.15) writes into CombatState ---------------------
 
 void parse_player(const json& j, const std::string& path, Ctx& ctx,
-                  eng::CombatState& cs) {
+                  eng::CombatState& cs, CombatVitals* vitals = nullptr) {
     FieldReader fr(j, path, ctx);
     cs.player_hp = static_cast<int16_t>(as_i64(fr.require("current_hp"), ctx, path + ".current_hp"));
     fr.mapped();
@@ -547,15 +596,18 @@ void parse_player(const json& j, const std::string& path, Ctx& ctx,
     fr.mapped();
     if (const json* b = fr.take("block")) {
         cs.player_block = static_cast<int16_t>(as_i64(*b, ctx, path + ".block"));
+        if (vitals != nullptr) vitals->player_block = cs.player_block;
         fr.mapped();
     }
     if (const json* e = fr.take("energy")) {
         cs.player_energy = static_cast<int16_t>(as_i64(*e, ctx, path + ".energy"));
+        if (vitals != nullptr) vitals->player_energy = cs.player_energy;
         fr.mapped();
     }
     if (const json* pw = fr.take("powers")) {
         parse_powers(*pw, path + ".powers", ctx, cs.player_powers,
-                     cs.player_power_count, &cs.flags);
+                     cs.player_power_count, &cs.flags,
+                     vitals != nullptr ? &vitals->player_powers : nullptr);
         fr.mapped();
     }
     fr.defer("orbs");  // §3.18; Ironclad has no orbs, no schema storage
@@ -570,7 +622,7 @@ void parse_player(const json& j, const std::string& path, Ctx& ctx,
 // ordering (that is combat-replay equivalence, out of B1.5 scope).
 void parse_pile(const json& arr, const std::string& path, Ctx& ctx,
                 eng::CombatState& cs, int& pool_used, eng::CardPoolIndex* out,
-                uint8_t& count, int cap) {
+                uint8_t& count, int cap, std::vector<VitalsCard>* vitals = nullptr) {
     if (!arr.is_array()) throw TranslateError(loc(ctx) + " expected array at " + path);
     if (static_cast<int>(arr.size()) > cap) {
         throw TranslateError(loc(ctx) + " " + path + " has " +
@@ -583,7 +635,11 @@ void parse_pile(const json& arr, const std::string& path, Ctx& ctx,
             throw TranslateError(loc(ctx) + " combat card_pool overflow (> " +
                                  std::to_string(eng::kCardPoolCap) + ") at " + path);
         }
-        eng::CardInstance ci = parse_card(arr[i], path + "[" + std::to_string(i) + "]", ctx);
+        VitalsCard vc;
+        eng::CardInstance ci = parse_card(arr[i], path + "[" + std::to_string(i) + "]", ctx,
+                                          /*master_deck=*/false,
+                                          vitals != nullptr ? &vc : nullptr);
+        if (vitals != nullptr) vitals->push_back(std::move(vc));
         eng::CardPoolIndex idx = static_cast<eng::CardPoolIndex>(pool_used);
         cs.card_pool[pool_used++] = ci;
         out[count++] = idx;
@@ -934,11 +990,18 @@ struct OracleAnchors {
 // Returns the card_pool fill cursor it left behind: the HAND_SELECT screen state
 // (below) allocates further pool rows for the cards the select screen has lifted
 // out of the hand, and must not tread on the rows this filled.
+//
+// `vitals` (combat_vitals.hpp) is filled from the SAME walk: every id join and
+// every scalar the CombatState receives, the projection receives too, so the
+// two can never disagree about what the dump said.
 int parse_combat_state(const json& j, const std::string& path, Ctx& ctx,
-                       eng::CombatState& cs) {
+                       eng::CombatState& cs, CombatVitals* vitals = nullptr) {
     FieldReader fr(j, path, ctx);
     cs.phase = static_cast<uint8_t>(eng::CombatPhase::WAITING_ON_USER);
     int pool_used = 0;  // running fill cursor into cs.card_pool (no struct field)
+    auto pile_vitals = [vitals](std::vector<VitalsCard> CombatVitals::*member) {
+        return vitals != nullptr ? &(vitals->*member) : nullptr;
+    };
 
     if (const json* mons = fr.take("monsters")) {
         if (!mons->is_array()) throw TranslateError(loc(ctx) + " expected array at " + path + ".monsters");
@@ -949,38 +1012,45 @@ int parse_combat_state(const json& j, const std::string& path, Ctx& ctx,
         }
         cs.monster_count = 0;
         for (std::size_t i = 0; i < mons->size(); ++i) {
+            VitalsMonster vm;
             cs.monsters[cs.monster_count++] =
-                parse_monster((*mons)[i], path + ".monsters[" + std::to_string(i) + "]", ctx);
+                parse_monster((*mons)[i], path + ".monsters[" + std::to_string(i) + "]", ctx,
+                              vitals != nullptr ? &vm : nullptr);
+            if (vitals != nullptr) vitals->monsters.push_back(std::move(vm));
         }
         fr.mapped();
     }
 
     if (const json* p = fr.take("hand"))
-        { parse_pile(*p, path + ".hand", ctx, cs, pool_used, cs.hand, cs.hand_count, eng::kHandCap); fr.mapped(); }
+        { parse_pile(*p, path + ".hand", ctx, cs, pool_used, cs.hand, cs.hand_count, eng::kHandCap, pile_vitals(&CombatVitals::hand)); fr.mapped(); }
     if (const json* p = fr.take("draw_pile")) {
-        parse_pile(*p, path + ".draw_pile", ctx, cs, pool_used, cs.draw, cs.draw_count, eng::kDrawCap);
+        parse_pile(*p, path + ".draw_pile", ctx, cs, pool_used, cs.draw, cs.draw_count, eng::kDrawCap, pile_vitals(&CombatVitals::draw));
         fr.oracle("draw_pile");  // membership mapped; ORDER is advisory (§3.10 O)
     }
     if (const json* p = fr.take("discard_pile"))
-        { parse_pile(*p, path + ".discard_pile", ctx, cs, pool_used, cs.discard, cs.discard_count, eng::kDiscardCap); fr.mapped(); }
+        { parse_pile(*p, path + ".discard_pile", ctx, cs, pool_used, cs.discard, cs.discard_count, eng::kDiscardCap, pile_vitals(&CombatVitals::discard)); fr.mapped(); }
     if (const json* p = fr.take("exhaust_pile"))
-        { parse_pile(*p, path + ".exhaust_pile", ctx, cs, pool_used, cs.exhaust, cs.exhaust_count, eng::kExhaustCap); fr.mapped(); }
+        { parse_pile(*p, path + ".exhaust_pile", ctx, cs, pool_used, cs.exhaust, cs.exhaust_count, eng::kExhaustCap, pile_vitals(&CombatVitals::exhaust)); fr.mapped(); }
     if (const json* p = fr.take("limbo"))
-        { parse_pile(*p, path + ".limbo", ctx, cs, pool_used, cs.limbo, cs.limbo_count, eng::kLimboCap); fr.mapped(); }
+        { parse_pile(*p, path + ".limbo", ctx, cs, pool_used, cs.limbo, cs.limbo_count, eng::kLimboCap, pile_vitals(&CombatVitals::limbo)); fr.mapped(); }
     if (const json* c = fr.take("card_in_play")) {
         // player.cardInUse: one card, appended to limbo (the sim's in-flight pile).
         if (cs.limbo_count >= eng::kLimboCap || pool_used >= eng::kCardPoolCap)
             throw TranslateError(loc(ctx) + " limbo/card_pool overflow at " + path + ".card_in_play");
-        eng::CardInstance ci = parse_card(*c, path + ".card_in_play", ctx);
+        VitalsCard vc;
+        eng::CardInstance ci = parse_card(*c, path + ".card_in_play", ctx, /*master_deck=*/false,
+                                          vitals != nullptr ? &vc : nullptr);
+        if (vitals != nullptr) vitals->limbo.push_back(std::move(vc));
         eng::CardPoolIndex idx = static_cast<eng::CardPoolIndex>(pool_used);
         cs.card_pool[pool_used++] = ci;
         cs.limbo[cs.limbo_count++] = idx;
         fr.mapped();
     }
 
-    if (const json* pl = fr.take("player")) { parse_player(*pl, path + ".player", ctx, cs); fr.mapped(); }
+    if (const json* pl = fr.take("player")) { parse_player(*pl, path + ".player", ctx, cs, vitals); fr.mapped(); }
     if (const json* t = fr.take("turn")) {
         cs.turn = static_cast<uint16_t>(as_i64(*t, ctx, path + ".turn"));
+        if (vitals != nullptr) vitals->turn = cs.turn;
         fr.mapped();
     }
     fr.defer("cards_discarded_this_turn");  // no matching CombatState counter
@@ -1087,7 +1157,8 @@ void parse_relic(const json& j, const std::string& path, Ctx& ctx, eng::RelicSlo
 // seven-card hand rather than five cards with two picked, and that ambiguity
 // would be a silently wrong state rather than an honestly partial one.
 void parse_hand_select_state(FieldReader& fr, const std::string& path, Ctx& ctx,
-                             eng::CombatState* cs, int* pool_used) {
+                             eng::CombatState* cs, int* pool_used,
+                             CombatVitals* vitals = nullptr) {
     if (cs == nullptr || pool_used == nullptr) {
         throw TranslateError(loc(ctx) + " HAND_SELECT at " + path +
                              " with no combat_state — the hand-select screen "
@@ -1107,6 +1178,16 @@ void parse_hand_select_state(FieldReader& fr, const std::string& path, Ctx& ctx,
         throw TranslateError(loc(ctx) + " expected boolean at " + path +
                              ".can_pick_zero");
     }
+    // The screen's hand is the OPENING ACTION's eligible subset: ArmamentsAction
+    // (:45-91) pulls every `cannotUpgrade` card out of `p.hand` into a private
+    // list before `HandCardSelectScreen.open` and only appends them back in
+    // `returnCards()`. Neither that list nor the action is serialized, and
+    // `screen_state.hand` is the same filtered group as `combat_state.hand`, so
+    // the dump's hand is missing them while the sim (which filters at choice
+    // time instead, interp_cards.cpp `choice_slot_eligible`) still holds them.
+    // Flagging the record is what lets `--vitals` judge the hand by containment
+    // rather than equality there (combat_vitals.hpp).
+    if (vitals != nullptr) vitals->hand_partial = true;
     const int64_t max_cards = as_i64(max_cards_v, ctx, path + ".max_cards");
     const bool can_pick_zero = pick_zero_v.get<bool>();
     const std::size_t picked = selected->size();
@@ -1146,8 +1227,14 @@ void parse_hand_select_state(FieldReader& fr, const std::string& path, Ctx& ctx,
                              " hand + selected overflows kHandCap/kCardPoolCap");
     }
     for (std::size_t i = 0; i < picked; ++i) {
+        // The picks rejoin the hand on the vitals side as well: the sim keeps a
+        // picked card IN hand until the selection commits (the trailing-suffix
+        // shape above), so the like-for-like hand multiset includes them.
+        VitalsCard vc;
         eng::CardInstance ci = parse_card(
-            (*selected)[i], path + ".selected[" + std::to_string(i) + "]", ctx);
+            (*selected)[i], path + ".selected[" + std::to_string(i) + "]", ctx,
+            /*master_deck=*/false, vitals != nullptr ? &vc : nullptr);
+        if (vitals != nullptr) vitals->hand.push_back(std::move(vc));
         cs->card_pool[*pool_used] = ci;
         cs->hand[cs->hand_count++] =
             static_cast<eng::CardPoolIndex>((*pool_used)++);
@@ -1179,7 +1266,8 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
                         const std::string& screen_type,
                         eng::CombatState* cs = nullptr,
                         int* pool_used = nullptr,
-                        eng::RunState* rs = nullptr) {
+                        eng::RunState* rs = nullptr,
+                        CombatVitals* vitals = nullptr) {
     FieldReader fr(j, path, ctx);
     if (screen_type == "EVENT") {
         fr.ignore("body_text");
@@ -1417,7 +1505,7 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
         defer_all(fr, {"num_cards", "any_number", "for_upgrade", "for_transform",
                        "for_purge", "confirm_up"});
     } else if (screen_type == "HAND_SELECT") {
-        parse_hand_select_state(fr, path, ctx, cs, pool_used);
+        parse_hand_select_state(fr, path, ctx, cs, pool_used, vitals);
     } else if (screen_type == "GAME_OVER") {
         fr.ignore("score");   // out-of-model presentation
         fr.defer("victory");
@@ -1527,7 +1615,8 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
         out.in_combat = true;
         has_combat = true;
         combat_pool_used =
-            parse_combat_state(*combat, path + ".combat_state", ctx, out.combat);
+            parse_combat_state(*combat, path + ".combat_state", ctx, out.combat,
+                               &out.vitals);
         fr.mapped();
     }
 
@@ -1632,7 +1721,8 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
         parse_screen_state(*screen, path + ".screen_state", ctx, screen_type,
                            has_combat ? &out.combat : nullptr,
                            has_combat ? &combat_pool_used : nullptr,
-                           &out.run);
+                           &out.run,
+                           has_combat ? &out.vitals : nullptr);
         fr.defer("screen_state");
     }
     fr.finish();

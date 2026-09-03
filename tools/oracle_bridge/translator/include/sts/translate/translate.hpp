@@ -54,6 +54,7 @@
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/run_state.hpp"
+#include "sts/translate/combat_vitals.hpp"
 
 namespace sts::translate {
 
@@ -103,6 +104,11 @@ struct TranslatedRecord {
     bool in_combat = false;
     engine::RunState run{};
     engine::CombatState combat{};  // meaningful iff in_combat
+    // The index-normalised combat-vitals projection of the same dump
+    // (combat_vitals.hpp), filled by the same walk that builds `combat`;
+    // meaningful iff in_combat. `replay_run_diff --vitals` compares it against
+    // `vitals_from_combat_state(<the live sim>)` at every in-combat record.
+    CombatVitals vitals{};
 
     // `oracle.playtime` -- CardCrawlGame.playtime, wall-clock seconds
     // (s2-design §5 trap 5). NOT RunState: it is not save-parity state the

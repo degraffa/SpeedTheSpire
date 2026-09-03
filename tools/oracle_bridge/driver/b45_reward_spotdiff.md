@@ -228,6 +228,33 @@ had a failure. `--replay` re-drives a whole run from `run_begin` instead, and
 `--combat` adds a per-record `CombatState` diff for triage; both are diagnosis
 modes, not the acceptance.
 
+`--vitals` (with `--replay`) is the third, and the only one of the three that
+is a *comparison* rather than a print. It projects both sides of every
+in-combat record to the index-normalised `CombatVitals`
+(`tools/oracle_bridge/translator/include/sts/translate/combat_vitals.hpp`, which
+carries the contract and every exclusion) — turn, player block / energy /
+powers, each monster SLOT's identity / hp / block / liveness / powers, and each
+pile's contents as a `(card, upgrades)` multiset — and prints the FIRST
+differing record in full as a `VDIFF` block, later ones as one line each unless
+`--verbose`:
+
+```bash
+build/debug/tools/oracle_bridge/replay/replay_run_diff --replay --vitals \
+    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/<id>/run_*[!g].jsonl
+```
+
+Pool indices and pile order never enter the projection (draw-pile order is
+hidden by PROTOCOL.md §3.10 anyway), which is what makes it a compare where
+`--combat` can only ever be a print. It exists because the run-level differ
+sees a combat-internal drift — a different damage number, a Time Warp count one
+off — only once it becomes a run-level symptom several records later; `--vitals`
+names the record where it starts. It is a **second report beside** the run-level
+one: `CLEAN`/`PART`, the exit code and every existing line are unchanged, and
+its own summary says `vitals-clean` or `vitals-divergent` with the first
+differing seq. Records the run-level compare already excuses as capture races,
+the A20 double-boss handoff, and records where the sim has already left the
+fight are skipped and counted rather than compared.
+
 ## 6. Caveat the capture ALSO resolved: card-pool library order — CLOSED
 
 The generated pools used to be emitted in **registry-id order**, a documented
