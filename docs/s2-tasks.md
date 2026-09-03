@@ -3949,7 +3949,8 @@ uncommitted under `SpeedTheSpire-campaigns/fuzz/` per convention.
 The design §6 S2-G2 bar, checked literally, every item with linked
 evidence. Then: update CLAUDE.md "Current state"; notify the training
 ledger (T4.1's `Deps: S2` is this tag); S3 planning opens as its own fresh
-exercise (not claimed here).
+exercise (not claimed here) — **opened 2026-09-03 as
+[s3-design.md](s3-design.md) + [s3-tasks.md](s3-tasks.md)**.
 **Log:** 2026-08-27 — GATE TAKEN, tag `s2-g2-verified`. The bar's
 item-by-item answer is
 [verification/s2-verification.md](verification/s2-verification.md)

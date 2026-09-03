@@ -148,8 +148,10 @@ Library index spaces) plus six follower seams and b1.7.1's
 `--boss-reward-via-policy`, all landed with named regressions the same
 day. A three-act CI corpus (incl. both double-boss victories) now
 replays zero-diff in every preset. **Training Phase T4 is unblocked**
-([docs/training-tasks.md](docs/training-tasks.md) T4.1); S3 planning
-opens as its own fresh exercise.
+([docs/training-tasks.md](docs/training-tasks.md) T4.1); **S3 planning is
+open** — keys, Act 4, the Corrupt Heart and the true-victory terminal, spec
+in [docs/s3-design.md](docs/s3-design.md) and ledger in
+[docs/s3-tasks.md](docs/s3-tasks.md).
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
 in [docs/stage-b-tasks.md](docs/stage-b-tasks.md) and
