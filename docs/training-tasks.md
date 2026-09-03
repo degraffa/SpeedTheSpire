@@ -55,8 +55,11 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Remaining (training repo):** SpireTrainer still consumes the engine via ExternalProject — switching it to `add_subdirectory` and collapsing its `engine_suite` into per-test entries is now unblocked and is tracked in `SpireTrainer/docs/training-tasks.md` |
+| Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Training side DISCHARGED 2026-09-03 (T1.1b, SpireTrainer `33a99a0`):** pin `bfd95a2` → `6c50a0b`, `ExternalProject_Add` replaced by `add_subdirectory`, `sts_engine` a real target, googletest fetched once |
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
+| Stored records carry `outcome_kind = kOpen` and zeroed outcome/value/aux targets — an append-only writer cannot go back once a run ends | T1.2 | T2.3 | Filling them is a read-old-shard / write-new-shard pass, which is exactly the shape of T2.3's **reanalyze** operation, so T1.2 deliberately did not half-build it. `RecordedRunStats::outcome_kind` carries the answer for a caller that wants it immediately. A loader must never read `outcome_return` from a `kOpen` record as if it were a target. |
+| Quarantine has no **committed** `CommitOrder` — the ordered list of sim commits this repo has ever pinned | T1.2 | T2.3 | Git shas are unordered, so "the range from A to B" is only evaluable against a declared order (`quarantine.hpp`). T1.2 demonstrated the filter with an order built in the tool; the lifecycle operation needs one in the repo, appended by the same reviewed change that moves the pin (conventions, "Moving the engine pin"). Until it exists, every real shard is `kUnknownCommit` to any policy but a hand-built one. |
+| The keyframe interval (default 64) is unswept, and `SidecarReader::reconstruct` linear-scans both sidecar streams | T1.2 | T2.1 | The interval trades bytes/run against replayed steps; T1.2 measured both at 64 (see [verification/t1-2-storage-numbers.md](verification/t1-2-storage-numbers.md)) but the bank is what should choose it. The linear scan is deliberate — an index built inside the reader would be a cache with a lifetime nobody asked for; the bank harvester wants one **on disk**. |
 
 ---
 
@@ -402,8 +405,31 @@ force run 1 with `workflow_dispatch` after this lands).
   tracking now lives in `SpireTrainer/docs/training-tasks.md`; this
   ledger keeps the GT1+ cross-repo gates.** Engine-side follow-up filed
   below: `CMAKE_SOURCE_DIR` → `CMAKE_CURRENT_SOURCE_DIR` refactor.
+  **2026-09-03 (T1.1b)** — engine pin moved `bfd95a2` (tag `gt0-info-layer`)
+  → `6c50a0b` (S2 verified, 118 commits on), and `ExternalProject_Add`
+  replaced by `add_subdirectory(external/SpeedTheSpire engine)` in the same
+  commit, discharging the deferred obligation above on the consumer side. The
+  engine is now one CMake invocation with this project: `sts_engine` is a real
+  target (every `add_dependencies(<t> sts_engine_build)` deleted), googletest
+  is fetched once instead of twice, and the engine's suites arrive as per-test
+  ctest entries rather than one opaque `engine_suite`. `tests/golden/
+  actor_smoke_v1.txt` was regenerated — it REFUSED to compare, by design,
+  because `SCHEMA_VERSION` 6→8 and `PUBLIC_VIEW_VERSION` 2→6. Every hash
+  moved; the finding is that the eight seeds' step counts (120/130/101/68/75/
+  78/90/87) and terminal phase (RUN_OVER) are unchanged, so the ladder's
+  trajectory is the same and only the hashed bytes differ. **Acceptance (real
+  runs, per the owner's 2026-09-03 direction):** all six presets configure +
+  build green — win-debug / win-asan / win-release through the vcvars+LLVM
+  wrapper, and `debug` / `asan` / `release` through `tools/wsl_run.sh
+  --script`; `actor_smoke` run on its eight real A20 seeds under all six
+  produces a byte-identical fixture (sha256
+  `8654ae010fa349a052ec48742e90bf786f5183c1d240795f15bcf6aa3b19c733` under
+  both clang-cl and GCC). `tools/training/check_omniscient_boundary.sh` clean;
+  `tools/check_submodule_pin.sh` clean after the commit. (Incidentally, before
+  the direction landed: `ctest --preset win-debug` and `win-asan` were 100%
+  green over the whole embedded suite — `ctest -N | tail -1` = 2747.)
 
-- **T1.2** `[ ]` ∥ **Trajectory schema + storage.** Fixed-layout POD
+- **T1.2** `[x]` ∥ **Trajectory schema + storage.** Fixed-layout POD
   records (public obs, mask, sparse search distribution, action, outcome,
   aux targets) in append-only memory-mapped shards; refuse-on-mismatch
   loaders; **restricted sidecar** as keyframes + action logs with
@@ -412,7 +438,58 @@ force run 1 with `workflow_dispatch` after this lands).
   **Deps:** T1.1, GT0 **Acceptance:** write→read round-trip; loader
   refuses a stamped-incompatible shard (negative test); a sampled
   intermediate state reconstructs bit-exactly from keyframe + action log;
-  sidecar bytes/run measured and recorded. **Log:** —
+  sidecar bytes/run measured and recorded.
+  **Inherited:** the version stamp T1.1 built is the shard header's
+  identity — all six fields, refuse-on-mismatch, per conventions §6.
+  **Log:** 2026-09-03 — landed on engine pin `6c50a0b`.
+  `include/sts/training/{trajectory_schema,mapped_file,shard,sidecar,quarantine,trajectory_recorder}.hpp`
+  + their `src/training/` bodies. `DecisionRecord` carries the public
+  observation (`engine::PublicView`, which EMBEDS the mask — contract §4, so
+  there is deliberately no second mask field to disagree with it), the sparse
+  search distribution, the action, the outcome block and the four aux targets;
+  the fanout bound is *derived* from `RunActionMask`'s action-bearing slots, not
+  picked. Shards are append-only with a fixed 512-byte header holding all six
+  stamp fields, read back through a read-only memory mapping, with **no record
+  count in the header** so a crashed writer leaves an arithmetically-visible
+  torn tail rather than a lie. The restricted sidecar is keyframes + an action
+  log; quarantine is a loader-level metadata filter over a declared sim-commit
+  order (unknown commits are excluded, never admitted).
+  **Acceptance — real runs, not test cases** (owner direction 2026-09-03; the
+  harness is `storage_numbers`, which exits non-zero on any failure, and the
+  four in-flight gtest files from the 2026-08-25 session were deleted rather
+  than finished). Every line below is checked on the artifacts of the same
+  invocation that wrote them, and the full PASS list is
+  [verification/t1-2-storage-numbers.md](verification/t1-2-storage-numbers.md):
+  *write→read round-trip* — 749 baseline + 331 deep records re-opened through
+  the mapping and memcmp-identical to the bytes written, with `public_hash`
+  re-derived from every read-back view matching the stored hash; *refusal* —
+  a real shard copied and altered in one field is refused by name
+  (`sim_commit_mismatch`, `schema_version_mismatch`,
+  `record_layout_version_mismatch`, and `record_kind_mismatch` for the sidecar
+  keyframe stream opened as a decision shard), while `read_shard_header` still
+  reads the refused shard's metadata, which is what quarantine needs; *quarantine*
+  — those three real files classified 1 accepted / 1 quarantined / 1
+  unknown_commit; *reconstruction* — 101 baseline + 13 deep sampled
+  intermediate states rebuilt from nearest keyframe + action log through the
+  engine's own `advance()`, all **bit-exact** (longest replay 63 actions), the
+  deep ones on **seed 1 under the engine's `SIM_SEARCH` scripted driver, which
+  ends act 2 / floor 24 after 331 decisions** — so reconstruction is witnessed
+  across a real act transition, not only inside Act 1. *Measured sidecar
+  bytes/run:* **26,310 B** over the eight baseline runs (281 B/decision, 41×
+  against a snapshot-per-decision) and **76,016 B** for the deep run
+  (229 B/decision, 50×), at the default keyframe interval of 64.
+  **Defect found and fixed in the process:** `DecisionRecord` had four bytes of
+  *implicit* tail padding at this pin (body 13940, struct 13944) — indeterminate
+  bytes in a record that is memcpy'd to disk and memcmp'd back. The tail pad is
+  now *computed* from `sizeof(PublicView) + sizeof(SearchDistribution)` rather
+  than hand-picked, so it cannot rot on the next pin move, and two static_asserts
+  hold it (no implicit tail padding; the 64-byte prefix constant matches
+  `offsetof(view)`).
+  All six presets configure + build green and run the harness with identical
+  output: win-debug / win-asan / win-release (clang-cl) and debug / asan /
+  release (GCC/WSL) all produce a byte-identical
+  `t1-2-storage-numbers.md` and a byte-identical `actor_smoke_v1.txt`.
+  `tools/training/check_omniscient_boundary.sh` clean.
 
 - **T1.3** `[ ]` ∥ **Actor throughput spike.** Tiny net + real Gumbel
   root / PUCT in-tree search + `resample_hidden` particles + GPU batching
@@ -784,6 +861,9 @@ desired.
   assist-annealing fallback sentence. T2.x edits mirrored verbatim into
   `SpireTrainer/docs/training-tasks.md` per its tracked-in-both-places
   rule.
+- 2026-09-03 (later) — T1.1b and T1.2 landed in SpireTrainer (`33a99a0`, `4f731d4`);
+  their Log text and T1.2's three deferred rows mirrored here verbatim. The
+  same-day T1.x amendments below were mirrored into the SpireTrainer ledger.
 - 2026-09-03 — *shortest path to the first training loop* (owner-directed:
   reach training as early as possible). Mirrors the same-day plan change-log
   entry: T1.4 renamed V0h and demoted to an accelerant; **T1.4s** (sim-fitted
