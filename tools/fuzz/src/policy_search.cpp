@@ -1,4 +1,6 @@
-// SIM_SEARCH / SIM_SEARCH_SKIP -- the sim-consulting scripted policy (S2.V2).
+// SIM_SEARCH / SIM_SEARCH_SKIP / SIM_SEARCH_HOLD / SIM_SEARCH_KEYS -- the
+// sim-consulting scripted policy (S2.V2), plus its two one-rule variants and
+// S3.22's key-seeking one.
 //
 // WHY THIS EXISTS. s2-design §6's driver-risk paragraph sanctions exactly one
 // escalation when the TE.1 survival family cannot reach the S2-G2 depth bars:
@@ -158,6 +160,55 @@ constexpr int kGridCancel = 300;
 constexpr int kPotionOutOfCombat = 20;
 constexpr int kNeowChoice = 500;
 constexpr int kDefaultProceed = 400;
+
+// --- S3.22's key-seeking bands (SIM_SEARCH_KEYS only) ------------------------
+//
+// Four constants and two HP gates, all dead under every other kind. The bands
+// are chosen to DOMINATE THEIR OWN SCREEN and nothing else: a key row beats the
+// 900 relic row on a reward screen, RECALL beats the 700 pre-boss rest on a
+// campfire menu. Nothing here competes across screens, because run_move_score
+// bands only ever compete within one screen's legal set.
+//
+// K1. The key rows. EMERALD_KEY is free (it is a free-standing row appended
+// after the relic, MonsterRoomElite.java:94-98). SAPPHIRE_KEY is NOT: claiming
+// it silently destroys the chest's relic row unrewarded (RewardItem.java:
+// 317-326), which is why SIM_SEARCH scores both rows kRewardCardClosed and this
+// kind is a separate kind rather than a repair. One constant for both, because
+// the two rows never co-occur on a screen (one comes from a burning elite, the
+// other from a chest).
+constexpr int kKeyRowClaim = 1200;
+// K2. RECALL, above kRestPreferred (700). The button is offered only while
+// !hasRubyKey (CampfireUI.java:94-96, rest_sites.cpp:203), so "exactly one
+// campfire on RECALL" is enforced by the GAME, not by a counter here: the
+// option stops existing the moment it is taken.
+constexpr int kKeyRecall = 750;
+// The two HP gates. Both are "while HP allows" read as a percentage of max HP,
+// the same currency hp_at_or_below_pct already speaks. Below the gate the rule
+// is not merely weakened, it is OFF -- the move scores exactly what SIM_SEARCH
+// scores it, so a hurt run behaves identically to the baseline.
+constexpr int kKeySeekEliteHpPct = 60;  // K3: the burning elite is a FIGHT
+constexpr int kKeyRecallHpPct = 50;     // K2/K4: recall costs the heal
+// K3/K4. Map appetite, in the run-evaluation currency the one-floor rollout
+// scores in (kEvalPlayerHp == 300 per HP), added to a map candidate's rolled-out
+// score. 30,000 = 100 player HP for the burning elite -- enough to outweigh the
+// fight's expected HP cost, and far too small to outweigh the rollout's
+// kEvalDefeat, so a line that DIES on the elite inside the rollout is still
+// rejected. The chest and campfire bonuses are smaller because those rooms are
+// free: they only need to break the tie against another non-combat room.
+constexpr int64_t kKeyMapEmerald = 30000;
+constexpr int64_t kKeyMapEmeraldPath = 8000;
+constexpr int64_t kKeyMapChest = 15000;
+constexpr int64_t kKeyMapRest = 10000;
+// The nested-completion band for the burning elite (see the map arm of
+// run_move_score): inside a rollout there is no second rollout to consult, so
+// the elite node needs a band, and it sits above kMapBoss (700).
+constexpr int kMapEmeraldSeek = 800;
+
+// Which kinds seek keys. SIM_SEARCH / _SKIP / _HOLD never do, so their
+// trajectories are bit-for-bit what they were before S3.22.
+[[nodiscard]] constexpr bool kind_seeks_keys(PolicyKind kind) noexcept {
+    return kind == PolicyKind::SIM_SEARCH_KEYS;
+}
 
 // --- evaluation weights (combat search) --------------------------------------
 //
@@ -502,6 +553,111 @@ constexpr int kMapEliteAvoid = 200;
         rc.run.map[engine::run_state_map_index(col, row)].room_type);
 }
 
+// Is this map candidate's DESTINATION the act's burning-elite node? The engine's
+// own predicate (`on_emerald_elite_node`, run_advance.hpp) answers the question
+// for the node the controller is STANDING on; a map choice is made one room
+// early, so the same comparison is made against the candidate's (col, row) in
+// the same coordinate space map_dest_room uses -- at MAP_CHOICE the destination
+// row is `floor - act_floor_base(act)`, which is exactly `run_cur_row + 1` once
+// the move is taken. kNoEmeraldNode means the act placed no burning elite (the
+// key is already held, or the act has no elites).
+[[nodiscard]] bool map_dest_is_emerald_node(const RunController& rc,
+                                            const Move& m) noexcept {
+    if (m.cat != MoveCat::MAP_NODE) return false;
+    if (rc.emerald_x == engine::kNoEmeraldNode) return false;
+    const int col = engine::action_arg0(m.action);
+    const int row = static_cast<int>(rc.run.floor) -
+                    engine::act_floor_base(static_cast<int>(rc.run.act));
+    return col == static_cast<int>(rc.emerald_x) &&
+           row == static_cast<int>(rc.emerald_y);
+}
+
+// Can the burning-elite node still be REACHED from a candidate destination?
+//
+// WHY THIS EXISTS AND IS NOT A STEERING HEURISTIC. The emerald node sits at one
+// (column, row); a map choice moves one row at a time along real edges, so an
+// opportunistic "is the candidate the emerald node" preference only ever fires
+// on the single floor below it, and on most maps the run has already walked
+// into a column that cannot reach it. The map is a 15x7 DAG whose edges are two
+// bits per node (map_gen.hpp kEdgeLeft/Center/Right), so exact forward
+// reachability is a row-by-row frontier propagation over at most 15 rows of 7
+// bits -- cheaper than one rollout step and, unlike a "move towards the column"
+// heuristic, it is never wrong.
+//
+// It is a CONSERVATIVE test: Wing Boots lets the run jump to an unconnected
+// node (run_advance.cpp:2467-2490), which can only ADD reachability, so a false
+// negative costs an opportunity and a false positive is impossible.
+[[nodiscard]] bool node_reaches_emerald(const RunController& rc, int col,
+                                        int row) noexcept {
+    if (rc.emerald_x == engine::kNoEmeraldNode) return false;
+    const int ex = static_cast<int>(rc.emerald_x);
+    const int ey = static_cast<int>(rc.emerald_y);
+    if (row > ey || row < 0 || row >= engine::kMapRows) return false;
+    if (col < 0 || col >= engine::kMapCols) return false;
+    uint8_t frontier = static_cast<uint8_t>(1u << col);
+    for (int y = row; y < ey; ++y) {
+        uint8_t next = 0;
+        for (int x = 0; x < engine::kMapCols; ++x) {
+            if ((frontier & static_cast<uint8_t>(1u << x)) == 0) continue;
+            const uint8_t e =
+                rc.run.map[engine::run_state_map_index(x, y)].edges;
+            if ((e & engine::kEdgeLeft) != 0 && x > 0) {
+                next = static_cast<uint8_t>(next | (1u << (x - 1)));
+            }
+            if ((e & engine::kEdgeCenter) != 0) {
+                next = static_cast<uint8_t>(next | (1u << x));
+            }
+            if ((e & engine::kEdgeRight) != 0 && x + 1 < engine::kMapCols) {
+                next = static_cast<uint8_t>(next | (1u << (x + 1)));
+            }
+        }
+        frontier = next;
+        if (frontier == 0) return false;
+    }
+    return (frontier & static_cast<uint8_t>(1u << ex)) != 0;
+}
+
+// K3/K4 (S3.22): the bounded key appetite added to a map candidate's ROLLED-OUT
+// score in sim_search_pick. Zero for every other kind, for every key already
+// held, and below each rule's HP gate. It is added AFTER the rollout rather
+// than folded into run_layer_eval on purpose: the rollout keeps pricing the
+// fight (and death) exactly as the baseline does, and this term is a clearly
+// bounded preference laid on top of that valuation rather than a change to it.
+[[nodiscard]] int64_t key_map_bonus(PolicyKind kind, const RunController& rc,
+                                    const Move& m) noexcept {
+    if (!kind_seeks_keys(kind)) return 0;
+    if (m.cat != MoveCat::MAP_NODE) return 0;  // the boss edge is never a key
+    const uint8_t keys = rc.run.keys;
+    const bool want_emerald = (keys & engine::kKeyEmerald) == 0 &&
+                              !hp_at_or_below_pct(rc, kKeySeekEliteHpPct);
+    if (map_dest_is_emerald_node(rc, m)) {
+        return want_emerald ? kKeyMapEmerald : 0;
+    }
+    if (want_emerald) {
+        const int col = engine::action_arg0(m.action);
+        const int row = static_cast<int>(rc.run.floor) -
+                        engine::act_floor_base(static_cast<int>(rc.run.act));
+        // The APPROACH band: this candidate keeps the burning elite reachable.
+        // Much smaller than standing on it, because it only has to break a tie
+        // between two otherwise comparable columns -- an approach that costs
+        // real HP in the rollout is still refused.
+        if (node_reaches_emerald(rc, col, row)) return kKeyMapEmeraldPath;
+    }
+    switch (map_dest_room(rc, m)) {
+        case engine::RoomType::Treasure:
+            // The sapphire row is appended to every chest open while the key is
+            // unheld (AbstractChest.java:95-97 -> AbstractRoom.java:545-547).
+            return (keys & engine::kKeySapphire) == 0 ? kKeyMapChest : 0;
+        case engine::RoomType::Rest:
+            return (keys & engine::kKeyRuby) == 0 &&
+                           !hp_at_or_below_pct(rc, kKeyRecallHpPct)
+                       ? kKeyMapRest
+                       : 0;
+        default:
+            return 0;
+    }
+}
+
 // Grid-pick direction: does this master-deck grid want the WORST card (purge /
 // transform) or the BEST (upgrade / duplicate)?
 enum class GridWants : uint8_t { WORST, BEST };
@@ -560,7 +716,7 @@ enum class GridWants : uint8_t { WORST, BEST };
     return kNeowChoice;
 }
 
-[[nodiscard]] int reward_claim_score(const RunController& rc,
+[[nodiscard]] int reward_claim_score(PolicyKind kind, const RunController& rc,
                                      const Move& m) noexcept {
     const uint8_t arg0 = engine::action_arg0(m.action);
     // The pending-bottle overlay replaces the claim mask with a mandatory
@@ -587,13 +743,12 @@ enum class GridWants : uint8_t { WORST, BEST };
                        : kRewardCardClosed;
         case engine::RewardItemKind::EMERALD_KEY:
         case engine::RewardItemKind::SAPPHIRE_KEY:
-            // Spelled out to keep the fall-through EXPLICIT rather than
-            // implicit: this policy does not seek keys, so a key row scores the
-            // same "do not pick" it scored before S3.11 assembled it. The
-            // key-seeking variant is S3.22's deliverable (s3-tasks.md), and it
-            // is a policy change, not a scoring-table repair -- taking the
-            // sapphire key costs the chest relic, which no weight here knows.
-            return kRewardCardClosed;
+            // K1 (S3.22). The key-seeking kind claims the row above everything
+            // else on the screen; every other kind keeps the "do not pick" this
+            // arm scored before, spelled out rather than fallen through: taking
+            // the sapphire key costs the chest relic, which no weight here
+            // knows, so it is a POLICY decision and not a scoring-table repair.
+            return kind_seeks_keys(kind) ? kKeyRowClaim : kRewardCardClosed;
         case engine::RewardItemKind::NONE:
             break;
     }
@@ -635,7 +790,7 @@ enum class GridWants : uint8_t { WORST, BEST };
             if (rc.rewards.open_card_item != engine::kNoOpenCardReward) {
                 return take_card_score(rc, m);
             }
-            return reward_claim_score(rc, m);
+            return reward_claim_score(kind, rc, m);
         case engine::BossChestScreen::CLOSED:
         case engine::BossChestScreen::DONE:
             break;
@@ -654,6 +809,16 @@ enum class GridWants : uint8_t { WORST, BEST };
         case MoveCat::MAP_NODE:
         case MoveCat::MAP_BOSS: {
             const engine::RoomType r = map_dest_room(rc, m);
+            // K3, the NESTED-COMPLETION half. The outer map decision is made by
+            // the one-floor rollout in sim_search_pick (which adds the bonuses
+            // below); this band is what a rollout's own map walk uses, where
+            // there is no second rollout to consult.
+            if (kind_seeks_keys(kind) && r == engine::RoomType::Elite &&
+                map_dest_is_emerald_node(rc, m) &&
+                (rc.run.keys & engine::kKeyEmerald) == 0 &&
+                !hp_at_or_below_pct(rc, kKeySeekEliteHpPct)) {
+                return kMapEmeraldSeek;
+            }
             switch (r) {
                 case engine::RoomType::Boss:
                     return kMapBoss;
@@ -671,7 +836,7 @@ enum class GridWants : uint8_t { WORST, BEST };
             }
         }
         case MoveCat::REWARD_CLAIM:
-            return reward_claim_score(rc, m);
+            return reward_claim_score(kind, rc, m);
         case MoveCat::REWARD_TAKE_CARD:
             return take_card_score(rc, m);
         case MoveCat::REWARD_SKIP_CARD:
@@ -698,7 +863,14 @@ enum class GridWants : uint8_t { WORST, BEST };
         case MoveCat::DIG:
             return kRestOther;
         case MoveCat::RECALL:
-            return kRestRecall;
+            // K2 (S3.22): take the ruby key while HP allows. Below the gate the
+            // band is SIM_SEARCH's unchanged 250, so a hurt run heals instead --
+            // and the button survives, because taking it is the only thing that
+            // removes it.
+            return kind_seeks_keys(kind) &&
+                           !hp_at_or_below_pct(rc, kKeyRecallHpPct)
+                       ? kKeyRecall
+                       : kRestRecall;
         case MoveCat::SMITH_CARD:
             if (engine::action_arg0(m.action) == engine::kChooseCancelGrid) {
                 return kGridCancel;
@@ -1206,6 +1378,10 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             RunController sim = rc;
             apply_one(sim, moves[i].action);
             scores[i] = rollout_floor_and_eval(kind, sim);
+            // K3/K4 (S3.22): the key appetite, on the OUTER map decision only.
+            // Zero for every kind but SIM_SEARCH_KEYS, so this line cannot move
+            // an existing trajectory.
+            scores[i] += key_map_bonus(kind, rc, moves[i]);
         } else {
             scores[i] = run_move_score(kind, rc, moves[i]);
         }

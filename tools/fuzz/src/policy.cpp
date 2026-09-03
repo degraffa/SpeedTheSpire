@@ -31,6 +31,7 @@ const char* policy_name(PolicyKind k) noexcept {
         case PolicyKind::SIM_SEARCH: return "sim_search";
         case PolicyKind::SIM_SEARCH_SKIP: return "sim_search_skip";
         case PolicyKind::SIM_SEARCH_HOLD: return "sim_search_hold";
+        case PolicyKind::SIM_SEARCH_KEYS: return "sim_search_keys";
         case PolicyKind::COUNT: break;
     }
     return "?";
@@ -819,11 +820,13 @@ size_t policy_pick(PolicyKind kind, const RunController& rc, const Move* moves, 
         return rng.below(static_cast<uint32_t>(n));
     }
     if (kind == PolicyKind::SIM_SEARCH || kind == PolicyKind::SIM_SEARCH_SKIP ||
-        kind == PolicyKind::SIM_SEARCH_HOLD) {
+        kind == PolicyKind::SIM_SEARCH_HOLD ||
+        kind == PolicyKind::SIM_SEARCH_KEYS) {
         // The sim-consulting policy (S2.V2) is a different class of generator
         // and lives in its own translation unit; see policy_search.cpp. All
-        // three kinds share that body -- _SKIP differs only in R4's boss-relic
-        // answer, _HOLD only in the Curiosity hold.
+        // four kinds share that body -- _SKIP differs only in R4's boss-relic
+        // answer, _HOLD only in the Curiosity hold, _KEYS only in the four
+        // key-seeking rules K1-K4 (S3.22).
         return sim_search_pick(kind, rc, moves, n, rng);
     }
 

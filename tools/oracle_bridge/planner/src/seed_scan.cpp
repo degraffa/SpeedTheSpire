@@ -194,6 +194,48 @@ std::string boss_ids_text(const uint16_t (&boss_ids)[kMaxActs]) {
     return s;
 }
 
+// --- Keys (S3.22) ------------------------------------------------------------
+
+namespace {
+
+struct KeyName {
+    uint8_t bit;
+    std::string_view name;
+};
+
+// Bit order, which is also the order keys_text prints in.
+constexpr KeyName kKeyNames[3] = {
+    {engine::kKeyEmerald, "emerald"},
+    {engine::kKeyRuby, "ruby"},
+    {engine::kKeySapphire, "sapphire"},
+};
+
+}  // namespace
+
+std::string keys_text(uint8_t keys) {
+    std::string s;
+    for (const KeyName& k : kKeyNames) {
+        if ((keys & k.bit) == 0) continue;
+        if (!s.empty()) s += '|';
+        s.append(k.name);
+    }
+    return s;
+}
+
+bool key_bit_from_name(std::string_view name, uint8_t& out) {
+    std::string lower(name);
+    for (char& c : lower) {
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    }
+    for (const KeyName& k : kKeyNames) {
+        if (lower == k.name) {
+            out = k.bit;
+            return true;
+        }
+    }
+    return false;
+}
+
 // --- Scanning ----------------------------------------------------------------
 
 fuzz::CaseId ScanCase::case_id() const {
@@ -222,6 +264,11 @@ struct Watch {
     uint8_t boss_killed_acts = 0;
     bool victory = false;
     uint16_t boss_ids[kMaxActs]{};
+    // S3.22: keys carried (OR), per-act elite kills, the A20 second Act-3 boss
+    // room. All three are latches, same contract.
+    uint8_t keys = 0;
+    uint8_t elite_killed_acts = 0;
+    bool double_boss_room = false;
     std::vector<RelicObs> relics;  // one per target, latched (OR) per step
 };
 
@@ -272,6 +319,29 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
         w->victory = true;
         w->boss_killed_acts |= act_bit(engine::kFinalAct);
     }
+    // --- S3.22 keys, elite kills, and the A20 double-boss room --------------
+    //
+    // Keys: an OR over the run, not a terminal read (the event_flags rationale).
+    // S3.11's two reward-row claims and the campfire Recall are the three
+    // writers; nothing clears a bit.
+    w->keys |= rc.run.keys;
+    // An elite's reward screen is the elite's death: an Elite room always opens
+    // one (only a non-endless TheBeyond BOSS is suppressed, AbstractRoom
+    // .java:327), and the room type is still Elite while the screen is up.
+    if (rc.room_type == static_cast<uint8_t>(engine::RoomType::Elite) &&
+        rc.phase == static_cast<uint8_t>(engine::RunPhase::COMBAT_REWARD)) {
+        w->elite_killed_acts |= act_bit(act);
+    }
+    // The A20 second Act-3 boss room. boss_cursor counts boss rooms COMPLETED,
+    // so >= 1 inside a final-act boss room means the first one is already dead
+    // and this is goToDoubleBoss's synthetic node -- the exact witness the
+    // S2.V2 report's §6.1 correction had to reconstruct from max_floor.
+    if (rc.room_type == static_cast<uint8_t>(engine::RoomType::Boss) &&
+        act == static_cast<unsigned>(engine::kFinalAct) &&
+        rc.boss_cursor >= 1) {
+        w->double_boss_room = true;
+    }
+
     // Boss identity, mirrored into RunState at act init
     // (run_advance.cpp:1601, :1769) as an ENCOUNTER id. Copied rather than
     // read at the end because a run that dies mid-act still testifies about
@@ -364,6 +434,9 @@ ScanRow scan_case(const ScanCase& c, const ScanLimits& lim,
     row.boss_killed_acts = w.boss_killed_acts;
     row.victory = w.victory;
     for (int i = 0; i < kMaxActs; ++i) row.boss_ids[i] = w.boss_ids[i];
+    row.keys = w.keys;
+    row.elite_killed_acts = w.elite_killed_acts;
+    row.double_boss_room = w.double_boss_room;
     row.relic_obs = std::move(w.relics);
     row.fail_kind = fuzz::fail_kind_name(result.failure.kind);
     if (trajectory_out != nullptr) {
@@ -380,7 +453,7 @@ bool Filter::empty() const {
            need_relic_reward_offered.empty() && need_relic_acquired.empty() &&
            need_shop_after_relic.empty() && need_boss_reached_act == 0 &&
            need_boss_killed_act == 0 && !need_victory && min_act == 0 &&
-           need_boss_ids.empty();
+           need_boss_ids.empty() && need_keys == 0 && !need_heart_kill;
 }
 
 namespace {
@@ -416,6 +489,17 @@ bool row_hits(const ScanRow& row, const Filter& f) {
         return false;
     }
     if (f.need_victory && !row.victory) return false;
+    // S3.22 key clauses. ALL-OF on the mask (see the header for why all-of is
+    // the satisfiable reading here); the heart clause is the act-4 boss-kill
+    // bit, spelled separately because its consumer is S3.23/S3.62 and its probe
+    // sharpens at S3.31.
+    if (f.need_keys != 0 && (row.keys & f.need_keys) != f.need_keys) {
+        return false;
+    }
+    if (f.need_heart_kill &&
+        !act_bit_set(row.boss_killed_acts, static_cast<unsigned>(kMaxActs))) {
+        return false;
+    }
     if (!f.need_boss_ids.empty()) {
         bool any = false;
         for (uint16_t want : f.need_boss_ids) {
@@ -479,7 +563,9 @@ std::string_view tsv_header() {
     return "seed\tseed_int\tpolicy\tpolicy_seed\tascension\tend_reason\tactions\t"
            "max_floor\ttreasure\tboss\tevent_flags\tevents\trelic_obs\t"
            "final_hash\tfail_kind\t"
-           "act\tboss_reached_acts\tboss_killed_acts\tvictory\tboss_ids";
+           "act\tboss_reached_acts\tboss_killed_acts\tvictory\tboss_ids\t"
+           // S3.22, appended after boss_ids for the same contract reason.
+           "keys\telite_killed_acts\tdouble_boss";
 }
 
 namespace {
@@ -559,6 +645,9 @@ std::string row_to_tsv(const ScanRow& row) {
         std::to_string(static_cast<unsigned>(row.boss_killed_acts)),
         row.victory ? "1" : "0",
         boss_ids_text(row.boss_ids),
+        keys_text(row.keys),
+        std::to_string(static_cast<unsigned>(row.elite_killed_acts)),
+        row.double_boss_room ? "1" : "0",
     };
     std::string s;
     bool first = true;
@@ -654,7 +743,24 @@ std::string row_to_jsonl(const ScanRow& row) {
              std::to_string(row.boss_ids[i]) + ",\"encounter\":\"" +
              json_escape(encounter_game_id_from_id(row.boss_ids[i])) + "\"}";
     }
-    s += "]";
+    s += "],";
+    // S3.22: the number and the array, the same pair shape as event_flags.
+    s += "\"keys\":" + std::to_string(static_cast<unsigned>(row.keys)) + ",";
+    s += "\"keys_held\":[";
+    first = true;
+    for (int i = 0; i < 3; ++i) {
+        if ((row.keys & static_cast<uint8_t>(1u << i)) == 0) continue;
+        if (!first) s += ',';
+        first = false;
+        s += "\"" + std::string(i == 0   ? "emerald"
+                                : i == 1 ? "ruby"
+                                         : "sapphire") +
+             "\"";
+    }
+    s += "],\"elite_killed_acts\":" +
+         std::to_string(static_cast<unsigned>(row.elite_killed_acts)) + ",";
+    s += std::string("\"double_boss\":") +
+         (row.double_boss_room ? "true" : "false");
     s += "}";
     return s;
 }
@@ -669,12 +775,13 @@ CohortTriple cohort_triple(const ScanRow& row) {
     t.boss_reached_acts = row.boss_reached_acts;
     t.boss_killed_acts = row.boss_killed_acts;
     for (int i = 0; i < kMaxActs; ++i) t.boss_ids[i] = row.boss_ids[i];
+    t.keys = row.keys;
     return t;
 }
 
 std::string_view cohort_tsv_header() {
     return "seed\tpolicy\tpolicy_seed\tboss_reached_acts\tboss_killed_acts\t"
-           "boss_ids";
+           "boss_ids\tkeys";
 }
 
 std::string cohort_triple_to_tsv(const CohortTriple& t) {
@@ -685,6 +792,7 @@ std::string cohort_triple_to_tsv(const CohortTriple& t) {
     s += '\t' + std::to_string(static_cast<unsigned>(t.boss_reached_acts));
     s += '\t' + std::to_string(static_cast<unsigned>(t.boss_killed_acts));
     s += '\t' + boss_ids_text(t.boss_ids);
+    s += '\t' + keys_text(t.keys);
     return s;
 }
 
@@ -703,6 +811,20 @@ void ActDepth::add(const ScanRow& row) {
     }
     if (row.victory) ++victories;
     if (row.end_reason == fuzz::EndReason::ACTION_CAP) ++action_cap;
+    // --- S3.22 -------------------------------------------------------------
+    for (int a = 1; a <= kMaxActs; ++a) {
+        if (act_bit_set(row.elite_killed_acts, static_cast<unsigned>(a))) {
+            ++elite_killed[a - 1];
+        }
+    }
+    if (row.double_boss_room) ++double_boss_rooms;
+    for (int i = 0; i < 3; ++i) {
+        if ((row.keys & static_cast<uint8_t>(1u << i)) != 0) ++key_carry[i];
+    }
+    if ((row.keys & kAllKeys) == kAllKeys) {
+        ++key_carry_all;
+        if (row.victory) ++key_carry_all_victory;
+    }
 }
 
 void ScanSummary::add(const ScanRow& row) {
@@ -774,10 +896,32 @@ std::string depth_text(std::string_view label, const ActDepth& d) {
              std::to_string(d.boss_killed[a]) + " (" +
              pct(d.boss_killed[a], d.rows) + ")";
     }
+    s += "\n  act elite KILL:";
+    for (int a = 0; a < kMaxActs; ++a) {
+        s += " a" + std::to_string(a + 1) + "=" +
+             std::to_string(d.elite_killed[a]) + " (" +
+             pct(d.elite_killed[a], d.rows) + ")";
+    }
     s += "\n  victories=" + std::to_string(d.victories) + " (" +
          pct(d.victories, d.rows) + ")  action_cap=" +
          std::to_string(d.action_cap) + " (" + pct(d.action_cap, d.rows) +
          ")\n";
+    // S3.22: the key block. `keys all three` is the Act-4 door's precondition
+    // (SpireHeart.java:151), and `keys all + victory` is the whole of what
+    // s3-design §6.1 calls the brutal precondition -- a keyed A20 double-boss
+    // win. Both are printed even when zero: a zero here is the reportable
+    // result the S3.22 Acceptance names, not a missing line.
+    s += "  keys carried:  emerald=" + std::to_string(d.key_carry[0]) + " (" +
+         pct(d.key_carry[0], d.rows) + ") ruby=" +
+         std::to_string(d.key_carry[1]) + " (" + pct(d.key_carry[1], d.rows) +
+         ") sapphire=" + std::to_string(d.key_carry[2]) + " (" +
+         pct(d.key_carry[2], d.rows) + ")\n";
+    s += "  keys all three=" + std::to_string(d.key_carry_all) + " (" +
+         pct(d.key_carry_all, d.rows) + ")  keys all + victory=" +
+         std::to_string(d.key_carry_all_victory) + " (" +
+         pct(d.key_carry_all_victory, d.rows) + ")\n";
+    s += "  double-boss rooms=" + std::to_string(d.double_boss_rooms) + " (" +
+         pct(d.double_boss_rooms, d.rows) + ")\n";
     return s;
 }
 

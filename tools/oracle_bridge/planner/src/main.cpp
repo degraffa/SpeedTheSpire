@@ -65,7 +65,9 @@ void usage() {
         "SCAN SHAPE\n"
         "  --policies <a,b,...>      random, greedy_damage, greedy_block,\n"
         "                            hoard_gold, always_event, sim_search,\n"
-        "                            sim_search_skip, sim_search_hold\n"
+        "                            sim_search_skip, sim_search_hold,\n"
+        "                            sim_search_keys (S3.22: sim_search plus\n"
+        "                            the four key-seeking rules)\n"
         "                            (default: random)\n"
         "  --policy-seeds <n,n,...>  default: 0\n"
         "  --ascension <n>           default: 20\n"
@@ -120,6 +122,25 @@ void usage() {
         "                            S3.21 on; it matches nothing until the\n"
         "                            run layer kFinalAct moves (S3.32).\n"
         "  --need-victory            the run was won (run_is_victory)\n"
+        "  --need-act <n>            the run REACHED act <n>. The design's\n"
+        "                            (s3-design 6.1) spelling for --min-act,\n"
+        "                            which S2.42 already added; they are the\n"
+        "                            SAME clause and the last one given wins.\n"
+        "                            Act 4 is a legal value from S3.21 on and\n"
+        "                            matches nothing until kFinalAct moves.\n"
+        "  --need-keys               the run carried ALL THREE keys (emerald,\n"
+        "                            ruby, sapphire) -- the Act-4 door's own\n"
+        "                            precondition (SpireHeart.java:151)\n"
+        "  --need-key <name>         repeatable; emerald | ruby | sapphire.\n"
+        "                            ALL listed keys must be carried (AND, like\n"
+        "                            --need-event), and --need-keys is the\n"
+        "                            three-way shorthand.\n"
+        "  --need-heart-kill         the Corrupt Heart was killed. Today this is\n"
+        "                            the act-4 boss-kill bit under the name its\n"
+        "                            consumer uses; engine kFinalAct is still 3\n"
+        "                            (S3.32 owns the move), so it matches\n"
+        "                            NOTHING and that zero is the honest answer,\n"
+        "                            not a scan bug.\n"
         "  --need-boss-id <encounter game id>  repeatable; hits when ANY listed\n"
         "                            boss encounter was this run's boss in some\n"
         "                            act. This is how a cohort covers every\n"
@@ -422,9 +443,24 @@ int main(int argc, char** argv) {
             script_dir = need_value(argc, argv, i);
         } else if (a == "--need-victory") {
             filter.need_victory = true;
-        } else if (a == "--min-act") {
+        } else if (a == "--min-act" || a == "--need-act") {
+            // ONE clause, two spellings: S2.42 shipped --min-act, s3-design
+            // §6.1 names --need-act. Aliasing beats adding a second field that
+            // would have to be kept in step with it.
             filter.min_act = static_cast<uint32_t>(
                 std::strtoul(need_value(argc, argv, i), nullptr, 10));
+        } else if (a == "--need-keys") {
+            filter.need_keys = sts::planner::kAllKeys;
+        } else if (a == "--need-key") {
+            const std::string name = need_value(argc, argv, i);
+            uint8_t bit = 0;
+            if (!sts::planner::key_bit_from_name(name, bit)) {
+                die("--need-key: unknown key '" + name +
+                    "' (emerald | ruby | sapphire)");
+            }
+            filter.need_keys |= bit;
+        } else if (a == "--need-heart-kill") {
+            filter.need_heart_kill = true;
         } else if (a == "--need-boss-act") {
             filter.need_boss_reached_act = parse_act("--need-boss-act",
                                                      need_value(argc, argv, i));

@@ -154,6 +154,8 @@ are S3's own.
 | **The emerald key's CLAIM, and with it §5 trap 1, has no capture** | S3.11 | **S3.23** | The engine assembles the `EMERALD_KEY` row, skips `setEmeraldElite`'s `mapRng` draw once the key is held, and both are corpus-clean — but no committed capture ever *presses* the key row, and none takes a key and then crosses an act. So the highest-risk change in S3 is landed on a source read plus a zero-diff that cannot see it. The discharging capture is a PAIR on one seed: emerald claimed → next act generated, and emerald skipped → next act generated, with the two acts' maps **differing**. A single matching run is not evidence, because a sim that kept drawing would still match a capture that never took the key |
 | **`RunState.keys` is neutralized on both sides of every replay comparison** | S3.11 (inherited shape from the ruby bit) | **S3.21** | `neutralize_incomparable` and `neutralize_presentation_only` both zero `keys`: the sim has three writers now (Recall, and S3.11's two key-row claims) while neither CommunicationMod's `game_state` nor the fork's oracle block exposes `Settings.hasRubyKey/hasEmeraldKey/hasSapphireKey`, so the capture side is structurally 0. Until S3.21 (a) emits the three booleans, every key claim is proved only through its CONSEQUENCES — the spent campfire, the abandoned relic still popped from `relic_pool_*`, the moved `map_rng`. Remove both zeroings in the same change that lands the emit, or the new field is emitted and still not compared. **DISCHARGED 2026-09-03 by S3.21** — both zeroings are gone. The field is compared as a **pair**, not unconditionally (`neutralize_unattested_keys`, gated on `TranslatedRecord::has_keys`): deleting the zeroing and stopping there REDs `act1_a20_50/STS71037`, whose seq 83 claims the `SAPPHIRE_KEY` row so the sim rightly holds `kKeySapphire` while the pre-redeploy capture has no key block and translates to a structural 0 (`keys: 0 -> 4`). Every capture from the new jar on is compared; only unattested pre-redeploy records are neutralized |
 | **`Spire Heart` clicks 1–2: collapse or model?** | s3-design §4.1 | **DISCHARGED 2026-09-03 by S3.31 — MODEL, all four.** The decision was made on the differ's record counts, exactly as the row demanded, and it is now witnessed rather than argued: every three-act victory capture carries a five-record post-victory tail (four `Spire Heart` `choose 0` action records plus `__terminal_observed__`), and the engine answers each of the four with its own `CHOOSE 0` on `EventDialogState::screen`. Collapsing clicks 1–2 would have left the sim with no press for records 2 and 3, which the follower's glue rule 3 cannot repair on the DIFFER side. The corpus reads **5 of 5 compared, zero-diff** on both double-boss victories (0 of 5 before). The collapse convention itself is untouched: the clicks really do change nothing, and the whole dialog is presentation — the only STATE is the room transition ahead of it and the terminal that ends it | Clicks 1 and 2 change no run state and are exactly the shape the engine already collapses (shrines.cpp / beyond_events.cpp, accepted at G7), and the follower's glue rule 3 answers collapsed one-click dialogs either way. But the differ compares **record counts**, so the choice must be made once, recorded, and reflected in the follower — not discovered during scoring |
+| **The Black Star burning-elite claim is unproducible under `sim_search_keys`** | S3.22 | **S3.23** | S3.11's sixth needed capture (§5 trap 6's four-item potion suppression) needs a burning-elite claim on a run that already owns **Black Star**. S3.22 measured the conjunction and it is ordered apart **by construction**, not by luck: over a dedicated 8,640-row tracked wave, 436 rows acquired Black Star and 380 of those also carried the emerald key — and **all 380 emitted scripts claim the emerald key in Act 1**, while Black Star cannot be owned before the Act-1 boss chest and a held emerald key stops `setEmeraldElite` placing a burning elite in any later act (S3.11 (c)'s own gate). Two constructive routes, and S3.23 owns the choice: a fifth `PolicyKind` differing from `SIM_SEARCH_KEYS` in one rule — refuse the emerald row while `act == 1` — on the standing "separate kind, never a change to `SIM_SEARCH`" precedent; or a hand-written STS-SCRIPT line on a seed whose Act-1 burning elite is unreachable. Evidence: [verification/s3-22-key-reach.md](verification/s3-22-key-reach.md) §6 |
+| **No keyed A20 double-boss victory exists, so no Act-4 line can be scheduled yet** | S3.22 | **S3.61** (re-measure), then **S3.62** (capture) | s3-design §6.1's "brutal precondition" is unmet on the sim side: 39,296 key-policy rows produced **417 Act-3 boss fights, every one carrying all three keys**, **14 lines that killed the first Act-3 boss carrying all three keys** (`double_boss`, 3 distinct seeds) and **zero victories**. The pre-registered escalation ladder's **first lever is spent** — 1,024 policy seeds on the six deepest seeds (16,128 rows, 6,018,290 actions) moved `double_boss` 0 → 14 without a victory — so **the next lever is the deeper boss-floor ply**, and it must again be a separate `PolicyKind` or it moves `SIM_SEARCH`. Explicitly NOT admissible under design §6.1 step 3: rule handicaps, difficulty reduction, a weakened bar. A T4-era trained checkpoint behind the external-policy seam remains a sanctioned accelerant and never a precondition |
 
 ---
 
@@ -505,7 +507,7 @@ are S3's own.
   bytecode and on the offline synthetic capture with its three negative
   controls, both quoted above.
 
-- **S3.22** `[ ]` **Key-aware sim-consulting driver + reach scan.** Extend the
+- **S3.22** `[x]` **Key-aware sim-consulting driver + reach scan.** Extend the
   S2.V2 instrument rather than the bar (design §6.1 step 1). A `sim_search`
   variant that seeks keys: prefer the burning-elite node while HP allows and
   claim the `EMERALD_KEY` row; claim `SAPPHIRE_KEY` at the first chest; spend
@@ -534,7 +536,150 @@ are S3's own.
   scan produces **no** Act-4 line, that is a reportable result and triggers
   the design §6.1 step-3 escalation ladder (more policy-seed budget, then a
   deeper boss-floor ply) — **not** a weakened bar, and **not** rule handicaps.
-  **Log:** —
+  **Log:** 2026-09-03 — **the instrument, the filters and the measurement
+  landed; there is no Act-4 line and no keyed victory, and that is the
+  report.** Full evidence:
+  [verification/s3-22-key-reach.md](verification/s3-22-key-reach.md).
+
+  *(1) The policy.* `PolicyKind::SIM_SEARCH_KEYS` (value **8**, `COUNT`
+  8 → 9), a fourth kind of the `sim_search` family and **never a change to
+  `SIM_SEARCH`**, on the `SIM_SEARCH_HOLD` precedent. It is `sim_search` plus
+  four run-layer rules, each gated on the kind at one site: **K1** a key
+  reward row (`EMERALD_KEY` / `SAPPHIRE_KEY`) scores 1200, above the 900 relic
+  row — which for the sapphire means throwing the chest relic away
+  (RewardItem.java:317-326), the trade `sim_search` refuses and the reason
+  this is a policy and not a scoring-table repair; **K2** the campfire
+  `RECALL` scores 750, above the 700 pre-boss rest, while HP is above 50 %
+  (below the gate it scores `sim_search`'s unchanged 250) — "exactly one
+  campfire" is enforced by the game, since the button exists only while
+  `!hasRubyKey`; **K3** a map candidate that IS the act's burning-elite node
+  is worth +30,000 while the key is unheld and HP is above 60 %, and one that
+  merely keeps that node REACHABLE +8,000, decided by exact forward-edge
+  reachability over the 15×7 map DAG (`node_reaches_emerald`, a 7-bit frontier
+  over `kEdgeLeft/Center/Right`) rather than a "steer towards the column"
+  guess — the approach band is what makes the emerald reachable at all
+  (8 % → 18 % emerald carry on the development A/B); **K4** +15,000 for a
+  Treasure destination while the sapphire is unheld, +10,000 for a Rest
+  destination while the ruby is unheld. The bonuses are added AFTER the
+  one-floor rollout, so the rollout keeps pricing the fight and the death
+  exactly as the baseline does. **No `_SKIP` twin was added**, and the reason
+  is stated rather than assumed: `SIM_SEARCH_SKIP` differs only in R4's
+  boss-relic answer, which is a CAPTURE-COHORT identity (the sim-side mirror
+  of `policy_bossrelic_skip.json`) and not a reach lever — none of S3.23's six
+  needed captures is a boss-relic skip, and skipping the relic can only lower
+  survival, which the report already measures the key rules costing.
+
+  *(2) The scan.* `--need-keys` (all three), `--need-key emerald|ruby|sapphire`
+  (repeatable, AND), `--need-act <n>` (an explicit ALIAS of S2.42's
+  `--min-act`, one clause with two names, because the design names one
+  spelling and the tool already shipped the other) and `--need-heart-kill`.
+  Three appended TSV/JSONL columns carry the observations — `keys` (an OR over
+  the run), `elite_killed_acts` (per act; the probe is `room_type == Elite &&
+  phase == COMBAT_REWARD`, since only a non-endless TheBeyond BOSS suppresses
+  the reward screen, AbstractRoom.java:327 — Act 4's Shield and Spear is what
+  it exists for) and `double_boss` (the A20 SECOND Act-3 boss room:
+  `room_type == Boss && act == kFinalAct && boss_cursor >= 1`, and
+  `boss_cursor` counts rooms COMPLETED, so ≥ 1 means the first Act-3 boss is
+  already dead). `double_boss` exists because
+  [verification/s2v2-sim-reach.md](verification/s2v2-sim-reach.md) §6.1 had to
+  reconstruct exactly that fact from `max_floor == 51` after the `victory`
+  probe produced a false "0 Awakened One kills"; a column is cheaper than a
+  correction. `CohortTriple` gained a `keys` column so a cohort file says
+  which key a triple witnesses without the consumer rescanning.
+
+  *(3) Emitter and follower: nothing was owed.* `reward_kind_text` already
+  emitted `EMERALD_KEY`/`SAPPHIRE_KEY` (S3.11, in CommunicationMod's own
+  `RewardItem.RewardType.name()` spellings) and the `rest` step already
+  emitted `opt: "recall"` (S2.V2; the live campfire name is `RecallOption` →
+  `recall`, `ChoiceScreenUtils.getCampfireOptionName`), and
+  `script_policy_cmd.py`'s `_match_claim` joins on `reward_type` generically.
+  So the emitted scripts needed no new step kind and the follower needed no
+  change — **checked rather than assumed**: `match_step` was driven offline
+  against synthesized dumps in the shapes `GameStateConverter` emits, and the
+  three new step shapes resolve to a live `choose N` while three negative
+  controls raise `Divergence` (the stop-on-desync contract) — report §9.
+
+  *(4) The measurement, honestly.* 62,464 rows / 18,054,009 actions over a
+  FRESH seed range **STS500000–STS509999** (the STS5 prefix; §1 of the report
+  quotes the prior ranges it is disjoint from — S2.41/42 `STS00100-STS05099`,
+  S2.V2 `STS100000-STS199999`, S2.V3 `STS200000-STS239999`, S2.43/S3.21
+  captures `STS430000-STS431999`). Paired breadth, 10,000 seeds × ps0:
+  `sim_search` act-1 kill **36.43 %** / act-2 kill **0.47 %** / all-three-keys
+  **0**; `sim_search_keys` act-1 kill **22.45 %** (×0.62) / act-2 kill
+  **0.11 %** (×0.23) / emerald **19.65 %** / ruby **79.19 %** / sapphire
+  **75.30 %** / **all three 16.38 %**. Re-seeding depth (566 all-keys act-2
+  seeds × ps1–8, both policies) narrows the survival gap to ×0.92 on the
+  act-1 kill and holds the act-2 gap at ×0.41. The hunt waves (stages 3–5,
+  24,768 key-policy rows) produce **414** of the run's **417 Act-3 boss
+  fights**, every one of which carries all three keys, and **all 14 lines that
+  killed the FIRST Act-3 boss carrying all three keys** (`double_boss`, over 3
+  seeds: STS502962, STS506383, STS508459) — and **zero keyed victories**.
+  Act-4 entry **0**, Shield-and-Spear kills **0**, Heart kills **0**.
+
+  *(5) The zeros have positive controls, which is what makes them
+  measurements.* On three identical deep rows, `--need-act 3` /
+  `--need-boss-act 3` / `--need-keys --need-act 3` answer **3 of 3** while
+  `--need-act 4` / `--need-boss-act 4` / `--need-boss-kill-act 4` /
+  `--need-heart-kill` answer **0 of 3**. The new `elite_killed_acts` probe
+  fires 15,603 / 5,599 / **275** times in acts 1/2/3 across the deep waves and
+  0 in act 4, so "0 Shield-and-Spear kills" is a statement about act 4 not
+  existing yet. And `sim_search` itself set `double_boss` once in the breadth
+  wave (STS508004/ps0), so that column is capable of being 1.
+  **`engine::kFinalAct` is still 3** exactly as the Inherited line said; the
+  act-4 zeros are re-run by S3.32.
+
+  *(6) The escalation ladder was entered and its first lever is spent.*
+  Design §6.1 step 3 pre-registers "more policy-seed budget on seeds already
+  known to reach, then a deeper boss-floor ply, and NOT rule handicaps".
+  Stages 4/5a/5b are that first lever — 1,024 policy seeds on the six deepest
+  seeds, 16,128 rows, 6,018,290 actions — and it moved `double_boss` from 0 to
+  14 without producing a victory. **The next lever is therefore the deeper
+  boss-floor ply**, recorded as the recommendation rather than taken here: it
+  is a change to the search body and would move `SIM_SEARCH` unless it is
+  again a separate kind, which is outside this task's deliverables.
+
+  *(7) One requested cohort is NOT producible under this policy, with a
+  mechanism rather than an excuse.* S3.11's sixth capture is a burning-elite
+  claim on a **Black Star** run (§5 trap 6's four-item potion suppression). A
+  dedicated 8,640-row wave with `--track-relic "Black Star"` found 436 rows
+  that acquired the relic, 380 of which also carried the emerald key and
+  reached act ≥ 2; **all 380 were emitted as scripts and all 380 claim the
+  emerald key in ACT 1**. Black Star cannot be owned before the Act-1 boss
+  chest, and once the key is held `setEmeraldElite` places no burning elite in
+  any later act (S3.11 (c)'s own gate), so the two events are ordered apart by
+  construction. The constructive route — a fifth kind that refuses the emerald
+  row while `act == 1`, or a hand-written line on a seed whose Act-1 burning
+  elite is unreachable — is handed to **S3.23** and carried in the deferred
+  table.
+
+  *Acceptance evidence (commands + verdicts).* **Six presets BUILD:**
+  `tools/wsl_run.sh --script tools/build_presets.sh debug asan release` →
+  `PRESETS BUILT: debug asan release` (exit 0, 15m18s); `win-debug` /
+  `win-asan` / `win-release` configured + built through a vcvars64 + LLVM
+  wrapper, all three exit 0 with `/EHsc` present in each `CMakeCache.txt`.
+  **Determinism sweep:** STS500000–STS500499 × {`sim_search`,
+  `sim_search_keys`} × ps{0,1} (2,000 rows, every case scanned twice, four
+  shards) → **`determinism_mismatches=0`** in all four, all exit 0.
+  **`SIM_SEARCH` byte-identical before/after:** the same fixed scan
+  (STS500000–STS500199 × `sim_search` × ps{0,1}, 400 rows) run on base
+  `e39aa7b` and on this branch; over the twenty pre-existing columns
+  (`final_hash` among them; the three appended columns are new output by
+  construction, and `tr -d '\r'` normalises the CRLF the tool writes on
+  Windows) both files sha256
+  **`91e84391ad1c16a2e8b498d18138851e1363adb75ec8943f67f86368574d355b`**,
+  `cmp` clean. **Cohort scripts:** 18 written under `--verify-determinism`
+  individually (18/18, 0 mismatches) and independently re-verified from the
+  FILE afterwards by re-scanning the triple each header names —
+  **`scripts OK=18 MISMATCH=0`**. `check_doc_links.sh`
+  (`clean (58 files scanned, 62 indexed)`) and `check_stale_counts.sh`
+  (`clean`) both clean. No ctest was run and no test was added, per the
+  2026-09-03 owner directive.
+
+  *Artifacts (uncommitted, design §7.3 data root).* Scripts:
+  `D:\STS_BG_Mod\_oracle_data\s3\s322_scripts\` (18 files, named in the
+  report's §8 table). Scan rows, summaries, aggregates, the filter-control
+  matrix, the script-verification table and the follower check:
+  `D:\STS_BG_Mod\_oracle_data\s3\s322\`.
 
 - **S3.23** `[ ]` **Keys capture wave** (the S3-G2 item-2 evidence, and the
   first live exercise of the new jar). Directed captures through
@@ -569,6 +714,35 @@ are S3's own.
   Invincible, Flight, Combust and Echo Form declare the union's members) and
   which an Act-2 crossing witnesses automatically via Byrd or Shelled
   Parasite. Say so in this block's Log.
+  **Inherited from S3.22:** (1) **The cohort is emitted and waiting** —
+  eighteen `--verify-determinism`-clean STS-SCRIPT v1 files under
+  `D:\STS_BG_Mod\_oracle_data\s3\s322_scripts\`, listed with their steps,
+  reached act, `final_hash` and per-key content in
+  [verification/s3-22-key-reach.md](verification/s3-22-key-reach.md) §8. They
+  are **nine seeds × a pair**: a `sim_search_keys` line that claims the
+  emerald key at an Act-1 burning elite, claims the sapphire key at the chest,
+  spends a campfire on Recall and crosses into Act 2; and, on the SAME seed,
+  the `sim_search` line that takes no key and claims the chest's RELIC — which
+  is simultaneously the sapphire RELIC branch and the key-not-taken control
+  the emerald pair needs. On STS507768 the pair is exact at one chest (control
+  step `i:54` → `RELIC Kunai`; keys step `i:71` → `SAPPHIRE_KEY`, after which
+  the Kunai row is gone). Three of the keyed lines reach **floor 51 with all
+  three keys** (STS502962/ps226, STS506383/ps173, STS508459/ps749) — the
+  deepest keyed lines the instrument produced. Re-emit any of them with
+  `seed_scan --seeds <S>-<S> --policies <p> --policy-seeds <ps> --min-floor 1
+  --script-dir <dir> --verify-determinism`. (2) **The follower needs no
+  change**: the emerald/sapphire claim and the `recall` campfire step were
+  already in its vocabulary, checked offline against synthesized dumps with
+  three positive and three negative controls (report §9) — a live desync on
+  one of those steps is therefore a finding, not a missing feature.
+  (3) **The Black Star capture (S3.11's sixth) is NOT in this cohort and
+  cannot be**, and the reason is measured, not incidental: 380 of 380 emitted
+  Black-Star-owning lines claim the emerald key in **Act 1**, while Black Star
+  cannot be owned before the Act-1 boss chest, and once the key is held no
+  later act places a burning elite. Producing it needs either a fifth
+  `PolicyKind` that refuses the emerald row while `act == 1`, or a
+  hand-written line on a seed whose Act-1 burning elite is unreachable — this
+  task owns that choice (deferred-obligations row).
   **Deps:** S3.21, S3.22 **Acceptance:** each of the captures above replays
   **zero-diff** to its terminal through `replay_run_diff --replay` with zero
   capture-race records, and the emerald pair shows the two runs' Act-2/3 maps
@@ -866,6 +1040,22 @@ are S3's own.
   `victory_kind` still NONE. Replace the park with the crossing; the handoff
   is written out in full at that call site. Resolves the first-row map-choice width and the
   elite→boss action kind against the fork (deferred rows).
+  **Inherited from S3.22:** the **act-4 zeros to re-run**, and the cheapest
+  possible check that the `kFinalAct` audit landed. S3.22 measured every act-4
+  clause answering zero *while sitting beside a positive control on identical
+  rows* — [verification/s3-22-key-reach.md](verification/s3-22-key-reach.md)
+  §4: on the three deep triples STS502962/ps226, STS506383/ps173,
+  STS508459/ps749, `--need-act 3` / `--need-boss-act 3` /
+  `--need-keys --need-act 3` answer **3 of 3** and `--need-act 4` /
+  `--need-boss-act 4` / `--need-boss-kill-act 4` / `--need-heart-kill` answer
+  **0 of 3**; the `elite_killed_acts` probe fires 15,603 / 5,599 / 275 times
+  in acts 1/2/3 and 0 in act 4. **Re-run that table after moving
+  `kFinalAct`** (the report quotes the commands verbatim). Note what it can
+  and cannot tell you: those three lines die on floor 51 to the second Act-3
+  boss, so a still-zero `--need-act 4` after the move is expected there and
+  the DISCRIMINATING check is the `elite_killed_acts` act-4 column and
+  `--need-boss-act 4` on a line that gets through the Door — which is why the
+  act-4 reach numbers themselves are S3.61's re-measurement, not this task's.
   **Deps:** S3.31 **Acceptance:** six presets **build**; the committed corpora
   replay **zero-diff** (Acts 1–3 are untouched by this task and a RED means
   the `kFinalAct` audit missed a reader — that is exactly what this
@@ -1213,6 +1403,20 @@ a gate that cannot print it has not been checked. Then: update CLAUDE.md
   commands verbatim on the gated tree so the depth wave schedules from real
   cohorts. Report the key-carry, Act-4-entry, Shield-and-Spear-kill and
   Heart-kill rates, and emit the triple list S3.62 schedules from.
+  **Inherited from S3.22:** the baseline this re-measures, and the two things
+  it must not silently absorb. (a) The **paired** numbers to beat, all in
+  [verification/s3-22-key-reach.md](verification/s3-22-key-reach.md): key
+  carry 19.65 / 79.19 / 75.30 % (emerald / ruby / sapphire), all three
+  16.38 %, and the measured COST of key-seeking — Act-1 boss kill ×0.62,
+  Act-2 boss kill ×0.23 against `sim_search` on an identical 10,000-seed grid.
+  Keep the paired arm; a single-arm re-measurement cannot say whether a delta
+  is Act 4 or the policy. (b) The **seed-range hygiene**: STS500000–STS509999
+  is spent, and the report §1 lists every prior cohort's range, so pick a
+  fresh window inside the STS5 prefix rather than re-deriving the census.
+  (c) The open escalation: **zero keyed victories** at S3.22's scale, with the
+  ladder's first lever already spent (deferred-obligations row) — if this
+  re-measurement still yields no Act-4 line, the next lever is the deeper
+  boss-floor ply as its own `PolicyKind`, never a handicap.
   **Deps:** S3-G1 **Acceptance:** the S3.22 report regenerated from the same
   commands with the deltas explained rather than absorbed; determinism sweep
   zero mismatches; every emitted cohort script replaying to its recorded

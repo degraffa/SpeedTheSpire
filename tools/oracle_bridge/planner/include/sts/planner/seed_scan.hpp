@@ -253,6 +253,28 @@ inline constexpr int kMaxActs = 4;
 // is the events column's (no encounter game id contains '|' or a tab).
 [[nodiscard]] std::string boss_ids_text(const uint16_t (&boss_ids)[kMaxActs]);
 
+// --- Keys (S3.22) ------------------------------------------------------------
+//
+// The three run keys as a scan vocabulary. The engine stores them as three bits
+// in `RunState::keys` (run_state.hpp:386-392, kKeyEmerald/kKeyRuby/kKeySapphire)
+// and S3.11 made all three obtainable, so a scan can now answer "does this line
+// carry the keys" -- the precondition the whole Act-4 reach problem hangs off
+// (s3-design §6.1: an Act-4 capture needs a run that wins two A20 Act-3 boss
+// fights WHILE CARRYING ALL THREE KEYS).
+//
+// The observation is an OR over the whole run, not a terminal read, for the
+// same reason `event_flags` is: it stays correct if a future engine change ever
+// clears a bit, and no engine path clears one today.
+inline constexpr uint8_t kAllKeys =
+    engine::kKeyEmerald | engine::kKeyRuby | engine::kKeySapphire;
+
+// '|'-joined lower-case key names in bit order ("emerald|ruby|sapphire"); ""
+// for no keys. Same separator rationale as the events and boss_ids columns.
+[[nodiscard]] std::string keys_text(uint8_t keys);
+// "emerald" / "ruby" / "sapphire" (case-insensitive) -> its bit; false if the
+// name is not one of the three.
+[[nodiscard]] bool key_bit_from_name(std::string_view name, uint8_t& out);
+
 // The registry `game_id` for an EncounterDef id, or "" for 0 / unknown. A
 // linear scan of the generated kEncounters table -- the generator emits no
 // id->name lookup for encounters (they have no enum, tools/registry_gen
@@ -303,6 +325,29 @@ struct ScanRow {
     // The act's boss ENCOUNTER id (RunState::boss_ids), 0 where unobserved.
     // G2-3's ">= 2 distinct first-boss identities" filters on this.
     uint16_t boss_ids[kMaxActs]{};
+
+    // --- S3.22 key + Act-4 depth, appended after boss_ids in the TSV ---------
+    //
+    // Appended, never inserted, for the reason the S2.42 block above states:
+    // a `cut -fN` over a script written against the older header must keep
+    // selecting the same column.
+    uint8_t keys = 0;  // OR of RunState::keys over the run (kKeyEmerald|...)
+    // Bit (act-1) per act whose ELITE was killed. The probe is the elite's own
+    // reward screen -- an elite room ALWAYS opens one (AbstractRoom.dropReward
+    // is suppressed only for a non-endless TheBeyond BOSS, :327) -- so
+    // `room_type == Elite && phase == COMBAT_REWARD` is standing in the reward
+    // of an elite that just died. Act 4's `Shield and Spear` is the consumer
+    // this exists for (S3-G2 item 4); acts 1-3 come free and make the column
+    // checkable today instead of only after S3.32.
+    uint8_t elite_killed_acts = 0;
+    // The A20 SECOND Act-3 boss room was entered. `boss_cursor` counts boss
+    // rooms COMPLETED (run_advance.cpp's next_room_transition_impl), so standing
+    // in a final-act boss room with boss_cursor >= 1 is the synthetic
+    // MapRoomNode(-1, 15) that goToDoubleBoss opens -- i.e. the first Act-3
+    // boss is already dead. Distinct from `victory`, which needs BOTH: the
+    // S2.V2 report's §6.1 correction is exactly this distinction, and it cost
+    // that campaign a false "0 Awakened One kills".
+    bool double_boss_room = false;
 };
 
 struct ScanLimits {
@@ -353,6 +398,21 @@ struct Filter {
     // query is "an Act-2 boss cohort covering EITHER of two identities", which
     // an all-of reading could never satisfy (one run fights one boss per act).
     std::vector<uint16_t> need_boss_ids;
+
+    // --- S3.22 key clauses ---------------------------------------------------
+    // ALL-OF, like need_events: a mask of kKey* bits every one of which the row
+    // must carry. `--need-keys` sets all three; `--need-key <name>` ORs one in.
+    // The all-of reading is the one the Act-4 door needs (SpireHeart.java:151
+    // tests all three), and a row can carry all three, so unlike the boss-id
+    // clause it is satisfiable.
+    uint8_t need_keys = 0;
+    // The Corrupt Heart killed. Today the probe is the act-4 boss-kill bit,
+    // i.e. this clause is `--need-boss-kill-act 4` under the name its consumer
+    // uses; `engine::kFinalAct` is still 3 (S3.32 owns the move), so nothing
+    // can set that bit and the honest answer is zero. When S3.31's
+    // RunVictoryKind lands, the probe sharpens to `kind == HEART` here and the
+    // flag's spelling at every call site is unchanged.
+    bool need_heart_kill = false;
 
     // Relic clauses. UNLIKE need_events, each list is an ANY-OF within its
     // clause: the motivating query is "an early source offered ANY of the
@@ -411,6 +471,10 @@ struct CohortTriple {
     uint8_t boss_reached_acts = 0;
     uint8_t boss_killed_acts = 0;
     uint16_t boss_ids[kMaxActs]{};
+    // S3.22: which keys the line carried. S3.23 schedules its directed captures
+    // off this column, so a cohort file says WHICH key a triple witnesses
+    // without the consumer re-scanning.
+    uint8_t keys = 0;
 };
 
 [[nodiscard]] CohortTriple cohort_triple(const ScanRow& row);
@@ -429,6 +493,12 @@ struct ActDepth {
     uint64_t boss_killed[kMaxActs]{};
     uint64_t victories = 0;
     uint64_t action_cap = 0;  // the truncation witness -- see ScanLimits
+    // --- S3.22 -------------------------------------------------------------
+    uint64_t elite_killed[kMaxActs]{};
+    uint64_t double_boss_rooms = 0;  // the A20 second Act-3 boss room entered
+    uint64_t key_carry[3]{};         // emerald, ruby, sapphire (bit order)
+    uint64_t key_carry_all = 0;      // all three in the same row
+    uint64_t key_carry_all_victory = 0;  // ... and the run was won
 
     void add(const ScanRow& row);
 };

@@ -100,7 +100,30 @@ enum class PolicyKind : uint8_t {
     // and keeps the falsifying A/B a command anyone can re-run instead of a
     // number in a document. See docs/verification/s2v2-sim-reach.md §6.
     SIM_SEARCH_HOLD = 7,
-    COUNT = 8,
+    // S3.22's key-seeking variant (s3-design §6.1 step 1). SIM_SEARCH plus
+    // exactly four run-layer rules, all of which name a key:
+    //
+    //   K1  a reward row of kind EMERALD_KEY or SAPPHIRE_KEY is claimed above
+    //       every other row on its screen (the sapphire claim DESTROYS the
+    //       chest relic -- RewardItem.java:317-326 -- which is the price this
+    //       kind is willing to pay and SIM_SEARCH is not);
+    //   K2  the campfire's RECALL button outranks rest/smith while HP allows;
+    //   K3  a map candidate whose destination is the act's BURNING ELITE node
+    //       (rc.emerald_x/emerald_y) gets a bounded appetite bonus while the
+    //       emerald key is unheld and HP allows;
+    //   K4  the same, smaller, for a Treasure node while the sapphire key is
+    //       unheld and for a Rest node while the ruby key is unheld.
+    //
+    // IT IS A SEPARATE KIND, NOT A CHANGE TO SIM_SEARCH, for the reason
+    // SIM_SEARCH_HOLD is: SIM_SEARCH is the cohort identity every S2-G2
+    // schedulable triple was selected under, and its scan output must stay
+    // byte-identical so those triples remain reproducible. Every rule above is
+    // gated on `kind == SIM_SEARCH_KEYS` at exactly one site, and S3.22's
+    // acceptance proves the invariance by sha256 of a fixed-range scan taken
+    // before and after this value existed. Key-seeking is measured COSTLY --
+    // see docs/verification/s3-22-key-reach.md for the paired table.
+    SIM_SEARCH_KEYS = 8,
+    COUNT = 9,
 };
 
 [[nodiscard]] const char* policy_name(PolicyKind k) noexcept;

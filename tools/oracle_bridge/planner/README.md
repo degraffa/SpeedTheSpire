@@ -77,10 +77,49 @@ one clause. The live capture driver runs the same pair of probes against the
 protocol dump (`campaign_driver.py _observe_reach`), deliberately, so the two
 instruments agree.
 
-**Column order is append-only.** The five new TSV columns (`act`,
+**Column order is append-only.** The five S2.42 TSV columns (`act`,
 `boss_reached_acts`, `boss_killed_acts`, `victory`, `boss_ids`) go **after**
 `fail_kind`, and `boss` keeps its old meaning (`boss_reached_acts != 0`), so a
 script that has been doing `cut -f10` since S1 still selects the boss column.
+S3.22's three (`keys`, `elite_killed_acts`, `double_boss`) go after
+`boss_ids`, under the same rule.
+
+### Keys and Act-4 depth (S3.22)
+
+The three run keys became real content at S3.11, and the whole Act-4 reach
+problem is stated in terms of them (s3-design §6.1: an Act-4 capture needs a
+run that wins two A20 Act-3 boss fights *while carrying all three keys*). So
+the scan can name them:
+
+| Flag | Means |
+|---|---|
+| `--need-key <emerald\|ruby\|sapphire>` | repeatable; **all** listed keys were carried (AND, like `--need-event`) |
+| `--need-keys` | all three — the Act-4 door's own gate (`SpireHeart.java:151`) |
+| `--need-act <n>` | the design's spelling for `--min-act`; **one clause, two names** |
+| `--need-heart-kill` | the Corrupt Heart was killed |
+
+and three columns carry the observations: **`keys`** (`emerald|ruby|sapphire`,
+an OR over the run — the `event_flags` rationale), **`elite_killed_acts`** (a
+per-act mask; the probe is `room_type == Elite && phase == COMBAT_REWARD`,
+because an elite room always opens a reward screen — only a non-endless
+TheBeyond *boss* is suppressed, AbstractRoom.java:327 — and Act 4's
+`Shield and Spear` is the consumer it exists for), and **`double_boss`** (the
+A20 **second** Act-3 boss room was entered: `room_type == Boss && act ==
+kFinalAct && boss_cursor >= 1`, and `boss_cursor` counts boss rooms
+*completed*, so ≥ 1 means the first Act-3 boss is already dead). `double_boss`
+exists because [s2v2-sim-reach.md](../../../docs/verification/s2v2-sim-reach.md)
+§6.1 had to reconstruct exactly that fact from `max_floor == 51` after the
+`victory` probe reported a false "0 Awakened One kills"; a column is cheaper
+than a correction.
+
+**`--need-act 4` and `--need-heart-kill` answer ZERO today, and that is not a
+bug.** S3.21 moved the planner's `kMaxActs` 3 → 4 so act 4 is a nameable
+value; `engine::kFinalAct` is still **3** (S3.32 owns that move), so no run
+can leave Act 3. The zeros are measured beside positive controls on identical
+rows in
+[verification/s3-22-key-reach.md](../../../docs/verification/s3-22-key-reach.md)
+§4, and S3.32 should re-run that table as the cheapest check that its move
+landed.
 
 **`--max-actions` defaults to 12000**, raised from the Act-1-era 4000. A
 three-act A20 run is roughly three times the actions, and a truncated deep run
@@ -107,6 +146,28 @@ in exactly one rule — R4's boss-relic pick answers SKIP — mirroring the
 deliberately omniscient (it advances copies of the real controller); the
 product is a scripted LINE for a capture to replay, not an agent under the
 information contract.
+
+**`sim_search_keys`** (S3.22) is a fourth kind of the same family, and it is a
+separate kind for the reason `sim_search_hold` is: `sim_search` is the cohort
+identity every S2-G2 schedulable triple was selected under, so its scan output
+must stay byte-identical. It is `sim_search` plus four run-layer rules, each
+gated on the kind at one site: **K1** a key reward row (`EMERALD_KEY` /
+`SAPPHIRE_KEY`) outranks every other row on its screen — which for the
+sapphire means throwing the chest relic away (RewardItem.java:317-326), the
+trade `sim_search` refuses; **K2** the campfire's `RECALL` outranks rest and
+smith while HP is above 50 % (it can fire at most once per run, because the
+button exists only while `!hasRubyKey`); **K3** a map candidate that IS the
+act's burning-elite node is worth +30,000 while the key is unheld and HP is
+above 60 %, and one that merely keeps that node reachable (exact forward-edge
+reachability over the map DAG) +8,000; **K4** a Treasure destination while the
+sapphire is unheld +15,000, a Rest destination while the ruby is unheld
++10,000. The bonuses are added *after* the one-floor rollout, so the rollout
+keeps pricing the fight and the death exactly as the baseline does.
+
+Key-seeking is measured **costly** — Act-1 boss kill ×0.62, Act-2 boss kill
+×0.23 on a paired 10,000-seed grid — and the full table, with the emitted
+cohort scripts, is
+[verification/s3-22-key-reach.md](../../../docs/verification/s3-22-key-reach.md).
 
 **`--script-dir <dir>`** writes an **STS-SCRIPT v1** file for every row that
 hits the filter — the scripted action line the live script follower
@@ -139,7 +200,7 @@ different card at the same index is the desync the follower must stop on):
 | `end` | — | `end` |
 | `potion` / `potion_discard` | `slot`, `potion` (game id), `t` | slot must hold that potion → `potion use/discard <slot> [t]` |
 | `map` / `map_boss` | `x` (column), `sym` (node symbol) | node with that x/symbol in `next_nodes` → `choose i`; boss → `choose 0` |
-| `claim` | `rtype` (reward_type), `id` (relic/potion game id when carried), `ord` (n-th row of same type) | n-th matching `rewards[]` row → `choose i` |
+| `claim` | `rtype` (reward_type), `id` (relic/potion game id when carried), `ord` (n-th row of same type) | n-th matching `rewards[]` row → `choose i`. `rtype` includes **`EMERALD_KEY`** and **`SAPPHIRE_KEY`** (S3.11's rows, spelled as `RewardItem.RewardType.name()`); neither carries a payload `id`, so the kind IS the identity and the ordinal is a kind ordinal — there is never more than one of either on a screen. Only `sim_search_keys` emits them |
 | `take_card` / `skip_card` / `sing` | `card`+`up`+`ord` / — / — | match in `screen_state.cards` → `choose i`; `skip`; the bowl row |
 | `rest` | `opt` (`rest`/`smith`/`lift`/`toke`/`dig`/`recall`) | choice_list entry of that name |
 | `grid` / `grid_cancel` | `ctx` + `card`+`up`+`ord` | match in the grid's card list → `choose i`; cancel alias |
