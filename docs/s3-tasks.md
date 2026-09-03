@@ -103,7 +103,7 @@ granted windows (`monsters` 48 and 66, `powers` 112–135, `cards` 133,
 | `relics.yaml` | **155–156** contingency — design §2.5 predicts **zero** | S3.4x, release unspent |
 | `a20.yaml` | no new rows; six existing rows' notes refreshed | S3.41 |
 | `RunPhase` (`run_advance.hpp`) | **12** contingency — the preferred model rides `EVENT_DIALOG` (design §4.1); release unspent | S3.31 — **RELEASED UNSPENT 2026-09-03.** The `Spire Heart` dialog rides `EVENT_DIALOG` exactly as predicted, and the Act-3 boss's proceed needed no phase either (it is run inline off the kill, the goToDoubleBoss precedent), so no new run phase exists. 12 gaps permanently; `RunPhase::BOSS_TREASURE` (11) remains the last enumerator and `legal_actions`' `static_assert` on it is unmoved |
-| `RoomType` (`map_rooms.hpp`) | **9** `Victory`, **10** `TrueVictory`; `kRoomTypeCount` 9 → 11 with its `static_assert` | S3.31 **spent 9 `Victory`** (`kRoomTypeCount` 9 → 10, the `static_assert` and the fuzz coverage mirror re-pinned on it) / S3.33 owns 10 |
+| `RoomType` (`map_rooms.hpp`) | **9** `Victory`, **10** `TrueVictory`; `kRoomTypeCount` 9 → 11 with its `static_assert` | **BOTH SPENT.** S3.31 spent 9 `Victory` (`kRoomTypeCount` 9 → 10); S3.33 spent 10 `TrueVictory` (10 → 11), with the `static_assert`, `room_symbol` and the fuzz coverage mirror (`coverage.hpp`'s own `static_assert` + the `default:`-less `room_name` switch) re-pinned on it. The block is exhausted |
 | fuzz `MoveCat` (`tools/fuzz/.../policy.hpp`) | **32–35** (`REWARD_CLAIM_KEY`, the Act-4 map choice, the Spire-Heart dialog, one reserve); `COUNT` → 36 | S3.52 |
 | Opcode (`interp.hpp`, `vocab.py`) | **75–77** contingency — design §2.3 expects the four powers to be native binders on existing opcodes; release unspent | S3.42 / S3.43 |
 | power `Hook` | **18** `on_attacked_to_change_damage` contingency (`kHookCount` → 19) — Invincible may instead ride the existing `apply_buffer` site natively, in which case release it | S3.43 |
@@ -1433,7 +1433,7 @@ are S3's own.
   translator already enforces. The floor pair needs both bands: a single
   matching number on one band hides it.
 
-- **S3.33** `[ ]` **The Act-4 rooms and the true-victory terminal.** The four
+- **S3.33** `[x]` **The Act-4 rooms and the true-victory terminal.** The four
   playable rooms as ordinary rooms with their Act-4 specifics: the **rest**
   (3,0) with **no Recall option** (reaching Act 4 implies the ruby key, so
   `!hasRubyKey` is false — CampfireUI.java:94-96) and everything else the S1
@@ -1477,7 +1477,159 @@ are S3's own.
   `UNVERIFIED-until-captured`, discharged by **S3.62**: an Act-4 rest, an
   Act-4 shop purchase, an Act-4 elite reward claim and the Heart's terminal
   gold, each named here.
-  **Log:** —
+  **Log:** 2026-09-03. **The four rooms needed no room code, and that is the
+  finding.** S3.32's blanket park at the top of `on_player_entry_impl` was
+  DELETED and nothing replaced it: all four Act-4 rooms fall into the same
+  `switch` every other act's rooms use, because TheEnding constructs plain
+  `RestRoom` / `ShopRoom` / `MonsterRoomElite` / `MonsterRoomBoss` objects
+  (TheEnding.java:76-83) and every Act-4 branch inside those four classes is
+  cosmetic (`RestRoom.java:34,:58`, `ShopRoom.java:45`,
+  `ShopScreen.java:132-136`, `Merchant.java:86-90` — all BGM or barks). Each
+  of the four "Act-4 specifics" turned out to be already true for a reason
+  that is not an act test, and each is now a recorded negative at its site
+  rather than a new branch:
+  *rest* — the Recall option's gate is `kFinalActAvailable && !(keys &
+  kKeyRuby)` (CampfireUI.java:94-96) and the Door admits nobody without all
+  three keys (SpireHeart.java:151), so `!hasRubyKey` is false on every Act-4
+  floor; the negative is pinned at the push site in `rest_sites.cpp`, and it
+  says the KEY BIT removes the button, not the act number.
+  *shop* — unchanged; `card_upgraded_chance`'s `act >= 3` arm (S3.32's
+  inherited (d)) already answers Act 4 and is the only live per-act constant
+  the shop reads besides `colorlessRareChance`.
+  *elite* — `assemble_combat_rewards` was already act-general, so the full
+  set drops with no edit: gold `treasureRng.random(25,35)`, the relic at
+  `MonsterRoomElite`'s OWN hard-coded thresholds (:100-112, which is
+  `return_random_relic_tier`), the potion roll and the card reward. **No
+  emerald key and no emerald buff for a reason worth writing down**: both
+  conjuncts read `getCurrMapNode().hasEmeraldKey` (:40 and :95), and the
+  crossing resets `emerald_x`/`emerald_y` to `kNoEmeraldNode` because
+  `setEmeraldElite` lives inside `generateMap`, which `generateSpecialMap`
+  replaces — so `on_emerald_elite_node` is false at every Act-4 node and both
+  sites are off with no act clause anywhere.
+  *boss* — the only room with real Act-4 behaviour, and it is
+  `finish_combat_after_action`'s, not the room's.
+
+  **The new code is three things.** (1) `RoomType::TrueVictory` **10** claimed,
+  `kRoomTypeCount` 10 → 11 with its `static_assert`, `room_symbol`'s case, and
+  the fuzz mirror (`coverage.hpp`'s second `static_assert` + `room_name`, whose
+  missing `default:` is what turned the new enumerator into a compile error at
+  exactly the right file). The node (3,4) now carries the value in
+  `generate_special_map`, on S3.32's decision-(3) terms: the game's map array
+  really does hold a `TrueVictoryRoom` there (TheEnding.java:84-85, :124). It
+  stays edgeless, so no mask can offer it. (2) `TransitionTarget::TrueVictory`
+  + `next_room_transition_true_victory` — a FULL transition (++floor, the
+  trap-7 reseed, the relic room-entry fan-outs), and the one member of the
+  `goToTreasureRoom`/`goToVictoryRoomOrTheDoor`/`goToDoubleBoss` family whose
+  node is a REAL coordinate, `new MapRoomNode(3, 4)` (ProceedButton.java:191),
+  not `(-1, 15)`. `isDungeonBeaten` is false at this point and the round trip
+  is worth stating: the Door set it TRUE (DoorUnlockScreen.java:159, which is
+  why the crossing cost no floor) and TheEnding's own AbstractDungeon
+  constructor clears it again at :285, one line above its
+  `dungeonTransitionSetup()` at :287. (3) The Act-4 arm of
+  `finish_combat_after_action`, beside the Act-3 one: Meat on the Bone, the
+  onVictory pass, fold-back, stolen-gold settle, **the trap-5
+  `roll_boss_gold`**, then the transition, then `res.reward = 1.0f`. The
+  terminal itself is written by the ROOM (`RunVictoryKind::HEART` +
+  `RunPhase::RUN_OVER` in the new `case RoomType::TrueVictory`), because
+  `TrueVictoryRoom.onPlayerEntry`'s `screen = NO_INTERACT`
+  (TrueVictoryRoom.java:26-32) is what ends the run; the cutscene and the
+  `VictoryScreen` behind it are presentation, the S3 analogue of S2's
+  post-victory skip.
+
+  **The A20 negative is in the SHAPE of an `else if`, and the arithmetic would
+  have got it wrong** (design §4.6, §5 trap 8). Act 4's `bossList` also holds
+  three keys and also reaches a remaining count of 2 after the entry pop, so
+  the double-boss gate's algebra PASSES in Act 4 — it is the id test
+  `AbstractDungeon.id.equals("TheBeyond")` (:101) that excludes it, exactly as
+  it excludes Acts 1 and 2. Reproducing the count check would have
+  manufactured a second Heart fight at A20. There is no ascension clause on the
+  Act-4 arm at all. The other A20 negative, A1's elite quota, is pinned at
+  `generate_special_map`: the ×1.6 lives inside `generateRoomTypes`, which
+  `generateSpecialMap` never calls. The **§2.6 dead constants** are frozen as a
+  comment table at the room-switch site, each with its proof of deadness (room
+  chances → `generateRoomTypes`, never called; chest chances → `getRandomChest`,
+  whose only caller is `TreasureRoom.onPlayerEntry` and Act 4 has no treasure
+  room; relic-tier chances → `returnRandomRelicTier`, whose every caller is an
+  event and Act 4's pools are empty) and the two live ones marked equal to Act
+  3's.
+
+  **The differ's terminal** gained a third COMPLETE-screen arm,
+  `is_true_victory_handoff` (`replay/src/command_map.hpp`), coordinated the way
+  S3.31 did the Spire-Heart tail. AbstractRoom.java:327 names TheEnding as well
+  as TheBeyond, so the Heart's room also shows a bare `COMPLETE` + `proceed`;
+  unlike its two siblings this one is `MapKind::TERMINAL`, not a NOOP elision,
+  because the room it enters is NO_INTERACT and there is no later record to
+  resynchronise against. The arm sits AHEAD of the generic finished-victory
+  arm so the seam is recognised structurally rather than swallowed by "the run
+  happens to be won"; the unmapped-command message names it too. **Also
+  sharpened, because its own comment asked for it by name** (conventions §8,
+  "a comment asserting X does not exist yet"): `seed_scan.cpp` now writes the
+  act-4 boss-kill bit from `run_is_true_victor(rc)` rather than from nothing,
+  so `--need-heart-kill` is a real probe. It still answers zero everywhere,
+  and the reason has moved one task along — an ENCOUNTER gap, not a probe gap.
+
+  **The remaining park is S3.41's, and it is not act-shaped.**
+  `Shield and Spear` and `The Heart` have no registry row, so `enter_combat`'s
+  ordinary encounter join fails and the Act-4 elite and boss rooms park at
+  `ROOM_UNIMPLEMENTED` there — AFTER the exact miscRng composition draws,
+  exactly like any unimplemented encounter in any act, and with the room
+  entered and the relic fan-outs run. No act test is involved and none is
+  wanted. The Act-4 rest and shop are fully live today.
+
+  *Evidence — build + real run, no gtest and no ctest.* Six presets **build**:
+  `debug` / `asan` / `release` through `tools/wsl_run.sh --script
+  tools/build_presets.sh <p>`, and `win-debug` / `win-asan` / `win-release`
+  through the vcvars64 + LLVM wrapper (`s333env.cmd`; `win-debug`'s cache
+  re-checked for `/EHsc`). Both committed corpora replay **zero-diff** through
+  `tools/corpus_replay.sh` with both injected-divergence controls failing
+  loud; `--replay --vitals --stop-on-diff` is **vitals-clean** on all five
+  three-act corpus entries (444 / 447 / 451 / 434 / 300 in-combat records
+  compared, 0 differed). The 20 Stage-A fixtures were regenerated once via the
+  checked-in `gen_combat_fixtures` and `git status tests/golden/` came back
+  **empty**. `check_stale_counts.sh` / `check_doc_links.sh` clean.
+
+  *The witness-in-lieu.* The S3.32 harness, extended to WALK the Act-4 map and
+  print each room. Two non-real inputs, both named where they are applied:
+  (1) `RunState::keys` forced at the Door, inherited from S3.32 (no keyed sim
+  victory exists — S3.22 measured 0/39,296); (2) the Act-4 elite/boss
+  ENCOUNTER keys substituted for implemented stand-ins (`Gremlin Nob` /
+  `The Guardian`), because S3.41 has not landed — and the harness first FORKS
+  the controller and walks the copy into the elite with the REAL keys, so the
+  S3.41 park is printed rather than asserted. Everything else is the engine.
+  One seed at both bands (STS103509, `sim_search`, policy seed 347 — a corpus
+  double-boss line):
+
+  | | A19 (below A20) | A20 |
+  |---|---|---|
+  | `act4_floor_base` | 51 | 52 |
+  | rest / shop / elite / boss / TrueVictory floors | 52 / 53 / 54 / 55 / **56** | 53 / 54 / 55 / 56 / **57** |
+  | map col 3 (`sym/edges`) y=0..5 | `R/2 S/2 E/8 B/0 TV/0 ./0` | same |
+  | rest options offered | `REST`, `SMITH(unusable)` — **no RECALL** | same |
+  | `mapRng` / `monsterRng` across all four rooms | counter **0** / **112**, unmoved | same |
+  | shop stock (5 colored / 2 colorless / 3 relic / 3 potion), `sale_index` 1, purge 75 | `merchantRng` 80 → 96, `cardRng` 750 → 762 | identical stock and prices |
+  | Act-4 elite with REAL keys (forked probe) | `eliteList[0]=Shield and Spear`, `ROOM_UNIMPLEMENTED`, room_type Elite, floor 54 | same at floor 55 |
+  | elite reward rows | `GOLD 29`, `RELIC id=82`, `CARDS×3 (57+, 55, 51+)`; `treasureRng` 25→26, `relicRng` 5→6, `potionRng` 105→106 (the roll ran and failed) | same rows, same ids |
+  | terminal | `act=4 floor=56 run_cur_row=4 room_type=10(TV) cur_x=3 phase=RUN_OVER` | `floor=57`, otherwise same |
+  | `victory_kind` / `run_is_true_victor` / StepResult | **2 (HEART)** / **1** / `terminal=1 reward=1.0` | same |
+  | Act-4 boss gold (trap 5) | boss floor 55, `miscRng` 0 → **1**, suppressed payout **78** | boss floor 56, 0 → **1**, payout **73** |
+
+  The card-reward upgrades (`57+`, `51+`) are `card_upgraded_chance`'s Act-3
+  row answering at act 4, which is the S3.32 inherited (d) claim reaching a
+  real reward screen for the first time.
+
+  *Owed, and named for S3.62.* Act-4 room behaviour lands
+  `UNVERIFIED-until-captured`. Four captures discharge it, each named here:
+  an **Act-4 rest** (the campfire with no Recall button in the dump's option
+  list), an **Act-4 shop purchase** (`merchantRng` and the purge ramp across
+  the buy), an **Act-4 elite reward claim** (the four rows, and the
+  `treasureRng`/`relicRng` pair that proves the §2.6 chest and relic-tier
+  chances stayed dead — design §5 trap 10), and the **Heart's terminal gold**
+  (the single `miscRng` advance on the last compared record, trap 5). A fifth
+  thing has no comparison consumer and is recorded so nobody looks for one:
+  the (3,4) node's map SYMBOL. `TrueVictoryRoom` assigns no `mapSymbol`, so
+  the game dumps `null` there — and `replay/src/main.cpp`'s
+  `neutralize_incomparable` zeroes `map[]` on both sides, so the field is
+  never compared.
 
 ## Phase S3.4 — Act-4 content
 
@@ -1497,6 +1649,25 @@ are S3's own.
   new card or relic row, no `rolls:` column anywhere (Act 4 spends no
   `monsterHpRng`), and `FocusPower` deliberately unregistered (orb-gated,
   Ironclad-unreachable, S4).
+  **Inherited from S3.33:** **the last Act-4 park is this task's, and it is
+  not act-shaped.** S3.33 deleted the blanket act-4 arm from
+  `on_player_entry_impl` entirely; the Act-4 rest and shop are live and the
+  elite and boss ROOMS are entered for real (room type set, relic
+  `onEnterRoom` / `justEnteredRoom` fan-outs run, floor advanced). What parks
+  is the ORDINARY encounter join in `enter_combat` (src/engine/
+  run_advance.cpp): `resolve_encounter` finds no registry row for the literal
+  keys `"Shield and Spear"` and `"The Heart"` that `act_transition`'s ACT-4
+  fork writes into `elite_list` / `boss_list` (the strings are spelled at
+  `kActEndingEncounter` / `kActEndingBoss` in that file), so the room parks at
+  `ROOM_UNIMPLEMENTED` **after** the exact miscRng composition draws, exactly
+  as an unimplemented encounter does in any act. Landing rows 62-63 with those
+  two `game_id` strings is therefore the whole of what un-parks Act 4 — there
+  is no act test to delete and none should be added. The S3.33 witness prints
+  the park on a forked controller (`eliteList[0]=Shield and Spear`,
+  `ROOM_UNIMPLEMENTED`, room_type Elite, floor 54/55) so the seam is observed,
+  not assumed. Note also that `boss_ids[3]` stays **0** until row 63 exists:
+  `act_transition` mirrors the act boss through `encounter_by_game_id`, which
+  returns null today.
   **Deps:** S3.32 (the act-4 dimension exists) **Acceptance:** codegen
   deterministic and its emitted headers byte-stable across two runs; six
   presets **build**; committed corpora zero-diff (Acts 1–3 emit nothing new,

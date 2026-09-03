@@ -86,6 +86,23 @@
 //     nextDungeon = "TheEnding", isDungeonBeaten = true, and NO extra floor).
 //     As of S3.32 the Door CROSSES: act4_crossing builds TheEnding and the run
 //     opens Act 4 on the first-row map pick.
+//   * the ACT-4 ROOMS (S3.33): rest (3,0) / shop (3,1) / elite (3,2) /
+//     boss (3,3) are ORDINARY rooms -- the same on_player_entry switch arms
+//     every other act uses, because TheEnding constructs plain RestRoom /
+//     ShopRoom / MonsterRoomElite / MonsterRoomBoss objects
+//     (TheEnding.java:76-83) and every Act-4 branch inside them is cosmetic.
+//     The campfire's Recall option is absent for free (the ruby key is held);
+//     the elite drops its full reward set with NO emerald key and NO emerald
+//     buff (no Act-4 node carries the flag).
+//   * the TRUE VICTORY terminal (S3.33): the Act-4 boss opens no reward screen
+//     either (AbstractRoom.java:327 names TheEnding too) but DOES spend its
+//     miscRng gold add (:286-297 has no dungeon clause), and then
+//     goToTrueVictoryRoom (ProceedButton.java:107-109, :189-197) runs a full
+//     room transition into the on-grid (3,4) TrueVictoryRoom -- whose entry is
+//     RunPhase::RUN_OVER with RunVictoryKind::HEART, because the room is
+//     NO_INTERACT (TrueVictoryRoom.java:26-32) and the cutscene behind it is
+//     presentation. There is NO Act-4 double boss at any ascension: the gate is
+//     an id test on "TheBeyond" (ProceedButton.java:101-109).
 // ROOM CONTENT is fully live in Acts 2-3 as of the S2.2x/S2.3x waves: the
 // Act-2/3 monsters, elites and bosses landed with S2.21-S2.28, the per-act
 // event/shrine lists with S2.13 and the event bodies with S2.31-S2.33, so no
@@ -95,13 +112,14 @@
 // along.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
-//   * ACT-4 ROOM BEHAVIOUR (S3.33). The act itself is CONSTRUCTED as of S3.32 --
-//     dungeonTransitionSetup, the fixed lists, mapRng = seed + 1200, the
-//     hand-built 5x7 special map, the floor base -- and the run really walks
-//     onto its map. But the four playable rooms (rest 3,0 / shop 3,1 / elite
-//     3,2 / boss 3,3) park at ROOM_UNIMPLEMENTED on ENTRY, at the act-4 arm of
-//     on_player_entry_impl (run_advance.cpp), because their bodies and the
-//     TrueVictoryRoom terminal are S3.33's and their encounters are S3.41's.
+//   * the ACT-4 ENCOUNTERS (S3.41 for the rows, S3.42/S3.43 for the bodies).
+//     S3.33 removed the act-4 room park entirely; what remains is NOT act
+//     -shaped. `Shield and Spear` and `The Heart` have no registry row, so
+//     enter_combat's ordinary encounter join fails and the Act-4 elite and boss
+//     rooms park at ROOM_UNIMPLEMENTED there -- after the exact miscRng
+//     composition draws, exactly like any unimplemented encounter in any act.
+//     The Act-4 rest and shop are fully live today. Nothing else in Act 4
+//     parks.
 //   * ? rooms RESOLVE (event_framework.hpp): the one committed eventRng roll
 //     picks MONSTER (a real monster combat, consuming monsterList) / SHOP
 //     (parks, like a map shop) / TREASURE (the chest flow) / EVENT, and an
@@ -834,6 +852,33 @@ void next_room_transition_boss_chest(RunController& rc) noexcept;
 // -- neither proceed press offers the player an alternative, so neither is a
 // decision the run layer has to surface (see finish_combat_after_action).
 void next_room_transition_victory_room(RunController& rc) noexcept;
+
+// The full transition to the Act-4 TrueVictoryRoom -- THE RUN'S REAL TERMINAL
+// (S3.33).
+//
+// ProceedButton.goToTrueVictoryRoom (ProceedButton.java:189-197) is the fourth
+// and last member of the goToTreasureRoom / goToVictoryRoomOrTheDoor /
+// goToDoubleBoss family, and it differs from all three in ONE way: its node is
+// `new MapRoomNode(3, 4)` (:191), a real Act-4 coordinate, where they all build
+// `MapRoomNode(-1, 15)`. Everything else is the same chain --
+// `node.room = new TrueVictoryRoom()`, `nextRoom = node`, closeCurrentScreen(),
+// nextRoomTransitionStart() -- and it reaches the same
+// AbstractDungeon.updateFading `if (!isDungeonBeaten)` arm (:2317-2325).
+//
+// isDungeonBeaten IS FALSE HERE, and the round trip is worth stating because
+// the Door's `= true` (DoorUnlockScreen.java:159) is what made the crossing
+// itself cost no floor: TheEnding's construction runs the AbstractDungeon
+// constructor, which sets it back to false at :285, one line before its
+// `dungeonTransitionSetup()` at :287. So this IS a real floor -- ++floorNum,
+// the trap-7 five-stream reseed, the relic onEnterRoom / justEnteredRoom
+// fan-outs -- and the run ends at act4_floor_base + 5 (56 below A20, 57 at
+// A20).
+//
+// Called inline off the Act-4 boss's death, exactly as its two siblings are:
+// AbstractRoom.java:327 denies the room a reward screen, so the proceed press
+// offers the player no alternative and is not a decision the run layer has to
+// surface (see finish_combat_after_action).
+void next_room_transition_true_victory(RunController& rc) noexcept;
 
 // --- THE DOOR: the Act-3 -> Act-4 crossing (S3.32) ---------------------------
 //

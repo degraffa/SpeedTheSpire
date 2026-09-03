@@ -409,13 +409,17 @@ struct Filter {
     // tests all three), and a row can carry all three, so unlike the boss-id
     // clause it is satisfiable.
     uint8_t need_keys = 0;
-    // The Corrupt Heart killed. Today the probe is the act-4 boss-kill bit,
-    // i.e. this clause is `--need-boss-kill-act 4` under the name its consumer
-    // uses. S3.32 moved `engine::kFinalAct` to 4 and Act 4 is now reachable,
-    // but its BOSS ROOM still parks on entry (S3.33), so nothing can set that
-    // bit yet and the honest answer is still zero. When the Act-4 boss becomes
-    // playable the probe sharpens to `run_victory_kind(rc) == HEART` here and
-    // the flag's spelling at every call site is unchanged.
+    // The Corrupt Heart killed. The clause is still `--need-boss-kill-act 4`
+    // under the name its consumer uses, but as of S3.33 the act-4 bit is
+    // SHARPENED: it is written from `run_is_true_victor(rc)` --
+    // RunVictoryKind::HEART, which only the Act-4 TrueVictoryRoom's entry
+    // produces -- rather than from any room/phase shape. The flag's spelling at
+    // every call site is unchanged.
+    //
+    // IT IS STILL ZERO EVERYWHERE, and the reason has moved one task along:
+    // the Act-4 boss ROOM is live (S3.33) but `The Heart` has no registry row
+    // or body until S3.41/S3.43, so its encounter parks and nothing reaches the
+    // terminal. That is an encounter gap, not a probe gap.
     bool need_heart_kill = false;
 
     // Relic clauses. UNLIKE need_events, each list is an ANY-OF within its

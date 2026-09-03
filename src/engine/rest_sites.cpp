@@ -200,6 +200,18 @@ RestMenu build_rest_menu(const RunState& rs) noexcept {
     // entry in run_advance.cpp) runs AFTER this append, so a
     // boss-relic-locked campfire stays OPEN while the Ruby Key is still on
     // offer.
+    //
+    // S3.33 -- THE ACT-4 CAMPFIRE HAS NO RECALL OPTION, and this line is
+    // already the whole reason, with no act test anywhere. TheEnding's rest
+    // node (3,0) is a plain RestRoom (TheEnding.java:76-77; RestRoom.java:34,
+    // :58 fork only on the BGM silence/unsilence), so it builds the same
+    // CampfireUI as every other act -- and by the time the player is standing
+    // on it the ruby bit is SET, because the Door that admits them to Act 4
+    // gates on all three keys (SpireHeart.java:151, the third click). So
+    // `!Settings.hasRubyKey` is false on every Act-4 floor and the option is
+    // never appended. A `rs.act < kFinalAct` conjunct here would be redundant
+    // AND would hide the real invariant; the recorded negative is that the key
+    // bit, not the act number, is what removes the button.
     if (kFinalActAvailable && (rs.keys & kKeyRuby) == 0u) {
         push_option(menu, RestOptionKind::RECALL, true);
     }

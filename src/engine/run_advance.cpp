@@ -1395,36 +1395,87 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
         dispatch_just_entered_room_relics(rc.run, room == RoomType::Shop);
     }
 
-    // === ACT-4 ROOM BEHAVIOUR IS S3.33's (S3.32 handoff) =====================
+    // === THE ACT-4 ROOMS ARE ORDINARY ROOMS (S3.33) ==========================
     //
-    // THIS IS THE PARK, and it is the one place to look for it. S3.32 builds
-    // the act -- the crossing, the fixed lists, the special map, the floor base
-    // -- so the run really walks onto Act 4's map and really picks its nodes.
-    // What it does NOT build is what happens INSIDE the four rooms:
+    // S3.32's blanket park -- `if (rc.run.act >= kFinalAct && room !=
+    // RoomType::None) { stall(room); return; }`, which stood exactly here --
+    // IS GONE. The four playable Act-4 rooms fall into the same switch every
+    // other act's rooms do, because that is what the game does: TheEnding
+    // constructs a plain `RestRoom`, `ShopRoom`, `MonsterRoomElite` and
+    // `MonsterRoomBoss` (TheEnding.java:76-83) and every Act-4 branch inside
+    // those four classes is cosmetic. The ONE park that survives is not
+    // act-shaped at all -- it is the encounter join in enter_combat, which
+    // finds no registry row for "Shield and Spear" / "The Heart" until
+    // **S3.41** lands the rows. That park is structural (a missing row parks
+    // AFTER the exact miscRng composition draws, like every unimplemented
+    // encounter in every act) and needs no act test.
     //
-    //   rest  (3,0)  RestRoom with NO Recall option (CampfireUI.java:94-96:
-    //                reaching Act 4 implies the ruby key, so `!hasRubyKey` is
-    //                false) -- S3.33.
-    //   shop  (3,1)  an ordinary ShopRoom -- S3.33.
-    //   elite (3,2)  "Shield and Spear" with MonsterRoomElite's own hard-coded
-    //                relic tiers and NO emerald key / NO emerald buff -- S3.33
-    //                for the room, S3.41/S3.42 for the encounter.
-    //   boss  (3,3)  "The Heart", whose reward screen is suppressed but whose
-    //                miscRng gold add is not (§5 trap 5) -- S3.33 for the room
-    //                and the goToTrueVictoryRoom terminal, S3.41/S3.43 for the
-    //                encounter.
+    // WHAT EACH ROOM NEEDED, AND WHY THE ANSWER IS "NOTHING", verified rather
+    // than assumed -- each is a recorded negative with its citation:
     //
-    // Parking is placed HERE rather than at each of the four cases so that the
-    // relic onEnterRoom / justEnteredRoom fan-outs above still run -- they are
-    // act-general and already correct, and Maw Bank's +12 gold on an Act-4 floor
-    // is real. Two of the four rooms would park anyway (their encounter keys
-    // have no registry row until S3.41); the other two would run S1 bodies that
-    // S3.33 has to review, so all four are parked together and the census reads
-    // one cause instead of two.
-    if (rc.run.act >= kFinalAct && room != RoomType::None) {
-        stall(room);
-        return;
-    }
+    //   rest  (3,0)  RestRoom.java:33-42 has two `TheEnding` branches (:34,
+    //                :58) and both only skip the BGM silence/unsilence. The
+    //                CAMPFIRE loses its Recall option, and the engine already
+    //                gets that right for free: build_rest_menu's gate is
+    //                `kFinalActAvailable && !(keys & kKeyRuby)`
+    //                (CampfireUI.java:94-96) and reaching Act 4 REQUIRES the
+    //                ruby key (SpireHeart.java:151 tests all three), so
+    //                `!hasRubyKey` is false on every Act-4 floor. rest_sites
+    //                .cpp carries the negative at the push site.
+    //   shop  (3,1)  ShopRoom.java:45 skips only `playBGM("SHOP")`;
+    //                ShopScreen.java:132-136 and Merchant.java:86-90 change
+    //                only the idle barks. Prices, merchantRng, the purge-cost
+    //                ramp (which never resets) and colorlessRareChance are the
+    //                S1 model at Act-3 values -- `card_upgraded_chance`'s
+    //                `act >= 3` arm already answers Act 4 (S3.32 inherited (d),
+    //                combat_rewards.hpp).
+    //   elite (3,2)  A plain MonsterRoomElite: AbstractRoom.java:327's reward
+    //                suppression names `MonsterRoomBoss` only, so the elite
+    //                drops its full set -- gold `treasureRng.random(25,35)`
+    //                (:316), the relic at MonsterRoomElite's OWN hard-coded
+    //                tier thresholds (:100-112, `<50` C / `>82` R / else U,
+    //                which is `return_random_relic_tier`), the potion roll
+    //                (:330) and the card reward (:334-341). NO emerald key and
+    //                NO emerald buff: both conjuncts read
+    //                `getCurrMapNode().hasEmeraldKey` (MonsterRoomElite.java:40
+    //                and :95), and the act-4 crossing resets emerald_x/emerald_y
+    //                to kNoEmeraldNode (act_transition) because
+    //                `setEmeraldElite` lives inside `generateMap`, which
+    //                `generateSpecialMap` replaces -- so `on_emerald_elite_node`
+    //                is false at every Act-4 node and both sites are off with
+    //                no act test. `eliteTrigger` is true, so elite-keyed relics
+    //                fire, subject to their floor gates at floor 54/55
+    //                (s2-design §5 trap 9: the floor-gated canSpawn family is
+    //                rejecting almost everywhere by floor 51+).
+    //   boss  (3,3)  A plain MonsterRoomBoss, and the ONE room with real Act-4
+    //                behaviour -- its reward screen is suppressed but its gold
+    //                add is not. That asymmetry is finish_combat_after_action's
+    //                (s3-design §5 trap 5); the room ENTRY is ordinary.
+    //
+    // THE §2.6 DEAD CONSTANTS, frozen dead here rather than tested (design §5
+    // trap 10). TheEnding.initializeLevelSpecificChances (:145-160) assigns
+    // thirteen values; eleven have no Act-4 consumer at all and the two that do
+    // equal Act 3's:
+    //
+    //   shop/rest/treasure/event/eliteRoomChance  (:147-151)  DEAD -- their only
+    //       reader is generateRoomTypes, which generateSpecialMap never calls.
+    //   small/medium/largeChestChance 0/100/0     (:152-154)  DEAD -- read only
+    //       by AbstractDungeon.getRandomChest (:499-508), whose only caller is
+    //       TreasureRoom.onPlayerEntry, and Act 4 has no treasure room.
+    //   common/uncommon/rareRelicChance 0/100/0   (:155-157)  DEAD -- read only
+    //       by AbstractDungeon.returnRandomRelicTier (:810-819), whose every
+    //       caller is an EVENT (Addict, The Mausoleum, Big Fish, Dead
+    //       Adventurer, Scrap Ooze, Gremlin Wheel Game, We Meet Again), and Act
+    //       4's event/shrine pools are empty. The elite above uses
+    //       MonsterRoomElite's hard-coded thresholds and the shop uses
+    //       ShopScreen.rollRelicTier (:418-428); neither reads these.
+    //   colorlessRareChance 0.3                   (:158)      LIVE, == Act 3's.
+    //   cardUpgradedChance A12+ ? .25 : .5        (:159)      LIVE, == Act 3's;
+    //       card_upgraded_chance's `act >= 3` arm is the site.
+    //
+    // Wiring any of the eleven up would move treasureRng or relicRng at an
+    // Act-4 shop or elite and diverge there -- which is what makes this a
+    // negative with a witness rather than an opinion.
 
     switch (room) {
         case RoomType::Monster:
@@ -1560,6 +1611,41 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
             rc.event.event_id = kSpireHeartEventId;
             rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
             event_dialog_impl(kSpireHeartEventId)->on_enter(rc, rc.event);
+            break;
+        }
+        case RoomType::TrueVictory: {
+            // TrueVictoryRoom.onPlayerEntry (TrueVictoryRoom.java:26-32):
+            // `isScreenUp = true`, the proceed button hidden, the cursor
+            // hidden, `screen = CurrentScreen.NO_INTERACT`. THE RUN IS
+            // NON-INTERACTIVE FROM HERE -- there is no button, no screen and no
+            // command, so this room's ENTRY is the engine's terminal.
+            //
+            // IT GRANTS NOTHING AND ROLLS NOTHING. The constructor (:20-24)
+            // sets `phase = INCOMPLETE`, builds a `Cutscene` for the chosen
+            // class and hides the proceed button; there is no reward, heal,
+            // relic, gold or RNG anywhere in the class. What the crossing into
+            // it DID do -- ++floorNum, the five-stream reseed, the relic
+            // onEnterRoom / justEnteredRoom fan-outs (Maw Bank's 12 gold) --
+            // belongs to the transition, exactly as it does for the boss chest
+            // and the `Spire Heart` VictoryRoom, and has already happened above.
+            //
+            // THE CUTSCENE IS PRESENTATION, and this is the S3 analogue of S2's
+            // post-victory skip. Its last panel opens VictoryScreen
+            // (Cutscene.java:108-125), which sets `is_victory = true`
+            // (VictoryScreen.java:79) and submits `victory=true,
+            // trueVictor=true` (:254-269) -- two metrics booleans, no state the
+            // simulator carries. RunVictoryKind::HEART is the engine's
+            // spelling of that pair (run_state.hpp), and this is its ONLY
+            // producer; `run_is_true_victor` reads it.
+            rc.combat = CombatState{};
+            reseed_floor_streams(rc.combat, seed, floor);
+            rc.rewards = RewardScreen{};
+            rc.rewards.open_card_item = kNoOpenCardReward;
+            rc.rest = RestSiteState{};
+            rc.treasure_chest = TreasureChest{};
+            rc.event = EventDialogState{};
+            rc.run.victory_kind = static_cast<uint8_t>(RunVictoryKind::HEART);
+            rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
             break;
         }
         case RoomType::Event: {
@@ -1703,6 +1789,17 @@ enum class TransitionTarget : uint8_t {
     // The `Spire Heart` VictoryRoom (ProceedButton.java:199-208) -- a third
     // synthetic MapRoomNode(-1, 15), on the same terms as BossChest.
     VictoryRoom = 3,
+    // The Act-4 TrueVictoryRoom (ProceedButton.java:189-197). The ONE
+    // off-the-map-flow destination that is NOT synthetic: goToTrueVictoryRoom
+    // builds `new MapRoomNode(3, 4)` (:191) where its three siblings build
+    // `MapRoomNode(-1, 15)`. It is still not a MapNode target, because the room
+    // does not come from the map array -- `node.room = new TrueVictoryRoom()`
+    // (:192) is assigned directly, exactly as goToDoubleBoss assigns a fresh
+    // MonsterRoomBoss -- but the COORDINATES are real, so cur_x takes the
+    // node's own x rather than a sentinel. It agrees with the map mirror
+    // anyway: (3,4) carries RoomType::TrueVictory (generate_special_map) and
+    // the boss floor's ++floorNum lands on row 4.
+    TrueVictory = 4,
 };
 
 void next_room_transition_impl(RunController& rc, uint8_t dst_x,
@@ -1829,6 +1926,18 @@ void next_room_transition_impl(RunController& rc, uint8_t dst_x,
             rc.cur_x = static_cast<uint8_t>(kBossCol);
             room = RoomType::Victory;
             break;
+        case TransitionTarget::TrueVictory:
+            // MapRoomNode(3, 4) -- a REAL coordinate (ProceedButton.java:191),
+            // not the (-1, 15) sentinel the other three off-flow destinations
+            // use. kBossCol IS 3 (map_gen.hpp), so this writes the same byte
+            // the Act-4 boss room already left in cur_x; it is spelled as the
+            // node's own x because that is what the Java says, not because the
+            // two happen to coincide. The room is assigned to the node
+            // directly (:192), so it is not read out of rs.map -- but the
+            // mirror agrees: (3,4) holds RoomType::TrueVictory.
+            rc.cur_x = 3;
+            room = RoomType::TrueVictory;
+            break;
         case TransitionTarget::MapNode:
         default: {
             rc.cur_x = dst_x;
@@ -1877,6 +1986,21 @@ void next_room_transition_boss_chest(RunController& rc) noexcept {
 // (floor++, trap-7 reseed, relic room-entry fan-outs) rather than a screen.
 void next_room_transition_victory_room(RunController& rc) noexcept {
     next_room_transition_impl(rc, 0, TransitionTarget::VictoryRoom);
+}
+
+// The full transition to the Act-4 TrueVictoryRoom -- goToTrueVictoryRoom
+// (ProceedButton.java:189-197) -> nextRoomTransitionStart() ->
+// AbstractDungeon.updateFading's `!isDungeonBeaten` arm (:2317-2325). The flag
+// is still false here: the Door set it TRUE on the way into Act 4
+// (DoorUnlockScreen.java:159), which is what made the crossing cost no floor,
+// and then the AbstractDungeon constructor TheEnding runs through clears it
+// again at :285 -- one line above its own `dungeonTransitionSetup()` call at
+// :287. So this is a real floor -- ++floorNum, the trap-7 five-stream reseed
+// and the relic room-entry fan-outs -- and NOT a screen change; see
+// run_advance.hpp. (ProceedButton.java:250's other write is goToNextDungeon's,
+// the Act-1/2/3 chest crossing, and is not on this path.)
+void next_room_transition_true_victory(RunController& rc) noexcept {
+    next_room_transition_impl(rc, 0, TransitionTarget::TrueVictory);
 }
 
 // --- the act transition (S2.12) ----------------------------------------------
@@ -1971,13 +2095,17 @@ static_assert(kActEndingListLen <= kMaxMonsterList &&
 //     `MapRoomNode(-1, 15)` + `new MonsterRoomBoss()` the row-14 boss uses
 //     (DungeonMap.java:77-79), so the (3,3) node below is never entered through
 //     the map -- exactly like the victory node.
-//  2. THE VICTORY NODE (3,4) IS LEFT `RoomType::None`. `RoomType::TrueVictory`
-//     is value 10 and belongs to S3.33 (docs/s3-tasks.md's id-block table);
-//     claiming it here would be spending another task's id. Nothing observes
-//     the gap: the node has no inbound edge, so no mask and no transition can
-//     ever reach it, and `goToTrueVictoryRoom` builds a FRESH MapRoomNode(3, 4)
-//     rather than looking this one up (ProceedButton.java:191-192). S3.33 fills
-//     it in when it claims the value.
+//  2. THE VICTORY NODE (3,4) CARRIES `RoomType::TrueVictory` (S3.33, which is
+//     what spends value 10). S3.32 left it `None` because the id belonged to
+//     another task; this fills it in, for the same reason as (3) -- the game's
+//     map array really does hold a TrueVictoryRoom there (:84-85, :124), and
+//     the map is a mirror of that array. It stays EDGELESS: `connectNode`
+//     runs only rest->shop and shop->elite (:86-87) and the one explicit
+//     MapEdge is elite->boss (:88), so nothing points at (3,4) and no mask can
+//     offer it. The room is reached only by the Act-4 boss's proceed, which
+//     builds its OWN `MapRoomNode(3, 4)` rather than looking this one up
+//     (ProceedButton.java:191-192) -- the coordinates coincide because the
+//     boss sits on row 3 and the transition's ++floorNum lands on row 4.
 //  3. `RoomType::Boss` (7) IS written into a grid node here, which Acts 1-3
 //     never do. That is the game's own shape (:82-83 puts a MonsterRoomBoss in
 //     the map array) and it is inert for the same reason as (1): the boss is
@@ -1986,6 +2114,17 @@ static_assert(kActEndingListLen <= kMaxMonsterList &&
 // Rows 5..14 stay `None` with no edges. RunState.map is 15x7 single-act storage
 // (the game throws the old DungeonMap away with the old dungeon object), so
 // overwriting the whole array in place is the faithful model.
+//
+// A RECORDED A20 NEGATIVE lives here (s3-design §4.6, §5 trap 8, and the a20
+// row it belongs to): **A1's elite quota has no Act-4 effect.** The x1.6 elite
+// multiplier is applied inside `generateRoomTypes`
+// (AbstractDungeon.java:generateRoomTypes, the `Settings.isFinalActAvailable`
+// -independent ascension arm the map_rooms.hpp quota block models), and
+// `generateSpecialMap` NEVER CALLS IT -- there is no RoomTypeAssigner, no
+// quota, no node list. Act 4 has exactly one elite because the map is a
+// constant, at every ascension from 0 to 20. The negative is frozen at the
+// site rather than tested, on the same terms as s2-design §5 trap 10's
+// shop/rest/chest freezes.
 void generate_special_map(RunState& rs) noexcept {
     for (int y = 0; y < kMapRows; ++y) {
         for (int x = 0; x < kMapCols; ++x) {
@@ -2001,7 +2140,8 @@ void generate_special_map(RunState& rs) noexcept {
         static_cast<uint8_t>(RoomType::Elite), kEdgeBoss};    // :80-81, :88
     rs.map[run_state_map_index(kCol, 3)] = MapNode{
         static_cast<uint8_t>(RoomType::Boss), 0};             // :82-83
-    // (3,4) TrueVictoryRoom -- decision (2) above; left None for S3.33.
+    rs.map[run_state_map_index(kCol, 4)] = MapNode{
+        static_cast<uint8_t>(RoomType::TrueVictory), 0};      // :84-85, no edge
 }
 
 // S3.32: `next_act == 4` is TheEnding, and the four places it differs from
@@ -3042,11 +3182,10 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
     // `AbstractDungeon.id.equals("TheBeyond")` (:101-103), so it names Act 3
     // and nothing else. While kFinalAct was 3 the two spellings coincided;
     // once Act 4 exists they do not, and leaving `>= kFinalAct` here would have
-    // routed the ACT-4 boss (S3.33) into the Act-3 double-boss / VictoryRoom
-    // branch -- a second Heart fight and a second `Spire Heart` dialog. Act 4's
-    // boss proceed goes to goToTrueVictoryRoom (ProceedButton.java:107-109),
-    // which is S3.33's; until it lands the Act-4 boss room parks on entry and
-    // never reaches this function at all.
+    // routed the ACT-4 boss into the Act-3 double-boss / VictoryRoom branch --
+    // a second Heart fight and a second `Spire Heart` dialog. Act 4's boss
+    // proceed goes to goToTrueVictoryRoom (ProceedButton.java:107-109) and has
+    // its own arm, immediately below this one.
     if (static_cast<RoomType>(rc.room_type) == RoomType::Boss &&
         rc.run.act == kActBeyond) {
         apply_meat_on_the_bone_pre_victory(rc.combat);
@@ -3211,6 +3350,82 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
         // paragraph above the branch says why).
         next_room_transition_victory_room(rc);
         fill_run_result(rc, res);
+        return;
+    }
+
+    // === THE ACT-4 BOSS: THE CORRUPT HEART, AND THE RUN'S REAL TERMINAL ======
+    //
+    // ProceedButton.update's third arm, the `else if` of the id test the block
+    // above sits under (ProceedButton.java:100-110, read in full):
+    //
+    //     if (currentRoom instanceof MonsterRoomBoss) {
+    //         if (AbstractDungeon.id.equals("TheBeyond")) { ...double boss... }
+    //         else if (AbstractDungeon.id.equals("TheEnding"))
+    //             this.goToTrueVictoryRoom();
+    //     }
+    //
+    // THE A20 NEGATIVE IS IN THE SHAPE OF THAT `else if`, and it is worth
+    // naming because it is easy to get wrong from the arithmetic alone
+    // (s3-design §4.6, §5 trap 8). Act 4's `bossList` also holds THREE keys
+    // (TheEnding.initializeBoss :191-196) and also reaches a remaining count of
+    // 2 after the entry pop, so the double-boss GATE's algebra passes here --
+    // it is the id test that excludes Act 4, exactly as it excludes Acts 1 and
+    // 2. Reproducing the count check here would therefore have manufactured a
+    // second Heart fight at A20. There is no ascension clause on this arm at
+    // all: the Act-4 boss proceeds to the TrueVictoryRoom at ascension 0 and at
+    // ascension 20 alike.
+    //
+    // THE GOLD ADD STILL FIRES, AND THE REWARD SCREEN STILL DOES NOT
+    // (s3-design §5 trap 5 -- the one place a "suppress all Act-4 boss rewards"
+    // shortcut loses a draw). AbstractRoom.java's two guards are DIFFERENT
+    // predicates over the same room:
+    //
+    //   :286  `this instanceof MonsterRoomBoss && !loading_post_combat`
+    //         -- no dungeon clause at all, so TheEnding passes: one
+    //         `miscRng.random(-5, 5)` on `100 + roll`, x0.75 rounded at A13+.
+    //   :327  `!(currRoom instanceof MonsterRoomBoss)
+    //          || !(dungeon instanceof TheBeyond) && !(dungeon instanceof
+    //             TheEnding) || Settings.isEndless`
+    //         -- names TheEnding explicitly, so all three disjuncts are false
+    //         and dropReward() / addPotionToRewards() / combatRewardScreen
+    //         .open() are all skipped, exactly as at the Act-3 boss.
+    //
+    // So the draw is consumed and its payout discarded (addGoldToRewards writes
+    // the ROOM's unclaimed list, :610-617, and no screen ever opens to claim
+    // it) -- the same shape as the Act-3 boss's, modelled for the stream and
+    // not for the gold. `roll_boss_gold` is the shared body; it is the last
+    // miscRng consumer of the run.
+    //
+    // The VICTORY jingle DOES play here (the :282 guard names TheBeyond only,
+    // so a TheEnding boss is not excluded from it) -- cosmetic, recorded so the
+    // asymmetry with :327 is not read as a transcription slip.
+    //
+    // RUN INLINE OFF THE KILL, for the third time and for the third identical
+    // reason: with no reward screen there is nothing to claim and no map to
+    // pick from, so the proceed press carries NO PLAYER DECISION and needs no
+    // action verb and no fuzz MoveCat. The replay differ answers the capture's
+    // parked proceed the same way it answers the other two -- see
+    // command_map.hpp's COMPLETE-screen arm, third case.
+    //
+    // The terminal itself is written by the ROOM, not here: on_player_entry's
+    // RoomType::TrueVictory arm sets RunVictoryKind::HEART and RUN_OVER,
+    // because TrueVictoryRoom.onPlayerEntry's `screen = NO_INTERACT` is what
+    // ends the run. All this arm owes `res` is the +1 the winning EVENT_DIALOG
+    // terminal pays (the analogue of the DEFEAT path's -1), and it can be paid
+    // unconditionally: reaching this line means the step started in COMBAT, so
+    // no terminal can already have written the outcome.
+    if (static_cast<RoomType>(rc.room_type) == RoomType::Boss &&
+        rc.run.act == kFinalAct) {
+        apply_meat_on_the_bone_pre_victory(rc.combat);
+        dispatch_relics_on_victory(rc.combat, rc.combat.relics,
+                                   rc.combat.relic_count);
+        fold_back_combat(rc);
+        (void)settle_stolen_gold(rc);
+        (void)roll_boss_gold(rc.combat.misc_rng,
+                             static_cast<int>(rc.run.ascension));
+        next_room_transition_true_victory(rc);
+        fill_run_result(rc, res);
+        res.reward = 1.0f;
         return;
     }
 

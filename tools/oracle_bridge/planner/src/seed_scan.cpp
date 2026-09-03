@@ -324,6 +324,20 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
         // yes for every won run.
         w->boss_killed_acts |= act_bit(engine::kActBeyond);
     }
+    // S3.33 SHARPENS THE HEART PROBE, which the header asked for by name. The
+    // act-4 boss-kill bit is now written by the ONE thing that can only follow
+    // a Corrupt Heart kill: RunVictoryKind::HEART, set at the TrueVictoryRoom's
+    // entry (run_advance.cpp) and nowhere else. `victory` above stays true for
+    // both kinds -- an Act-3 stop and a true victory are both wins -- so this
+    // is an additional bit, not a replacement, and a HEART run correctly
+    // reports BOTH act-3 and act-4 kills (it had to kill the Act-3 boss to
+    // reach the Door). The bit stays ZERO until S3.41/S3.43 give `The Heart` a
+    // registry row and a body; the Act-4 boss ROOM is live as of S3.33 but its
+    // encounter still parks, so `--need-heart-kill` answering nothing today is
+    // an ENCOUNTER gap, not a probe gap.
+    if (engine::run_is_true_victor(rc)) {
+        w->boss_killed_acts |= act_bit(engine::kFinalAct);
+    }
     // --- S3.22 keys, elite kills, and the A20 double-boss room --------------
     //
     // Keys: an OR over the run, not a terminal read (the event_flags rationale).
@@ -502,8 +516,9 @@ bool row_hits(const ScanRow& row, const Filter& f) {
     if (f.need_victory && !row.victory) return false;
     // S3.22 key clauses. ALL-OF on the mask (see the header for why all-of is
     // the satisfiable reading here); the heart clause is the act-4 boss-kill
-    // bit, spelled separately because its consumer is S3.23/S3.62 and its probe
-    // sharpens at S3.31.
+    // bit, spelled separately because its consumer is S3.23/S3.62. S3.33
+    // sharpened the bit's WRITER to run_is_true_victor (above); this reader is
+    // unchanged.
     if (f.need_keys != 0 && (row.keys & f.need_keys) != f.need_keys) {
         return false;
     }

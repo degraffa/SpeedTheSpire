@@ -936,6 +936,43 @@ struct ShopTarget {
            static_cast<int>(rc.run.floor) == s.floor + 1;
 }
 
+// THE ACT-4 BOSS'S PROCEED -- the third and last member of the family (S3.33),
+// and the only one that is a TERMINAL rather than an elision.
+//
+// AbstractRoom.java:327's suppression names TheEnding as well as TheBeyond, so
+// the Corrupt Heart's room opens no reward screen either and the capture again
+// shows a bare `COMPLETE` + `proceed`. Pressing it is
+// ProceedButton.java:107-109's `else if (id.equals("TheEnding"))
+// goToTrueVictoryRoom()`, which run_advance.cpp likewise runs inline off the
+// kill -- so at this record the sim is already one floor on, standing in the
+// (3,4) TrueVictoryRoom.
+//
+// AND THAT ROOM ENDS THE RUN. TrueVictoryRoom.onPlayerEntry sets
+// `screen = NO_INTERACT` (TrueVictoryRoom.java:26-32), so unlike the other two
+// handoffs there is no later record to resynchronise against: the sim is at
+// RunPhase::RUN_OVER with RunVictoryKind::HEART and the walk is finished. The
+// cutscene and the VictoryScreen behind it are presentation -- the S3 analogue
+// of S2's post-victory skip -- so whatever tail the capture carries past this
+// point is not replayable state.
+//
+// It is checked BEFORE the generic finished-victory arm below rather than
+// folded into it, on the same terms as its two siblings: a structural
+// recognizer that names the exact seam is a place a divergence cannot hide,
+// where "the run happens to be won" would also swallow an Act-4 boss record the
+// sim reached in the wrong state.
+[[nodiscard]] inline bool is_true_victory_handoff(const RunController& rc,
+                                                  const ScreenInfo& s) noexcept {
+    return s.screen_type == "COMPLETE" && s.room_type == "MonsterRoomBoss" &&
+           // kFinalAct, not kActBeyond: this is the id test's OTHER arm.
+           rc.run.act == sts::engine::kFinalAct &&
+           // The sim has already entered the TrueVictoryRoom and ended there.
+           rc.phase == static_cast<uint8_t>(RunPhase::RUN_OVER) &&
+           rc.room_type == static_cast<uint8_t>(RoomType::TrueVictory) &&
+           sts::engine::run_is_true_victor(rc) &&
+           // ...and the crossing the capture has not made yet.
+           static_cast<int>(rc.run.floor) == s.floor + 1;
+}
+
 [[nodiscard]] inline MappedCommand map_command(const RunController& rc, const ScreenInfo& s,
                                         const std::string& cmd) {
     const std::vector<std::string> p = split_ws(cmd);
@@ -1014,11 +1051,13 @@ struct ShopTarget {
     // (ChoiceScreenUtils.getCurrentChoiceType :80-83: not a chest, shop, rest
     // or event room, `actionManager.isEmpty()`, not fading). Every ordinary
     // combat opens COMBAT_REWARD over its room and every other room type has
-    // its own label, so within S2's scope this screen has exactly TWO
-    // producers, and they are the two Act-3 boss rooms that
-    // AbstractRoom.java:327 denies a reward screen to. Both are transitions
-    // the engine has ALREADY made by the time the capture shows the button,
-    // and both are therefore elisions rather than presses.
+    // its own label, so this screen has exactly THREE producers, and they are
+    // the three boss rooms AbstractRoom.java:327 denies a reward screen to:
+    // both Act-3 boss rooms (its `TheBeyond` disjunct) and the Act-4 boss (its
+    // `TheEnding` one, S3.33). All three are transitions the engine has ALREADY
+    // made by the time the capture shows the button. The first two are
+    // elisions; the third is where the walk ENDS, because the room it enters is
+    // NO_INTERACT.
     if (s.screen_type == "COMPLETE") {
         if (verb == "proceed") {
             // 1. The A20 double-boss handoff (see is_double_boss_handoff): the
@@ -1040,7 +1079,16 @@ struct ShopTarget {
                 m.kind = MapKind::NOOP;
                 return m;
             }
-            // 3. A finished run still parked on a COMPLETE screen: the sim has
+            // 3. The ACT-4 boss (see is_true_victory_handoff): the press is
+            //    goToTrueVictoryRoom, which run_advance.cpp also ran inline off
+            //    the kill -- but the room it entered is NO_INTERACT, so this
+            //    one is the END of the walk rather than an elision. The
+            //    cutscene / VictoryScreen tail is presentation.
+            if (is_true_victory_handoff(rc, s)) {
+                m.kind = MapKind::TERMINAL;
+                return m;
+            }
+            // 4. A finished run still parked on a COMPLETE screen: the sim has
             //    reached its terminal (a victory here; a death never gets a
             //    proceed button) and there is nothing left to press.
             if (sts::engine::run_is_victory(rc)) {
@@ -1049,8 +1097,9 @@ struct ShopTarget {
             }
             m.reason =
                 "a COMPLETE-screen `proceed` that is none of the A20 "
-                "double-boss handoff, the `Spire Heart` VictoryRoom crossing "
-                "or a finished victory; the sim is in " +
+                "double-boss handoff, the `Spire Heart` VictoryRoom crossing, "
+                "the Act-4 true-victory terminal or a finished victory; the "
+                "sim is in " +
                 std::string(phase_name(rc.phase)) + " at floor " +
                 std::to_string(static_cast<int>(rc.run.floor)) +
                 " (capture floor " + std::to_string(s.floor) +

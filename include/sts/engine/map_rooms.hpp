@@ -110,9 +110,29 @@ enum class RoomType : uint8_t {
     // relic onEnterRoom fan-outs) whose phase is EVENT (VictoryRoom.java:21-33)
     // and whose event is the `Spire Heart` dialog; it grants nothing.
     // Value 9 is the S3 Wave-1 allocation (docs/s3-tasks.md "Registry id blocks
-    // granted to Wave 1"); 10 is TrueVictory and belongs to S3.33. Values are
-    // append-only and never renumbered.
+    // granted to Wave 1"). Values are append-only and never renumbered.
     Victory = 9,
+    // TrueVictoryRoom -- the run's REAL terminal, and the one off-map-looking
+    // room that is actually ON the grid. ProceedButton.goToTrueVictoryRoom
+    // (ProceedButton.java:189-197) builds `new MapRoomNode(3, 4)` -- NOT the
+    // `MapRoomNode(-1, 15)` its three siblings (goToTreasureRoom :181,
+    // goToVictoryRoomOrTheDoor :202, goToDoubleBoss :214) build -- and the
+    // Act-4 map really does hold a TrueVictoryRoom at (3,4)
+    // (TheEnding.java:84-85, :124), so unlike Boss/TreasureBoss/Victory this
+    // value IS written into a grid node. The coordinates are not a coincidence:
+    // the Act-4 boss sits at floor act4_floor_base + 4 (row 3) and the
+    // transition's ++floorNum lands the player on row 4, which is (3,4).
+    //
+    // It is still never ENTERED through the map -- the victory node has no
+    // inbound edge (:86-88 connect rest->shop->elite->boss and stop), so no
+    // mask can offer it; the room arrives only through the Act-4 boss's proceed.
+    //
+    // The room is NO_INTERACT (TrueVictoryRoom.java:26-32: isScreenUp, the
+    // proceed button hidden, `screen = NO_INTERACT`) and the cutscene behind it
+    // is presentation, so the engine's terminal IS this room's entry --
+    // RunPhase::RUN_OVER with RunVictoryKind::HEART. Value 10 is the S3 Wave-1
+    // allocation, spent by S3.33.
+    TrueVictory = 10,
 };
 
 // One past the last RoomType enumerator, for consumers that index an array by
@@ -120,8 +140,8 @@ enum class RoomType : uint8_t {
 // declared HERE, beside the enum, and static_asserted against it, so a new room
 // kind cannot silently leave a downstream array one short -- which is exactly
 // what the fuzz coverage table had no guard against before TreasureBoss landed.
-inline constexpr int kRoomTypeCount = 10;
-static_assert(static_cast<int>(RoomType::Victory) + 1 == kRoomTypeCount,
+inline constexpr int kRoomTypeCount = 11;
+static_assert(static_cast<int>(RoomType::TrueVictory) + 1 == kRoomTypeCount,
               "kRoomTypeCount must be one past the last RoomType enumerator");
 
 // The game's mapSymbol for a room (RoomTypeAssigner dump / oracle golden).
@@ -147,6 +167,17 @@ static_assert(static_cast<int>(RoomType::Victory) + 1 == kRoomTypeCount,
         // on the same terms as TreasureBoss's 'T': a dump that somehow held one
         // should be readable, and the RoomTypeAssigner writes only 1..6.
         case RoomType::Victory:  return 'V';
+        // TrueVictoryRoom's constructor (TrueVictoryRoom.java:20-24) assigns no
+        // `mapSymbol` either, so `getMapSymbol()` returns null and the game's
+        // own dump of the Act-4 map prints "null" at (3,4) rather than a
+        // character. 'V' is returned on the same terms as Victory's and
+        // TreasureBoss's: readable, and unreachable from any RoomTypeAssigner
+        // (which writes only 1..6). NOTE that this is the one of the three
+        // that a map dump CAN contain, because unlike them the room is in the
+        // grid -- the replay differ neutralizes `map[]` on both sides
+        // (replay/src/main.cpp, neutralize_incomparable), so the symbol has no
+        // comparison consumer; S3.62 owns the Act-4 map capture.
+        case RoomType::TrueVictory: return 'V';
         case RoomType::None:     return '.';
     }
     return '.';
