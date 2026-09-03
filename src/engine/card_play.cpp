@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include "sts/engine/action_queue.hpp"  // add_to_bottom, add_card_to_queue_bottom, kActorPlayer
+#include "sts/engine/back_attack.hpp"   // the playCard facing write (S3.42)
 #include "sts/engine/cards.hpp"         // CardDef, card_def
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
@@ -465,6 +466,48 @@ bool queue_card_play(CombatState& s, uint8_t hand_index, uint8_t target) noexcep
     CardQueueItem item{};
     item.card_index = s.hand[hand_index];  // the played card's pool index
     item.target = target;
+    // S3.42 -- THE PLAYER'S FACING. AbstractPlayer.playCard (:1285-1295), the
+    // method THIS function is:
+    //     if (hoveredCard.target == ENEMY || hoveredCard.target == SELF_AND_ENEMY) {
+    //         if (this.hasPower("Surrounded"))
+    //             this.flipHorizontal = this.hoveredMonster.drawX < this.drawX;
+    //         actionManager.cardQueue.add(new CardQueueItem(hoveredCard, hoveredMonster));
+    //     } else { ...cardQueue.add(card, null); }
+    // -- INSIDE the enemy-targeted arm and BEFORE the queue add, which is the
+    // order reproduced here. The kind is read upgrade-aware for the same reason
+    // card_can_use reads it that way (an upgraded Blind is ALL_ENEMY and takes no
+    // target, so it never turns the player).
+    //
+    // Dead in every combat but the Act-4 elite: `hasPower("Surrounded")` is the
+    // outer guard and SpireShield.java:71 is the game's only source of that power.
+    // The marker refresh that follows is CardGroup.refreshHandLayout's Surrounded
+    // block; back_attack.hpp note (4) records why it is pinned to this seam and
+    // what that costs (the one declared deviation of this task).
+    {
+        const CardDef* played =
+            card_def(static_cast<CardId>(s.card_pool[item.card_index].card_id));
+        if (played != nullptr && target < s.monster_count && target < kMonsterCap) {
+            const CardTargetKind kind =
+                card_target_kind(*played, s.card_pool[item.card_index].upgrade);
+            if (kind == CardTargetKind::ENEMY ||
+                kind == CardTargetKind::SELF_AND_ENEMY) {
+                const bool surrounded = [&s]() noexcept {
+                    for (uint8_t i = 0;
+                         i < s.player_power_count && i < kPowerCap; ++i) {
+                        if (s.player_powers[i].power_id ==
+                            static_cast<uint16_t>(PowerId::SURROUNDED)) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }();
+                if (surrounded) {
+                    set_player_facing_toward(s, target);
+                    refresh_back_attack_markers(s);
+                }
+            }
+        }
+    }
     add_card_to_queue_bottom(s, item);     // normal (non-priority) enqueue
     // NOTE (trap 10): no card_random_rng draw happens here -- the random-target
     // roll is a DEQUEUE-time operation (resolve_play_target), not enqueue-time.

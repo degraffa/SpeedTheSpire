@@ -57,6 +57,10 @@ add_library(sts_engine
     monster_awakened_one.cpp
     monster_time_eater.cpp
     monster_donu_deca.cpp
+    # S3.42 -- the Act-4 elite pair, plus AbstractMonster's facing machinery.
+    monster_spire_shield.cpp
+    monster_spire_spear.cpp
+    back_attack.cpp
     # S3.43 -- the Act-4 boss.
     monster_corrupt_heart.cpp
     monster_dispatch.cpp
@@ -78,6 +82,10 @@ add_library(sts_engine
     powers/power_anger.cpp
     powers/power_angry.cpp
     powers/power_artifact.cpp
+    # S3.42 -- both bodies deliberately empty; see each .cpp for why the row is
+    # `native: true` anyway.
+    powers/power_surrounded.cpp
+    powers/power_back_attack.cpp
     powers/power_beat_of_death.cpp
     powers/power_combust.cpp
     powers/power_confusion.cpp

@@ -151,7 +151,7 @@ are S3's own.
 | **A pre-existing `--replay` RunState divergence at an Act-3 double-boss `proceed` handoff, unrelated to cost or mask** | S3.53 sweep (`_oracle_data/s3/s353_sweep.tsv`, 2026-09-03) | **UNASSIGNED** | `s2v3_wave2_STS205404_ps20` diverges on the base `--replay` walk (not `--costs`/`--masks`, both clean on this file) at seq=894 floor=50 screen=COMPLETE cmd='proceed': `hp: 36 -> 61`, `floor: 50 -> 51`, six `relics[i].counter` rows, and `boss_ids[2]: 59 -> 58`. This is an S2.V3-era capture (2026-08-27 campaign) predating the S2-G2 divergence-harvest's double-boss handoff fixes named in the session hand-off ("the double-boss handoff bossKey"), so it may be stale rather than live — no other capture in this sweep, and neither committed corpus, reproduces it. Outside S3.53's two-named blind spots; recorded rather than chased. A fresh capture on the current engine would settle stale-vs-live |
 | **conventions.md still carries the superseded unit-test wording** | this planning exercise (S3 ledger creation, 2026-09-03) | **DISCHARGED 2026-09-03** — conventions `dd15937` (§1 owner-directive block, §5 "no rule without its witness") | Recorded while this ledger was drafted, before the orchestrator amended conventions.md the same day. No S3 brief was dispatched in between, so the condition ("before the first S3 task is dispatched") held. A real document conflict under conventions §4, recorded rather than silently tolerated. conventions §1 ("Tests land in the same change as the code they verify. Registry YAML is code: entries land with their tier-2 tests in one commit"), §5's "No rule without its test — … for registry entries the test is the tier-2 table test", and §6's three-ways-the-test-suite-lies subsection all describe a practice the 2026-09-03 owner directive retires. This planning exercise was scoped to two new documents plus two one-line cross-references and could not edit that file. conventions.md is the authority that wins on conflict, so **it must be amended to carry the directive before it is quoted at an S3 agent**, or the first brief will cite a rule the ledger contradicts |
 | **The `SpireHeart$CUR_SCREEN` enum order is derived, not read** | s3-design §4.1 | **DISCHARGED 2026-09-03 by S3.31** — recovered mechanically, and the derivation was RIGHT: `INTRO 0, MIDDLE 1, MIDDLE_2 2, DEATH 3, GO_TO_ENDING 4`. The `RECOVERED-INNER-CLASSES.md` §2 procedure was run against the shipped `desktop-1.0.jar` (SHA-256 `cfad868a…e081673`, the value that file pins, re-verified at task time) — but with `javap` rather than CFR, because the tree's `cfr-0.152.jar` and `sts-classes.jar` are no longer on disk and the switch-map is more legible as bytecode anyway. `javap -c -p 'SpireHeart$1'` shows `$SwitchMap[INTRO.ordinal()] = 1 … [GO_TO_ENDING.ordinal()] = 5` in order, and `javap -p 'SpireHeart$CUR_SCREEN'` declares the five constants in that same order, so the decompile's bare `case N:` labels are the ordinals plus one. `VictoryRoom$EventType` was recovered in the same pass (`HEART = 1`, `NONE = 2`), confirming that `VictoryRoom.onPlayerEntry`'s `case 1:` is the HEART arm. The recovered classes are NOT committed (conventions §2 licence hygiene); the derivation is recorded at `src/engine/events/spire_heart.cpp`'s header, and `EventDialogState::screen` IS the game's ordinal so no second numbering exists to drift | The inner enum was stripped from the decompile source jar, so CFR rendered the switch with bare integer labels. The mapping (INTRO=1, MIDDLE=2, MIDDLE_2=3, DEATH=4, GO_TO_ENDING=5) is derived unambiguously from the arms' bodies, but "derived" is not "read in full" (stage-a §1). Recover it mechanically via `RECOVERED-INNER-CLASSES.md` §2 and cite the recovered file, or record the derivation as the provenance with the reason |
-| **Back-attack facing: model it, or collapse it?** | s3-design §2.3 | **S3.42** | `applyBackAttack` (AbstractMonster.java:1015-1017) reads the player's `flipHorizontal`, which changes when a target is hovered (AbstractPlayer.java:1291-1293) and is re-evaluated on every hand layout (CardGroup.java:204-223). The proposed collapse — "with exactly two guards, the one the player is not facing takes 1.5×" — must be proven exact or rejected, against those three methods read in full **and** against a live Shield-and-Spear capture where the player attacks each guard in turn |
+| **Back-attack facing: model it, or collapse it?** | s3-design §2.3 | **LANDED 2026-09-03 by S3.42; the CAPTURE half stays open on S3.62.** MODEL THE FACING, COLLAPSE THE COORDINATES — and the collapse is proven exact, not assumed. All three cited methods were read in full: `applyBackAttack` (AbstractMonster.java:1015-1017) is a `hasPower("Surrounded")` test **and** a `flipHorizontal`/`drawX` positional test; `AbstractPlayer.playCard` (:1291-1293) writes the facing only inside the enemy-targeted arm, before the card queues; `CardGroup.refreshHandLayout` (:204-223) re-evaluates it per group member behind the SAME `hasPower` guard. The geometry that makes the "one guard, not the other" collapse sound is derived from three more methods read in full — `AbstractMonster`'s ctor (`drawX = WIDTH*0.75 + offsetX*xScale`, offsetX -1000 for the Shield / +70 for the Spear), `AbstractDungeon.java:1802-1806` (the Shield-and-Spear room is the ONE room that centres the player at `WIDTH/2` and does not reset `flipHorizontal` — every other room does both), and `Settings`'s always-positive `xScale` — substituting shows the two guards sit on strictly opposite sides of the player at every resolution, so `applyBackAttack` reduces to "the player is not facing this one" while both live. Landed as one flag bit (`kCombatFlagPlayerFacingLeft`) plus the already-stored `MonsterState::draw_x` ordering key, `include/sts/engine/back_attack.hpp` / `back_attack.cpp` | `applyBackAttack` (AbstractMonster.java:1015-1017) reads the player's `flipHorizontal`, which changes when a target is hovered (AbstractPlayer.java:1291-1293) and is re-evaluated on every hand layout (CardGroup.java:204-223). The proposed collapse — "with exactly two guards, the one the player is not facing takes 1.5×" — must be proven exact or rejected, against those three methods read in full **and** against a live Shield-and-Spear capture where the player attacks each guard in turn |
 | **Act-4 first-row map choice width** | s3-design §4.4 | **DISCHARGED 2026-09-03 by S3.32 — the width is ONE, and the boss edge is `MAP_BOSS` exclusively.** Answered from the fork's source rather than from a capture, which the row allowed and which is stronger: `ChoiceScreenUtils.getMapScreenNodeChoices`' `!firstRoomChosen` arm iterates `map.get(0)` and adds a node **only if `node.hasEdges()`**, and Act 4's six empty row-0 nodes have none — so the first-row choice list is the single entry `x=3`, and `MapRoomNode.update`'s live hitboxes are a rendering fact with no choice-list consequence. For the second half, `bossNodeAvailable()` repeats DungeonMap.java:68's disjunction verbatim and `getMapScreenChoices` **returns early** with the single choice `"boss"` whenever it holds — the node list is never reached, so the explicit elite→boss `MapEdge` (:88) produces no `x=3` alternative, and `makeMapChoice` throws on any index but 0. The engine encodes the elite node's onward edge as `kEdgeBoss` ALONE for exactly this reason; its mask, probed at every Act-4 row, reads `x=3` / `x=3` / `x=3` / boss / nothing. s3-design §4.4 carries both resolutions | `MapRoomNode.update`'s first-room arm gates only on `y == 0` and hover (:254-279), and Act 4's row 0 has six roomless nodes beside the rest room. Whether the game offers 1 or 7 candidates decides the legal-action mask; an over-wide mask is a leak-gate problem, not a cosmetic one. Answer from the fork's own `ChoiceScreenUtils` output on the first Act-4 capture, and pin the same source for the elite→boss action kind (`MAP_BOSS` vs `MAP_NODE`, DungeonMap.java:68) |
 | **The Act-4 floor pair is A20-dependent** | s3-design §4.3 | **LANDED 2026-09-03 by S3.32; the CAPTURE half stays open on S3.62.** `RunState::act4_floor_base` is written by `act4_crossing` from the unchanged Door floor before `rs.act` moves, and `run_cur_row` reads it through the new `act_floor_base_of(rs)` (`event_map_row`'s independent restatement takes the same branch). **Both halves are witnessed on ONE seed at BOTH bands** — STS103509 / `sim_search` / ps347, the row's own "separate witnesses" demand: A19 gives Door floor 51 and `act4_floor_base` 51, A20 gives 52 and 52, and the per-row mask probe reproduces design §4.3's whole column (rest 52/53, shop 53/54, elite 54/55, boss 55/56). The witness forces the three keys at the dialog because no keyed sim victory exists (S3.22), so the numbers are engine-attested and not yet oracle-attested; the two discharging captures (an Act-4 entry at A20 and one below) are named in S3.32's Log and are **S3.62's** | Act 4's floor base is 51 below A20 and 52 at A20, because the A20 second Act-3 boss room is a real floor. That breaks `act_floor_base(act) = (act-1) * kActFloorSpan`, so the base must be run state written at the crossing and `run_cur_row` must read it. Both halves need **separate** witnesses at **both** ascension bands — a single matching number on one band hides the pair, which is the mistake s2-design §4.2's row existed to prevent |
 | **The emerald key's CLAIM, and with it §5 trap 1, has no capture** | S3.11 | **DISCHARGED 2026-09-03 by S3.23** — captured, and the row's expectation is CORRECTED. Seven same-seed PAIRS were captured and all replay zero-diff (`_oracle_data/s3/s323_capture_ledger.tsv`); the exemplar is `s323_STS507768_keys` (EMERALD_KEY claimed at the floor-8 burning elite, SAPPHIRE_KEY at the floor-9 chest, a Recall campfire, Act 2 entered) beside `s323_STS507768_ctrl` on the same seed. **The two acts' maps differ in exactly the burning-elite MARK, not in layout** — the keys line's Act-2 map carries no `has_emerald_key` node, the control's carries one at `(3,6)`, and every other node of the 15-row map is identical. That is not a weaker result, it is the correct one: `mapRng` is RE-SEEDED at each act's construction (`Exordium.java:56`, `TheCity.java:46`, `TheBeyond.java:44`, `TheEnding.java:49` — `Settings.seed + actNum*K`), and `setEmeraldElite` is the LAST consumer of that act's stream (AbstractDungeon.java:538, after `distributeRoomsAcrossMap`), so the skipped draw cannot shift any later layout. What the gate changes is that no act generated while the key is held places a burning elite at all. Both halves of each pair replay zero-diff against the differ's map comparison, so a sim that kept drawing would RED on the keys line. `s323_STS508459_keys` is the independent positive control from the other side: it claims the emerald key in ACT 2, so its Act-2 map DOES carry the mark. The pair is promoted into the committed `keys_a20_4` corpus | The engine assembles the `EMERALD_KEY` row, skips `setEmeraldElite`'s `mapRng` draw once the key is held, and both are corpus-clean — but no committed capture ever *presses* the key row, and none takes a key and then crosses an act. So the highest-risk change in S3 is landed on a source read plus a zero-diff that cannot see it. The discharging capture is a PAIR on one seed: emerald claimed → next act generated, and emerald skipped → next act generated, with the two acts' maps **differing**. A single matching run is not evidence, because a sim that kept drawing would still match a capture that never took the key |
@@ -1838,7 +1838,7 @@ are S3's own.
   bands were printed from the **built tables** by a throwaway program and are
   quoted in the commit body.
 
-- **S3.42** `[ ]` **Shield and Spear.** The Act-4 elite, both actors and the
+- **S3.42** `[x]` **Shield and Spear.** The Act-4 elite, both actors and the
   two flag powers. **SpireShield** (SpireShield.java:36-176): fixed HP
   110/125@A8, damage 12/34 → 14/38@A3, `FORTIFY_BLOCK` 30, the
   pre-battle `SurroundedPower` **on the player** plus Artifact 1/2@A18, the
@@ -1903,7 +1903,108 @@ are S3's own.
   no-op there); fixtures byte-identical. `UNVERIFIED-until-captured` until
   **S3.62** delivers the two kill-order captures the design §5 trap 7 witness
   requires, replayed `--combat` zero-diff; named here.
-  **Log:** —
+  **Log:** 2026-09-03. Continued a killed agent's uncommitted worktree
+  (`_wt/s342`); the prior hunk was audited line-by-line against the Java
+  before anything further was written, not trusted. Its stated last finding
+  ("neither `take_turn` queued the trailing `RollMoveAction`") was already
+  **fixed on disk** — both `spire_shield_take_turn` and `spire_spear_take_turn`
+  queue an unconditional `ROLL_MOVE` item outside the move switch, exactly as
+  SpireShield.java:110 / SpireSpear.java:113 do, on the same registered-body
+  pattern the Centurion/Chosen/Cultist already use; no fix was needed there,
+  only verification that it was true.
+  **Mechanisms landed** (both bodies, native — a data program cannot express
+  the fan-outs or the runtime branches involved): SpireShield's fixed HP
+  110/125@A8 (one `monster_hp_rng` draw over the degenerate range, the Nemesis
+  precedent), the `moveCount % 3` cycle (case 0's `aiRng.randomBoolean()`
+  coin, case 1's `lastMove(BASH)` read), the BASH move's short-circuited orb
+  branch (`kPlayerHasOrbs = false` for the orb-less Ironclad, so the
+  `randomBoolean()` is provably never evaluated and the Strength arm is
+  unconditional), FORTIFY's all-allies-including-self 30-block fan-out, and
+  SMASH's flat-99 A18+ block. SpireSpear's fixed HP 160/180@A8, its own
+  mirrored mod-3 cycle (coin on case 2, history read on case 0 — the
+  interleave the ledger predicted), BURN_STRIKE's two separate hits plus the
+  ascension-branched Burn pile (A18+ draw-pile top, no `cardRandomRng` draw),
+  PIERCER's +2-Strength-to-everyone-including-self fan-out, and SKEWER's
+  `skewerCount` (3, 4@A3) separate hits. Both guards' pre-battle Artifact
+  tiers, and the Shield's *additional* pre-battle `SurroundedPower` onto the
+  player — the game's only source of it. The byte-identical `die()` body
+  (`spire_guard_die_after`, registered by both ids so there is one copy, not
+  two that could drift): post-`super.die()`, walks every still-live group
+  member, faces the player toward it, removes `Surrounded` from the player
+  once, and removes `BackAttack` from that member if it is the one carrying
+  the marker — which is why the two kill orders queue a different number of
+  items (design §5 trap 7).
+  **The facing module** (`include/sts/engine/back_attack.hpp` +
+  `src/engine/back_attack.cpp`) resolves the deferred row below: one flag bit
+  (`kCombatFlagPlayerFacingLeft`) plus the already-stored `MonsterState::draw_x`
+  ordering key is the whole state `applyBackAttack` needs, because the
+  geometry — derived from `AbstractMonster`'s ctor (:152), the Shield-and-Spear
+  room's centred, non-resetting entry (`AbstractDungeon.java:1802-1806`,
+  the one room whose `lastCombatMetricKey` check skips the facing reset every
+  other room applies) and `Settings`'s always-positive `xScale` — proves the
+  two guards sit on strictly opposite sides of the player at every resolution,
+  so "the one the player is not facing" is exact and not an approximation.
+  The multiplier itself is applied where the Java's `AbstractMonster.applyPowers`
+  applies it: after `DamageInfo.applyPowers` has already floored and clamped
+  (`compute_damage`'s monster branch, `back_attack_multiply`), not at
+  `calculateDamage`'s differing mid-pipeline site, which the header records
+  has no engine consumer. Powers 136 SURROUNDED / 137 BACK_ATTACK landed
+  `native: true` with deliberately empty hook bodies (the Artifact
+  precedent) — S3.41's rows predicted "binds nothing, not native" and that
+  sentence is corrected in place in `powers.yaml`, because the generated
+  `STS_REGISTRY_NATIVE_POWERS` table odr-uses a handler per native row and
+  Surrounded/BackAttack are both read by a live predicate even though neither
+  responds to a hook.
+  **Master moved under this task mid-verification**
+  (`a5a8065`, the `MonsterLists`/`EncounterKeyId` change landed the same day)
+  — the worktree was rebased cleanly onto it (no conflicts in any S3.42 file)
+  and the full verification matrix was re-run from a clean rebuild rather than
+  trusted from before the rebase. The only fallout was in the scratch,
+  uncommitted witness harness (`build/` is gitignored): `elite_list[0]` /
+  `boss_list[0]` are now `EncounterKeyId` (`uint8_t`), not `string_view`, so
+  the harness was updated to call `encounter_key_of` / `encounter_key_id`
+  instead of indexing `.size()`/`.data()` on a byte.
+  **Verification, all six presets plus the oracle/vitals/fixture/witness/soak
+  bar** (owner directive, conventions §1 — no unit tests written or run):
+  `win-debug` and WSL `debug`/`asan`/`release` all **build** clean
+  (`tools/wsl_run.sh --script tools/build_presets.sh debug asan release`; the
+  win-debug wrapper `s342fin.cmd`). `tools/corpus_replay.sh`: `act1_a20_50`,
+  `three_act_a20_5` and `keys_a20_4` all **ZERO-DIFF**, all three injected
+  controls **fail loud**. `--vitals` over the same three corpora: **59/59
+  files vitals-clean**. `gen_combat_fixtures`: 20/20 regenerated,
+  `git status tests/golden/` **empty** (byte-identical). The witness harness
+  (extends the S3.33 `act4_rooms_witness` shape) ran a real `SIM_SEARCH` run
+  with keys forced at the `Spire Heart` dialog at both **A20** (seed
+  `IRONBEAK`/12345) and **A19** (seed `IRONBEAK`/777); neither reached Act 4
+  before the run ended (step 204 / step 197) — expected and not a defect: the
+  S3.61/S3.62 ledger rows already establish that reaching the Act-4 elite
+  under any current `PolicyKind` is a dedicated-campaign problem (39,296
+  key-policy rows produced zero Act-3 victories), not a single-seed one, and
+  every facing/kill-order claim in this task's code carries its own
+  `UNVERIFIED-until-captured` marker for exactly that reason. The harness's
+  Part B, a scripted spawn + pre-battle + kill-order pair on a standalone
+  combat, is not gated on reaching Act 4 and is the mechanism's real witness:
+  pre-battle, `Surrounded=-1`/`Strength=-1` on the player, `SpireShield`
+  `backAttack=YES(x1.5)` (facing right, Shield at `x=-1000` is on the far
+  side) and `SpireSpear backAttack=no`; `monster_hp_rng` counter after spawn
+  is **2** (trap 4's "exactly two draws", confirmed, not assumed). Killing
+  the **Shield** first: the Spear survives holding no `BackAttack` marker (it
+  never carried one) and the die-loop queues **one** item (the Surrounded
+  removal only). Killing the **Spear** first: the Shield survives, the
+  player's facing flips to `LEFT(flip)` (facing the new sole target), and the
+  die-loop queues **two** items — the Surrounded removal **and** the
+  Shield's own `BackAttack` removal, because the Shield entered the loop
+  still marked. Both sequences match the derivation exactly, including the
+  item-count asymmetry design §5 trap 7 predicts. `fuzz_soak --seeds 500
+  --ascension 20`: **failures: 0**, `no_progress` 0/4500 cases — Act 4 and
+  both guards are outside a 500-seed heuristic soak's reach (consistent with
+  the campaign numbers above), so this bar is about the rest of the engine
+  staying green under the new dispatch cases, translation units and registry
+  flags, which it does.
+  **Left for S3.62** (named, not silently dropped): the live capture half of
+  the facing derivation, and the two kill-order captures replayed `--combat`
+  zero-diff design §5 trap 7 asks for. Everything derivable from source and
+  from the scripted sim witness is landed and verified above.
 
 - **S3.43** `[x]` **The Corrupt Heart.** The final boss
   (CorruptHeart.java:49-211). Fixed HP 750/800@A9, damage 40/2 → 45/2@A4 with

@@ -11,6 +11,7 @@
 #include <cstdint>
 
 #include "sts/engine/action_queue.hpp"  // add_to_bottom, kActor* sentinels
+#include "sts/engine/back_attack.hpp"   // the PotionPopUp facing write (S3.42)
 #include "sts/engine/card_play.hpp"     // roll_random_target (Distilled Chaos)
 #include "sts/engine/cards.hpp"         // CardEffectStep
 #include "sts/engine/combat_state.hpp"
@@ -129,6 +130,43 @@ bool use_potion(CombatState& s, PotionId id, uint8_t target) noexcept {
         // run layer's legality gate should already have kept this action off the
         // mask; this is the second line of defence for a direct caller.
         return false;
+    }
+    // S3.42 -- THE PLAYER'S FACING, the potion twin of AbstractPlayer.playCard.
+    // PotionPopUp.updateInput (:197-202), the targeted-potion arm:
+    //     if (this.hoveredMonster != null) {
+    //         if (AbstractDungeon.player.hasPower("Surrounded"))
+    //             player.flipHorizontal = hoveredMonster.drawX < player.drawX;
+    //         ... this.potion.use(this.hoveredMonster);
+    // -- so it happens only when a monster was actually AIMED AT, and BEFORE
+    // use(). `hoveredMonster != null` is reached only for a target-required
+    // potion; PotionDef carries no such column, so the equivalent test here is
+    // "this potion's program actually consumes the target", i.e. it has a
+    // CARD_TARGET step. That is exact for every potion in the registry -- a
+    // native potion's body ignores `target` outright (dispatch_native_potion's
+    // parameter is unnamed) and a self potion has no CARD_TARGET step -- and it
+    // cannot misfire on a caller that passes a stale target with a self potion.
+    // Dead outside the Act-4 elite: the Surrounded guard below is the outer one.
+    if (target < s.monster_count && target < kMonsterCap) {
+        bool aims_at_target = false;
+        for (uint8_t k = 0; k < def->step_count; ++k) {
+            if (def->steps[static_cast<std::size_t>(k)].target ==
+                StepTarget::CARD_TARGET) {
+                aims_at_target = true;
+                break;
+            }
+        }
+        bool surrounded = false;
+        for (uint8_t i = 0; i < s.player_power_count && i < kPowerCap; ++i) {
+            if (s.player_powers[i].power_id ==
+                static_cast<uint16_t>(PowerId::SURROUNDED)) {
+                surrounded = true;
+                break;
+            }
+        }
+        if (aims_at_target && surrounded) {
+            set_player_facing_toward(s, target);
+            refresh_back_attack_markers(s);
+        }
     }
     const int potency_scale =
         player_has_relic(s, RelicId::SACRED_BARK) ? 2 : 1;

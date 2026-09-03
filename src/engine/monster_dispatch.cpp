@@ -60,6 +60,8 @@
 #include "sts/engine/monster_spire_growth.hpp"  // the Spire Growth: a PLAYER-power query
 #include "sts/engine/monster_transient.hpp"  // the Transient: Fading ramp, one ai draw
 #include "sts/engine/monster_writhing_mass.hpp"  // the Writhing Mass: recursive getMove
+#include "sts/engine/monster_spire_shield.hpp"  // SpireShield + the shared guard die()
+#include "sts/engine/monster_spire_spear.hpp"   // SpireSpear
 #include "sts/registry/manifest.hpp"           // generated kMonstersCount
 
 namespace sts::engine {
@@ -299,13 +301,26 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &bandit_leader_init;
         case MonsterId::BANDIT_BEAR:
             return &bandit_bear_init;
+        // S3.42: the Act-4 elite pair. Registering these two init fns is the
+        // whole of what un-parks encounters.yaml 62 `Shield and Spear`, exactly
+        // as the Looter's did for its groups -- the run layer's gate is
+        // monster_init_fn(id) == nullptr, asked of this switch directly. Each
+        // spends EXACTLY ONE monster_hp_rng draw over a one-wide range
+        // (setHp(int) == setHp(hp, hp), AbstractMonster.java:777-779 -> :765-766),
+        // so the spawn spends TWO -- s3-design section 5 trap 4, and the reason
+        // neither may "optimise away" a degenerate range. CORRUPT_HEART is
+        // S3.43's, cased below.
+        case MonsterId::SPIRE_SHIELD:
+            return &spire_shield_init;
+        case MonsterId::SPIRE_SPEAR:
+            return &spire_spear_init;
         // S3.43 -- the Act-4 BOSS. ONE degenerate monster_hp_rng roll
         // (single-arg setHp is setHp(hp, hp), AbstractMonster.java:777-779; the
         // S2.28 reading, restated by s3-design section 5 trap 4 as REWRITTEN by
         // S3.41). Registering this init fn is what UN-PARKS the `The Heart`
         // encounter (encounters.yaml 63): the run layer's gate is
         // monster_init_fn(id) == nullptr, asked of this switch directly. The
-        // Act-4 ELITE pair is S3.42's and takes its own cases beside this one.
+        // Act-4 ELITE pair is S3.42's, cased above.
         case MonsterId::CORRUPT_HEART:
             return &corrupt_heart_init;
     }
@@ -443,6 +458,16 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &bandit_leader_take_turn;
         case MonsterId::BANDIT_BEAR:
             return &bandit_bear_take_turn;
+        // S3.42: the Act-4 elite pair. Both takeTurn bodies are the registry
+        // program PLUS something a step list cannot express -- the Shield's
+        // FORTIFY all-allies block fan-out and short-circuited BASH orb branch,
+        // the Spear's PIERCER all-allies Strength fan-out, skewerCount hit count
+        // and ascension-branched Burn pile -- so both are native bodies rather
+        // than bare queue_monster_move_effects calls.
+        case MonsterId::SPIRE_SHIELD:
+            return &spire_shield_take_turn;
+        case MonsterId::SPIRE_SPEAR:
+            return &spire_spear_take_turn;
         // S3.43 -- the Act-4 BOSS.
         case MonsterId::CORRUPT_HEART:
             return &corrupt_heart_take_turn;
@@ -699,6 +724,18 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             // derived slot map), so it takes the whole state -- the Centurion
             // reason.
             return &collector_roll_move;
+        // S3.42: the Act-4 elite pair, the registration the S3.41 note above
+        // predicted. Both takeTurn bodies end in `addToBottom(new
+        // RollMoveAction(this))` OUTSIDE the switch (SpireShield.java:110,
+        // SpireSpear.java:113), so every move body reaches it. Both getMove
+        // overrides IGNORE the rolled num on every arm -- and both bodies spend
+        // the aiRng.random(99) anyway, because AbstractMonster.rollMove draws it
+        // before calling getMove (AbstractMonster.java:465-467); one arm of each
+        // mod-3 cycle then spends a SECOND draw on an aiRng.randomBoolean().
+        case MonsterId::SPIRE_SHIELD:
+            return &spire_shield_roll_move;
+        case MonsterId::SPIRE_SPEAR:
+            return &spire_spear_roll_move;
         // S3.43 -- the Act-4 BOSS. CorruptHeart.takeTurn ends in
         // `addToBottom(new RollMoveAction(this))` OUTSIDE the switch
         // (CorruptHeart.java:168), so every move body reaches it and getMove
@@ -1664,6 +1701,18 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::SPIRE_GROWTH:
         case MonsterId::MAW:
             return nullptr;
+        // S3.42: the Act-4 elite pair, the registration the S3.41 note above
+        // predicted. The Shield (SpireShield.java:69-77) queues SurroundedPower
+        // ON THE PLAYER -- the game's ONLY construction of it -- and then
+        // Artifact 1 (2 at A18+); its body also queues the BackAttack marker that
+        // AbstractMonster.applyPowers addToTop's when that Surrounded RESOLVES,
+        // at the identical queue position (monster_spire_shield.hpp note 4). The
+        // Spear (SpireSpear.java:73-80) queues Artifact ONLY, at the same tiers,
+        // and NO Surrounded. Neither draws any stream. CORRUPT_HEART is S3.43's.
+        case MonsterId::SPIRE_SHIELD:
+            return &spire_shield_use_pre_battle_action;
+        case MonsterId::SPIRE_SPEAR:
+            return &spire_spear_use_pre_battle_action;
 
         // S3.43 -- the Act-4 BOSS. usePreBattleAction (CorruptHeart.java:88-103)
         // queues TWO items and NO ARTIFACT: InvinciblePower at 300 (200 at A19+,
@@ -1963,6 +2012,23 @@ MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
             // sim-visible: an UNSEEDED MathUtils sound coin, fadeInAmbiance,
             // onBossVictoryLogic, UnlockTracker. Explicit nullptr.
             return nullptr;
+        // S3.42: the Act-4 elite pair, the registration the S3.41 note above
+        // predicted -- and BOTH ids map to the SAME function, because the two
+        // Java bodies are byte-identical (SpireShield.java:164-176 ==
+        // SpireSpear.java:171-183) and a copy is the thing that would drift.
+        // Strictly post-super: the walk has no `m == this` term and excludes the
+        // dying guard only because super.die() has already set isDying -- the
+        // Reptomancer shape this slot exists for. Each surviving member costs one
+        // RemoveSpecificPowerAction("Surrounded") on the PLAYER (plus the
+        // flipHorizontal write that precedes it) and one
+        // RemoveSpecificPowerAction("BackAttack") on that member IF it carries
+        // the marker -- which is why KILL ORDER is observable in the number of
+        // items queued and in the survivor's power list
+        // (s3-design section 5 trap 7; UNVERIFIED-until-captured, S3.62 owes the
+        // two captures, one per order). CORRUPT_HEART is S3.43's.
+        case MonsterId::SPIRE_SHIELD:
+        case MonsterId::SPIRE_SPEAR:
+            return &spire_guard_die_after;
         case MonsterId::BANDIT_BEAR:
             // The ONLY deathReact producer in the game: `super.die()`, then
             // `for (m : monsters) { if (m.isDead || m.isDying) continue;

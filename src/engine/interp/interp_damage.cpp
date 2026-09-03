@@ -16,6 +16,7 @@
 #include "sts/engine/cards.hpp"             // CardId (Blood for Blood cost update)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
+#include "sts/engine/back_attack.hpp"       // monster_applies_back_attack, the 1.5x
 #include "sts/engine/monster_dispatch.hpp"  // on_monster_damaged (split interrupt)
 #include "sts/engine/potions.hpp"          // potion_def (Fairy in a Bottle potency)
 #include "sts/engine/power_hooks.hpp"       // power hook dispatch (wasHPLost/onAttacked)
@@ -1692,6 +1693,21 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt, int base,
         for (uint8_t i = 0; i < target.count; ++i) {
             tmp = at_damage_final_receive(tmp, target.slots[i]);
         }
+        // S3.42 -- THE BACK-ATTACK 1.5x, THE REAL-HIT SITE.
+        //
+        // It is NOT a power hook and it is NOT inside this float pipeline. The
+        // Java applies it in AbstractMonster.applyPowers (:1003-1007):
+        //     for (DamageInfo dmg : this.damage) {
+        //         dmg.applyPowers(this, AbstractDungeon.player);   // <-- the loop above
+        //         if (!applyBackAttack) continue;
+        //         dmg.output = (int)((float)dmg.output * 1.5f);
+        //     }
+        // i.e. AFTER DamageInfo.applyPowers has already floored and clamped
+        // (DamageInfo.java:67-70). So it lands after the floor below, not here --
+        // see the multiply under `out`. The CALCULATE-DAMAGE site (:982-984) is a
+        // different arithmetic in a different place and has no engine consumer;
+        // back_attack.hpp note (3) carries both and the worked example where they
+        // disagree by one.
     } else {
         // Player-owned attack (DamageInfo.java:71-99): the two halves below,
         // in sequence. Kept as the two public functions so a play-time-locked
@@ -1703,6 +1719,17 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt, int base,
     int out = mathutils_floor(tmp);  // one floor, at the very end (trap 1)
     if (out < 0) {
         out = 0;
+    }
+    // The back-attack multiply, on the ALREADY-FLOORED, ALREADY-CLAMPED output --
+    // AbstractMonster.applyPowers (:1006), see the note in the monster branch
+    // above. Reachable only on the monster-owned branch (the player is never
+    // "surrounded" as an attacker), and gated first on the player holding
+    // SurroundedPower, which no encounter but the Act-4 elite ever applies -- so
+    // in Acts 1-3 this is one predicate over an empty-of-Surrounded power list
+    // and nothing else. UNVERIFIED-until-captured: S3.62's Shield-and-Spear
+    // capture is the witness.
+    if (src != kActorPlayer && monster_applies_back_attack(s, src)) {
+        out = back_attack_multiply(out);
     }
     return out;
 }

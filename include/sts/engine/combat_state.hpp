@@ -388,6 +388,54 @@ inline constexpr uint32_t kCombatFlagOrangePelletsPower = 1u << 23;
 // it (the Centennial Puzzle divergence class).
 inline constexpr uint32_t kCombatFlagArtOfWarAttackPlayed = 1u << 24;
 
+// ---- S3.42: the player's FACING (AbstractCreature.flipHorizontal) -----------
+//
+// CombatState.flags bit for `AbstractDungeon.player.flipHorizontal`
+// (AbstractCreature.java:74, `= false`). It exists for exactly one reader:
+// AbstractMonster.applyBackAttack (AbstractMonster.java:1015-1017)
+//
+//     return player.hasPower("Surrounded")
+//         && (   player.flipHorizontal && player.drawX < this.drawX
+//             || !player.flipHorizontal && player.drawX > this.drawX);
+//
+// which is the whole gate on the hard-coded 1.5x back-attack multiplier. SET
+// means the player is facing LEFT (the Java's `flipHorizontal == true`).
+//
+// THE COMPLETE PRODUCER LIST, from `grep -rn flipHorizontal com/` with every hit
+// read (presentation-only draw/skeleton hits excluded):
+//   * AbstractDungeon.java:1802-1806 -- room entry. The Shield-and-Spear room
+//     moves the player to WIDTH/2 and DOES NOT reset the flag; every OTHER room
+//     entry moves them to WIDTH*0.25 and sets it false. A fresh `CombatState s{}`
+//     per combat (enter_combat, run_advance.cpp) therefore reproduces both arms
+//     exactly, with no reset code: the guards' room is entered from a room that
+//     already cleared it.
+//   * AbstractPlayer.playCard :1291-1293 -- `if (hasPower("Surrounded"))
+//     flipHorizontal = hoveredMonster.drawX < drawX`, for an ENEMY /
+//     SELF_AND_ENEMY targeted card. Reproduced in queue_card_play (card_play.cpp),
+//     which IS playCard's seam.
+//   * PotionPopUp :199-201 -- the same two lines for a TARGETED potion.
+//     Reproduced in use_potion (potions.cpp).
+//   * SpireShield.die :170 == SpireSpear.die :177 -- face the survivor.
+//     Reproduced in the guards' monster_die_after_fn bodies.
+//   * SmokeBomb :44 -- `flipHorizontal = !flipHorizontal`, and NOT reproduced:
+//     Smoke Bomb's own action ends the combat on the same beat
+//     (SmokeBombPotion.java:41-45 -> EscapeAction), so no later read of the flag
+//     exists. Recorded rather than left to inference.
+//   * AbstractPlayer.java:2288 -- cleared at the end of the escape animation,
+//     which this engine has no clock for and whose combat is already over.
+//
+// Storage rationale is the Centennial Puzzle / elite-room one: bit 25 was
+// RELEASED UNSPENT by the Stage-B grant table and was previously zero, so no
+// offset, no `sizeof`, no `SCHEMA_VERSION` and no committed fixture byte moves,
+// and enter_combat's fresh `CombatState s{}` is the per-combat reset. Like
+// kCombatFlagMugged / kCombatFlagCannotLose, it is internal, not reconstructed by
+// the translator, and not an acceptance-diff field.
+inline constexpr uint32_t kCombatFlagPlayerFacingLeft = 1u << 25;
+
+[[nodiscard]] inline constexpr bool player_facing_left(uint32_t flags) noexcept {
+    return (flags & kCombatFlagPlayerFacingLeft) != 0u;
+}
+
 inline constexpr uint32_t kCombatFlagOrangePelletsMask =
     kCombatFlagOrangePelletsAttack | kCombatFlagOrangePelletsSkill |
     kCombatFlagOrangePelletsPower;
@@ -743,6 +791,33 @@ inline constexpr uint32_t kMonsterFlagByrdFlying = 0x8000u;
 // rollMove -- this one is consumed on the FIRST QUEUED roll, one decision later,
 // which the init/roll split does not distinguish for free.
 inline constexpr uint32_t kMonsterFlagSphericSecondMove = 0x10000u;
+
+// S3.42 -- the two Act-4 guards' `moveCount` (SpireShield.java:41,:115,:136 ==
+// SpireSpear.java:42,:118,:139). BOTH classes carry the same field with the same
+// `% 3` cycle and the same trailing `++moveCount`, so ONE type-scoped 2-bit
+// range serves both: an encounter never contains a third reader, the two rows are
+// the same encounter's two slots, and neither ever coexists with a Spheric
+// Guardian or a Byrd. Bits 17-18 of the type-scoped region (0-23) were free.
+//
+// TWO BITS ARE ENOUGH AND THE WRAP IS THE JAVA'S. The Java field is a plain
+// `int` that increments forever and is only ever read as `moveCount % 3`, so any
+// counter congruent mod 3 is observationally identical. Stored mod 3 (0/1/2 --
+// the value 3 is never written), which makes the wrap free and the stored value
+// the cycle index itself.
+inline constexpr uint32_t kMonsterFlagSpireGuardMoveCountShift = 17u;
+inline constexpr uint32_t kMonsterFlagSpireGuardMoveCountMask = 0x60000u;
+
+[[nodiscard]] inline constexpr uint8_t spire_guard_move_count(
+    const MonsterState& m) noexcept {
+    return static_cast<uint8_t>((m.flags & kMonsterFlagSpireGuardMoveCountMask) >>
+                                kMonsterFlagSpireGuardMoveCountShift);
+}
+// `++this.moveCount`, stored mod 3 (see above).
+inline void spire_guard_bump_move_count(MonsterState& m) noexcept {
+    const uint32_t next = (spire_guard_move_count(m) + 1u) % 3u;
+    m.flags = (m.flags & ~kMonsterFlagSpireGuardMoveCountMask) |
+              (next << kMonsterFlagSpireGuardMoveCountShift);
+}
 
 // Maw `roared` (Maw.java:58,90-95,119-122). SET == the ROAR has RESOLVED, which
 // is what releases getMove from forcing it. Note the Java sets the field in
