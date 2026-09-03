@@ -1605,7 +1605,25 @@ class CampaignDriver:
                     if any(a in avail2 for a in ("confirm", "proceed")):
                         esc = "proceed"
                     elif "choose" in avail2 and (gs2.get("choice_list")):
-                        esc = "choose 0"
+                        # A `choose` escape presses a REAL decision, so it must
+                        # be the POLICY's decision, not row 0. S3.23 witness
+                        # (s323_STS508459_ctrl, reproduced twice at floor 6):
+                        # a Power Potion and a Colorless Potion drunk back to
+                        # back stack two discovery screens, and the game does
+                        # not re-arm ready_for_command after the first pick, so
+                        # this escape fired on the SECOND discovery screen and
+                        # took row 0 without advancing the script follower's
+                        # cursor -- which then stopped one step later, on a
+                        # combat state, asking for a card screen that had
+                        # already been consumed. Asking the policy keeps its
+                        # cursor and the game in step; row 0 stays the fallback
+                        # for a policy that cannot answer here (script mode has
+                        # no per-state policy at all).
+                        esc = None
+                        if self.args.policy != "script":
+                            esc = self._policy_command(state)
+                        if esc is None:
+                            esc = "choose 0"
                     else:
                         esc = "state"
                     rl.action(esc, state)
