@@ -6,7 +6,7 @@
 //
 // Provenance (D:\STS_BG_Mod\SlayTheSpireDecompiled), read in full:
 //   WrithingMass.java:37-195; ReactivePower.java; MalleablePower.java (reused
-//   unchanged from S2.22); AddCardToDeckAction.java:83-88;
+//   unchanged from S2.22); AddCardToDeckAction.java:12-26;
 //   ShowCardAndObtainEffect.java:30-45 (the Omamori gate); Parasite.java;
 //   AbstractMonster.java:705-715 (init/rollMove), 431-491 (moveHistory),
 //   765-779 (setHp BOTH overloads); RollMoveAction.java:17-21.

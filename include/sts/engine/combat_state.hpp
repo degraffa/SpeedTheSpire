@@ -417,10 +417,12 @@ inline constexpr uint32_t kCombatFlagArtOfWarAttackPlayed = 1u << 24;
 //     Reproduced in use_potion (potions.cpp).
 //   * SpireShield.die :170 == SpireSpear.die :177 -- face the survivor.
 //     Reproduced in the guards' monster_die_after_fn bodies.
-//   * SmokeBomb :44 -- `flipHorizontal = !flipHorizontal`, and NOT reproduced:
-//     Smoke Bomb's own action ends the combat on the same beat
-//     (SmokeBombPotion.java:41-45 -> EscapeAction), so no later read of the flag
-//     exists. Recorded rather than left to inference.
+//   * SmokeBomb.use :37-48 -- `flipHorizontal = !flipHorizontal` (SmokeBomb.java:
+//     44), and NOT reproduced: Smoke Bomb's own action ends the combat on the
+//     same beat (it sets escapeTimer/isEscaping, not an EscapeAction -- that
+//     class is monster-escape-only; AbstractPlayer.updateEscapeAnimation,
+//     :2281-2292, is what counts the timer down and calls endBattle()), so no
+//     later read of the flag exists. Recorded rather than left to inference.
 //   * AbstractPlayer.java:2288 -- cleared at the end of the escape animation,
 //     which this engine has no clock for and whose combat is already over.
 //

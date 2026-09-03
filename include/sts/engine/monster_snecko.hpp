@@ -5,7 +5,7 @@
 // data (monsters.yaml id 34); move SELECTION is native.
 //
 // Provenance (D:\STS_BG_Mod\SlayTheSpireDecompiled), read in full:
-//   Snecko.java:36-165; ConfusionPower.java:16-58;
+//   Snecko.java:36-165; ConfusionPower.java:16-54;
 //   ApplyPowerAction.java:80-82 (the 3-arg ctor) and :96-180 (update);
 //   AbstractPower.java:65 (the amount field initializer), :152-159 (stackPower);
 //   AbstractCreature.java:506-527 (addPower);

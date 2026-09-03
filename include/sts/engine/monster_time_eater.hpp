@@ -8,7 +8,7 @@
 // Provenance (D:\STS_BG_Mod\SlayTheSpireDecompiled), read in full:
 //   TimeEater.java:44-223; TimeWarpPower.java (see powers/power_time_warp.hpp);
 //   DrawReductionPower.java (powers/power_draw_reduction.hpp);
-//   RemoveDebuffsAction.java; HealAction.java:13-38 ->
+//   RemoveDebuffsAction.java; HealAction.java:13-36 ->
 //   AbstractMonster.heal (AbstractMonster.java:383-399);
 //   AbstractMonster.java:765-779 (setHp), :431-491 (move history).
 //

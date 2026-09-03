@@ -451,7 +451,7 @@ TEST(RelicRaresShop, IntangibleCapsDamageAtOneAndExpiresAtRoundEnd) {
     EXPECT_EQ(s.player_hp, 38);
 }
 
-// Brimstone.atTurnStart (Brimstone.java:44-51): +2 Strength to the player and +1
+// Brimstone.atTurnStart (Brimstone.java:33-40): +2 Strength to the player and +1
 // to every monster. The three addToTop calls REVERSE, so the resolution order is
 // the last monster, the earlier monsters, then the player.
 TEST(RelicRaresShop, BrimstoneBuffsPlayerTwoAndEveryMonsterOne) {

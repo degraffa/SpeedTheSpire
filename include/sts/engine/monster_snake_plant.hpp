@@ -5,15 +5,15 @@
 // data (monsters.yaml id 33); move SELECTION is native.
 //
 // Provenance (D:\STS_BG_Mod\SlayTheSpireDecompiled), read in full:
-//   SnakePlant.java:34-143; MalleablePower.java:12-83;
+//   SnakePlant.java:34-141; MalleablePower.java:12-83;
 //   FrailPower.java / WeakPower.java (the two SPORES debuffs, already registered);
 //   AbstractMonster.java:705-715 (init/rollMove), 765-775 (setHp),
 //   431-491 (moveHistory / lastMove / lastMoveBefore / lastTwoMoves);
 //   RollMoveAction.java:17-21.
 //
-// THE MOVE TREE (getMove, SnakePlant.java:121-142) IS TWO WHOLE ARMS, one per
+// THE MOVE TREE (getMove, SnakePlant.java:116-140) IS TWO WHOLE ARMS, one per
 // side of `ascensionLevel >= 17`, and the engine's fixed difficulty is A20, so
-// the A17+ arm (:122-133) is the live one. Transcribed, with the sub-A17 arm
+// the A17+ arm (:117-128) is the live one. Transcribed, with the sub-A17 arm
 // beside it because the ONLY difference is one disjunct:
 //
 //   num <  65:  lastTwoMoves(CHOMPY) ? SPORES : CHOMPY      (both arms, same)
@@ -31,11 +31,11 @@
 // (1) AI-RNG ACCOUNTING. One ai_rng.random(99) at init() -- and unlike the
 //     Chosen's or the Looter's, it is NOT discarded: getMove reads num on the
 //     very first call, so the opening move is seed-dependent. Then exactly one
-//     ai_rng.random(99) per turn via the trailing RollMoveAction (:114), which
+//     ai_rng.random(99) per turn via the trailing RollMoveAction (:112), which
 //     sits OUTSIDE takeTurn's switch so BOTH move bodies reach it. No branch
 //     spends a second draw: no nested randomBoolean, no recursion. One
 //     monster_hp_rng draw in the ctor, over the A7 column (78, 82). The BiteEffect
-//     jitter inside Chompy Chomps (:100) is libGDX MathUtils -- UNSEEDED, no
+//     jitter inside Chompy Chomps (:101) is libGDX MathUtils -- UNSEEDED, no
 //     seeded cost.
 //
 // (2) CHOMPY CHOMPS IS THREE SEPARATE HITS. The loop at :99-104 queues numBlows
@@ -54,8 +54,8 @@
 //
 // (4) NO ROLL-MOVE SPECIAL CASE, NO damage() CONSEQUENCE, NO SPAWN PATH.
 //     SnakePlant.java declares usePreBattleAction, changeState, damage, takeTurn
-//     and getMove. changeState's only key is "ATTACK" (:75-82), two spine calls;
-//     damage() (:85-91) is `super.damage(info)` plus the standard non-THORNS,
+//     and getMove. changeState's only key is "ATTACK" (:74-81), two spine calls;
+//     damage() (:84-90) is `super.damage(info)` plus the standard non-THORNS,
 //     output > 0 hit animation, so an empty on_monster_damaged hook is the
 //     complete translation. There is no die() override at all. Nothing splits or
 //     summons a Snake Plant.
@@ -72,7 +72,7 @@ namespace sts::engine {
 // Flat at every ascension.
 inline constexpr int32_t kSnakePlantMalleableAmount = 3;
 
-// getMove's decision (SnakePlant.java:121-142) as a pure function of the move
+// getMove's decision (SnakePlant.java:116-140) as a pure function of the move
 // history, the rolled `num`, and the ASCENSION -- which is a parameter rather
 // than the fixed kMonsterAscension precisely so the tier-2 tests can exercise the
 // sub-A17 arm, whose only difference is the `|| lastMoveBefore(SPORES)` disjunct

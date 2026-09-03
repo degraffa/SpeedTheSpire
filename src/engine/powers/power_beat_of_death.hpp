@@ -29,7 +29,7 @@
 //     ramp nor the player's Vulnerable moves the number (block still absorbs
 //     it) -- op_damage's NORMAL-only pipeline gate (interp/interp_damage.cpp).
 //   * PainfulStabsPower.onInflictDamage EXCLUDES THORNS
-//     (PainfulStabsPower.java:145-150), so the Heart's own Painful Stabs -- its
+//     (PainfulStabsPower.java:40-44), so the Heart's own Painful Stabs -- its
 //     buffCount == 2 rung (CorruptHeart.java:138) -- is NOT triggered by this
 //     pulse. Only BLOOD_SHOTS' landed hits pay Wounds.
 //

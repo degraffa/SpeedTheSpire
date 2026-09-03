@@ -16,7 +16,7 @@ void power_native_invincible(CombatState& s, Hook hook,
     if (hook != Hook::AT_START_OF_TURN) {
         return;  // the cap/drain is the apply_buffer site, not a hook
     }
-    // InvinciblePower.atStartOfTurn (InvinciblePower.java:95-99):
+    // InvinciblePower.atStartOfTurn (InvinciblePower.java:45-48):
     //     this.amount = this.maxAmt;
     // A FULL REFILL, not a decay, and unconditional -- a pool the player emptied
     // last turn is back at 300 (200 at A19+) when the Heart's own turn begins.

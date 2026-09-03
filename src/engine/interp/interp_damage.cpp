@@ -568,7 +568,7 @@ void cards_took_player_damage(CombatState& s) noexcept;
 }
 
 // Step 2, SECOND MEMBER (S3.43). InvinciblePower.onAttackedToChangeDamage
-// (InvinciblePower.java:82-93):
+// (InvinciblePower.java:32-42):
 //     if (damageAmount > this.amount) damageAmount = this.amount;
 //     this.amount -= damageAmount;
 //     if (this.amount < 0) this.amount = 0;
@@ -1139,7 +1139,7 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     // are byte-unchanged.
     int dmg = intangible_cap(s, tgt, amount);   // AbstractPlayer.java:1397-1399
     dmg = apply_buffer(s, tgt, dmg);            // AbstractPlayer.java:1412-1415
-    dmg = apply_invincible(s, tgt, dmg);        // InvinciblePower.java:82-93
+    dmg = apply_invincible(s, tgt, dmg);        // InvinciblePower.java:32-42
     dmg = apply_tungsten_rod(s, tgt, dmg);      // AbstractPlayer.java:1433-1435
     // The victim's powers' onAttacked, HP_LOSS arm. LoseHPAction routes through
     // creature.damage() (LoseHPAction.java:41), and that method's onAttacked

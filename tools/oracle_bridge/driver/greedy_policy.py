@@ -246,7 +246,7 @@ CARD_REWARD_TAKE_OPEN = 1000    # gate open: every card beats `skip`
 CARD_RANK_DAMAGE_WEIGHT = 2
 CARD_RANK_BLOCK_WEIGHT = 1
 CARD_RANK_ATTACK_BONUS = 40     # a deck short of attacks wants an ATTACK
-CARD_RANK_AOE_BONUS = 6         # the split is two targets (SlimeBoss.java:155-6)
+CARD_RANK_AOE_BONUS = 6         # the split is two targets (SlimeBoss.java:155-156)
 CARD_RANK_MAX = 200             # keeps the take band bounded and comparable
 
 # R1's gate. Ironclad starts with 6 attacks in 10 cards; the Act-1 boss needs

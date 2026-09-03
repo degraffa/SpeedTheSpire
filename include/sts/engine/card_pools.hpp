@@ -73,7 +73,7 @@ namespace sts::engine {
 // ONE AUTHORITY, DELIBERATELY. Every in-game caller of transformCard reaches
 // this list: Neow's TRANSFORM_CARD / TRANSFORM_TWO_CARDS (NeowReward.java:
 // 157-173) with NeowEvent.rng, and the event grids -- Living Wall
-// (LivingWall.java:53-61) and Transmorgrifier (Transmorgrifier.java:56-64) --
+// (LivingWall.java:67-75) and Transmorgrifier (Transmogrifier.java:44-55) --
 // with miscRng. The rng is the ONLY thing that differs, so it is the only
 // parameter. This used to be two independent renderings, and they drifted: the
 // event grids read a separately emitted `kEventTransformRedPool` that walked

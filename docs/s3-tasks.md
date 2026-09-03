@@ -2937,7 +2937,7 @@ this tree, not a Log carried forward.
   `check_stale_counts.sh` / `check_doc_links.sh` clean. No ctest run, per
   brief and the 2026-09-03 owner directive.
 
-- **S3.65** `[ ]` ∥ **Provenance sweep: the ~60 mirror sites and the four
+- **S3.65** `[x]` ∥ **Provenance sweep: the ~60 mirror sites and the four
   citation families.** Comment/provenance only. Bring `src/`, `include/`,
   `tests/` and `tools/` into line with the citations `wave3-citations`
   corrected in `registry/*.yaml`, and resolve the four out-of-range families
@@ -2951,7 +2951,41 @@ this tree, not a Log carried forward.
   checker run over the tree; six presets **build**; committed corpora
   zero-diff and fixtures byte-identical (a comment-only change that moves
   either is not comment-only); `check_doc_links.sh` clean.
-  **Log:** —
+  **Log:** 2026-09-03, worktree `s365` off `dbe4446` (S3.63 landed). The
+  ~60-mirror-site handoff and its three sibling out-of-range families
+  (nine repo-wide; eleven + fifteen in `relics.yaml`; nine in `cards.yaml`)
+  were **already applied** by `wave3-citations`/`wave3-integrate`
+  (`4db75c3`, 2026-07-29) — re-grepping every OLD citation string those
+  passes recorded finds zero survivors in `src/`, `include/`, `tests/`,
+  `tools/`. `docs/stage-b-tasks.md`'s six citation rows had their status
+  columns fixed from stale `UNASSIGNED` to `DISCHARGED` in place (their own
+  narratives already said so). A repo-wide mechanical checker (methodology
+  and full source in
+  [verification/s3-65-citations.md](verification/s3-65-citations.md), not
+  committed as a tool since it is itself new code and this task is
+  comments/docs-only) swept `include/`, `src/`, `tests/`, `tools/` (minus
+  `tools/fuzz/src/policy*.cpp`, `tools/oracle_bridge/planner/`,
+  `benchmarks/`) and `docs/` against both the decompiled game tree and the
+  vendored CommunicationMod fork source: 7,255 citations scanned, 20
+  genuinely wrong (wrong file, wrong line, or both — none overlapping the
+  wave3 families; found across 17 files, mostly monster/power comment
+  blocks whose citations drifted independently of one another, the same
+  "one bad authoring batch, not a mechanical offset" shape prior citation
+  rows record), all fixed after reading the cited Java in full. Full
+  old/new table, per-site verification, and the excluded-directory
+  read-only re-check (31 citations, all clean, no follow-up row needed) are
+  in the linked report. UNVERIFIED: none. No behaviour discrepancy found —
+  every fix is a citation/line correction or a same-meaning prose
+  tightening (SmokeBomb's escape is `AbstractPlayer.updateEscapeAnimation`'s
+  `escapeTimer` countdown, not an `EscapeAction` — that class is
+  monster-escape-only). Diff is comments and docs only, confirmed by
+  inspection (every changed source line's non-comment prefix is
+  byte-identical; two lines carry inline code with only their trailing
+  `//`/`#` citation comment changed). Six presets build (WSL debug/asan/
+  release; win-debug/win-asan/win-release via the vcvars64+LLVM wrapper,
+  clang-cl 22.1.8); all three committed corpora zero-diff on `release` and
+  `win-debug` (`--replay`/`--costs`/`--masks`, all six injected controls
+  fail loud); `check_stale_counts.sh` and `check_doc_links.sh` both clean.
 
 - **S3.66** `[x]` ∥ **Windows CI job.** The stage-b row, promoted by the
   evidence rule: with unit tests retired, CI's job is to prove the six presets

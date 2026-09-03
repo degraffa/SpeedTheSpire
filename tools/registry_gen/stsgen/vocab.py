@@ -359,7 +359,7 @@ OPCODES = {
     # S2.24's, ISSUED below. All three landed as bodies with no producer --
     # the consumers are the content batches this framework unblocked.
     #
-    # AddCardToDeckAction (AddCardToDeckAction.java:83-88): an in-combat write to
+    # AddCardToDeckAction (AddCardToDeckAction.java:12-26): an in-combat write to
     # the MASTER DECK. The Writhing Mass's MEGA_DEBUFF is the only producer in
     # Acts 1-3 (WrithingMass.java:118, a Parasite), and it is the only in-combat
     # master-deck writer in the game's first three acts -- every other obtain is
@@ -884,9 +884,9 @@ MONSTER_INTENTS = {
                           # IT IS NOT DONU'S. The dispatching brief assigned
                           # DEFEND_DEBUFF to Donu; the tree says otherwise and was
                           # re-read before the value was spent. Donu's Circle of
-                          # Protection telegraphs Intent.BUFF (Donu.java:339) and
+                          # Protection telegraphs Intent.BUFF (Donu.java:129) and
                           # Deca's Square of Protection telegraphs DEFEND below A19,
-                          # DEFEND_BUFF from A19 (Deca.java:507-511) -- three
+                          # DEFEND_BUFF from A19 (Deca.java:138-142) -- three
                           # constants that all already existed.
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting

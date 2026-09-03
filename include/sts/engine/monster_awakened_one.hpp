@@ -9,7 +9,7 @@
 //   AwakenedOne.java:67-377; AbstractMonster.java:621-707 (damage -> die),
 //   :765-779 (setHp), :915-919 (escape), :921-951 (die/die(bool)),
 //   :431-491 (move history); MonsterGroup.java:90-95; ClearCardQueueAction.java;
-//   CanLoseAction.java:12-15; HealAction.java:13-38; CardGroup.java:463-469
+//   CanLoseAction.java:12-15; HealAction.java:13-36; CardGroup.java:463-469
 //   (addToRandomSpot); CuriosityPower / UnawakenedPower / RegenerateMonsterPower.
 //
 // ============================================================================

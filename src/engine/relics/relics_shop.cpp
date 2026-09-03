@@ -16,7 +16,7 @@ namespace sts::engine {
 
 void relic_native_brimstone(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
                             const RelicHookContext& /*ctx*/) noexcept {
-    // Brimstone.atTurnStart (Brimstone.java:44-51):
+    // Brimstone.atTurnStart (Brimstone.java:33-40):
     //     addToBot(RelicAboveCreatureAction)                 -- cosmetic
     //     addToTop(ApplyPowerAction(player, player, Strength 2))
     //     for (m : monsters) addToTop(ApplyPowerAction(m, m, Strength 1))

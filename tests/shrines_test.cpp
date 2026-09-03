@@ -214,7 +214,7 @@ TEST(Transmorgrifier, TransformSpendsExactlyOneMiscRngDrawOnTheSameColorPool) {
     set_deck(rc.run, {{CardId::ANGER, 0}, {CardId::DEFEND, 0}});
     rc.combat.misc_rng = from_seed(31337);
     RngStream expected_rng = rc.combat.misc_rng;
-    // Transmorgrifier.buttonEffect (Transmorgrifier.java:56-64) is Living
+    // Transmorgrifier.update (Transmogrifier.java:44-55) is Living
     // Wall's pair: removeCard, then transformCard(..., miscRng). The
     // expectation is therefore the shared `transform_card` (card_pools.hpp) off
     // the event's own stream; the LIST's order is pinned separately and without

@@ -729,8 +729,8 @@ bool event_grid_transform_card(RunState& rs, EventDialogState& es,
         static_cast<CardId>(rs.master_deck[deck_index].card_id);
 
     // LivingWall.update removes first, then transformCard(..., miscRng)
-    // (LivingWall.java:53-61); Transmorgrifier.buttonEffect is the same pair
-    // (Transmorgrifier.java:56-64). The list transformCard builds is
+    // (LivingWall.java:67-75); Transmorgrifier.update is the same pair
+    // (Transmogrifier.java:44-55). The list transformCard builds is
     // `transform_card` (card_pools.hpp) -- THE one authority for
     // AbstractDungeon.transformCard (:860-878) and its
     // returnTrulyRandomCardFromAvailable list (:1016-1045), shared with Neow's
