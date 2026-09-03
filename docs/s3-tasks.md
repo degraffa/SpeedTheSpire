@@ -2669,7 +2669,7 @@ are S3's own.
   (`tools/build_presets.sh` through `tools/wsl_run.sh --script`).
   `tools/check_stale_counts.sh` and `tools/check_doc_links.sh` both exit 0.
 
-### S3-G1 `[ ]` **Gate: S3 rules complete** — tag `s3-g1-content`
+### S3-G1 `[x]` **Gate: S3 rules complete** — tag `s3-g1-content`
 **Deps:** all S3.1x, S3.2x, S3.3x, S3.4x, S3.5x
 The design §6 S3-G1 bar, checked literally: every §2 inventory row landed and
 either witnessed by a zero-diff capture or explicitly
@@ -2678,13 +2678,99 @@ trap discharged by its Witness clause or carrying the same marker; the
 `a20.yaml` rows IMPLEMENTED with the A20 capture that exercises each named;
 the ≥ 10M-action four-act soak clean with its per-key and per-act witnesses;
 six presets **building** green with the Stage-A fixtures, golden vectors and
-both committed CI corpora byte-identical / zero-diff; the information layer at
+all three committed CI corpora byte-identical / zero-diff; the information layer at
 `PUBLIC_VIEW_VERSION` 7 with the GT0 leak gates green;
 `check_stale_counts.sh` + `check_doc_links.sh` clean. **The gate publishes the
 full `UNVERIFIED-until-captured` list** — that list is S3.62's work order, and
 a gate that cannot print it has not been checked. Then: update CLAUDE.md
 "Current state".
-**Log:** —
+**Log:** 2026-09-03 — **TAKEN**, re-verified literally on the integrated
+tree (base `759f73237b9068a5a5ec6447ee8698c602afc787`,
+`_wt/s3g1`/`s3g1`), all S3.1x/2x/3x/4x/5x deps `[x]` except **S3.23 `[~]`**,
+whose one owed item (the Black Star burning-elite capture) is carried
+forward explicitly below and to S3.62, per the orchestrator's decision that
+the gate is taken with that residue published rather than silent. Full
+report: [verification/s3-g1-content.md](verification/s3-g1-content.md).
+
+**(1) Six presets build.** `win-debug`/`win-asan`/`win-release` via a
+task-scoped vcvars64+LLVM wrapper (`s3g1env.cmd`, `/EHsc` verified present)
+and WSL `debug`/`asan`/`release` via `tools/wsl_run.sh --script
+tools/build_presets.sh debug asan release` — `PRESETS BUILT: debug asan
+release`. All six exit 0.
+
+**(2) Stage-A fixtures / golden vectors byte-identical.**
+`gen_combat_fixtures.exe` run once: `generated 20/20 fixtures`;
+`git status tests/golden/` empty before and after.
+
+**(3) All three CI corpora zero-diff, controls fail loud.**
+`tools/wsl_run.sh --script tools/corpus_replay.sh` (release): `act1_a20_50`,
+`three_act_a20_5`, `keys_a20_4` all **ZERO-DIFF** under `--replay`,
+`--costs` and `--masks`; all nine injected negative controls (`state`/
+`cost`/`mask` × 3 corpora) fail loud. `--replay --vitals` over
+`three_act_a20_5` and `keys_a20_4`: both **VITALS-CLEAN**.
+
+**(4) Information layer.** `PUBLIC_VIEW_VERSION = 7`
+(`include/sts/engine/public_view.hpp:155`). `twin_test` run directly, all
+eleven cases green (stale-count-ok — a fresh run result, not a carried
+claim), per-phase sweep `10737 states; phase0=0 phase1=345 phase2=687
+phase3=7495 phase4=1579 phase6=120 phase7=67 phase8=18 phase9=360
+phase10=66`, plus the directed Act-4 coverage table (16 states × 15 twin
+seeds at A15 and A20) zero leaks. `tripwire_test` run directly, all ten
+cases green (stale-count-ok, same basis), all
+three negative controls fire by name. `tools/dist_check/sampler_dist.sh
+release` (nightly mode): 5/5, all nine pre-registered hypotheses retained
+under Holm, three mutants correctly rejected. `sampler_dist_test` also run
+directly in smoke mode (`STS_SAMPLER_DIST_MODE` unset): 5/5, eight
+hypotheses retained (H9/seedfilter not executed at smoke scale), same three
+mutants rejected.
+
+**(5) Four-act soak.** [verification/s3-52-four-act-soak.md](verification/s3-52-four-act-soak.md)
+exists; all 17 recorded sha256 artifacts under
+`D:\STS_BG_Mod\_oracle_data\s3\s352_soak\` recomputed and matched exactly
+— 17/17. Not re-run (the instruction is to verify the artifacts, not repeat
+a 10M-action soak).
+
+**(6) `check_stale_counts.sh` / `check_doc_links.sh`.** Both clean
+(`check_stale_counts: clean`; `check_doc_links: clean (61 files scanned, 65
+indexed)`), re-run after every doc edit in this commit.
+
+**(7) Document conflicts found and fixed at this gate** (conventions §4):
+three `s3-design.md` §2.3/§4.1 `UNVERIFIED — needs decompile check` /
+open-decision markers whose resolution was already landed (S3.31, S3.42)
+and recorded in this ledger's Deferred-obligations table, but whose
+placeholder text in the design doc itself had never been rewritten —
+rewritten in place with new §9 change-log entries (back-attack facing,
+the `SpireHeart$CUR_SCREEN` ordinal order, the clicks-1-2 collapse
+decision). This task's own bar text ("both committed CI corpora") was
+stale since S3.23 promoted a third corpus (`keys_a20_4`) — corrected to
+"all three" in the same edit that found it.
+
+**(8) The `UNVERIFIED-until-captured` list — published.**
+[verification/s3-g1-content.md](verification/s3-g1-content.md) §8: 10
+registry rows (§2 inventory), 11 §5 traps (trap 1 fully discharged by
+S3.23, trap 11 half-discharged — the floor half witnessed by the committed
+three-act corpus, the Maw Bank gold half owed), 8 `a20.yaml` rows (all
+IMPLEMENTED with the discharging capture named in-row), and 11 task-level
+capture debts named in their own Logs (S3.11/S3.23's Black Star capture,
+S3.24's Courier restock, S3.31's Maw Bank + Door arm, S3.32's two Act-4
+entries, S3.33's four rooms, S3.41's two fights, S3.42's kill orders +
+facing, S3.43's Heart capture, S3.44's Beat of Death drain, and — flagged
+as a genuine gap with no current owner — `EchoForm`/`cardsDoubledThisTurn`,
+the fifth `misc_field` union member, which is not Act-4-gated at all and
+needs only an ordinary Echo-Form capture). 40 rows tracked; 38 outstanding.
+Every outstanding row funnels into a handful of physical captures: one
+Shield-and-Spear fight (both kill orders), one Heart-kill capture (a
+lethal Beat-of-Death turn, an Invincible pool exceed + restore, `buffCount`
+≥ 3, the terminal `miscRng` gold), two Act-4 entry captures (A20 + below
+A20), an Act-4 shop purchase, an Act-4 rest, a `Spire Heart` capture
+holding Maw Bank, a Black Star burning-elite claim, a Courier restock, and
+an ordinary Echo Form capture. The shared reach precondition (a keyed A20
+double-boss victory) is unmet today (S3.22: 39,296 key-policy rows, zero
+keyed victories) — S3.61 re-measures it and S3.62 schedules the captures
+against whatever it finds.
+
+**Nothing failed to reproduce.** Every item above is a fresh command run on
+this tree, not a Log carried forward.
 
 ## Phase S3.6 — Verification campaigns + S3 exit
 

@@ -241,11 +241,20 @@ twice in `AbstractMonster`: in `calculateDamage` for the intent number
 `applyBackAttack()`. The player's facing flips when a target is chosen
 (AbstractPlayer.java:1291-1293) and is re-evaluated on every hand layout
 (CardGroup.refreshHandLayout, CardGroup.java:204-223).
-`UNVERIFIED — needs decompile check`: whether the *engine* must model facing
-at all, or whether the S3 collapse "the monster the player is not facing takes
-1.5×, and there are exactly two of them" is exact — resolve at the S3.42 task
-by reading `refreshHandLayout`, `AbstractPlayer.java:1285-1300` and
-`AbstractMonster.java:998-1023` in full, and pin the answer either way.
+**RESOLVED 2026-09-03 by S3.42 (§9):** the engine must model facing, and the
+S3 collapse is exact. `include/sts/engine/back_attack.hpp` +
+`src/engine/back_attack.cpp` derive it from one flag bit
+(`kCombatFlagPlayerFacingLeft`) plus the already-stored `MonsterState::draw_x`
+ordering key: `AbstractMonster`'s ctor (:152), the Shield-and-Spear room's
+centred, non-resetting entry (`AbstractDungeon.java:1802-1806` — the one room
+whose `lastCombatMetricKey` check skips the facing reset every other room
+applies) and `Settings`'s always-positive `xScale` together prove the two
+guards sit on strictly opposite sides of the player at every resolution, so
+"the one the player is not facing" is exact and not an approximation. The
+multiplier is applied where `AbstractMonster.applyPowers` applies it — after
+`DamageInfo.applyPowers` has already floored and clamped — not at
+`calculateDamage`'s differing mid-pipeline site, which has no engine
+consumer.
 
 ### 2.4 Events — 1 new registry row
 
@@ -462,12 +471,16 @@ grants nothing** — no reward, heal, relic, gold or RNG.
 | 4b | GO_TO_ENDING | the Door | `goToFinalAct()` → `screen = DOOR_UNLOCK`, `doorUnlockScreen.open(true)` (:178-184, :94-98) |
 
 The constructor (:64-92) is entirely score/leaderboard/publisher bookkeeping
-and changes no run state. `UNVERIFIED — needs decompile check`: the ordinal
-order of the stripped inner enum `SpireHeart$CUR_SCREEN`, which CFR rendered as
-bare integer case labels. The mapping above is *derived* from the arms' bodies
-and is unambiguous behaviourally (INTRO=1, MIDDLE=2, MIDDLE_2=3, DEATH=4,
-GO_TO_ENDING=5); recovering the enum itself is a mechanical run of the
-`RECOVERED-INNER-CLASSES.md` §2 procedure and is owned by an S3 row.
+and changes no run state. **RESOLVED 2026-09-03 by S3.31 (§9):** the ordinal
+order of the stripped inner enum `SpireHeart$CUR_SCREEN` was recovered
+mechanically (`RECOVERED-INNER-CLASSES.md` §2, via `javap` against the shipped
+`desktop-1.0.jar`) and the derivation above was right: `INTRO 0, MIDDLE 1,
+MIDDLE_2 2, DEATH 3, GO_TO_ENDING 4` — the bare `case N:` labels CFR rendered
+are the ordinals plus one. `VictoryRoom$EventType` was recovered in the same
+pass (`HEART = 1`, `NONE = 2`). The recovered classes are not committed
+(conventions §2 licence hygiene); the derivation is recorded at
+`src/engine/events/spire_heart.cpp`'s header, and `EventDialogState::screen`
+IS the game's ordinal, so no second numbering exists to drift.
 
 **The Door is `DoorUnlockScreen.open(true)`, and it is the only writer of
 `nextDungeon = "TheEnding"`** (DoorUnlockScreen.java:143-161, the
@@ -483,10 +496,18 @@ rides `RunPhase::EVENT_DIALOG` and the registry event body (§2.4), so no new
 engine's landed convention of collapsing a no-state-change dialog click
 (shrines.cpp / beyond_events.cpp, accepted at G7): clicks 1 and 2 are exactly
 that shape, click 3 is the one that branches, and click 4 is the terminal.
-**Whether S3 collapses clicks 1–2 or models them is a capture-parity decision,
-not a taste one** — the follower's glue rule 3 already answers collapsed
-one-click dialogs (s2v2 §7), so either choice is capture-compatible; make it
-once, pin it, and record it, because the differ compares record counts.
+**RESOLVED 2026-09-03 by S3.31 (§9): MODEL, all four.** The decision was made
+on the differ's record counts, exactly as this section demanded: every
+three-act victory capture carries a five-record post-victory tail (four
+`Spire Heart` `choose 0` action records plus `__terminal_observed__`), and the
+engine answers each of the four with its own `CHOOSE 0` on
+`EventDialogState::screen` — collapsing clicks 1-2 would have left the sim
+with no press for records 2 and 3, which the follower's glue rule 3 cannot
+repair on the differ side. The corpus reads 5 of 5 compared, zero-diff, on
+both double-boss victories (0 of 5 before). The collapse convention itself is
+unaffected: the clicks really do change nothing, and the whole dialog is
+presentation — the only state is the room transition ahead of it and the
+terminal that ends it.
 
 ### 4.2 The Act-3 stop is a *victory*, and the engine already produces it
 
@@ -1167,3 +1188,23 @@ scan**, in three sanctioned steps with a pre-registered escalation:
   `mapRng` draw from every act generated after the key is taken (§3.4, §5
   trap 1). The S2 row is left as written (it is history); this document and
   the S3 ledger's deferred table carry the correction.
+- 2026-09-03 — **S3-G1 gate: §2.3's back-attack `UNVERIFIED — needs decompile
+  check` marker resolved, from S3.42's implementation** (conventions §4 — a
+  landed task's finding had not been carried back into this still-open marker,
+  which is exactly the "discovered mid-gate-check" shape that rule exists for).
+  The engine does model facing, and the S3 collapse ("the monster the player
+  is not facing takes 1.5×, and there are exactly two of them") is exact, on
+  the geometry `back_attack.hpp`/`.cpp` derive from `AbstractMonster`'s ctor,
+  the Shield-and-Spear room's non-resetting entry and `Settings`'s
+  always-positive `xScale`. §2.3 is rewritten in place; no other §2.3 fact
+  changes.
+- 2026-09-03 — **S3-G1 gate: two more §4.1 `UNVERIFIED — needs decompile
+  check` / open-decision markers resolved in place**, same reason as above —
+  both were already `DISCHARGED`/`LANDED` in the s3-tasks.md deferred-
+  obligations table but the design doc's own placeholder text had not been
+  rewritten. (i) The `SpireHeart$CUR_SCREEN` ordinal order, resolved by
+  S3.31: `INTRO 0, MIDDLE 1, MIDDLE_2 2, DEATH 3, GO_TO_ENDING 4`, recovered
+  via `RECOVERED-INNER-CLASSES.md` §2 against the shipped jar, matching the
+  derivation exactly. (ii) The clicks-1-2 collapse-or-model decision, resolved
+  by S3.31 as MODEL ALL FOUR, witnessed by both three-act corpus victories'
+  post-victory tail going from 0 of 5 to 5 of 5 records compared.

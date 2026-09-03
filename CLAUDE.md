@@ -148,13 +148,41 @@ Library index spaces) plus six follower seams and b1.7.1's
 `--boss-reward-via-policy`, all landed with named regressions the same
 day. A three-act CI corpus (incl. both double-boss victories) now
 replays zero-diff in every preset. **Training Phase T4 is unblocked**
-([docs/training-tasks.md](docs/training-tasks.md) T4.1); **S3 planning is
-open** — keys, Act 4, the Corrupt Heart and the true-victory terminal, spec
-in [docs/s3-design.md](docs/s3-design.md) and ledger in
-[docs/s3-tasks.md](docs/s3-tasks.md).
+([docs/training-tasks.md](docs/training-tasks.md) T4.1).
+
+**S3-G1 complete** (tag `s3-g1-content`, 2026-09-03): S3's content — the
+three keys, the Act-3 `Spire Heart` terminal (the Act-3-stop and the Door),
+Act 4 (`TheEnding`) in full — its special map, its four rooms, `Shield and
+Spear`, `The Heart` and its two flag powers — and the information layer at
+`PUBLIC_VIEW_VERSION` 7 — is landed under the 2026-09-03 owner evidence
+directive (conventions.md §1: no unit tests written or run; the marker of
+truth is build + real-run replay). All six presets build; the Stage-A
+fixtures and golden vectors are byte-identical; all three committed CI
+corpora (`act1_a20_50`, `three_act_a20_5`, `keys_a20_4`) replay zero-diff
+under `--replay`/`--costs`/`--masks` with every injected control failing
+loud; the GT0 leak gates (`twin_test`, `tripwire_test`, the sampler
+distributional suite) are green; the four-act fuzz soak cleared 10M
+actions with zero nondeterminism. Full evidence in
+[docs/verification/s3-g1-content.md](docs/verification/s3-g1-content.md).
+**What is owed to S3.62**, published there as the gate's
+`UNVERIFIED-until-captured` list (40 rows tracked, 38 outstanding): every
+Act-4 registry row, `a20.yaml` row and §5 trap needs a live capture, and
+none exists yet, because **the reach precondition is unmet** — S3.22
+measured 39,296 key-policy rows and zero keyed A20 double-boss victories.
+S3.61 re-measures reach on this gated tree; S3.62 schedules the captures
+(one Shield-and-Spear fight, one Heart-kill, two Act-4 entries, an Act-4
+shop/rest, a `Spire Heart` capture holding Maw Bank, a Black Star
+burning-elite claim — S3.23's sole residue, carried forward rather than
+absorbed — a Courier restock, and an ordinary Echo Form capture) once it
+does. S3-G2 ("S3 verified", the training program's **T5** unblock) cannot
+close while any of those rows remains — S3 planning's next open work is
+[docs/s3-tasks.md](docs/s3-tasks.md)'s S3.61 onward. The training repo
+itself remains T1.1's deliverable and has not started; T4 stays the
+unblocked training-side frontier until S3-G2 lands T5.
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
-in [docs/stage-b-tasks.md](docs/stage-b-tasks.md) and
+in [docs/stage-b-tasks.md](docs/stage-b-tasks.md),
+[docs/s3-tasks.md](docs/s3-tasks.md) and
 [docs/training-tasks.md](docs/training-tasks.md); **do not restate it here.**
 
 **The build is no longer WSL-only.** Six presets: `debug`/`asan`/`release`
