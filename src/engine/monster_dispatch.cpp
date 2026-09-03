@@ -925,11 +925,58 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
     // BEFORE the pre-battle block below, because the Java's isDone arm (:117-121)
     // runs usePreBattleAction after this addToBot -- so a summoned Gremlin
     // Warrior's items land [Minion, Angry], in that order.
+    // THE SLOT THIS RECORD WILL SIT IN WHEN A BOTTOM-QUEUED ITEM RESOLVES.
+    //
+    // Every action the Java queues from here names the monster by REFERENCE --
+    // `new ApplyPowerAction(this.m, this.m, new MinionPower(this.m))`
+    // (SummonGremlinAction.java:114), `ApplyPowerAction(this, this, new
+    // AngryPower(...))` (GremlinWarrior.java:63-70) -- so a later list insert
+    // cannot move the target out from under it. This engine names it by INDEX,
+    // and an item added to the BOTTOM resolves after every SPAWN_MONSTER
+    // already pending, each of which shifts this record one further right when
+    // it lands at or before it.
+    //
+    // It is reachable because a Gremlin Leader RALLY queues TWO
+    // SummonGremlinActions back to back, and SummonGremlinAction addToBot's its
+    // Minion (:114) -- so summon #1's application is still pending, behind
+    // summon #2 and the trailing RollMoveAction exactly as the Java orders
+    // them, when summon #2's getSmartPosition (:92-99) inserts to its LEFT.
+    // Both applications then landed on one record: MINION stacked to -2 on the
+    // left gremlin and absent on the right (captures
+    // s2v3_wave1_STS216298_ps107 and s2v3_wave2_STS216298_ps107, floor 31,
+    // seq 379: `monsters[0].powers[Minion]: -1 -> -2`,
+    // `monsters[1].powers[Minion]: -1 -> (absent)`).
+    //
+    // WHY THIS AND NOT A REMAP AT THE INSERT. A blanket "shift every pending
+    // monster index" pass is WRONG here: the Bronze Automaton and The Collector
+    // queue their spawns AND their Minion applications up front, with `tgt`
+    // already simulated for the moment each item runs (monster_bronze_automaton
+    // .cpp's "minion 1's tgt deliberately does NOT account for spawn 2's
+    // insert"), so shifting those would over-count by exactly one. Settling
+    // only the items THIS resolve queues leaves every pre-simulated item alone.
+    //
+    // `<=` because an insert AT this index pushes this record right; the walk
+    // is progressive because the pending spawns resolve in queue order and each
+    // one's `tgt` is already the position it will occupy then.
+    uint8_t settled = slot;
+    for (uint8_t i = 0; i < state.action_count; ++i) {
+        const uint8_t at = static_cast<uint8_t>(
+            (static_cast<unsigned>(state.action_head) + i) % kActionQueueCap);
+        const ActionQueueItem& pending = state.action_queue[at];
+        if (static_cast<Opcode>(pending.opcode) == Opcode::SPAWN_MONSTER &&
+            pending.tgt <= settled) {
+            ++settled;
+        }
+    }
+
     if (apply_minion) {
         ActionQueueItem minion{};
         minion.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-        minion.src = slot;
-        minion.tgt = slot;
+        // `minion_at_top` puts the item AHEAD of every pending spawn, so it
+        // resolves against the list as it stands right now and takes `slot`;
+        // the addToBot form resolves behind them and takes `settled`.
+        minion.src = minion_at_top ? slot : settled;
+        minion.tgt = minion_at_top ? slot : settled;
         minion.amount = kMinionAppliedAmount;
         minion.flags = make_apply_power_flags(PowerId::MINION);
         // ...and SpawnMonsterAction.java:68 is `addToTop` for the identical
@@ -955,7 +1002,34 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
     if (run_pre_battle) {
         const MonsterPreBattleFn pre = monster_pre_battle_fn(id);
         if (pre != nullptr) {
+            // The body is handed the LIVE slot, because a pre-battle body may
+            // write the record as well as queue against it. What it queues is
+            // then settled the same way the Minion above is: a summoned Gremlin
+            // Warrior's Angry is one more addToBot ApplyPowerAction naming
+            // `this` (GremlinWarrior.java:63-70), so in a two-summon rally it
+            // resolves behind the sibling spawn exactly as the Minion does.
+            // Only the items THIS call appended are touched, and only where
+            // they name this record.
+            const uint8_t appended_from = state.action_count;
             pre(state, slot);
+            if (settled != slot) {
+                for (uint8_t i = appended_from; i < state.action_count; ++i) {
+                    const uint8_t at = static_cast<uint8_t>(
+                        (static_cast<unsigned>(state.action_head) + i) %
+                        kActionQueueCap);
+                    ActionQueueItem& queued = state.action_queue[at];
+                    if (static_cast<Opcode>(queued.opcode) !=
+                        Opcode::APPLY_POWER) {
+                        continue;
+                    }
+                    if (queued.src == slot) {
+                        queued.src = settled;
+                    }
+                    if (queued.tgt == slot) {
+                        queued.tgt = settled;
+                    }
+                }
+            }
         }
     }
 }
