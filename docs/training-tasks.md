@@ -59,7 +59,7 @@ one exists, mirroring the Stage B convention.
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
 | Stored records carry `outcome_kind = kOpen` and zeroed outcome/value/aux targets — an append-only writer cannot go back once a run ends | T1.2 | T2.3 | Filling them is a read-old-shard / write-new-shard pass, which is exactly the shape of T2.3's **reanalyze** operation, so T1.2 deliberately did not half-build it. `RecordedRunStats::outcome_kind` carries the answer for a caller that wants it immediately. A loader must never read `outcome_return` from a `kOpen` record as if it were a target. |
 | Quarantine has no **committed** `CommitOrder` — the ordered list of sim commits this repo has ever pinned | T1.2 | T2.3 | Git shas are unordered, so "the range from A to B" is only evaluable against a declared order (`quarantine.hpp`). T1.2 demonstrated the filter with an order built in the tool; the lifecycle operation needs one in the repo, appended by the same reviewed change that moves the pin (conventions, "Moving the engine pin"). Until it exists, every real shard is `kUnknownCommit` to any policy but a hand-built one. |
-| The keyframe interval (default 64) is unswept, and `SidecarReader::reconstruct` linear-scans both sidecar streams | T1.2 | T2.1 | The interval trades bytes/run against replayed steps; T1.2 measured both at 64 (see [verification/t1-2-storage-numbers.md](verification/t1-2-storage-numbers.md)) but the bank is what should choose it. The linear scan is deliberate — an index built inside the reader would be a cache with a lifetime nobody asked for; the bank harvester wants one **on disk**. |
+| The keyframe interval (default 64) is unswept, and `SidecarReader::reconstruct` linear-scans both sidecar streams | T1.2 | T2.1 | The interval trades bytes/run against replayed steps; T1.2 measured both at 64 (see `SpireTrainer/docs/verification/t1-2-storage-numbers.md` (training repo)) but the bank is what should choose it. The linear scan is deliberate — an index built inside the reader would be a cache with a lifetime nobody asked for; the bank harvester wants one **on disk**. |
 
 ---
 
@@ -459,7 +459,7 @@ force run 1 with `workflow_dispatch` after this lands).
   four in-flight gtest files from the 2026-08-25 session were deleted rather
   than finished). Every line below is checked on the artifacts of the same
   invocation that wrote them, and the full PASS list is
-  [verification/t1-2-storage-numbers.md](verification/t1-2-storage-numbers.md):
+  `SpireTrainer/docs/verification/t1-2-storage-numbers.md` (training repo):
   *write→read round-trip* — 749 baseline + 331 deep records re-opened through
   the mapping and memcmp-identical to the bytes written, with `public_hash`
   re-derived from every read-back view matching the stored hash; *refusal* —
