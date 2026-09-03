@@ -419,6 +419,14 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::DAMAGE_STR_MULT:
             // Heavy Blade: `amount` base with Strength counted x `flags` (the
             // magicNumber multiplier), then the normal pipeline.
+            //
+            // A CARD PLAY never reaches here any more: queue_effect_step turns
+            // the step into a play-time-locked plain DAMAGE, because the
+            // multiplier only exists inside calculateCardDamage and that runs
+            // at useCard (card_play.cpp; the DAMAGE_PER_STRIKE precedent). This
+            // arm is the safe execute-time fallback for a hand-built item, and
+            // it is deliberately unchanged so an old item still means what it
+            // meant.
             op_damage(s, item.src, item.tgt, item.amount,
                       static_cast<int>(item.flags));
             return;

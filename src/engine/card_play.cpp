@@ -101,6 +101,10 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     ActionQueueItem item{};
     item.opcode = static_cast<uint16_t>(step.op);
     item.src = kActorPlayer;
+    // Heavy Blade's Strength multiplier, carried from the rewrite below to the
+    // play-time damage lock further down (both are one mechanism, split only by
+    // the item-authoring block that sits between them).
+    int strength_mult = 1;
     // Where the step lands. SELF -> the player; CARD_TARGET -> the card's
     // resolved monster (declared or the card-level random roll); ALL_ENEMY /
     // RANDOM_ENEMY -> the execute-time fan-out / per-hit-roll sentinels
@@ -148,6 +152,37 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         const int strikes = count_strikes(s);
         item.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
         item.amount = step.amount + static_cast<int32_t>(step.extra) * strikes;
+        item.flags = 0;
+    } else if (step.op ==
+               static_cast<decltype(step.op)>(Opcode::DAMAGE_STR_MULT)) {
+        // Heavy Blade. HeavyBlade.calculateCardDamage (HeavyBlade.java:47-56)
+        // temporarily sets `strength.amount *= magicNumber` around
+        // super.calculateCardDamage and puts it back afterwards, so the
+        // multiplier exists ONLY inside calculateCardDamage -- which
+        // AbstractPlayer.useCard runs at :1362, BEFORE c.use() at :1369. After
+        // that the card is an ordinary DamageAction carrying a fixed number
+        // (HeavyBlade.java:39-44 -> `new DamageInfo(p, this.damage, NORMAL)`),
+        // and DamageAction.update lands info.output unchanged (:88).
+        //
+        // The engine used to keep the multiplier on the ITEM and re-run the
+        // whole pipeline at execute (interp.cpp's DAMAGE_STR_MULT arm), which
+        // is exactly the mis-timing e5e790d fixed for plain DAMAGE -- and the
+        // one opcode that arm could not cover, because DAMAGE_STR_MULT spends
+        // the whole `flags` word on the multiplier and so has no room for
+        // kDamageOwnerLocked. So the item BECOMES a plain DAMAGE here (the
+        // DAMAGE_PER_STRIKE / DAMAGE_UPGRADE_SCALE precedent above) and the
+        // multiplier is spent in the play-time owner lock below, which is the
+        // one place that can apply it at calculateCardDamage timing.
+        //
+        // Witness (S3.23): capture s323_STS502962_keys seq 754-755, floor 50,
+        // Deca and Donu. Heavy Blade+ (magic 5) with Pain in hand and Rupture
+        // 2: Pain's addToTop'd LoseHPAction (Pain.java:34-36) resolves first
+        // and Rupture takes Strength 9 -> 11, so the game dealt 14 + 5*9 = 59
+        // (Deca 259 -> 209 through 9 block) and the sim dealt 14 + 5*11 = 69
+        // (-> 199). The 10 HP compounded into a different Fire Breathing kill
+        // order and a 24 HP gap that decided the fight.
+        strength_mult = static_cast<int>(step.extra);
+        item.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
         item.flags = 0;
     } else if (step.op ==
                static_cast<decltype(step.op)>(Opcode::DAMAGE_UPGRADE_SCALE)) {
@@ -213,7 +248,7 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         damage_type_from_flags(item.flags) == DamageType::NORMAL &&
         !damage_is_pure(item.flags) && !damage_source_is_null(item.flags)) {
         item.amount = std::bit_cast<int32_t>(owner_damage_stage(
-            s, kActorPlayer, item.amount, /*strength_mult=*/1));
+            s, kActorPlayer, item.amount, strength_mult));
         item.flags |= kDamageOwnerLocked;
     }
     if (static_cast<Opcode>(item.opcode) == Opcode::APPLY_POWER &&
