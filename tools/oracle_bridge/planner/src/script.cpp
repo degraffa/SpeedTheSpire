@@ -413,6 +413,24 @@ void put_board_card(Json& j, const engine::EventDialogState& es, uint8_t count,
     return mask.combat.choice_pending && mask.combat.choice_optional;
 }
 
+// Is `a` a DESELECT on the open optional screen -- the one toggle the header
+// above says has no live spelling? The engine keeps the game's [hand] /
+// [selectedCards] split as ONE array whose trailing `choice_selected_count`
+// entries are the picks in pick order (advance.hpp), so a CHOOSE at or past
+// the split takes a card back OUT (toggle_optional_choice_slot,
+// interp_cards.cpp). Precondition: optional_hand_select_open(rc).
+[[nodiscard]] bool optional_hand_select_deselect(const RunController& rc,
+                                                 Action a) noexcept {
+    RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    const engine::ActionMask& cm = mask.combat;
+    if (!cm.choice_pending || !cm.choice_optional) return false;
+    const uint8_t picked = cm.choice_selected_count;
+    if (picked == 0u || picked >= rc.combat.hand_count) return false;
+    const auto split = static_cast<uint8_t>(rc.combat.hand_count - picked);
+    return engine::action_arg0(a) >= split;
+}
+
 }  // namespace
 
 std::string script_step_json(const RunController& rc, Action a, uint32_t index,
@@ -882,15 +900,54 @@ ScriptEmit emit_script(int64_t seed_value, const std::string& seed_text,
         size_t emitted;
     };
     std::vector<ToggleMark> marks;
+    // A SURVIVING DESELECT MAKES THE LINE UNDRIVABLE (S3.23). The header's drop
+    // rule removes a toggle run that returns the controller hash, and that is
+    // the only shape in which a deselect costs nothing. A run that does NOT
+    // return -- a select that took a non-last unselected slot, so the pair
+    // leaves the hand REORDERED (`addToTop`, interp_cards.cpp) -- keeps both
+    // lines, and its second line has no live `choose` index at all:
+    // HandCardSelectScreen moves a picked card out of `hand` into
+    // `selectedCards` (:378-381) and CommunicationMod publishes only `hand`.
+    // The follower therefore stops mid-run, which is a capture spent for
+    // nothing. Refusing the SCRIPT is the honest outcome: the line is
+    // sim-exact and not live-drivable, and the caller re-emits another
+    // policy seed instead of discovering it from a dead campaign.
+    //
+    // Checked when the toggling RUN ENDS, never at the step: whether a
+    // deselect's line survives is only decided by the drop above, which can
+    // truncate it several steps later. Witnesses: S2.V3's
+    // s2v3_wave1_STS207337_ps255 (header) and S3.23's live
+    // s323_STS500270_keys, which stopped at floor 16 -- Gambling Chip at the
+    // Act-1 boss, script steps 116-117 -- with "grid has no #1 copy of
+    // 'Strike_R'+0".
+    std::vector<size_t> deselect_lines;
+    auto undrivable_deselect = [&]() -> bool {
+        for (const size_t d : deselect_lines) {
+            if (d < steps.size()) return true;
+        }
+        deselect_lines.clear();
+        return false;
+    };
     for (uint32_t i = 0; i < trajectory.size(); ++i) {
         const bool toggling =
             engine::action_verb(trajectory[i]) == ActionVerb::CHOOSE &&
             optional_hand_select_open(*rc);
         if (!toggling) {
+            if (undrivable_deselect()) {
+                out.error =
+                    "optional hand-select DESELECT survives the toggle-run "
+                    "drop and has no live `choose` index (CommunicationMod "
+                    "publishes only the unselected hand group) -- this line "
+                    "is sim-exact but not live-drivable";
+                return out;
+            }
             marks.clear();
         } else if (marks.empty()) {
             marks.push_back({fuzz::hash_controller(*rc), steps.size()});
         }
+
+        const bool deselect =
+            toggling && optional_hand_select_deselect(*rc, trajectory[i]);
 
         std::string err;
         std::string line = script_step_json(*rc, trajectory[i], i, err);
@@ -898,6 +955,7 @@ ScriptEmit emit_script(int64_t seed_value, const std::string& seed_text,
             out.error = "step " + std::to_string(i) + ": " + err;
             return out;
         }
+        if (deselect) deselect_lines.push_back(steps.size());
         steps.push_back(std::move(line));
         engine::Action a = trajectory[i];
         engine::StepResult res{};
@@ -924,6 +982,16 @@ ScriptEmit emit_script(int64_t seed_value, const std::string& seed_text,
         // line since then describes a selection the confirm will not see.
         steps.resize(marks[back_to].emitted);
         marks.resize(back_to + 1);
+    }
+    // A trajectory that ENDS inside a toggle run (no following non-CHOOSE step
+    // to close it) gets the same check.
+    if (undrivable_deselect()) {
+        out.error =
+            "optional hand-select DESELECT survives the toggle-run drop and "
+            "has no live `choose` index (CommunicationMod publishes only the "
+            "unselected hand group) -- this line is sim-exact but not "
+            "live-drivable";
+        return out;
     }
 
     // Replay fidelity: the re-driven trajectory must land on the scanned
