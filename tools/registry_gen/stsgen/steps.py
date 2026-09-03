@@ -22,7 +22,8 @@ authored today.
 from __future__ import annotations
 
 from .vocab import (APPLY_POWER_COUNTER_SHIFT,
-                    CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
+                    CARD_MAKE_SELF_COPY_BIT, CARD_MAKE_UPGRADED_BIT,
+                    CARD_PILES, CARD_TYPES,
                     CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT,
                     CHOICE_KIND_HIGH_BIT2, CHOICE_KINDS, CHOICE_OPTIONAL_BIT,
                     CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT, CHOICE_RANDOM_BIT,
@@ -461,7 +462,8 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         return cards[csym]
 
     if op == "MAKE_CARD":
-        # `extra` = CardId | (CardPile << 16) | (upgraded-copy << 24).
+        # `extra` = CardId | (CardPile << 16) | (upgraded-copy << 24)
+        #                   | (self-copy << 25).
         # card_play.cpp (and monster_dispatch.cpp for monster moves) splits the
         # CardPile back out into the ActionQueueItem's `src`.
         csym = step.get("card")
@@ -474,6 +476,17 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         extra = cards[csym] | (CARD_PILES[pile] << 16)
         if bool(step.get("upgraded_copy", False)):
             extra |= CARD_MAKE_UPGRADED_BIT
+        # S3.53: a TRUE makeStatEquivalentCopy of the card this step is
+        # authored on (Anger cloning itself, AbstractCard.java:825-848) --
+        # card_play.cpp reads this bit and, at queue time, packs the PLAYED
+        # card's own pool index into flags bits 16..23 so op_make_card can
+        # copy its live cost/misc/freeToPlayOnce state instead of the
+        # registry base row (interp.hpp kMakeCardSelfCopyBit). Distinct from
+        # `upgraded_copy`, which only ever set the upgrade bit on a fresh row
+        # and is now redundant (but harmless) on a self-copy row: the copied
+        # source instance's own upgrade count already carries it.
+        if bool(step.get("self_copy", False)):
+            extra |= CARD_MAKE_SELF_COPY_BIT
         return extra
 
     if op == "DAMAGE_STR_MULT":

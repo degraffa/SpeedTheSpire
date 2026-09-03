@@ -123,7 +123,8 @@ void burn_increase(CombatState& s) noexcept {
     upgrade_burns_in(s, s.discard, s.discard_count);
     upgrade_burns_in(s, s.draw, s.draw_count);
     op_make_card(s, static_cast<uint16_t>(CardId::BURN), CardPile::DISCARD,
-                 kBurnIncreaseCopies, /*upgraded=*/true);
+                 kBurnIncreaseCopies, /*upgraded=*/true, /*self_copy=*/false,
+                 /*source_pi=*/CardPoolIndex{0});
 }
 
 // getMove's selection (Hexaghost.java:224-252), keyed entirely on

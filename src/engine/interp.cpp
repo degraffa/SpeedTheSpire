@@ -185,7 +185,10 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::MAKE_CARD:
             op_make_card(s, make_card_id_from_flags(item.flags),
                          static_cast<CardPile>(item.src), item.amount,
-                         make_card_upgraded_from_flags(item.flags));
+                         make_card_upgraded_from_flags(item.flags),
+                         make_card_self_copy_from_flags(item.flags),
+                         static_cast<CardPoolIndex>(
+                             make_card_source_index_from_flags(item.flags)));
             return;
         case Opcode::SET_COST:
             // CURRENTLY UNREACHABLE -- see op_set_cost (interp/interp_cards.cpp)

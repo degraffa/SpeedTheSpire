@@ -1627,6 +1627,39 @@ inline constexpr uint32_t kMakeCardUpgradedBit = 1u << 24;
     return (flags & kMakeCardUpgradedBit) != 0u;
 }
 
+// Bit 25 of a MAKE_CARD item's `flags`: this copy is a SELF STAT-EQUIVALENT
+// COPY -- AbstractCard.makeStatEquivalentCopy (AbstractCard.java:825-848),
+// e.g. Anger cloning itself into the discard (Anger.use, Anger.java:39-43;
+// registry/cards.yaml `self_copy: true`). Unlike an ordinary MAKE_CARD (a
+// fresh base-cost instance from the registry row -- Wound/Dazed/Burn/
+// Necronomicurse), a self-copy carries the SOURCE INSTANCE's live runtime
+// state -- cost_now plus the SAVED_BASE_COST/COST_MODIFIED_FOR_TURN bits
+// (together reconstructing cost/costForTurn/isCostModified/
+// isCostModifiedForTurn), misc and FREE_TO_PLAY_ONCE -- not the registry
+// base. This is what makes a Confusion-rolled Anger clone itself at the SAME
+// rolled cost (ConfusionPower.onCardDraw, ConfusionPower.java:38-48) rather
+// than resetting to cost 0; before this bit existed op_make_card always wrote
+// the registry base, which is the S3.53 sweep finding
+// (s2v3_wave1_STS206243_ps5 and siblings). The source pool index rides in
+// bits 16..23 (redundant with the destination-pile copy already split into
+// `src` -- nothing reads a MAKE_CARD item's flags bits 16..23 as a pile, so
+// repurposing them here changes no existing behavior). `upgraded`
+// (kMakeCardUpgradedBit) is then redundant for a self-copy -- the copied
+// source instance's own `upgrade` field already carries it -- and is ignored
+// on that path.
+inline constexpr uint32_t kMakeCardSelfCopyBit = 1u << 25;
+inline constexpr uint32_t kMakeCardSourceIndexShift = 16u;
+inline constexpr uint32_t kMakeCardSourceIndexMask = 0xFFu
+                                                      << kMakeCardSourceIndexShift;
+[[nodiscard]] constexpr bool make_card_self_copy_from_flags(uint32_t flags) noexcept {
+    return (flags & kMakeCardSelfCopyBit) != 0u;
+}
+[[nodiscard]] constexpr uint8_t make_card_source_index_from_flags(
+    uint32_t flags) noexcept {
+    return static_cast<uint8_t>((flags & kMakeCardSourceIndexMask) >>
+                                kMakeCardSourceIndexShift);
+}
+
 // --- APPLY_POWER field encoding ---------------------------------------------
 // `flags` bits 0..14 hold the PowerId; bit 15 is an explicit
 // `isSourceMonster == false` constructor override for duration debuffs;

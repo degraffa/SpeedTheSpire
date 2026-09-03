@@ -653,12 +653,62 @@ void discard_slot_to_hand_free(CombatState& s, uint8_t slot) noexcept {
     set_cost_for_turn(s, pi, 0);
 }
 
+// AbstractCard.makeStatEquivalentCopy (AbstractCard.java:825-848), factored so
+// every in-scope stat-equivalent-copy site shares ONE implementation rather
+// than each hand-rolling its own (Dual Wield's clone_card_to_hand below and
+// Anger's self-copy in op_make_card, S3.53). makeStatEquivalentCopy is `this.
+// makeCopy()` (a FRESH instance, i.e. the registry's authored row at the
+// SOURCE's own upgrade level -- makeCopy() + the ctor's upgrade() loop
+// together are exactly card_flags(def, src.upgrade)) with a named field list
+// (:830-847) layered on top: upgrade/timesUpgraded (implied by re-deriving at
+// src.upgrade), cost/costForTurn/isCostModified/isCostModifiedForTurn (cost_now
+// plus the COST_MODIFIED_FOR_TURN / SAVED_BASE_COST bits, sts/engine/types.hpp),
+// misc, and freeToPlayOnce.
+//
+// A VERBATIM `card_pool[dst] = card_pool[src]` was tried first here and is
+// WRONG: it also carries EXHAUST_ON_USE_ONCE, PURGE_ON_USE and
+// AUTOPLAY_X_ENERGY -- none of which makeStatEquivalentCopy's field list
+// names, and every one of which is exactly the kind of ONE-PLAY transient
+// state that corrupts a pool row now sitting inertly in a pile. Witnessed
+// live on this fix's first pass: Anger autoplayed off the draw pile by Havoc
+// carries EXHAUST_ON_USE_ONCE until UseCardAction's post-fan-out clear
+// (UseCardAction.java:132, op_use_card below) -- which is AFTER Anger's own
+// MAKE_CARD step already ran, since the played card's effect program resolves
+// before the USE_CARD item queued behind it -- so a verbatim copy stamped the
+// freshly discarded clone with a bit that made ITS OWN LATER PLAY silently
+// exhaust instead of discard (s2v3_wave2_STS227212_ps88 floor 33: discard
+// [Anger] short one, exhaust[Anger] over one, from turn 9 on -- caught by this
+// task's own before/after replay, not by a live capture).
+void make_stat_equivalent_copy(CombatState& s, int dst_slot,
+                               CardPoolIndex src_pi) noexcept {
+    const CardInstance& src = s.card_pool[src_pi];
+    const CardDef* def = card_def(static_cast<CardId>(src.card_id));
+    CardInstance& dst = s.card_pool[dst_slot];
+    dst.card_id = src.card_id;
+    dst.upgrade = src.upgrade;
+    dst.cost_now = src.cost_now;
+    dst.flags = static_cast<uint16_t>(
+        (def == nullptr ? uint16_t{0} : card_flags(*def, src.upgrade)) |
+        (src.flags &
+         static_cast<uint16_t>(
+             card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) |
+             card_flag_bit(CardFlag::SAVED_BASE_COST) | kSavedBaseCostMask |
+             card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE))));
+    // makeStatEquivalentCopy, unlike makeSameInstanceOf, does NOT carry the uuid
+    // (AbstractCard.java:825-848 vs :819-823): the clone gets a fresh identity and
+    // a SNAPSHOT of the source's misc, then diverges. So if the source row is
+    // itself a replay copy whose misc is a group link, materialise the real
+    // value rather than handing the copy a link to a counter it does not share
+    // (REPLAY_MISC_LINK is deliberately not in the carried-flags mask above, so
+    // the copy never inherits the link bit itself).
+    dst.misc = has_card_flag(src.flags, CardFlag::REPLAY_MISC_LINK)
+                   ? s.card_pool[misc_group_row(s, src_pi)].misc
+                   : src.misc;
+}
+
 // Dual Wield: add one stat-equivalent clone of pool instance `src_pi` to
 // the hand, spilling to the discard when the hand is full (MakeTempCardInHand-
-// Action.update:71-77). makeStatEquivalentCopy (AbstractCard.java:826-848)
-// preserves the upgrade count, cost/costForTurn (cost_now + the FOR_TURN bit in
-// `flags`), and misc (Rampage's combat counter), so the clone copies the whole
-// CardInstance into a fresh pool row.
+// Action.update:71-77).
 void clone_card_to_hand(CombatState& s, CardPoolIndex src_pi) noexcept {
     int slot = -1;
     for (int i = 0; i < kCardPoolCap; ++i) {
@@ -670,20 +720,7 @@ void clone_card_to_hand(CombatState& s, CardPoolIndex src_pi) noexcept {
     if (slot < 0) {
         return;  // pool exhausted (defensive; 160-row cap, design §4.2)
     }
-    s.card_pool[slot] = s.card_pool[src_pi];
-    // makeStatEquivalentCopy, unlike makeSameInstanceOf, does NOT carry the uuid
-    // (AbstractCard.java:825-848 vs :819-823): the clone gets a fresh identity and
-    // a SNAPSHOT of the current baseDamage, then diverges. So if the source row is
-    // itself a replay copy whose misc is a group link, materialise the real value
-    // and drop the link. Unreachable today -- Dual Wield picks from the hand and a
-    // replay copy never leaves limbo -- but the row copy above would otherwise
-    // hand a pool index to a card that treats it as a counter.
-    if (has_card_flag(s.card_pool[slot].flags, CardFlag::REPLAY_MISC_LINK)) {
-        s.card_pool[slot].misc = s.card_pool[misc_group_row(s, src_pi)].misc;
-        s.card_pool[slot].flags = static_cast<uint16_t>(
-            s.card_pool[slot].flags &
-            ~card_flag_bit(CardFlag::REPLAY_MISC_LINK));
-    }
+    make_stat_equivalent_copy(s, slot, src_pi);
     const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
     if (s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = idx;
@@ -879,20 +916,41 @@ void apply_corruption_cost_modifier(CombatState& s) noexcept {
     }
 }
 
-// MAKE_CARD: create `count` copies of `id` into `pile`. Each copy
-// takes a free card_pool row (card_id == NONE); a new instance's cost_now/flags
-// come from the registry (base, upgrade 0). Provenance: MakeTempCardInHandAction
-// (:64-82, incl. the hand-full -> discard spill), MakeTempCardInDiscardAction,
-// ShuffleIntoDrawPileAction + CardGroup.addToRandomSpot (:463-468).
+// MAKE_CARD: create `count` copies of `id` into `pile`. An ORDINARY copy
+// (self_copy == false: Wound/Dazed/Burn/Necronomicurse -- a literal `new
+// Wound()`, never the played card itself) takes a free card_pool row and its
+// cost_now/flags come from the registry (base, upgrade 0). A SELF
+// stat-equivalent copy (self_copy == true: Anger cloning itself, registry
+// `self_copy: true`) instead copies the SOURCE INSTANCE `source_pi` whole --
+// cost_now, upgrade, flags (COST_MODIFIED_FOR_TURN / SAVED_BASE_COST payload /
+// FREE_TO_PLAY_ONCE included) and misc -- exactly like Dual Wield's
+// clone_card_to_hand, generalized to whichever pile MAKE_CARD targets, per
+// AbstractCard.makeStatEquivalentCopy (AbstractCard.java:825-848: `card.cost =
+// this.cost; card.costForTurn = this.costForTurn; card.isCostModified =
+// this.isCostModified; card.isCostModifiedForTurn = this.isCostModifiedForTurn;
+// ...; card.misc = this.misc; card.freeToPlayOnce = this.freeToPlayOnce;`).
+// `upgraded` (the registry's `upgraded_copy` bit) is then redundant on the
+// self-copy path -- the copied source's own `upgrade` count already carries
+// it -- and is ignored there.
+//
+// Before this fix EVERY MAKE_CARD, including a self-copy, reseeded the
+// registry base row: a Confusion-rolled Anger (ConfusionPower.onCardDraw,
+// ConfusionPower.java:38-48 -- card.cost = card.costForTurn = a random 0..3)
+// cloned itself back to cost 0 instead of the rolled cost. Witnessed by the
+// S3.53 sweep (s2v3_wave1_STS206243_ps5, s2v3_wave1_STS216263_ps95,
+// s2v3_wave2_STS200527_ps9 -- `_oracle_data/s3/s353_sweep.tsv`).
+//
+// Provenance: MakeTempCardInHandAction (:64-82, incl. the hand-full -> discard
+// spill), MakeTempCardInDiscardAction, ShuffleIntoDrawPileAction +
+// CardGroup.addToRandomSpot (:463-468).
 void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
-                  int count, bool upgraded) noexcept {
+                  int count, bool upgraded, bool self_copy,
+                  CardPoolIndex source_pi) noexcept {
     const CardId id = static_cast<CardId>(card_id_raw);
     const CardDef* def = card_def(id);
     if (def == nullptr || count <= 0) {
         return;
     }
-    // makeStatEquivalentCopy preserves timesUpgraded (Anger clones an upgraded
-    // Anger); every other in-scope MAKE_CARD source is a fresh base card.
     const uint8_t upg = upgraded ? 1 : 0;
     for (int k = 0; k < count; ++k) {
         int slot = -1;
@@ -905,11 +963,24 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
         if (slot < 0) {
             return;  // pool exhausted (defensive; the 160-row cap, design §4.2)
         }
-        s.card_pool[slot].card_id = card_id_raw;
-        s.card_pool[slot].upgrade = upg;
-        s.card_pool[slot].cost_now = card_cost(*def, upg);
-        s.card_pool[slot].flags = card_flags(*def, upg);
-        s.card_pool[slot].misc = 0;
+        if (self_copy) {
+            // make_stat_equivalent_copy (above, beside clone_card_to_hand):
+            // carries cost_now, the cost-runtime flag bits, misc and
+            // freeToPlayOnce from the SOURCE instance -- exactly
+            // AbstractCard.makeStatEquivalentCopy's field list
+            // (AbstractCard.java:830-847), no more -- rather than the
+            // registry's fresh-base row this branch used before S3.53, or a
+            // verbatim struct copy (which also drags EXHAUST_ON_USE_ONCE /
+            // PURGE_ON_USE / AUTOPLAY_X_ENERGY along; see that function's
+            // comment for the live witness).
+            make_stat_equivalent_copy(s, slot, source_pi);
+        } else {
+            s.card_pool[slot].card_id = card_id_raw;
+            s.card_pool[slot].upgrade = upg;
+            s.card_pool[slot].cost_now = card_cost(*def, upg);
+            s.card_pool[slot].flags = card_flags(*def, upg);
+            s.card_pool[slot].misc = 0;
+        }
         const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
         switch (pile) {
             case CardPile::HAND:
@@ -2190,7 +2261,8 @@ void resolve_codex_choice(CombatState& s, const ActionQueueItem& item,
         return;
     }
     op_make_card(s, static_cast<uint16_t>(id), CardPile::DRAW_RANDOM,
-                 /*count=*/1, /*upgraded=*/false);
+                 /*count=*/1, /*upgraded=*/false, /*self_copy=*/false,
+                 /*source_pi=*/CardPoolIndex{0});
 }
 
 // --- Public: CHOOSE_CARD queries ---------------------------------------------

@@ -237,13 +237,13 @@
   cost: 0
   target: ENEMY
   flags: []
-  provenance: "Anger.use (Anger.java:39-43) -> DamageAction(6), MakeTempCardInDiscardAction(makeStatEquivalentCopy(), 1). baseDamage 6 (Anger.java:35); upgradeDamage(2) -> 8 (Anger.java:49). makeStatEquivalentCopy preserves timesUpgraded (AbstractCard.java:825-848) -> an upgraded Anger clones an upgraded Anger."
+  provenance: "Anger.use (Anger.java:39-43) -> DamageAction(6), MakeTempCardInDiscardAction(makeStatEquivalentCopy(), 1). baseDamage 6 (Anger.java:35); upgradeDamage(2) -> 8 (Anger.java:49). makeStatEquivalentCopy preserves timesUpgraded (AbstractCard.java:825-848) -> an upgraded Anger clones an upgraded Anger. S3.53: makeStatEquivalentCopy ALSO copies cost/costForTurn/isCostModified/isCostModifiedForTurn/misc/freeToPlayOnce (AbstractCard.java:837-847) -- `self_copy: true` marks both MAKE_CARD rows below so the sim's copy carries the SOURCE instance's live cost fields (a Confusion-rolled Anger clones itself at the rolled cost) rather than the registry's base row; sweep witness s2v3_wave1_STS206243_ps5/_ps95, s2v3_wave2_STS200527_ps9."
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 6}
-    - {op: MAKE_CARD, card: ANGER, pile: DISCARD, amount: 1}
+    - {op: MAKE_CARD, card: ANGER, pile: DISCARD, amount: 1, self_copy: true}
   upgraded:
     - {op: DAMAGE, target: CARD_TARGET, amount: 8}
-    - {op: MAKE_CARD, card: ANGER, pile: DISCARD, amount: 1, upgraded_copy: true}
+    - {op: MAKE_CARD, card: ANGER, pile: DISCARD, amount: 1, upgraded_copy: true, self_copy: true}
 
 - id: 12
   name: BODY_SLAM

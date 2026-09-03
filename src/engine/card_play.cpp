@@ -136,13 +136,31 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     // three per-item compensations are folded into that general model.
     if (step.op == static_cast<decltype(step.op)>(Opcode::MAKE_CARD)) {
         // MAKE_CARD authoring: the step's `extra` packs the created
-        // CardId (bits 0-15), the destination CardPile (bits 16-23), and an
-        // upgraded-copy flag (bit 24). The interpreter reads the CardId + upgrade
-        // bit from the item's `flags` and the CardPile from `src`, so split them
-        // out here (tgt stays kActorPlayer -- SELF -- so it is not mistaken for an
-        // enemy-fan-out sentinel).
+        // CardId (bits 0-15), the destination CardPile (bits 16-23), an
+        // upgraded-copy flag (bit 24), and a self-copy flag (bit 25). The
+        // interpreter reads the CardId + upgrade bit from the item's `flags`
+        // and the CardPile from `src`, so split them out here (tgt stays
+        // kActorPlayer -- SELF -- so it is not mistaken for an enemy-fan-out
+        // sentinel).
         item.src = static_cast<uint8_t>((step.extra >> 16) & 0xFFu);
-        item.flags = step.extra;  // CardId(low16) + upgraded bit(24)
+        // S3.53: for a genuine self stat-equivalent copy (Anger cloning
+        // itself, registry `self_copy: true`), op_make_card needs the PLAYED
+        // card's own pool index to read its live cost/misc/freeToPlayOnce
+        // state at execute time (AbstractCard.makeStatEquivalentCopy,
+        // AbstractCard.java:825-848) -- the registry's fresh-base row is
+        // wrong for it, which is how a Confusion-rolled Anger clone lost its
+        // rolled cost before this fix. The step's own pile bits (16-23) are
+        // redundant here (nothing reads them off `flags`; the pile already
+        // rode over in `item.src` above), so bits 16-23 are repurposed to
+        // carry the source pool index instead, kept only alongside the
+        // low-16 CardId and the upgraded-copy bit (24).
+        item.flags = step.extra & (0xFFFFu | kMakeCardUpgradedBit);
+        if ((step.extra & kMakeCardSelfCopyBit) != 0u) {
+            item.flags = (item.flags & ~kMakeCardSourceIndexMask) |
+                        kMakeCardSelfCopyBit |
+                        (static_cast<uint32_t>(source_index)
+                         << kMakeCardSourceIndexShift);
+        }
     } else if (step.op == static_cast<decltype(step.op)>(Opcode::DAMAGE_PER_STRIKE)) {
         // Perfected Strike: BAKE the per-"Strike" bonus into a plain DAMAGE at
         // queue time -- calculateCardDamage-at-useCard timing

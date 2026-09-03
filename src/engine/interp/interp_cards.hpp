@@ -16,9 +16,13 @@
 
 namespace sts::engine {
 
-// MAKE_CARD.
+// MAKE_CARD. `self_copy` + `source_pi` (meaningful only when `self_copy` is
+// true) implement AbstractCard.makeStatEquivalentCopy's cost/misc/
+// freeToPlayOnce carry-over for a genuine self-copy (Anger cloning itself,
+// registry `self_copy: true`, S3.53) -- see the definition.
 void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
-                  int count, bool upgraded) noexcept;
+                  int count, bool upgraded, bool self_copy,
+                  CardPoolIndex source_pi) noexcept;
 
 // CHOOSE_CARD (auto path only -- see the definition).
 void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept;

@@ -616,11 +616,17 @@ CARD_TRIGGERS = {"on_play": 0, "end_of_turn": 1, "on_draw": 2,
                  "on_other_card_played": 3}
 # CardPile destination for a MAKE_CARD effect step (Stage B B3.3 card-authoring;
 # MIRROR of interp.hpp CardPile). The step's `extra` packs the created CardId in
-# bits 0-15, the CardPile in bits 16-23, and an "upgraded copy" flag in bit 24
-# (makeStatEquivalentCopy of an upgraded card -- Anger); card_play.cpp splits it
-# back into the ActionQueueItem {flags=CardId(+upg bit), src=CardPile}.
+# bits 0-15, the CardPile in bits 16-23, an "upgraded copy" flag in bit 24
+# (makeStatEquivalentCopy of an upgraded card -- Anger), and a "self copy" flag
+# in bit 25 (S3.53: this row is a TRUE makeStatEquivalentCopy of the card it is
+# authored on, so the sim carries the SOURCE INSTANCE's live cost/misc/
+# freeToPlayOnce state at execute time -- interp.hpp kMakeCardSelfCopyBit --
+# rather than the registry's fresh-base row); card_play.cpp splits it back into
+# the ActionQueueItem {flags=CardId(+upg bit+self-copy bit+source pool index),
+# src=CardPile}.
 CARD_PILES = {"HAND": 0, "DRAW": 1, "DISCARD": 2, "DRAW_RANDOM": 3}
 CARD_MAKE_UPGRADED_BIT = 1 << 24
+CARD_MAKE_SELF_COPY_BIT = 1 << 25
 
 # PLAY_CARD `extra` bits -- MIRROR of interp.hpp's kPlayCard* constants. A step
 # authors them as a list, e.g. `{op: PLAY_CARD, play: [from_draw_top]}`. `copy`
