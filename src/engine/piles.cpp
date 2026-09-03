@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <span>
 
+#include "interp/interp_cards.hpp"     // corruption_hand_cost_sweep (onCardDrawOrDiscard)
 #include "sts/engine/cards.hpp"        // card_cost (reset_cost_for_turn)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/knowledge.hpp"    // draw/shuffle knowledge hooks (observers)
@@ -239,6 +240,12 @@ void exhaust_card(CombatState& s, int pool_index) noexcept {
             // in the exhaust pile. No-op without an on-exhaust power or card-level
             // on-exhaust program, so the skeleton EXHAUST-opcode path is unchanged.
             dispatch_on_exhaust(s, idx, s.card_pool[idx].card_id);
+            // ...and moveToExhaustPile ENDS with player.onCardDrawOrDiscard
+            // (CardGroup.java:861), after that fan-out -- so under Corruption
+            // every exhaust re-sweeps the surviving hand
+            // (AbstractPlayer.java:1348-1352). Idempotent without Corruption and
+            // for a hand already at cost 0.
+            corruption_hand_cost_sweep(s);
             return;
         }
     }
@@ -379,6 +386,20 @@ void discard_hand_at_end_of_turn(CombatState& s) noexcept {
         // whose sweep the pump runs first; stated here so the pile move owns
         // its own reset wherever it is called from.
         reset_cost_for_turn(s, pi);
+        // moveToDiscardPile also ends in player.onCardDrawOrDiscard
+        // (CardGroup.java:841), once per discarded card, so the Corruption
+        // sweep runs here too -- BEFORE AbstractRoom.endTurn's resetAttributes
+        // pass, i.e. while the surviving hand still carries this turn's costs.
+        //
+        // RETAIN, when it becomes real: the game hoists every retain/selfRetain
+        // card OUT of hand.group into player.limbo before queueing these
+        // DiscardActions (DiscardAtEndOfTurnAction.java:27-33) and restores it
+        // afterwards, so such a card is outside this sweep. The engine models
+        // that hoist as a skip-in-place, which leaves it in s.hand and inside
+        // the sweep. No card in registry/cards.yaml carries `retain` today, so
+        // the difference is unreachable; whichever change adds one owes this
+        // loop a real hoist, and this sweep is part of what depends on it.
+        corruption_hand_cost_sweep(s);
     }
 }
 

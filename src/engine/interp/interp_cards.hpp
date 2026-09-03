@@ -36,6 +36,43 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept;
 // SET_COST.
 void op_set_cost(CombatState& s, uint8_t pool_index, int new_cost) noexcept;
 
+// --- the three cost primitives, shared with the sites outside this TU --------
+
+// AbstractCard.cost for pool row `pi` -- the combat-PERMANENT cost, as distinct
+// from costForTurn (which IS cost_now). Confusion's `card.cost = newCost`
+// (ConfusionPower.java:43) and every modifyCostForCombat writer move it off the
+// registry row; a COST_MODIFIED_FOR_TURN instance reports the value the
+// end-of-turn sweep will restore (the SAVED_BASE_COST payload when one was
+// saved, else the registry cost).
+//
+// EVERY Java `c.cost > 0` / `c.cost >= 0` / `costForTurn != cost` test is THIS,
+// never card_cost(registry). Two landed defects came from reading the registry
+// row instead, both witnessed live: MummifiedHand's candidate filter
+// (MummifiedHand.java:44) and CorruptionPower.onCardDraw's
+// isCostModifiedForTurn decision (via setCostForTurn, AbstractCard.java:2008).
+[[nodiscard]] int instance_base_cost(const CombatState& s,
+                                     CardPoolIndex pi) noexcept;
+
+// AbstractCard.setCostForTurn (AbstractCard.java:2001-2011) on pool row `pi`:
+// clamp `amount` at 0, write cost_now, and set COST_MODIFIED_FOR_TURN -- saving
+// the combat-permanent cost in the SAVED_BASE_COST payload when it differs from
+// the registry row -- only when the new value differs from instance_base_cost.
+void set_cost_for_turn(CombatState& s, CardPoolIndex pi, int amount) noexcept;
+
+// AbstractPlayer.onCardDrawOrDiscard's Corruption branch (AbstractPlayer.java:
+// 1348-1352): every SKILL in hand whose costForTurn != 0 takes
+// modifyCostForCombat(-9), i.e. cost AND costForTurn both to 0, PERMANENTLY for
+// the combat. A no-op without Corruption, and idempotent (it only touches a
+// cost_now > 0 SKILL).
+//
+// `visible_hand` bounds the sweep to the first N hand slots. It is not a Java
+// concept: it exists for the DRAW opcode, whose batch draw runs ahead of the
+// game's one-card-at-a-time draw()/onCardDrawOrDiscard interleave. Leave it at
+// its default at every other site. See the definition for the full derivation
+// and for the enumeration of onCardDrawOrDiscard's callers.
+void corruption_hand_cost_sweep(CombatState& s,
+                                uint8_t visible_hand = 0xFFu) noexcept;
+
 // ApplyPowerAction's Corruption-specific constructor side effect: permanently
 // reduce every SKILL in hand, draw, discard, and exhaust to zero cost for this
 // combat before the power action itself resolves.

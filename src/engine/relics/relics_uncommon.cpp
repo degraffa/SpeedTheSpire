@@ -7,6 +7,7 @@
 
 #include <cstdint>
 
+#include "../interp/interp_cards.hpp"   // instance_base_cost / set_cost_for_turn (Mummified Hand)
 #include "relic_native.hpp"             // heal_player (HealAction clamp)
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType (curse/skill checks)
@@ -332,12 +333,26 @@ void relic_native_mummified_hand(CombatState& s, RelicHook hook,
         if (cd == nullptr) {
             continue;
         }
-        // c.cost > 0 (:44). gen.py maps the game's sentinel costs onto flags
-        // with base_cost 0 -- X-cost (Java cost -1, the XCOST flag) and
-        // unplayable statuses/curses (Java cost -2, the UNPLAYABLE flag) both
-        // land at base_cost 0 -- so the single `> 0` test rejects exactly what
+        // c.cost > 0 (:44) -- AbstractCard.cost, the INSTANCE's live,
+        // combat-permanent cost, NOT the registry row. Every permanent writer
+        // moves it: ConfusionPower.onCardDraw's `card.costForTurn = card.cost =
+        // newCost` (ConfusionPower.java:43) under Snecko Eye, Snecko Oil's
+        // RandomizeHandCostAction, and modifyCostForCombat under Corruption /
+        // Madness. So a base-0 SKILL that Snecko rolled UP to 1 IS a candidate,
+        // and a base-3 SKILL that Corruption zeroed is NOT -- and getting the
+        // membership wrong shifts random(0, n - 1)'s bound, which moves the
+        // shared cardRandomRng for the rest of the fight.
+        //
+        // This read card_cost(registry) until now. Witnesses:
+        // s2v3_wave1_STS228756_ps2 floor 30 and s2v3_wave1_STS207854_ps9
+        // floor 39, both under Snecko Eye.
+        //
+        // gen.py maps the game's sentinel costs onto flags with base_cost 0 --
+        // X-cost (Java cost -1, the XCOST flag) and unplayable statuses/curses
+        // (Java cost -2, the UNPLAYABLE flag) -- and no writer moves those rows,
+        // so instance_base_cost stays 0 for them and `<= 0` rejects exactly what
         // the Java rejects.
-        if (card_cost(*cd, inst.upgrade) == 0) {
+        if (instance_base_cost(s, pi) <= 0) {
             continue;
         }
         // c.costForTurn > 0 (:44) -- the per-instance runtime cost.
@@ -355,15 +370,20 @@ void relic_native_mummified_hand(CombatState& s, RelicHook hook,
     if (n == 0) {
         return;  // :56-64 -- no candidate, and crucially NO cardRandomRng draw.
     }
+    // random(0, n - 1) indexes groupCopy -- the FILTERED list, in hand order
+    // with the played card and every cardQueue entry already removed (:50-64),
+    // which is exactly `candidates`. The engine must therefore build the same
+    // membership before it draws, not filter afterwards.
     const int32_t pick = random(s.card_random_rng, 0, n - 1);  // :61
-    CardInstance& chosen = s.card_pool[candidates[pick]];
     // setCostForTurn(0) (:67 -> AbstractCard.java:2001-2011): costForTurn = 0
     // and, because the new value differs from cost (every candidate has
     // cost > 0), isCostModifiedForTurn = true -- so the discount reverts in the
-    // end-of-turn sweep (reset_cost_for_turn, AbstractRoom.endTurn:397-405).
-    chosen.cost_now = 0;
-    chosen.flags = static_cast<uint16_t>(
-        chosen.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+    // end-of-turn sweep (reset_cost_for_turn, AbstractRoom.endTurn:397-405) to
+    // the INSTANCE's cost. The shared helper is called rather than the two
+    // fields written by hand because it is the helper that saves that cost in
+    // SAVED_BASE_COST when a Snecko roll has moved it off the registry row --
+    // the same instance-vs-registry distinction as the filter above.
+    set_cost_for_turn(s, candidates[pick], 0);
 }
 
 void relic_native_pantograph(CombatState& s, RelicHook hook,

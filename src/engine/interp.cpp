@@ -136,6 +136,21 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                 // Void queues its energy loss before the power onCardDraw fan-out.
                 dispatch_card_on_draw(s, pi);
                 dispatch_on_card_draw(s, pi, s.card_pool[pi].card_id);
+                // AbstractPlayer.draw() (the no-arg overload, :1657-1665) is
+                // what DrawCardAction actually calls, once per card (:117), and
+                // it ends `this.draw(1); this.onCardDrawOrDiscard();` -- so the
+                // Corruption sweep runs after EVERY single drawn card, not once
+                // per DrawCardAction.
+                //
+                // The bound is load-bearing. The game has drawn `i + 1` cards
+                // when its i-th sweep runs; this loop is walking a batch that
+                // draw_cards already dealt in full, so the whole tail
+                // hi+1..hand_count is in s.hand ahead of time. Passing hi + 1
+                // hides it, and reproduces the game's hand.group exactly --
+                // without it, card 1's sweep would permanently zero a
+                // still-undrawn SKILL that the game's own onCardDraw was about
+                // to give a THIS-TURN zero instead.
+                corruption_hand_cost_sweep(s, static_cast<uint8_t>(hi + 1));
             }
             return;
         }

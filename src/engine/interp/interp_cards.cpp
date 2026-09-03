@@ -198,11 +198,17 @@ void draw_card_to_hand_or_discard(CombatState& s, CardPoolIndex pi) noexcept {
     // known pile position (knowledge.hpp).
     knowledge_on_remove_known(s, pi);
     if (s.hand_count < kHandCap) {
+        // hand.addToTop (SkillFromDeckToHandAction.java:44 and its siblings) --
+        // NOT hand.addToHand through ShowCardAndAddToHandEffect, so there is no
+        // onCardDrawOrDiscard step on this arm.
         s.hand[s.hand_count++] = pi;  // hand.addToTop == append
     } else if (s.discard_count < kDiscardCap) {
         s.discard[s.discard_count++] = pi;
         // moveToDiscardPile -> Soul.update's DISCARD_PILE arm (piles.hpp).
         reset_cost_for_turn(s, pi);
+        // ... and CardGroup.moveToDiscardPile:841's onCardDrawOrDiscard, which
+        // is what makes this hand-full redirect a Corruption sweep point.
+        corruption_hand_cost_sweep(s);
     }
 }
 
@@ -220,8 +226,15 @@ void draw_card_to_hand_or_discard(CombatState& s, CardPoolIndex pi) noexcept {
     return false;
 }
 
-[[nodiscard]] int instance_base_cost(const CombatState& s,
-                                     CardPoolIndex pi) noexcept;
+}  // namespace
+
+// The three cost primitives below are declared in interp_cards.hpp rather than
+// kept TU-private: every Java `c.cost` / `setCostForTurn` / onCardDrawOrDiscard
+// site outside this file needs them (CorruptionPower.onCardDraw in
+// powers/power_corruption.cpp, MummifiedHand.onUseCard in
+// relics/relics_uncommon.cpp, and the pile moves in piles.cpp / interp.cpp).
+// Re-deriving "which of the two cost fields does this read" at each of those
+// sites is exactly how they drifted apart in the first place.
 
 // AbstractCard.setCostForTurn (AbstractCard.java:2001-2011): assign, clamp a
 // negative sentinel to 0, and mark the instance cost-modified-for-turn whenever
@@ -324,17 +337,38 @@ void set_cost_for_turn(CombatState& s, CardPoolIndex pi, int amount) noexcept {
 // modifyCostForCombat's second arm would need cost >= 0, and an X-cost card's is
 // -1.
 //
-// NOT COVERED HERE. The Java reaches this same branch from two more places the
-// engine does not model: CardGroup.moveToDiscardPile (:836-842) and
-// moveToExhaustPile (:850-862) call onCardDrawOrDiscard after every such move,
-// and AbstractPlayer.draw() (:1657-1665) calls it after a single-card draw. The
-// residual `Defend_R@0` (capture) vs `@1` (sim) in that same fight's exhaust pile
-// is the shape those would explain; it is left alone rather than guessed at.
-void corruption_hand_cost_sweep(CombatState& s) noexcept {
+// EVERY ENTRY POINT. onCardDrawOrDiscard has exactly five callers in the game
+// (grep: the method is called nowhere else):
+//
+//   ShowCardAndAddToHandEffect.java:47 / :69  -- a card created INTO the hand
+//   CardGroup.moveToDiscardPile        :841   -- ANY move into the discard pile
+//   CardGroup.moveToExhaustPile        :861   -- ANY move into the exhaust pile
+//   AbstractPlayer.draw()              :1664  -- after EACH single card drawn
+//   UseCardAction.java                 :124   -- the returnToHand branch, which
+//                                                this engine deliberately does
+//                                                not model (op_use_card's
+//                                                comment at the filing switch)
+//
+// and each of the first four is called from the engine's mirror of that Java
+// site. The sweep is idempotent by construction -- it only touches a SKILL whose
+// cost_now is still > 0 -- so a Java path the engine collapses into one step
+// (an exhaust that is also a hand move) cannot double-apply.
+//
+// `visible_hand` is NOT a Java concept: it is the number of leading `s.hand`
+// slots that correspond to the game's hand.group AT THIS INSTANT, and it exists
+// for the one engine site whose hand is ahead of the game's. AbstractPlayer.draw
+// interleaves (draw one card -> its onCardDraw -> this sweep -> draw the next),
+// while the engine's DRAW opcode draws the whole batch first and then walks the
+// new cards firing hooks; without the bound, the first card's sweep would see
+// cards 2..n that the game has not drawn yet and permanently zero a SKILL whose
+// own onCardDraw was about to give it a THIS-TURN zero instead. Passing
+// `before + i + 1` reproduces the game's hand.group exactly at each step.
+void corruption_hand_cost_sweep(CombatState& s, uint8_t visible_hand) noexcept {
     if (!player_carries_power(s, PowerId::CORRUPTION)) {
         return;
     }
-    for (uint8_t i = 0; i < s.hand_count; ++i) {
+    const uint8_t n = s.hand_count < visible_hand ? s.hand_count : visible_hand;
+    for (uint8_t i = 0; i < n; ++i) {
         CardInstance& c = s.card_pool[s.hand[i]];
         const CardDef* def = card_def(static_cast<CardId>(c.card_id));
         if (def == nullptr || def->type != CardType::SKILL || c.cost_now == 0) {
@@ -348,6 +382,8 @@ void corruption_hand_cost_sweep(CombatState& s) noexcept {
             ~card_flag_bit(CardFlag::SAVED_BASE_COST) & ~kSavedBaseCostMask);
     }
 }
+
+namespace {
 
 // Allocate a fresh library copy and add it to the hand, spilling to discard at
 // the hand cap. Discovery optionally applies setCostForTurn(0); Jack of All
@@ -749,6 +785,16 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
                 s.discard[s.discard_count++] = pi;
                 // Soul.update's DISCARD_PILE arm (piles.hpp).
                 reset_cost_for_turn(s, pi);
+                // CardGroup.moveToDiscardPile:841 -- onCardDrawOrDiscard, per
+                // discarded card. KNOWN IMPRECISION, stated rather than hidden:
+                // the selection's not-yet-discarded picks sit at the tail of
+                // s.hand here, where the game has them in
+                // handCardSelectScreen.selectedCards -- i.e. OUT of hand.group
+                // and out of the game's sweep. It can only be read by a still-
+                // selected SKILL carrying a nonzero cost under Corruption, and
+                // Gambling Chip (the only in-scope caller, GamblingChipAction.
+                // java:55) resolves at battle start, before any Corruption.
+                corruption_hand_cost_sweep(s);
             }
             break;
         }
@@ -1302,6 +1348,20 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
         // Dark Embrace draw for the played card is queued at THIS point, behind
         // anything the program's own exhausts already queued.
         dispatch_on_exhaust(s, pi, s.card_pool[pi].card_id);
+    }
+    if (!remove_only) {
+        // BOTH filing branches end in onCardDrawOrDiscard: `hand.moveTo
+        // DiscardPile` (UseCardAction.java:126 -> CardGroup.java:841) and
+        // `hand.moveToExhaustPile` (:129 -> CardGroup.java:861). It runs LAST in
+        // moveToExhaustPile, after the onExhaust fan-out above, which is why
+        // this sits below the dispatch rather than inside file_card_from_limbo.
+        //
+        // The `remove_only` branches have no such step: purgeOnUse goes through
+        // ShowCardAndPoofAction (:91) and a POWER through hand.empower
+        // (CardGroup.java:844-848), and neither touches onCardDrawOrDiscard.
+        // Corruption's own redirect makes this the sweep every played SKILL
+        // runs (CorruptionPower.onUseCard sets action.exhaustCard).
+        corruption_hand_cost_sweep(s);
     }
 }
 
