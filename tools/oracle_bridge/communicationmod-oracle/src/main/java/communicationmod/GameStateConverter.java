@@ -174,6 +174,33 @@ public class GameStateConverter {
         oracle.put("floor", AbstractDungeon.floorNum);
         oracle.put("act", AbstractDungeon.actNum);
         oracle.put("ascension", AbstractDungeon.ascensionLevel);
+        // S3.21 (oracle contract v2, PROTOCOL.md section 5.6): the dungeon
+        // IDENTITY, not just its ordinal. `act` alone cannot name the dungeon
+        // -- Endless re-enters act numbers, and Act 4 is the one act whose
+        // construction differs in kind (generateSpecialMap, no monsterRng, no
+        // mapRng draw). AbstractDungeon.id is the string the game itself
+        // branches on (DungeonMap.java:68's `id.equals("TheEnding")`,
+        // AbstractDungeon.getShrine's SecretPortal arm), so the differ compares
+        // the same key the rules read: "Exordium" / "TheCity" / "TheBeyond" /
+        // "TheEnding".
+        oracle.put("dungeonId", AbstractDungeon.id);
+        // S3.21 (a): the three run keys and the final-act gate they feed
+        // (Settings.java:64-67). Held in Settings, not in AbstractDungeon, so
+        // no stock field exposes them; without these the differ can only INFER
+        // key state from a claim record it may not even have captured, and
+        // three separate rules read them -- the campfire Recall gate
+        // (CampfireUI.java:94-96), the burning-elite reward row
+        // (MonsterRoomElite.java:90), the sapphire chest's linked row
+        // (AbstractRoom.java:545-547) -- plus the Spire Heart branch
+        // (SpireHeart.java:151) that decides whether a run can reach Act 4 at
+        // all. `isFinalActAvailable` rides with them because it is the fourth
+        // conjunct of that same gate and of the emerald row's guard, so a
+        // capture whose profile had it false would otherwise diverge with
+        // nothing in the dump to explain why.
+        oracle.put("hasRubyKey", Settings.hasRubyKey);
+        oracle.put("hasEmeraldKey", Settings.hasEmeraldKey);
+        oracle.put("hasSapphireKey", Settings.hasSapphireKey);
+        oracle.put("isFinalActAvailable", Settings.isFinalActAvailable);
         // s2-design section 5 trap 5: the simulator pins SecretPortal's
         // playtime gate (>= 800s, AbstractDungeon.java:1929-1933) FALSE.
         // Since S2.43 (2026-08-27) the FORK pins it too -- OraclePlaytimePinPatch
@@ -746,6 +773,21 @@ public class GameStateConverter {
     private static HashMap<String, Object> convertMapRoomNodeToJson(MapRoomNode node) {
         HashMap<String, Object> jsonNode = convertCoordinatesToJson(node.x, node.y);
         jsonNode.put("symbol", node.getRoomSymbol(true));
+        // SpeedTheSpire fork addition (S3.21 (a), PROTOCOL.md section 3.11):
+        // MapRoomNode.hasEmeraldKey (:61) -- the burning-elite mark
+        // setEmeraldElite writes into ONE elite node per act
+        // (AbstractDungeon.java:539-548). It is the node-side half of the key
+        // state: MonsterRoomElite.addEmeraldKey gates its reward row on
+        // `AbstractDungeon.getCurrMapNode().hasEmeraldKey` (:90), so without
+        // this field a capture cannot say WHICH elite was the burning one and
+        // the differ can only infer it from a claim that may never happen.
+        // Emitted only when TRUE -- the same absent-means-default shape
+        // `misc` and the Bottled trio use -- so every capture made by an
+        // earlier fork build, and every node in the 28 unmarked ones, is
+        // byte-unchanged.
+        if (node.hasEmeraldKey) {
+            jsonNode.put("has_emerald_key", true);
+        }
         return jsonNode;
     }
 
@@ -926,6 +968,8 @@ public class GameStateConverter {
      * "damage" (int, optional): The amount of damage the power does, if applicable
      * "card" (object, optional): The card associated with the power (for powers like Nightmare)
      * "misc" (int, optional): Contains misc values that don't fit elsewhere (such as the base value for Flight)
+     * "misc_field" (string, optional): The name of the private power field "misc" was read from
+     *     (SpeedTheSpire fork addition, S3.21); present exactly when "misc" is
      * "just_applied" (boolean, optional): Used with many powers to prevent them from expiring immediately
      * @param creature The creature whose powers are to be converted
      * @return A list of power objects
@@ -953,11 +997,26 @@ public class GameStateConverter {
             // storedAmount gives the number of stacks per turn for Flight
             // hpLoss gives the amount of HP lost per turn with Combust
             // cardsDoubledThisTurn gives the number of cards already doubled with Echo Form
+            //
+            // SpeedTheSpire fork addition (S3.21 (c), PROTOCOL.md section
+            // 3.14): the union is TAGGED. Upstream emits whichever of the five
+            // private fields it finds FIRST and says nothing about which one it
+            // was, so a reader holding `{"id":"Invincible","misc":300}` cannot
+            // tell `maxAmt` from a `basePower` that a future power might also
+            // declare -- and the ambiguity stops being theoretical in Act 4,
+            // where InvinciblePower's private maxAmt (InvinciblePower.java:18)
+            // is on the differ's compare path every turn of the Heart fight.
+            // `misc_field` names the field the value came from. It is emitted
+            // only alongside `misc`, so a dump with no misc value is
+            // byte-unchanged; a capture made by an EARLIER fork build simply
+            // has no tag, which is exactly how the translator tells "old
+            // capture, infer as before" from "new capture, trust the tag".
             Object misc = null;
             for (String fieldName : miscFieldNames) {
                 misc = getFieldIfExists(power, fieldName);
                 if (misc != null) {
                     json_power.put("misc", (int)misc);
+                    json_power.put("misc_field", fieldName);
                     break;
                 }
             }

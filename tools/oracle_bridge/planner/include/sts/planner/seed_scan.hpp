@@ -218,10 +218,22 @@ struct RelicObs {
 
 // --- Act depth ---------------------------------------------------------------
 
-// Acts a run can be in. `run_advance.hpp` kFinalAct is 3; the fourth act (the
-// Ending) is out of the S2 model entirely, so three bits is the whole space and
-// a uint8_t mask is not a premature narrowing.
-inline constexpr int kMaxActs = 3;
+// Acts a run can be in. S3.21 moved this 3 -> 4: TheEnding is in scope from S3
+// on, and a scan that cannot NAME act 4 cannot express the cohort filters the
+// Act-4 reach work is built on (`--need-boss-reached-act 4`,
+// `--need-boss-kill-act 4`), which is what the planner's parse_act rejected
+// before. Four is the whole space -- the game has no fifth act outside Endless,
+// which is out of scope -- and the `boss_ids` array it sizes is bounded by the
+// engine's own `kBossIdCap`, which has been 4 since the schema was frozen
+// (run_state.hpp:51), so nothing widens underneath it. The act masks stay
+// uint8_t with four bits spare.
+//
+// NOTE what this does NOT move: `engine::kFinalAct` is still 3, and that is
+// S3.32's single-owner change. This constant is the planner's *vocabulary*
+// (which acts a filter may name); kFinalAct is the engine's *terminal* (which
+// act ends a run). Until S3.32 lands, a `--need-boss-kill-act 4` scan is a
+// legal question with the honest answer "no seed matched".
+inline constexpr int kMaxActs = 4;
 
 // Bit for one act in the `boss_reached_acts` / `boss_killed_acts` masks. Acts
 // are 1-based; act 0 (before the dungeon exists) has no bit and never sets one.

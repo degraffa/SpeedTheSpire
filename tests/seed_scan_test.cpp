@@ -584,18 +584,22 @@ TEST(SeedScanActMask, BitIsActMinusOneAndZeroIsNotAnAct) {
     EXPECT_EQ(sts::planner::act_bit(1), 0x1);
     EXPECT_EQ(sts::planner::act_bit(2), 0x2);
     EXPECT_EQ(sts::planner::act_bit(3), 0x4);
-    // Act 0 is "before the dungeon exists" and act 4 (the Ending) is outside
-    // the S2 model. Neither may claim a bit -- an act_bit(0) of 1 would make
-    // every pre-run observation look like an act-1 boss.
+    // S3.21 moved kMaxActs 3 -> 4, so TheEnding now HAS a bit: an Act-4 cohort
+    // filter has to be expressible before an Act-4 cohort can be scanned for.
+    EXPECT_EQ(sts::planner::act_bit(4), 0x8);
+    // Act 0 is "before the dungeon exists" and still may not claim a bit -- an
+    // act_bit(0) of 1 would make every pre-run observation look like an act-1
+    // boss. Act 5 does not exist outside Endless, which is out of scope.
     EXPECT_EQ(sts::planner::act_bit(0), 0);
-    EXPECT_EQ(sts::planner::act_bit(4), 0);
+    EXPECT_EQ(sts::planner::act_bit(5), 0);
     EXPECT_EQ(sts::planner::act_bit(255), 0);
 
     EXPECT_TRUE(sts::planner::act_bit_set(0x5, 1));
     EXPECT_FALSE(sts::planner::act_bit_set(0x5, 2));
     EXPECT_TRUE(sts::planner::act_bit_set(0x5, 3));
     EXPECT_FALSE(sts::planner::act_bit_set(0xff, 0));
-    EXPECT_FALSE(sts::planner::act_bit_set(0xff, 4));
+    EXPECT_TRUE(sts::planner::act_bit_set(0xff, 4));
+    EXPECT_FALSE(sts::planner::act_bit_set(0xff, 5));
 }
 
 TEST(SeedScanActMask, BossReachedAgreesWithTheLegacyBool) {

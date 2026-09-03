@@ -136,7 +136,7 @@ are S3's own.
 | **Sharp Hide THORNS retaliation on the killing blow** | TE.1 (stage-b table: "UNASSIGNED — S1 pump semantics, owner-approved task") | **S3.44** | **ACCEPTED INTO S3 SCOPE.** Witness STS420252 (te1_survival_b160) already exists and is a promoted reproducer — under the 2026-09-03 evidence rule this row is unusually well placed, because the capture that proves the fix is already on disk. Act 4 sharpens the motive: `BeatOfDeathPower` fires a THORNS-typed hit after **every** card the player plays (BeatOfDeathPower.java:40-44), so terminal adjudication at the Heart is exactly this ordering question at its most consequential |
 | **~60 out-of-yaml MIRROR sites carrying citations `wave3-citations` corrected in `registry/*.yaml`** | wave3-citations, 2026-07-28 (stage-b, UNASSIGNED) | **S3.65** | **ACCEPTED INTO S3 SCOPE**, together with the three sibling citation rows the same sweep left open (the nine repo-wide out-of-range `File.java:line`s, the eleven and fifteen `relics.yaml` +1000-class ones, the nine `cards.yaml` ones). Folded into one provenance task because S3 touches `src/`, `include/` and `tools/` broadly and a split-brain between the registry and its mirrors is precisely the thing that makes a re-read at task time untrustworthy. Comment/provenance only — a behaviour change discovered mid-sweep is stop-the-line, not a drive-by |
 | **Windows CI job** | build effort (stage-b, UNASSIGNED) | **S3.66** | **ACCEPTED INTO S3 SCOPE**, and promoted in importance by the evidence rule: with unit tests gone, CI's job is to prove the six presets still **build** and that the committed corpora still replay zero-diff, which is now the whole automated safety net. **Pin the LLVM version** (the googletest `/WX-` workaround exists because a clang release added a warning gtest trips over). The proposed workflow is unverified because Actions cannot run locally; S3.67 owes a green run on a real push, not a plausible YAML |
-| **Translator: power `misc` fields other than player-owned Combust** (the five-way untagged union) | B3.7 (stage-b, UNASSIGNED; re-scoped by `wave2-harness` stage 3) | **S3.21** | **ACCEPTED INTO S3 SCOPE because Act 4 makes it live.** `GameStateConverter` emits whichever of `basePower`/`maxAmt`/`storedAmount`/`hpLoss`/`cardsDoubledThisTurn` is present first (PROTOCOL §3.14), with nothing telling a reader which. `InvinciblePower` carries a private **`maxAmt`** (InvinciblePower.java:18-29) — the union's *second* member — on a power the differ must compare every turn of the Heart fight. S3.21 owns the disambiguation as part of the redeploy (a tagged emission is the obvious fix and is a fork change, so it rides the same jar) |
+| **Translator: power `misc` fields other than player-owned Combust** (the five-way untagged union) | B3.7 (stage-b, UNASSIGNED; re-scoped by `wave2-harness` stage 3) | **S3.21** | **ACCEPTED INTO S3 SCOPE because Act 4 makes it live.** `GameStateConverter` emits whichever of `basePower`/`maxAmt`/`storedAmount`/`hpLoss`/`cardsDoubledThisTurn` is present first (PROTOCOL §3.14), with nothing telling a reader which. `InvinciblePower` carries a private **`maxAmt`** (InvinciblePower.java:18-29) — the union's *second* member — on a power the differ must compare every turn of the Heart fight. S3.21 owns the disambiguation as part of the redeploy (a tagged emission is the obvious fix and is a fork change, so it rides the same jar). **DISCHARGED 2026-09-03 by S3.21** — `power.misc_field` names the source field and is emitted only alongside `misc` (PROTOCOL §3.14, §5.6(c)); the translator keeps its inference on an untagged (pre-redeploy) capture and VERIFIES it against the tag on a new one, so a Combust whose tag is not `hpLoss` aborts. The tag's LIVE witness is `UNVERIFIED-until-captured` and is **S3.23**'s: exactly five classes declare the union's members (Malleable, Invincible, Flight, Combust, Echo Form) and none of them can appear in an Act-1 Ironclad run, so the preflight could not witness it and an Act-2 crossing witnesses it automatically |
 | **`--replay` compares `RunState`, not in-combat card COSTS** | S2.43 read-out ("worth its own row"); [verification/s2-verification.md](verification/s2-verification.md) §9 limit 2 | **S3.53** | **ACCEPTED INTO S3 SCOPE, and re-rated from "worth a row" to load-bearing.** A whole cost-state family reached the S2 depth wave undetected because no acceptance surface compared in-combat card costs against a capture. Under the evidence rule the replay differ *is* the acceptance surface, so a blind spot in it is a blind spot in the project's only marker of truth. S3.53 closes it and the event-grid-mask sibling below |
 | **Audit the event-grid legal-action masks against live captures** | raised as a background-task chip at the S2-G2 close (2026-08-27); **no ledger row was ever written for it**, which is why it is being written here | **S3.53** | **ACCEPTED INTO S3 SCOPE, with its provenance stated honestly:** this obligation exists as a one-line note in the S2 session hand-off and nowhere in the repository, so its exact original scope is not recoverable. S3.53 therefore defines it: for every screen that presents a card/relic grid (Neow, campfire Smith/Toke, event grids, the shop purge grid, the boss-relic screen), compare the **engine's legal-action mask** against the live `ChoiceScreenUtils` candidate list on a real capture, and make the comparison an acceptance surface rather than an inspection. Motivated by the same S2 findings the row above cites, plus The Library GRID identity and the Match-and-Keep index-space fixes |
 | **SecretPortal: should the simulator model a wall clock?** | S2.43 ("OWNER CALL LEFT OPEN"); [verification/s2-verification.md](verification/s2-verification.md) §9 limit 4 | **RE-DEFERRED — owner policy call, not engineering** | Both sides are pinned to `playtime = 0` today (the engine's `kUnmodelledPlaytimeSeconds`; the fork's `OraclePlaytimePinPatch`), so **no capture can disagree with the sim** and the question is invisible to every S3 bar. The 2026-08-10 ratification rested on "the event is avoidable and essentially never optimal", which is true of the event and not of the draw-index shift its omission causes — that is the open half. It is out of S3 scope because deciding it is a scope decision about what the simulator *is*, and because acting on it would unpin the fork mid-stage. Surfaced to the owner with the S3 plan; carried by s2-design §5 trap 5 until answered |
@@ -152,7 +152,7 @@ are S3's own.
 | **Act-4 first-row map choice width** | s3-design §4.4 | **S3.32** | `MapRoomNode.update`'s first-room arm gates only on `y == 0` and hover (:254-279), and Act 4's row 0 has six roomless nodes beside the rest room. Whether the game offers 1 or 7 candidates decides the legal-action mask; an over-wide mask is a leak-gate problem, not a cosmetic one. Answer from the fork's own `ChoiceScreenUtils` output on the first Act-4 capture, and pin the same source for the elite→boss action kind (`MAP_BOSS` vs `MAP_NODE`, DungeonMap.java:68) |
 | **The Act-4 floor pair is A20-dependent** | s3-design §4.3 | **S3.32** | Act 4's floor base is 51 below A20 and 52 at A20, because the A20 second Act-3 boss room is a real floor. That breaks `act_floor_base(act) = (act-1) * kActFloorSpan`, so the base must be run state written at the crossing and `run_cur_row` must read it. Both halves need **separate** witnesses at **both** ascension bands — a single matching number on one band hides the pair, which is the mistake s2-design §4.2's row existed to prevent |
 | **The emerald key's CLAIM, and with it §5 trap 1, has no capture** | S3.11 | **S3.23** | The engine assembles the `EMERALD_KEY` row, skips `setEmeraldElite`'s `mapRng` draw once the key is held, and both are corpus-clean — but no committed capture ever *presses* the key row, and none takes a key and then crosses an act. So the highest-risk change in S3 is landed on a source read plus a zero-diff that cannot see it. The discharging capture is a PAIR on one seed: emerald claimed → next act generated, and emerald skipped → next act generated, with the two acts' maps **differing**. A single matching run is not evidence, because a sim that kept drawing would still match a capture that never took the key |
-| **`RunState.keys` is neutralized on both sides of every replay comparison** | S3.11 (inherited shape from the ruby bit) | **S3.21** | `neutralize_incomparable` and `neutralize_presentation_only` both zero `keys`: the sim has three writers now (Recall, and S3.11's two key-row claims) while neither CommunicationMod's `game_state` nor the fork's oracle block exposes `Settings.hasRubyKey/hasEmeraldKey/hasSapphireKey`, so the capture side is structurally 0. Until S3.21 (a) emits the three booleans, every key claim is proved only through its CONSEQUENCES — the spent campfire, the abandoned relic still popped from `relic_pool_*`, the moved `map_rng`. Remove both zeroings in the same change that lands the emit, or the new field is emitted and still not compared |
+| **`RunState.keys` is neutralized on both sides of every replay comparison** | S3.11 (inherited shape from the ruby bit) | **S3.21** | `neutralize_incomparable` and `neutralize_presentation_only` both zero `keys`: the sim has three writers now (Recall, and S3.11's two key-row claims) while neither CommunicationMod's `game_state` nor the fork's oracle block exposes `Settings.hasRubyKey/hasEmeraldKey/hasSapphireKey`, so the capture side is structurally 0. Until S3.21 (a) emits the three booleans, every key claim is proved only through its CONSEQUENCES — the spent campfire, the abandoned relic still popped from `relic_pool_*`, the moved `map_rng`. Remove both zeroings in the same change that lands the emit, or the new field is emitted and still not compared. **DISCHARGED 2026-09-03 by S3.21** — both zeroings are gone. The field is compared as a **pair**, not unconditionally (`neutralize_unattested_keys`, gated on `TranslatedRecord::has_keys`): deleting the zeroing and stopping there REDs `act1_a20_50/STS71037`, whose seq 83 claims the `SAPPHIRE_KEY` row so the sim rightly holds `kKeySapphire` while the pre-redeploy capture has no key block and translates to a structural 0 (`keys: 0 -> 4`). Every capture from the new jar on is compared; only unattested pre-redeploy records are neutralized |
 | **`Spire Heart` clicks 1–2: collapse or model?** | s3-design §4.1 | **S3.31** | Clicks 1 and 2 change no run state and are exactly the shape the engine already collapses (shrines.cpp / beyond_events.cpp, accepted at G7), and the follower's glue rule 3 answers collapsed one-click dialogs either way. But the differ compares **record counts**, so the choice must be made once, recorded, and reflected in the follower — not discovered during scoring |
 
 ---
@@ -281,7 +281,7 @@ are S3's own.
 
 ## Phase S3.2 — Reach instruments and the oracle contract (∥ where marked)
 
-- **S3.21** `[ ]` **Oracle contract v2: the Act-4-aware fork redeploy.** The
+- **S3.21** `[x]` **Oracle contract v2: the Act-4-aware fork redeploy.** The
   one fork redeploy S3 gets, carrying everything that needs a jar change so
   nothing else has to ask for a second. (a) The `oracle` block emits the three
   key booleans (`Settings.hasRubyKey/hasEmeraldKey/hasSapphireKey`,
@@ -324,7 +324,186 @@ are S3's own.
   the two archives byte-unchanged; determinism check (the same seed twice,
   identical dumps); six presets **build**; `check_doc_links.sh` clean. A
   redeploy that moves any existing capture's verdict is stop-the-line.
-  **Log:** —
+  **Log:** 2026-09-03 — **the redeploy landed and is live.** Jar
+  `build/oracle_fork/CommunicationMod-oracle.jar`, SHA-256
+  `49b5eeef1f7ec04eb3eef7c0ed41e3e79865564d1cd3c3ec6930d69c48c460f0`,
+  built by `powershell -ExecutionPolicy Bypass -File
+  tools\oracle_bridge\build_fork.ps1 -CheckDeterminism` under JDK 8
+  (`C:\Program Files\Java\jdk1.8.0_171`) and **DEPLOYED** to
+  `D:\SteamLibrary\steamapps\common\SlayTheSpire\mods\`. The determinism
+  switch passed (a second full build byte-identical). The jar it replaced,
+  `ABD95268462FA31E7F7498B45BA4539E3731CC38E59850B547D03AE6F372A4C1` — the
+  playtime-pinned S2-G2 pin — is preserved byte-for-byte at
+  `D:\STS_BG_Mod\_oracle_data\jar_backup_ABD95268_pre_s321.jar`, so the
+  redeploy is reversible with one copy. **Every capture taken from
+  2026-09-03 on carries the new pin**; the two committed corpora do not, and
+  the contract is two-sided precisely so that stays true.
+
+  *(a) Keys and the dungeon identity.* `getOracleState` emits
+  `hasRubyKey` / `hasEmeraldKey` / `hasSapphireKey` (Settings.java:64-67),
+  `isFinalActAvailable` (the fourth conjunct of the same gate,
+  SpireHeart.java:151 and MonsterRoomElite.java:90) and **`dungeonId`**
+  (`AbstractDungeon.id`), and `convertMapRoomNodeToJson` emits
+  `has_emerald_key` **only when true** (MapRoomNode.java:61) — absent-means-
+  default, so every pre-redeploy capture is byte-unchanged. The translator
+  maps the three key booleans into `RunState::keys` and cross-checks
+  `dungeonId` against the `act` anchor (`Exordium`/`TheCity`/`TheBeyond`/
+  `TheEnding`), aborting on disagreement.
+
+  *The inherited `RunState.keys` row is discharged, and the way it is
+  discharged is itself a finding.* Both `s.keys = 0` zeroings are gone from
+  `neutralize_incomparable` and `neutralize_presentation_only`, exactly as the
+  row demanded — but the field is **not** compared unconditionally. Deleting
+  the zeroing and stopping there **REDs the committed Act-1 corpus**:
+  `act1_a20_50/STS71037` seq 83 opens a LargeChest offering
+  `RELIC Mummified Hand` + `SAPPHIRE_KEY` and answers `choose 1`, **taking the
+  key**, so S3.11's run layer rightly sets `kKeySapphire` while the
+  pre-redeploy capture has no key block and translates to a value-init 0 —
+  `keys: 0 -> 4`, a RED on a record where nothing is wrong. A structural zero
+  is an ABSENCE OF CLAIM, not a claim of "no keys". So `keys` takes the same
+  **pair shape** `boss_chest` takes (`neutralize_unattested_keys`, gated on
+  the new `TranslatedRecord::has_keys`): compared on every record that carries
+  the block, neutralized on both sides where it does not. That is "actually
+  compared" for every capture from this jar on, and it is what keeps the
+  redeploy from moving an existing verdict — which the block's own Acceptance
+  makes stop-the-line. Controls, both run: a synthesised capture carrying the
+  truthful key state replays CLEAN; the same capture with `hasRubyKey` forced
+  true REDs at seq 0 on `keys: 2 -> 0`.
+
+  *(b) Act 4 — audited, not re-implemented.* PROTOCOL §5.6(b) carries the
+  table. `GameStateConverter` is dungeon-agnostic almost everywhere, so
+  `act == 4`, the boss key `The Heart`, the special map, the `Spire Heart`
+  screens (`getEventState` reads the class's static `ID` by reflection;
+  `VictoryRoom.phase == EVENT` puts `ChoiceScreenUtils` on its EVENT arm) and
+  the `TrueVictoryRoom` terminal (`room_type` + `screen_name` `NO_INTERACT`,
+  `screen_type` `NONE` from the `default` arm) were all **verified already
+  correct**. Exactly one gap was real — `AbstractDungeon.id` was emitted
+  nowhere — and it is what `dungeonId` fills. One retail behaviour is recorded
+  rather than changed: `convertMapToJson` emits only nodes with edges, and
+  Act 4's `TrueVictoryRoom` node (3,4) has none (it is entered through a fresh
+  `MapRoomNode`, ProceedButton.java:191-192), so an Act-4 `map` array carries
+  **four** nodes, (3,0)…(3,3). Emitting edgeless nodes would rewrite the `map`
+  array of every capture ever taken; the engine's Act-4 map is a constant
+  (design §4.4), so four is the whole navigable map.
+
+  *(c) The tagged `misc` union — the stage-b deferred row, discharged.*
+  `power.misc_field` names which of `basePower`/`maxAmt`/`storedAmount`/
+  `hpLoss`/`cardsDoubledThisTurn` the value came from, emitted **only
+  alongside `misc`**. The contract is two-sided and backward-compatible: an
+  old capture has no tag and the translator keeps its per-power inference; a
+  new capture carries the tag and the inference is **verified** against it —
+  a Combust whose tag is not `hpLoss` now aborts instead of being silently
+  misread. Three negative controls run and fail loudly: a bogus
+  `misc_field` value, a partial key block (2 of 3), and a `dungeonId`
+  contradicting its act. The compiled bytecode is the emitter's proof:
+  `javap -c` over the jar's `GameStateConverter.class` shows the `misc_field`
+  put inside the same `ifnull` guard as the `misc` put, in the same loop
+  iteration, writing that iteration's field-name local.
+
+  *(d) The Courier patch rides the jar.* `CourierRestockSeedPatch.class` is
+  in it (verified by `jar -tf`), and **PROTOCOL.md §5.5** is written — the
+  section `shop.hpp` and the patch javadoc already cited by name. §5.6(d) and
+  README-oracle's patch-family table now name it too, with the five-flag
+  equivalence baseline restated: the three strip flags, `oraclePlaytimePin`
+  and `oracleCourierRestockSeed`. S3.21's own additions need no flag: they
+  ride the existing `oracleBlock` gate or are emitted-only-when-set, and none
+  changes a game rule.
+
+  *(e) Repo side.* The translator learns `"Spire Heart"` as the **second**
+  non-pool sentinel event id after Neow's (it is constructed by its room and
+  is a member of no act list, so a pool `EventId` would corrupt the three
+  membership bitsets), and learns that Act 4's `eventList`/`shrineList` are
+  **empty by construction** (`TheEnding` overrides both initialisers with
+  empty bodies, TheEnding.java:198-200, :211-213) — read through the act-local
+  "initially present, now absent ⇒ fired" derivation they would have marked
+  all eleven Exordium events and all six shrines FIRED off two empty arrays.
+  `event_framework.hpp` is deliberately **not** touched: the per-act
+  fall-through is S3.32's grant. The post-victory ending tail is now
+  **translated instead of dropped** — it lands in `records` at
+  `first_post_victory_ending_record` and the differ's `screens.resize`
+  compensation is deleted — and `replay_run_diff` reports
+  `N of M post-victory ending record(s) compared`. **Today that reads
+  `0 of 5`, and the 0 is a fact about the ENGINE, not about the differ:**
+  `command_map.hpp`'s COMPLETE-screen `proceed` arm still ends the replay at
+  `run_is_victory` one record earlier, because the run layer ends the run at
+  the last Act-3 boss instead of walking into the VictoryRoom. **S3.31 moves
+  that terminal and the tail starts being compared with no further differ
+  change.** Planner `kMaxActs` 3 → 4, so `--need-boss-act 4` /
+  `--need-boss-kill-act 4` are accepted clauses that match nothing until
+  `engine::kFinalAct` moves (S3.32); `engine::kFinalAct` is untouched here.
+
+  *What the newly-visible tail actually contains* (both corpus victories,
+  identically): five records — four `Spire Heart` `choose 0` clicks plus the
+  `__terminal_observed__` at `screen_type` GAME_OVER. The **first** carries
+  the whole state change and it is exactly design §5 trap 11 and §4.3's A20
+  row: `floor` 51 → **52**, all five floor-scoped streams reseeded to
+  `seed + 52` (every counter to 0, one shared `(s0,s1)` pair), one entry
+  popped off `oracle.encounterLists.monster`, `room_type`
+  `MonsterRoomBoss` → `VictoryRoom`, `room_phase` COMPLETE → EVENT. Clicks
+  **2, 3 and 4 change nothing but the option label and `choice_list`** — no
+  gold, no HP, no stream, no pool. That is the measured answer to the
+  clicks-1-and-2 collapse question the deferred row hands S3.31: the entire
+  dialog is presentation, and only the ROOM TRANSITION is state. Neither
+  corpus victory holds Maw Bank, so the +12 gold half of trap 11 is still
+  unwitnessed and stays S3.31's.
+
+  *Evidence.* Six presets **build**: `win-debug` / `win-asan` /
+  `win-release` via the vcvars64 + LLVM wrapper, `debug` / `asan` /
+  `release` through `tools/wsl_run.sh --script tools/build_presets.sh debug
+  asan release` (configure + build, no ctest, per the 2026-09-03 owner
+  directive). Both committed corpora replay **zero-diff** with the two
+  archives byte-unchanged — 50/50 `act1_a20_50` and 5/5 `three_act_a20_5`,
+  via `tools/verify_report/ci_corpus_smoke.py` on Windows and
+  `tools/wsl_run.sh --script tools/corpus_replay.sh` in WSL, with both
+  injected-divergence controls failing loud. `--replay --vitals` over the
+  three-act corpus is vitals-clean. `check_doc_links.sh` and
+  `check_stale_counts.sh` clean.
+
+  *Live preflight (2026-09-03, the new jar).* No stale game lock existed —
+  `D:\STS_BG_Mod\_oracle_data\oracle_game.lock` was absent and pid 288796 was
+  not alive, so nothing was deleted. `campaign_pipeline.py run
+  --campaign-id s321_preflight --seeds <STS430000> --policy random-legal
+  --policy-seed 1234 --instances 1` captured 28 actions to a floor-1 death;
+  scored with **this branch's** tooling it is **CLEAN to its terminal**, 29
+  records compared, zero diverging, and `--replay --vitals` **vitals-clean**
+  over 24 in-combat records. **Determinism:** the same seed captured twice
+  (`s321_preflight` / `s321_preflight_b`) gives **identical** records —
+  normalised SHA-256
+  `8f7777a1818faae3944044a2d96174c6e330343214f8f34c8ed6a3af30fe6570` on both,
+  the only differences being the header's
+  `campaign_id`/`created_utc`/`fork_jar_path` and the terminal record's
+  `created_utc`. The new fields are live in the capture: every one of the 29
+  in-dungeon records carries
+  `{"dungeonId":"Exordium","act":1,"hasRubyKey":false,"hasEmeraldKey":false,
+  "hasSapphireKey":false,"isFinalActAvailable":true}`, and exactly ONE map
+  node per record carries `has_emerald_key` —
+  `{"symbol":"E","x":1,"y":9,"has_emerald_key":true,...}`, the first live
+  witness of `setEmeraldElite`'s chosen node in any artifact.
+
+  *One expected non-failure worth naming:* the campaign's OWN report says
+  `translation_drift`, because `campaign_pipeline.py` post-processes with the
+  repo root it is launched from and it was launched from the main checkout,
+  whose translator is master's and does not yet know `oracle.dungeonId`. The
+  abort message is verbatim `record 1: unknown field
+  state_json.game_state.oracle.dungeonId` — the fail-loud field policy working
+  exactly as designed, and a positive proof that the deployed jar really is
+  emitting the new block. It disappears when this commit lands on master. Every
+  verdict quoted above is from this branch's binaries.
+
+  *Owed — `UNVERIFIED-until-captured`, one item.* The `misc_field` tag is
+  **not yet live-witnessed**, and the reason is structural rather than
+  incidental: exactly five classes in the 12-18-2022 tree declare the union's
+  five members — `MalleablePower` (`basePower`), `InvinciblePower` (`maxAmt`),
+  `FlightPower` (`storedAmount`), `CombustPower` (`hpLoss`) and `EchoPower`
+  (`cardsDoubledThisTurn`) — and **none of them can appear in an Act-1
+  Ironclad run** unless the player acquires and plays Combust. No Act-1
+  capture can witness the tag. It is discharged by the first capture that
+  reaches **Act 2** (Byrd's Flight, Shelled Parasite's / Spheric Guardian's
+  Malleable — automatic there), i.e. **S3.23**'s key wave, whose emerald pair
+  crosses an act by construction; a Heart capture (`Invincible`) witnesses the
+  union's second member at S3.43. Until then the tag rests on the compiled
+  bytecode and on the offline synthetic capture with its three negative
+  controls, both quoted above.
 
 - **S3.22** `[ ]` **Key-aware sim-consulting driver + reach scan.** Extend the
   S2.V2 instrument rather than the bar (design §6.1 step 1). A `sim_search`
@@ -339,6 +518,14 @@ are S3's own.
   rate with keys, Act-4 entry rate, Shield-and-Spear kill rate and Heart kill
   rate. Report the numbers honestly including the zeros; a zero with a
   positive control beside it is the finding.
+  **Inherited from S3.21:** the planner's `kMaxActs` is **4**, so
+  `--need-boss-act 4` and `--need-boss-kill-act 4` already parse — the
+  `--need-act 4` clause this block asks for is a filter over that vocabulary,
+  not a widening of it, and `act_bit(4)` is `0x8`. Note what is NOT moved:
+  `engine::kFinalAct` is still 3 (S3.32 owns it), so until that lands an act-4
+  clause is answerable and matches nothing; report that zero rather than
+  reading it as a scan bug. `seed_scan`'s `boss_ids` is bounded by the
+  engine's `kBossIdCap`, which has been 4 since the schema froze.
   **Deps:** S3.11 **Acceptance:** a committed reach report under
   `docs/verification/` in the [verification/s2v2-sim-reach.md](verification/s2v2-sim-reach.md)
   mould, regenerable from the commands it quotes; a `--verify-determinism`
@@ -364,6 +551,24 @@ are S3's own.
   a burning-elite claim on a **BLACK STAR** run, the only shape in which
   `addPotionToRewards`' four-item suppression (AbstractRoom.java:597-599, §5
   trap 6) is reachable — gold + relic + `EMERALD_KEY` is three rows, not four.
+  **Inherited from S3.21:** (1) the deployed jar is
+  `49b5eeef1f7ec04eb3eef7c0ed41e3e79865564d1cd3c3ec6930d69c48c460f0`; the
+  previous pin is restorable from
+  `D:\STS_BG_Mod\_oracle_data\jar_backup_ABD95268_pre_s321.jar`. (2) Every
+  capture this wave takes carries `oracle.hasRubyKey/hasEmeraldKey/
+  hasSapphireKey`, and `RunState::keys` is **compared** on exactly those
+  records (`neutralize_unattested_keys`), so a key claim is now proved
+  directly rather than only through its consequences — the emerald pair's
+  positive control gains a second, independent signal. (3) Map nodes carry
+  `has_emerald_key` when marked, so a capture NAMES the burning elite; today
+  `--spot` still seeds that flag from the capture's own reward row
+  (`captured_emerald_key_row`), and switching it to the node flag is a
+  cheap follow-up this wave's captures make possible for the first time.
+  (4) **This wave discharges S3.21's one `UNVERIFIED-until-captured` item**
+  — the `misc_field` tag, which no Act-1 capture can witness (only Malleable,
+  Invincible, Flight, Combust and Echo Form declare the union's members) and
+  which an Act-2 crossing witnesses automatically via Byrd or Shelled
+  Parasite. Say so in this block's Log.
   **Deps:** S3.21, S3.22 **Acceptance:** each of the captures above replays
   **zero-diff** to its terminal through `replay_run_diff --replay` with zero
   capture-race records, and the emerald pair shows the two runs' Act-2/3 maps

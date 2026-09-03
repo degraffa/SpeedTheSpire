@@ -73,10 +73,10 @@ the same patch classes and would double-patch.
 
 | Family | Status |
 |---|---|
-| 1. Oracle state block (§2.5) | landed at B1.2 (`GameStateConverter`, flag `oracleBlock`) |
+| 1. Oracle state block (§2.5) | landed at B1.2 (`GameStateConverter`, flag `oracleBlock`); grown at S3.21 (2026-09-03) by the **oracle contract v2** additions — the three `Settings.has*Key` booleans + `isFinalActAvailable`, `dungeonId`, the map node's `has_emerald_key` and the power `misc` union's `misc_field` tag. All four ride the same `oracleBlock` gate or are emitted only when set, so they need **no flag of their own** and are not part of the equivalence baseline: none of them changes a game rule. `PROTOCOL.md` §5.6 |
 | 2. Rendering-strip / fast-forward (§2.2) | landed at B1.3 (see below) |
 | 3. Campaign QoL (fast startup, restart hooks) | scoped at B1.4 with the driver |
-| 4. Oracle-contract pins (a retail behavior that is not a function of `(seed, actions)`) | `patches/OraclePlaytimePinPatch`, landed at S2.43 (2026-08-27), flag `oraclePlaytimePin`; `patches/CourierRestockSeedPatch`, source landed at S3.24 (2026-09-03), flag `oracleCourierRestockSeed` — see both below |
+| 4. Oracle-contract pins (a retail behavior that is not a function of `(seed, actions)`) | `patches/OraclePlaytimePinPatch`, landed at S2.43 (2026-08-27), flag `oraclePlaytimePin`; `patches/CourierRestockSeedPatch`, source landed at S3.24 (2026-09-03) and carried into the jar by S3.21's redeploy (2026-09-03), flag `oracleCourierRestockSeed` — see both below, and `PROTOCOL.md` §5.5 |
 
 B1.1 = build pipeline only: the fork jar must reproduce the stock jar's
 behavior byte-for-byte (B0.2 capture replay, uuid-normalized per PROTOCOL.md).

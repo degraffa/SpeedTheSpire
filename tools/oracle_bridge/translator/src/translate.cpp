@@ -464,12 +464,56 @@ void set_event_flag_block(eng::RunState& rs, uint16_t first_id, int count,
         fr.defer("damage");    // optional intent damage (§3.14)
     }
     fr.defer("card");          // optional nested card (Nightmare etc.)
+    // S3.21 (c) / PROTOCOL §3.14: the five-way `misc` union is TAGGED from the
+    // 2026-09-03 fork on. `misc_field` names which private field the value was
+    // read from (basePower / maxAmt / storedAmount / hpLoss /
+    // cardsDoubledThisTurn). It is present exactly when `misc` is, and only on
+    // captures made by the new jar -- so the contract is two-sided and
+    // backward-compatible: an OLD capture carries no tag and the union is
+    // resolved by inference from the power id exactly as it always was; a NEW
+    // capture carries the tag and the inference is VERIFIED against it, which
+    // turns a silent misread into a loud one. The tag is read here, before the
+    // Combust arm, so both arms see it.
+    std::string misc_field;
+    bool has_misc_field = false;
+    if (const json* mf = fr.take("misc_field")) {
+        misc_field = as_str(*mf, ctx, path + ".misc_field");
+        has_misc_field = true;
+        static constexpr std::string_view kMiscFields[] = {
+            "basePower", "maxAmt", "storedAmount", "hpLoss",
+            "cardsDoubledThisTurn"};
+        bool known = false;
+        for (const std::string_view f : kMiscFields)
+            known = known || (misc_field == f);
+        if (!known) {
+            throw TranslateError(loc(ctx) + " unknown power misc_field \"" +
+                                 misc_field + "\" at " + path +
+                                 ".misc_field — PROTOCOL §3.14 names exactly "
+                                 "five union members (schema drift, "
+                                 "translation aborted)");
+        }
+        if (!j.contains("misc")) {
+            throw TranslateError(loc(ctx) + " power at " + path +
+                                 " carries misc_field without misc — the tag "
+                                 "is emitted only alongside its value "
+                                 "(PROTOCOL §3.14)");
+        }
+        fr.oracle("misc_field");
+    }
     if (ps.power_id == static_cast<uint16_t>(eng::PowerId::COMBUST) &&
         player_combat_flags != nullptr) {
         // GameStateConverter's first-present `misc` field is CombustPower's
         // private hpLoss for this specific player-owned power. B3.7 stores that
         // counter in reserved CombatState.flags bits; no other power `misc`
-        // field is claimed here.
+        // field is claimed here. With a tagged capture the "this is hpLoss"
+        // claim stops being an inference: assert it.
+        if (has_misc_field && misc_field != "hpLoss") {
+            throw TranslateError(
+                loc(ctx) + " Combust misc at " + path +
+                " is tagged misc_field=\"" + misc_field +
+                "\", not \"hpLoss\" — the translator's union inference and "
+                "the fork's tag disagree (PROTOCOL §3.14)");
+        }
         const int64_t hp_loss =
             as_i64(fr.require("misc"), ctx, path + ".misc");
         constexpr uint32_t kMaxCombustHpLoss =
@@ -712,6 +756,13 @@ struct OracleAnchors {
     int64_t ascension = 0;
     float playtime = 0.0f;      // CardCrawlGame.playtime, seconds (0 if absent)
     bool has_playtime = false;  // pre-2026-08-26 captures lack the field
+    // S3.21 (a) / PROTOCOL §5.6. `has_keys` is false for every capture made
+    // before the 2026-09-03 redeploy; those keep RunState::keys at whatever the
+    // rest of the translation left it (0), which is byte-for-byte the
+    // pre-S3.21 behaviour. Only a capture that actually carries the fields
+    // writes them, so no existing verdict can move.
+    bool has_keys = false;
+    std::string dungeon_id;     // AbstractDungeon.id ("" if absent)
 };
 
 [[nodiscard]] OracleAnchors parse_oracle(const json& j, const std::string& path, Ctx& ctx,
@@ -744,6 +795,63 @@ struct OracleAnchors {
         a.has_playtime = true;
     }
     fr.oracle("playtime");  // the disposition tally, unchanged by the read above
+
+    // -- S3.21 (a): the dungeon IDENTITY and the three run keys (PROTOCOL
+    //    §5.6). Both arrived with the 2026-09-03 redeploy, so both are
+    //    take()-and-check rather than require(): absence is legal and means
+    //    "capture predates the redeploy".
+    //
+    //    `dungeonId` gets no schema field -- `act` already names acts 1..3
+    //    uniquely and Act 4 is act 4 -- but it is not merely deferred either:
+    //    it is the one string the GAME branches on (DungeonMap.java:68's
+    //    `id.equals("TheEnding")`, getShrine's SecretPortal arm), so it is
+    //    cross-checked against the act anchor. A dump whose id and act
+    //    disagree is a capture the differ must not silently score.
+    if (const json* did = fr.take("dungeonId")) {
+        a.dungeon_id = as_str(*did, ctx, path + ".dungeonId");
+        static constexpr std::string_view kDungeonIdByAct[] = {
+            "Exordium", "TheCity", "TheBeyond", "TheEnding"};
+        if (a.act >= 1 && a.act <= 4 &&
+            a.dungeon_id != kDungeonIdByAct[a.act - 1]) {
+            throw TranslateError(loc(ctx) + " oracle.dungeonId \"" +
+                                 a.dungeon_id + "\" does not match oracle.act " +
+                                 std::to_string(a.act) + " (expected \"" +
+                                 std::string(kDungeonIdByAct[a.act - 1]) +
+                                 "\") — anchor mismatch, translation aborted");
+        }
+        fr.oracle("dungeonId");
+    }
+    {
+        const json* ruby = fr.take("hasRubyKey");
+        const json* emerald = fr.take("hasEmeraldKey");
+        const json* sapphire = fr.take("hasSapphireKey");
+        const int present = (ruby != nullptr) + (emerald != nullptr) +
+                            (sapphire != nullptr);
+        if (present != 0 && present != 3) {
+            throw TranslateError(loc(ctx) + " oracle key block at " + path +
+                                 " is partial (" + std::to_string(present) +
+                                 "/3) — the fork emits all three or none "
+                                 "(PROTOCOL §5.6)");
+        }
+        if (present == 3) {
+            a.has_keys = true;
+            uint8_t keys = 0;
+            if (as_bool(*ruby, ctx, path + ".hasRubyKey")) keys |= eng::kKeyRuby;
+            if (as_bool(*emerald, ctx, path + ".hasEmeraldKey"))
+                keys |= eng::kKeyEmerald;
+            if (as_bool(*sapphire, ctx, path + ".hasSapphireKey"))
+                keys |= eng::kKeySapphire;
+            rs.keys = keys;
+            fr.mapped();
+        }
+    }
+    // The fourth conjunct of the same gate (SpireHeart.java:151,
+    // MonsterRoomElite.java:90). It is a PROFILE unlock, not run state -- the
+    // sanctioned save is fully unlocked (design §1.1), so it is true on every
+    // campaign capture -- and it therefore has no schema home. Consumed as a
+    // known oracle field so a future capture taken on a locked profile is
+    // visible in the artifact rather than only in a divergence.
+    fr.oracle("isFinalActAvailable");
 
     parse_streams(fr.require("streams"), path + ".streams", ctx, rs, cs);
     fr.mapped();
@@ -852,7 +960,33 @@ struct OracleAnchors {
     //    a capture that starts at floor 1; that is the capture campaign's call,
     //    and it is a live deferred-obligations row (owner S2.43). --
     const int rec_act = static_cast<int>(a.act);
-    if (const json* events = fr.take("eventList")) {
+    // S3.21 (e) / ACT 4. TheEnding overrides BOTH list initialisers with empty
+    // bodies (TheEnding.java:198-200, :211-213), so an Act-4 dump's `eventList`
+    // and `shrineList` are empty BY CONSTRUCTION, not by every entry having
+    // fired. The act-local derivation below reads "initially present and now
+    // absent" as "fired"; run unamended at act 4 it would fall through to the
+    // Act-1 table (event_framework.hpp's `anything else falls to Act 1`) and
+    // mark all eleven Exordium events plus all six shrines FIRED off two empty
+    // arrays -- a fabricated RunState the differ would then compare. Act 4 is
+    // therefore handled here rather than by widening event_framework.hpp's
+    // per-act tables, which is S3.32's grant (it owns the kFinalAct 3->4 move
+    // and the audit of every reader).
+    const bool act4_empty_pools = rec_act >= 4;
+    if (act4_empty_pools) {
+        for (const char* key : {"eventList", "shrineList"}) {
+            if (const json* arr = fr.take(key)) {
+                if (!arr->is_array() || !arr->empty()) {
+                    throw TranslateError(
+                        loc(ctx) + " " + path + "." + key +
+                        " is non-empty at act " + std::to_string(rec_act) +
+                        " — TheEnding initialises both lists empty "
+                        "(TheEnding.java:198-200, :211-213)");
+                }
+                fr.oracle(key);
+            }
+        }
+    }
+    if (const json* events = act4_empty_pools ? nullptr : fr.take("eventList")) {
         const uint16_t first = eng::event_list_first_id(rec_act);
         const int count = eng::event_list_count(rec_act);
         rs.event_membership = static_cast<uint16_t>(parse_event_membership(
@@ -862,7 +996,7 @@ struct OracleAnchors {
                              initial & ~static_cast<uint32_t>(rs.event_membership));
         fr.mapped();
     }
-    if (const json* shrines = fr.take("shrineList")) {
+    if (const json* shrines = act4_empty_pools ? nullptr : fr.take("shrineList")) {
         // Position -> id for this act's list (event_framework.hpp); the BIT is
         // still `id - kShrineListFirstId` in every act, which is why the
         // bitset stays byte-comparable across a crossing.
@@ -1090,6 +1224,16 @@ void parse_map_node(const json& j, const std::string& path, Ctx& ctx) {
     fr.defer("x");
     fr.defer("y");
     fr.defer("symbol");
+    // S3.21 (a) / PROTOCOL §3.11: the fork emits MapRoomNode.hasEmeraldKey
+    // ONLY when true, so absence is the default and every pre-redeploy capture
+    // reads exactly as it did. The engine already stores the marked node as
+    // `emerald_x`/`emerald_y` (map_rooms.hpp), which is a coordinate pair and
+    // not a per-node bit, so there is no per-node schema field to write here;
+    // this is consumed as a KNOWN field (a new/renamed one still trips the
+    // fail-loud policy) and its comparison against the engine's marked
+    // coordinates belongs to S3.11's reward row, which is what gives the flag
+    // a consumer.
+    fr.defer("has_emerald_key");
     if (const json* ps = fr.take("parents")) {
         for (std::size_t i = 0; i < ps->size(); ++i)
             parse_coord((*ps)[i], path + ".parents[" + std::to_string(i) + "]", ctx);
@@ -1290,7 +1434,20 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
             // exactly like the reward slices (the sim DERIVES the blessing from
             // the seed, so the acceptance diffs post-choice RunState, not the
             // screen).
-            if (id != "Neow Event") {
+            //
+            // S3.21 (e): `Spire Heart` joins Neow as the second recognised
+            // non-pool event id. It is the Act-3 terminal VictoryRoom's event
+            // (VictoryRoom.java:21-33, SpireHeart.java:47) and, like Neow, is
+            // a member of NO act event/shrine/special list -- it is
+            // constructed directly by the room, never drawn -- so giving it a
+            // pool EventId here would put a non-pool entry into the three
+            // membership bitsets that pool ids index. The registry row for it
+            // (events.yaml 52, `SPIRE_HEART`) is S3.41's grant and is a
+            // BEHAVIOUR row, not a join key; recognising the id here is what
+            // stops the translator ABORTING on the four-click tail every
+            // three-act victory capture carries, which is the whole reason the
+            // tail had to be dropped before this task.
+            if (id != "Neow Event" && id != "Spire Heart") {
                 (void)join_event(id, ctx, path + ".event_id");
             }
             fr.defer("event_id");
@@ -1642,6 +1799,7 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
         };
         out.playtime = anchors.playtime;
         out.has_playtime = anchors.has_playtime;
+        out.has_keys = anchors.has_keys;
         check("seed", stock_seed, anchors.seed);
         check("floor", stock_floor, anchors.floor);
         check("act", stock_act, anchors.act);
@@ -1800,8 +1958,18 @@ TranslatedRun translate_lines(const std::vector<std::string>& lines,
     ctx.unknown_ids = &run.unknown_ids;
     ctx.unknown_id_hits = &run.unknown_id_hits;
 
-    // Post-victory ending-cinematic gate (translate.hpp's field comment):
-    // active only when the artifact's own terminal record says victory.
+    // S3.21 (e): the post-victory ending tail is TRANSLATED, not dropped.
+    // Before this task the translator recognised a victory artifact's trailing
+    // `Spire Heart` records and `continue`d past them, because the id had no
+    // recognition and would have ABORTED the whole run. It now has one
+    // (parse_screen_state's EVENT arm), so the records go through the ordinary
+    // walk and become real `TranslatedRecord`s that the differ can compare.
+    // The counter survives as a labelled TALLY -- the tail is a distinct
+    // structural region every three-act victory capture carries, the differ's
+    // summary names how many of them it reached, and a reader needs the
+    // denominator to read that line. `in_ending_tail` latches at the first
+    // `Spire Heart` record and stays latched, so the `__terminal_observed__`
+    // record that follows the four clicks is counted with them.
     bool victory_terminal = false;
     for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
         if (it->empty()) continue;
@@ -1838,7 +2006,10 @@ TranslatedRun translate_lines(const std::vector<std::string>& lines,
                 (ss && ss->value("event_id", std::string{}) == "Spire Heart")) {
                 in_ending_tail = true;
                 ++run.post_victory_ending_records;
-                continue;
+                if (run.first_post_victory_ending_record < 0) {
+                    run.first_post_victory_ending_record =
+                        static_cast<int>(run.records.size());
+                }
             }
         }
         translate_record(rec, ctx, run);

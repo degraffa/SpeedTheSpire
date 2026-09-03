@@ -121,6 +121,17 @@ struct TranslatedRecord {
     // keep the engine's 0.0f (the trap-5 pin).
     float playtime = 0.0f;
     bool has_playtime = false;
+
+    // S3.21 (a): true when THIS record's oracle block carried the three
+    // `Settings.has*Key` booleans, i.e. it was captured by the 2026-09-03 jar
+    // or later. `run.keys` is written only then; on an older capture it stays
+    // a value-init 0, which is an absence of claim rather than a claim of "no
+    // keys". The replay differ compares `keys` UNCONDITIONALLY (the
+    // pre-redeploy corpora are zero-diff under that comparison because they
+    // never claim a key), so nothing gates on this today -- it is the
+    // artifact-level fact of which contract version a record was captured
+    // under, and a triage reader's first question when `keys` ever REDs.
+    bool has_keys = false;
 };
 
 // A whole translated run (one JSONL file).
@@ -141,15 +152,25 @@ struct TranslatedRun {
     std::map<std::string, uint64_t> unknown_ids;
     uint64_t unknown_id_hits = 0;  // sum over unknown_ids values
 
-    // Post-victory ending-cinematic records skipped (S2.43 depth campaign):
-    // an A20 double-boss victory walks the "Spire Heart" taunt dialog
-    // (continue/attack/continue/sleep) BEFORE its victory terminal. The sim
-    // rightly models none of it (its run ends at the kill), the registry
-    // carries no row for it (Act 4 is S3 scope), and the follower glues the
-    // one-click screens -- so the tail is presentation, not state. Counted
-    // and skipped ONLY when the artifact's own terminal says victory; in any
-    // other artifact an unknown event id still aborts loudly.
+    // The post-victory ending tail: an A20 double-boss victory walks the
+    // "Spire Heart" dialog (four clicks, then the observed terminal) BEFORE
+    // its victory terminal record.
+    //
+    // S2.43 COUNTED AND DROPPED these records, because "Spire Heart" had no
+    // recognised event id and translating one would have aborted the whole
+    // run. S3.21 gives the id its recognition (a non-pool sentinel, like
+    // Neow's) and the records are now TRANSLATED like any other: they appear
+    // in `records`, in order, at `first_post_victory_ending_record`. The
+    // count survives as a labelled tally so the replay differ's summary can
+    // say how many of them it actually reached and compared -- the tail is
+    // still a distinct structural region, and how far into it a replay gets is
+    // exactly the thing the Act-3-terminal work (S3.31) moves.
+    //
+    // Both fields are populated ONLY when the artifact's own terminal record
+    // says victory; in any other artifact an unknown event id still aborts
+    // loudly. `first_post_victory_ending_record` is -1 when there is no tail.
     int post_victory_ending_records = 0;
+    int first_post_victory_ending_record = -1;
 };
 
 // Translate a JSONL file from disk. Throws TranslateError on drift; throws

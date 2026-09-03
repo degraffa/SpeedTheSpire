@@ -286,19 +286,43 @@ void neutralize_incomparable(RunState& s) noexcept {
     // (`boss_list[0]`) into `boss_ids[0]` in the same EncounterId space the
     // translator writes from `act_boss`, so the old neutralization here is
     // gone (it existed only while the run layer had no writer for the field).
-    // `keys` -- the OPPOSITE gap: the SIM writes the Ruby bit when a capture's
+    // `keys` -- ALSO compared now, since S3.21. The gap this neutralization
+    // existed for was one-sided: the SIM writes the Ruby bit when a capture's
     // recall press is replayed (RestOptionKind::RECALL) and, from S3.11, the
     // Emerald and Sapphire bits when a capture's key-row claim is replayed
-    // (RewardItem.java:317-332); but neither CommunicationMod's game_state nor
-    // the fork's oracle block exposes the run's key booleans, so the translator
-    // has nothing to write and the capture side is structurally 0. The claims
-    // themselves ARE still validated, and by the strongest available proxy:
-    // the recall spends the campfire, the sapphire claim ABANDONS its linked
-    // relic (which stays popped from `relic_pool_*`), and holding the emerald
-    // key removes a `map_rng` draw from every later act's generateMap. All
-    // three are compared fields. The field itself comes back when the fork
-    // emits the three Settings.has*Key booleans -- s3-tasks.md S3.21 (a).
-    s.keys = 0;
+    // (RewardItem.java:317-332), while NOTHING in a dump exposed the run's key
+    // booleans, so the capture side was structurally 0 and every replayed key
+    // claim read as a one-field divergence on every later record. S3.21's fork
+    // redeploy closes it: `oracle.hasRubyKey`/`hasEmeraldKey`/`hasSapphireKey`
+    // (PROTOCOL section 5.6) are emitted on every in-dungeon dump and the
+    // translator maps them into `RunState::keys`, so the field now carries a
+    // real claim from BOTH sides and the line that zeroed it is gone.
+    //
+    // A capture made BEFORE that redeploy carries no key block, and its
+    // translated `keys` is a value-init 0 -- an ABSENCE OF CLAIM, not a claim
+    // of "no keys". That distinction is not academic and it is not a
+    // hypothetical: act1_a20_50/STS71037 seq 83 opens a LargeChest offering
+    // `RELIC Mummified Hand` + `SAPPHIRE_KEY` and answers `choose 1`, i.e. it
+    // TAKES THE KEY. S3.11's run layer is right to set kKeySapphire there, and
+    // an unconditional comparison would score that correct sim against a
+    // capture with nothing to say -- a RED on a record where nothing is wrong.
+    // So the field is neutralized on BOTH sides exactly where the capture did
+    // not attest it, and compared everywhere it did:
+    // `neutralize_unattested_keys` below, the same pair shape (and the same
+    // reasoning) as `neutralize_unattested_boss_chest`.
+}
+
+// S3.21 (a) -- the pair gate for `RunState::keys`, the same shape as
+// `neutralize_unattested_boss_chest` below. `attested` is the record's
+// `TranslatedRecord::has_keys`: true exactly when this dump carried the fork's
+// `hasRubyKey`/`hasEmeraldKey`/`hasSapphireKey` block. Attested -> compare;
+// unattested -> zero both sides, which is byte-for-byte the pre-S3.21
+// behaviour and is what keeps every committed capture's verdict where it was.
+void neutralize_unattested_keys(RunState& expected, RunState& actual,
+                                bool attested) noexcept {
+    if (attested) return;
+    expected.keys = 0;
+    actual.keys = 0;
 }
 
 // RunState.boss_chest (schema v8) is the CONDITIONAL version of the `keys`
@@ -329,17 +353,14 @@ void neutralize_unattested_boss_chest(RunState& expected,
 void neutralize_presentation_only(RunState& s) noexcept {
     for (auto& c : s.master_deck) c.cost_now = 0;
     for (auto& n : s.map) n = MapNode{};
-    // `keys`, for exactly the reason neutralize_incomparable gives: the SIM has
-    // three writers now (the campfire Recall, and from S3.11 the EMERALD_KEY
-    // and SAPPHIRE_KEY reward-row claims) while neither CommunicationMod's
-    // game_state nor the fork's oracle block exposes Settings.has*Key, so the
-    // capture side is structurally 0 and a replayed key claim would read as a
-    // one-field divergence on every later record. It comes back the moment the
-    // fork emits the three booleans -- S3.21 (a). The CONSEQUENCES of holding a
-    // key are still fully compared meanwhile: the relic the sapphire claim
-    // abandons stays popped from `relic_pool_*`, and the emerald key's skipped
-    // setEmeraldElite draw moves `map_rng`.
-    s.keys = 0;
+    // `keys` is NOT zeroed here either, for the reason neutralize_incomparable
+    // now gives: S3.21's redeploy emits the three `Settings.has*Key` booleans,
+    // the translator maps them, and the field is a real two-sided claim. The
+    // floor-0 and merchant read-outs never touch a key anyway, so this is the
+    // same value on both sides in every record they compare -- but leaving a
+    // stale zeroing here would have made the two neutralizers disagree about
+    // whether the field exists, which is the split-brain that hides a
+    // regression in one mode and not the other.
 }
 
 // DURING a combat the run layer deliberately does not write the live sheet back
@@ -711,7 +732,8 @@ struct Verdict {
     int obtain_race_records = 0;    // ...whose only diff was an obtain animation
     int escape_race_records = 0;    // ...the Smoke-Bomb escape-settlement race
     int preview_race_records = 0;   // ...a curse transform-preview cardRng burn
-    int post_victory_ending_records = 0;  // Spire-Heart cinematic tail skipped
+    int post_victory_ending_records = 0;      // ...in the artifact ending tail
+    int post_victory_ending_compared = 0;     // ...of those, actually compared
     int double_boss_handoff_records = 0;  // ...compared against the NEXT record
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
@@ -830,17 +852,22 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
     Verdict v;
     const sts::translate::TranslatedRun run = sts::translate::translate_file(path);
     std::vector<ScreenInfo> screens = read_screens(path);
-    // The translator skips a victory artifact's trailing Spire-Heart ending
-    // cinematic (translate.hpp's field comment); the screen read-out walks the
-    // raw file and still counts those records, so drop the same tail here --
-    // it is at the end by construction (the terminal follows it directly).
-    if (run.post_victory_ending_records > 0 &&
-        screens.size() ==
-            run.records.size() +
-                static_cast<std::size_t>(run.post_victory_ending_records)) {
-        screens.resize(run.records.size());
-        v.post_victory_ending_records = run.post_victory_ending_records;
-    }
+    // S3.21 (e): the differ no longer TRIMS a victory artifact's trailing
+    // Spire-Heart ending tail. The translator used to drop those records (an
+    // unrecognised event id would have aborted the run) and this block resized
+    // the raw screen read-out to match; the translator now keeps them, so the
+    // two walks line up on their own and the resize is gone. What is kept is
+    // the accounting: `post_victory_ending_records` is how many the artifact
+    // HAS, and `post_victory_ending_compared` is how many the replay actually
+    // REACHED -- the ordinary loop below compares them like any other record,
+    // and where it stops is a fact about the ENGINE, not about this differ.
+    // Today it stops one record earlier, at run_is_victory's terminal
+    // (command_map.hpp's COMPLETE-screen `proceed` arm), because the run layer
+    // still ends the run at the last Act-3 boss instead of walking into the
+    // VictoryRoom the game builds; S3.31 moves that terminal, and this counter
+    // is what reports the tail becoming compared with no further change here.
+    v.post_victory_ending_records = run.post_victory_ending_records;
+    const int ending_tail_first = run.first_post_victory_ending_record;
     if (screens.size() != run.records.size())
         throw std::runtime_error("screen/record count mismatch in " + path);
 
@@ -886,9 +913,17 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
         neutralize_incomparable(expected);
         neutralize_incomparable(actual);
         neutralize_unattested_boss_chest(expected, actual);
+        neutralize_unattested_keys(expected, actual, rec.has_keys);
         const sts::diff::DiffReport rep = sts::diff::diff_run_states(expected, actual);
         ++v.records_compared;
         if (is_reward) ++v.reward_records_compared;
+        // S3.21 (e): a record of the artifact's post-victory Spire-Heart tail
+        // that the replay actually reached. The tail is contiguous and runs to
+        // the end of the record list, so membership is a single index test.
+        if (ending_tail_first >= 0 &&
+            k >= static_cast<std::size_t>(ending_tail_first)) {
+            ++v.post_victory_ending_compared;
+        }
 
         std::size_t deck_id_diffs = 0;
         for (const auto& d : rep.diffs)
@@ -937,6 +972,8 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             neutralize_incomparable(after);
             neutralize_incomparable(actual_after);
             neutralize_unattested_boss_chest(after, actual_after);
+            neutralize_unattested_keys(after, actual_after,
+                                       run.records[k + 1].has_keys);
             handoff_rep = sts::diff::diff_run_states(after, actual_after);
         }
 
@@ -1572,6 +1609,8 @@ void diff_assembly_fields(const RunState& expected, const RunState& actual,
             neutralize_incomparable(expected);
             neutralize_incomparable(actual);
             neutralize_unattested_boss_chest(expected, actual);
+            neutralize_unattested_keys(expected, actual,
+                                       run.records[j].has_keys);
             const sts::diff::DiffReport rep = sts::diff::diff_run_states(expected, actual);
             std::size_t deck_only = 0;
             for (const auto& d : rep.diffs)
@@ -1702,11 +1741,13 @@ struct NeowVerdict {
 
 // Print a report and say whether it was empty.
 [[nodiscard]] bool report_checkpoint(const char* what, const std::string& seed,
-                                     const RunState& expected, const RunState& actual) {
+                                     const RunState& expected, const RunState& actual,
+                                     bool attested_keys) {
     RunState e = expected;
     RunState a = actual;
     neutralize_presentation_only(e);
     neutralize_presentation_only(a);
+    neutralize_unattested_keys(e, a, attested_keys);
     const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
     if (rep.empty()) {
         std::printf("  %-11s OK   %s\n", what, seed.c_str());
@@ -1750,7 +1791,8 @@ struct NeowVerdict {
                     sim.c_str());
     }
     const bool state_ok =
-        report_checkpoint("OPTIONS", run.seed_string, run.records[k].run, rc.run);
+        report_checkpoint("OPTIONS", run.seed_string, run.records[k].run,
+                          rc.run, run.records[k].has_keys);
     v.options_clean = labels_ok && state_ok;
     if (labels_ok && opts.verbose) {
         std::printf("  OPTIONS OK  %s: [%s | %s | %s | %s]\n", run.seed_string.c_str(),
@@ -1779,7 +1821,8 @@ struct NeowVerdict {
         return v;
     }
     v.activation_clean =
-        report_checkpoint("ACTIVATION", run.seed_string, run.records[k + 1].run, rc.run);
+        report_checkpoint("ACTIVATION", run.seed_string, run.records[k + 1].run,
+                          rc.run, run.records[k + 1].has_keys);
 
     GridSession grid;
     for (std::size_t j = k + 1; j < run.records.size(); ++j) {
@@ -1791,7 +1834,8 @@ struct NeowVerdict {
         if (s.screen_type == "MAP") {
             v.post_reached = true;
             v.post_clean =
-                report_checkpoint("POST-CHOICE", run.seed_string, run.records[j].run, rc.run);
+                report_checkpoint("POST-CHOICE", run.seed_string, run.records[j].run,
+                                  rc.run, run.records[j].has_keys);
             return v;
         }
         if (s.screen_type != "GRID") grid = GridSession{};
@@ -2086,6 +2130,7 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
             RunState a = buy;
             neutralize_presentation_only(e);
             neutralize_presentation_only(a);
+            neutralize_unattested_keys(e, a, run.records[j].has_keys);
             // neowRng is floor-0 only; a shop record carries no value for it.
             e.neow_rng = RngStream{};
             a.neow_rng = RngStream{};
@@ -2481,6 +2526,7 @@ struct TreasureVerdict {
             RunState a = cur;
             neutralize_presentation_only(e);
             neutralize_presentation_only(a);
+            neutralize_unattested_keys(e, a, run.records[j].has_keys);
             e.neow_rng = RngStream{};  // floor-0 only; not carried here
             a.neow_rng = RngStream{};
             const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
@@ -2548,6 +2594,7 @@ struct TreasureVerdict {
                 RunState oa = post;
                 neutralize_presentation_only(oe);
                 neutralize_presentation_only(oa);
+                neutralize_unattested_keys(oe, oa, run.records[oj].has_keys);
                 oe.neow_rng = RngStream{};
                 oa.neow_rng = RngStream{};
                 const sts::diff::DiffReport orep = sts::diff::diff_run_states(oe, oa);
@@ -3206,6 +3253,7 @@ struct EventVerdict {
         RunState a = rs;
         neutralize_presentation_only(e);
         neutralize_presentation_only(a);
+        neutralize_unattested_keys(e, a, run.records[k].has_keys);
         e.neow_rng = RngStream{};
         a.neow_rng = RngStream{};
         neutralize_unattested_boss_chest(e, a);
@@ -3574,8 +3622,10 @@ int main(int argc, char** argv) {
                         v.preview_race_records,
                         v.stop_reason.c_str());
             if (v.post_victory_ending_records > 0)
-                std::printf("      %d post-victory ending record(s) skipped "
-                            "(the Spire Heart cinematic -- out of S2 scope)\n",
+                std::printf("      %d of %d post-victory ending record(s) "
+                            "compared (the Spire Heart tail; the remainder lie "
+                            "past the replay's stop)\n",
+                            v.post_victory_ending_compared,
                             v.post_victory_ending_records);
             // Deliberately NOT spelled `... -race`: the campaign pipeline's
             // strict accounting scrapes every `N <name>-race` field out of this
