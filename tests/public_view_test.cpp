@@ -898,13 +898,13 @@ RunController make_run_on_map() {
     rc.emerald_x = 2;
     rc.emerald_y = 5;
 
-    rc.lists.monster_list[0] = "Cultist";
-    rc.lists.monster_list[1] = "Jaw Worm";
-    rc.lists.monster_list[2] = "2 Louse";
+    rc.lists.monster_list[0] = encounter_key_id("Cultist");
+    rc.lists.monster_list[1] = encounter_key_id("Jaw Worm");
+    rc.lists.monster_list[2] = encounter_key_id("2 Louse");
     rc.lists.monster_list_count = 3;
-    rc.lists.elite_list[0] = "Gremlin Nob";
+    rc.lists.elite_list[0] = encounter_key_id("Gremlin Nob");
     rc.lists.elite_list_count = 1;
-    rc.lists.boss_list[0] = "The Guardian";
+    rc.lists.boss_list[0] = encounter_key_id("The Guardian");
     rc.lists.boss_list_count = 1;
     rc.monster_cursor = 2;  // two encounters already fought and left
     return rc;
@@ -1048,8 +1048,8 @@ TEST(PublicViewRun, CurrentEncounterIsPublicWhileInsideTheRoom) {
 TEST(PublicViewRun, EncounterSuffixDoesNotLeak) {
     const RunController a = make_run_on_map();
     RunController b = make_run_on_map();
-    b.lists.monster_list[2] = "Gremlin Gang";
-    b.lists.monster_list[3] = "Blue Slaver";
+    b.lists.monster_list[2] = encounter_key_id("Gremlin Gang");
+    b.lists.monster_list[3] = encounter_key_id("Blue Slaver");
     b.lists.monster_list_count = 4;
 
     PublicView pa{};

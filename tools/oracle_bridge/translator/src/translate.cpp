@@ -1842,9 +1842,11 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
     // WHICH ID SPACE, and why EncounterId. `RunState.boss_ids` is documented as
     // "one boss id per act" without naming an enum, and nothing had ever written
     // it. EncounterId is the space the RUN LAYER already speaks: its
-    // `boss_list[]` holds encounter `game_id`s and `enter_combat` is called with
-    // one (encounters.cpp `initializeBoss`), so a consumer seeded from a
-    // translated RunState can join straight back to the list the sim shuffles.
+    // `boss_list[]` holds encounter key IDS -- the registry's own
+    // `EncounterDef.id`, since the lists-ids change -- and `enter_combat` takes
+    // the key that id resolves to (encounters.cpp `initializeBoss`), so a
+    // consumer seeded from a translated RunState can join straight back to the
+    // list the sim shuffles.
     // A MonsterId would not: "Slime Boss" the ENCOUNTER and `SlimeBoss` the
     // monster are different registries, and a two-monster boss would have no
     // single answer.

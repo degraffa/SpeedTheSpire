@@ -134,12 +134,75 @@ bool resolve_encounter(std::string_view key, RngStream& misc,
     return true;
 }
 
+// --- The encounter-key ID space (see encounters.hpp) -------------------------
+
+namespace {
+
+// The engine-local table: game keys the engine names that the registry does not
+// carry. Two rows today, both Act 4's (S3.41 is what retires them).
+struct EngineKey {
+    EncounterKeyId id;
+    std::string_view key;
+};
+inline constexpr std::array<EngineKey, 2> kEngineKeys{{
+    {kEngineKeyShieldAndSpear, kActEndingEncounterKey},
+    {kEngineKeyTheHeart, kActEndingBossKey},
+}};
+
+}  // namespace
+
+EncounterKeyId encounter_key_id(std::string_view key) noexcept {
+    // REGISTRY FIRST, and through encounter_by_game_id rather than a scan of
+    // our own: that function returns the LOWEST-id row carrying the key, which
+    // is the row every consumer of a stored key already resolved to (Act 3's
+    // "3 Darklings" is in two pools, trap 8). Canonicalising here is what makes
+    // the id a drop-in for the string everywhere downstream.
+    const EncounterDef* def = sts::registry::encounter_by_game_id(key);
+    if (def != nullptr) {
+        return static_cast<EncounterKeyId>(def->id);
+    }
+    for (const EngineKey& e : kEngineKeys) {
+        if (e.key == key) {
+            return e.id;
+        }
+    }
+    return kNoEncounterKey;
+}
+
+std::string_view encounter_key_of(EncounterKeyId id) noexcept {
+    if (id == kNoEncounterKey) {
+        return {};
+    }
+    if (id >= kEngineKeyBase) {
+        for (const EngineKey& e : kEngineKeys) {
+            if (e.id == id) {
+                return e.key;
+            }
+        }
+        return {};
+    }
+    const EncounterDef* def = encounter_def_of(id);
+    return def != nullptr ? def->game_id : std::string_view{};
+}
+
+const EncounterDef* encounter_def_of(EncounterKeyId id) noexcept {
+    if (id == kNoEncounterKey || id >= kEngineKeyBase) {
+        return nullptr;
+    }
+    for (const auto& e : kEncounters) {
+        if (e.id == id) {
+            return &e;
+        }
+    }
+    return nullptr;
+}
+
 // --- Pool draw (monsterRng) -------------------------------------------------
 
 namespace {
 
 struct PoolEntry {
-    std::string_view key;
+    EncounterKeyId key;
     float weight;
 };
 
@@ -153,7 +216,11 @@ uint8_t build_pool(int32_t act, EncounterPool pool,
     uint8_t n = 0;
     for (const auto& e : kEncounters) {
         if (e.act == act && e.pool == pool && n < out.size()) {
-            out[n++] = PoolEntry{e.game_id, e.weight};
+            // encounter_key_id, not e.id: a pool row whose game key ALSO names
+            // a lower-id row in another pool must draw to that lower id, which
+            // is what the list held (as a string) and what every consumer
+            // resolved. Act 3's "3 Darklings" is the case (trap 8).
+            out[n++] = PoolEntry{encounter_key_id(e.game_id), e.weight};
         }
     }
     std::stable_sort(out.begin(), out.begin() + n,
@@ -168,7 +235,7 @@ uint8_t build_pool(int32_t act, EncounterPool pool,
 
 // MonsterInfo.roll: walk the sorted+normalized pool accumulating currentWeight;
 // return the first entry with roll < currentWeight (MonsterInfo.java:40-47).
-std::string_view roll_pool(std::span<const PoolEntry> pool, float r) noexcept {
+EncounterKeyId roll_pool(std::span<const PoolEntry> pool, float r) noexcept {
     float cur = 0.0f;
     for (const auto& e : pool) {
         cur += e.weight;
@@ -178,11 +245,11 @@ std::string_view roll_pool(std::span<const PoolEntry> pool, float r) noexcept {
     }
     // Java returns "ERROR" if float rounding leaves the last band just under the
     // roll; fall back to the last entry (draw count is unaffected either way).
-    return pool.empty() ? std::string_view{} : pool.back().key;
+    return pool.empty() ? kNoEncounterKey : pool.back().key;
 }
 
-bool contains(std::span<const std::string_view> xs, std::string_view v) noexcept {
-    for (std::string_view x : xs) {
+bool contains(std::span<const EncounterKeyId> xs, EncounterKeyId v) noexcept {
+    for (EncounterKeyId x : xs) {
         if (x == v) return true;
     }
     return false;
@@ -192,7 +259,7 @@ bool contains(std::span<const std::string_view> xs, std::string_view v) noexcept
 // `n` entries to `list` (shared, so `count` may start non-zero for the strong
 // pass): no immediate repeat, and -- unless `elites` -- no A-B-A. A rejected roll
 // (--i) still consumed its monsterRng.random() draw.
-void populate_monster_list(std::span<std::string_view> list, uint8_t& count,
+void populate_monster_list(std::span<EncounterKeyId> list, uint8_t& count,
                            std::span<const PoolEntry> pool, int32_t n,
                            bool elites, RngStream& mrng) noexcept {
     for (int32_t i = 0; i < n; ++i) {
@@ -200,7 +267,7 @@ void populate_monster_list(std::span<std::string_view> list, uint8_t& count,
             list[count++] = roll_pool(pool, random(mrng));
             continue;
         }
-        const std::string_view to_add = roll_pool(pool, random(mrng));
+        const EncounterKeyId to_add = roll_pool(pool, random(mrng));
         if (to_add != list[count - 1]) {
             if (!elites && count > 1 && to_add == list[count - 2]) {
                 --i;  // A-B-A rejected (non-elite only)
@@ -216,11 +283,11 @@ void populate_monster_list(std::span<std::string_view> list, uint8_t& count,
 // AbstractDungeon.populateFirstStrongEnemy (AbstractDungeon.java:1057-1062): roll
 // until the result is not excluded, then append. Rejection loop -- each roll one
 // monsterRng.random() draw.
-void populate_first_strong(std::span<std::string_view> list, uint8_t& count,
+void populate_first_strong(std::span<EncounterKeyId> list, uint8_t& count,
                            std::span<const PoolEntry> pool,
-                           std::span<const std::string_view> exclusions,
+                           std::span<const EncounterKeyId> exclusions,
                            RngStream& mrng) noexcept {
-    std::string_view m = roll_pool(pool, random(mrng));
+    EncounterKeyId m = roll_pool(pool, random(mrng));
     while (contains(exclusions, m)) {
         m = roll_pool(pool, random(mrng));
     }
@@ -236,18 +303,32 @@ void populate_first_strong(std::span<std::string_view> list, uint8_t& count,
 
 // The exclusion set generateExclusions keys on: the encounter sitting at
 // `list[index-1]` when the first-strong roll happens.
-std::span<const std::string_view> exclusions_from(
-    std::span<const std::string_view> list, uint8_t count) noexcept {
+//
+// The registry stores an exclusion as the excluded encounter's game KEY, so
+// this canonicalises each one into the id space the list holds. Key equality
+// and canonical-id equality are the same relation (encounter_key_id is a
+// function of the key, and the codegen already refuses an exclusion naming no
+// real encounter), so the rejection test is unchanged -- it just no longer
+// compares characters. `out` is the caller's storage: a span into a registry
+// array cannot carry converted values.
+std::span<const EncounterKeyId> exclusions_from(
+    std::span<const EncounterKeyId> list, uint8_t count,
+    std::array<EncounterKeyId, sts::registry::kMaxEncounterExcludes>&
+        out) noexcept {
     if (count == 0) {
         return {};
     }
-    const sts::registry::EncounterDef* last =
-        sts::registry::encounter_by_game_id(list[count - 1]);
+    const sts::registry::EncounterDef* last = encounter_def_of(list[count - 1]);
     if (last == nullptr) {
         return {};
     }
-    return std::span<const std::string_view>(last->excludes.data(),
-                                             last->exclude_count);
+    const uint8_t n = last->exclude_count < out.size()
+                          ? last->exclude_count
+                          : static_cast<uint8_t>(out.size());
+    for (uint8_t i = 0; i < n; ++i) {
+        out[i] = encounter_key_id(last->excludes[i]);
+    }
+    return std::span<const EncounterKeyId>(out.data(), n);
 }
 
 }  // namespace
@@ -273,8 +354,9 @@ void generate_monster_lists(int32_t act, RngStream& mrng,
     // (TheBeyond.java:131-134, trap 8) -- the registry's weak row (id 44) is the
     // lower-id match encounter_by_game_id returns and it carries that exclusion.
     const uint8_t ns = build_pool(act, EncounterPool::STRONG, pool);
-    const std::span<const std::string_view> excl =
-        exclusions_from(out.monster_list, out.monster_list_count);
+    std::array<EncounterKeyId, sts::registry::kMaxEncounterExcludes> excl_buf{};
+    const std::span<const EncounterKeyId> excl =
+        exclusions_from(out.monster_list, out.monster_list_count, excl_buf);
     populate_first_strong(out.monster_list, out.monster_list_count,
                           {pool.data(), ns}, excl, mrng);
     populate_monster_list(out.monster_list, out.monster_list_count,
@@ -295,14 +377,14 @@ void generate_monster_lists(int32_t act, RngStream& mrng,
     for (const auto& e : kEncounters) {
         if (e.act == act && e.pool == EncounterPool::BOSS &&
             out.boss_list_count < out.boss_list.size()) {
-            out.boss_list[out.boss_list_count++] = e.game_id;
+            out.boss_list[out.boss_list_count++] = encounter_key_id(e.game_id);
         }
     }
     if (out.boss_list_count > 1) {
         const int64_t seed = random_long(mrng);
         JdkRandom jr(seed);
-        jdk_shuffle(std::span<std::string_view>(out.boss_list.data(),
-                                                out.boss_list_count),
+        jdk_shuffle(std::span<EncounterKeyId>(out.boss_list.data(),
+                                              out.boss_list_count),
                     jr);
     }
 }
@@ -319,7 +401,7 @@ void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
         monster_keep = monster_target;
     }
     for (uint8_t i = monster_keep; i < monster_target; ++i) {
-        lists.monster_list[i] = std::string_view{};
+        lists.monster_list[i] = kNoEncounterKey;
     }
     lists.monster_list_count = monster_keep;
 
@@ -340,9 +422,14 @@ void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
     // First strong (index 3): the exclusion-rejection loop, keyed on the third
     // weak entry. Only runs when the cursor is standing exactly on that slot.
     if (lists.monster_list_count == weak_seg && monster_target > weak_seg) {
-        populate_first_strong(
-            lists.monster_list, lists.monster_list_count, {pool.data(), ns},
-            exclusions_from(lists.monster_list, lists.monster_list_count), rng);
+        std::array<EncounterKeyId, sts::registry::kMaxEncounterExcludes>
+            excl_buf{};
+        populate_first_strong(lists.monster_list, lists.monster_list_count,
+                              {pool.data(), ns},
+                              exclusions_from(lists.monster_list,
+                                              lists.monster_list_count,
+                                              excl_buf),
+                              rng);
     }
     // Strong tail.
     if (lists.monster_list_count < monster_target) {
@@ -358,7 +445,7 @@ void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
         elite_keep = elite_target;
     }
     for (uint8_t i = elite_keep; i < elite_target; ++i) {
-        lists.elite_list[i] = std::string_view{};
+        lists.elite_list[i] = kNoEncounterKey;
     }
     lists.elite_list_count = elite_keep;
     const uint8_t ne = build_pool(act, EncounterPool::ELITE, pool);

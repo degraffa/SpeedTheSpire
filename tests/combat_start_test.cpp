@@ -125,7 +125,7 @@ uint8_t first_start_column(const RunController& rc) {
 // on the elite we need.
 RunController enter_floor_one_combat(std::string_view encounter) {
     RunController rc = run_begin(kSeed, kA20);
-    rc.lists.monster_list[0] = encounter;
+    rc.lists.monster_list[0] = encounter_key_id(encounter);
     leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))

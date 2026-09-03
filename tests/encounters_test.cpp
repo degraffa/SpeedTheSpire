@@ -368,31 +368,33 @@ TEST(Encounters, MonsterListsAreDeterministicAndWellFormed) {
         // Membership: weak keys in the first 3, strong keys after; every entry is
         // a real encounter of the expected pool.
         for (std::size_t i = 0; i < la.monster_list_count; ++i) {
-            const auto* e = sts::registry::encounter_by_game_id(la.monster_list[i]);
-            ASSERT_NE(e, nullptr) << la.monster_list[i];
+            const auto* e = encounter_def_of(la.monster_list[i]);
+            ASSERT_NE(e, nullptr) << encounter_key_of(la.monster_list[i]);
             const auto expect_pool = (i < 3) ? sts::registry::EncounterPool::WEAK
                                              : sts::registry::EncounterPool::STRONG;
             EXPECT_EQ(e->pool, expect_pool) << "pos " << i;
         }
         for (std::size_t i = 0; i < la.elite_list_count; ++i) {
-            const auto* e = sts::registry::encounter_by_game_id(la.elite_list[i]);
+            const auto* e = encounter_def_of(la.elite_list[i]);
             ASSERT_NE(e, nullptr);
             EXPECT_EQ(e->pool, sts::registry::EncounterPool::ELITE);
         }
 
         // Exclusions honored: the first strong (index 3) is not in the 3rd weak's
         // exclusion set.
-        const auto* weak3 = sts::registry::encounter_by_game_id(la.monster_list[2]);
+        const auto* weak3 = encounter_def_of(la.monster_list[2]);
         ASSERT_NE(weak3, nullptr);
         for (std::size_t x = 0; x < weak3->exclude_count; ++x) {
-            EXPECT_NE(la.monster_list[3], weak3->excludes[x])
+            EXPECT_NE(la.monster_list[3], encounter_key_id(weak3->excludes[x]))
                 << "first strong violates exclusion, seed=" << seed;
         }
 
         // Boss list is a permutation of the three Act-1 boss ENCOUNTER keys
         // (Exordium pool strings; the composition later maps them to monster ids).
-        std::vector<sv> bosses(la.boss_list.begin(),
-                               la.boss_list.begin() + la.boss_list_count);
+        std::vector<sv> bosses;
+        for (std::size_t i = 0; i < la.boss_list_count; ++i) {
+            bosses.push_back(encounter_key_of(la.boss_list[i]));
+        }
         std::sort(bosses.begin(), bosses.end());
         EXPECT_EQ(bosses,
                   (std::vector<sv>{"Hexaghost", "Slime Boss", "The Guardian"}));
@@ -407,9 +409,11 @@ TEST(Encounters, FirstStrongNeverViolatesLouseExclusion) {
         RngStream r = from_seed(seed);
         MonsterLists l{};
         generate_monster_lists(1, r, l);
-        if (l.monster_list_count >= 4 && l.monster_list[2] == sv("2 Louse")) {
+        if (l.monster_list_count >= 4 &&
+            l.monster_list[2] == encounter_key_id("2 Louse")) {
             ++seen_two_louse_third;
-            EXPECT_NE(l.monster_list[3], sv("3 Louse")) << "seed=" << seed;
+            EXPECT_NE(l.monster_list[3], encounter_key_id("3 Louse"))
+                << "seed=" << seed;
         }
     }
     EXPECT_GT(seen_two_louse_third, 0)

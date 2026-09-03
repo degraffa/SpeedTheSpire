@@ -335,6 +335,13 @@ struct PoolCell {
     return 0;
 }
 
+// A list slot holds an encounter key ID; the pool cells are keyed by the game's
+// strings, so resolve at the use site.
+[[nodiscard]] std::size_t pool_index(const std::vector<PoolCell>& pool,
+                                     EncounterKeyId id) {
+    return pool_index(pool, encounter_key_of(id));
+}
+
 // AbstractDungeon.populateMonsterList's rejection loop is rejection sampling, so
 // the accepted draw's law is the pool restricted to the allowed keys and
 // renormalized. `forbid_a` is the entry immediately before the cursor,
@@ -514,7 +521,7 @@ struct PoolCell {
         normalized_pool(1, sts::registry::EncounterPool::WEAK);
     MonsterLists base{};
     base.monster_list_count = 3;  // weak segment only: no first-strong pass
-    base.monster_list[0] = kWeakPrefix;
+    base.monster_list[0] = encounter_key_id(kWeakPrefix);
     const std::vector<uint64_t> obs =
         sample_monster_pair(pool, base, 1, sc.encounter_n, kSeedEncounterWeak);
     // Cursor at index 1: only one entry behind it, so the A-B-A rule is inert
@@ -529,10 +536,11 @@ struct PoolCell {
         normalized_pool(1, sts::registry::EncounterPool::STRONG);
     MonsterLists base{};
     base.monster_list_count = 6;
-    base.monster_list[0] = kWeakPrefix;
-    base.monster_list[1] = kWeakSecond;
-    base.monster_list[2] = kWeakThird;   // a WEAK key: never blocks a strong roll
-    base.monster_list[3] = kStrongPrefix;
+    base.monster_list[0] = encounter_key_id(kWeakPrefix);
+    base.monster_list[1] = encounter_key_id(kWeakSecond);
+    // a WEAK key: never blocks a strong roll
+    base.monster_list[2] = encounter_key_id(kWeakThird);
+    base.monster_list[3] = encounter_key_id(kStrongPrefix);
     const std::vector<uint64_t> obs =
         sample_monster_pair(pool, base, 4, sc.strong_n, kSeedEncounterStrong);
     const std::vector<double> p =
@@ -546,7 +554,7 @@ struct PoolCell {
     const std::size_t m = pool.size();
     MonsterLists base{};
     base.elite_list_count = 3;
-    base.elite_list[0] = kElitePrefix;
+    base.elite_list[0] = encounter_key_id(kElitePrefix);
 
     std::vector<uint64_t> obs(m * m, 0);
     SamplerRng rng = sampler_rng_from_seed(kSeedEncounterElite);
@@ -626,7 +634,8 @@ struct PoolCell {
         RngStream m = from_seed(s);
         MonsterLists ml{};
         generate_monster_lists(1, m, ml);
-        if (ml.monster_list_count < 2 || ml.monster_list[0] != kWeakPrefix) {
+        if (ml.monster_list_count < 2 ||
+            ml.monster_list[0] != encounter_key_id(kWeakPrefix)) {
             continue;  // the public prefix filter
         }
         ++obs[pool_index(pool, ml.monster_list[1])];

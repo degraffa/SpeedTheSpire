@@ -7,7 +7,8 @@
 #include <algorithm>
 
 #include "sts/engine/relic_hooks.hpp"  // player_has_relic (Runic Dome)
-#include "sts/registry/encounter_table.hpp"  // encounter_by_game_id (prefix ids)
+#include "sts/engine/encounters.hpp"  // EncounterKeyId, encounter_def_of
+#include "sts/registry/encounter_table.hpp"  // EncounterDef (prefix ids)
 #include "sts/registry/ids.hpp"              // EventId (scratch publicity)
 
 namespace sts::engine {
@@ -302,26 +303,33 @@ void encode_knowledge(const CombatState& s, const KnowledgeState& k,
 
 // --- Run-phase screen sections -------------------------------------------------
 
+// The REGISTRY id a stored list slot names, or 0.
+//
+// A slot holds an `EncounterKeyId` (encounters.hpp), whose registry range is
+// numerically the registry id -- so this is the identity on every real
+// encounter. The mapping is spelled out anyway, through `encounter_def_of`,
+// because the id space also has an ENGINE-LOCAL block (Act 4's "Shield and
+// Spear" / "The Heart", until S3.41's registry rows land) and PublicView must
+// keep reporting 0 for those, exactly as it did when the slot held their string
+// and `encounter_by_game_id` returned nullptr. Masking is the safe direction:
+// it under-informs, it cannot leak.
+[[nodiscard]] uint8_t encounter_id_of(EncounterKeyId id) noexcept {
+    const sts::registry::EncounterDef* def = encounter_def_of(id);
+    return def != nullptr ? def->id : uint8_t{0};
+}
+
 // The consumed prefix of one encounter list, as registry EncounterDef ids. Only
 // [0, consumed) is written: the unconsumed suffix is a monsterRng realization
 // (T0.4 continues it as a Markov chain rather than rerolling it).
-void encode_prefix(const std::string_view* list, uint8_t list_count,
+void encode_prefix(const EncounterKeyId* list, uint8_t list_count,
                    int consumed, uint8_t* out, int cap) noexcept {
     const int n = consumed < static_cast<int>(list_count)
                       ? consumed
                       : static_cast<int>(list_count);
     const int limit = n < cap ? n : cap;
     for (int i = 0; i < limit; ++i) {
-        const sts::registry::EncounterDef* def =
-            sts::registry::encounter_by_game_id(list[i]);
-        out[i] = def != nullptr ? def->id : uint8_t{0};
+        out[i] = encounter_id_of(list[i]);
     }
-}
-
-[[nodiscard]] uint8_t encounter_id_of(std::string_view key) noexcept {
-    const sts::registry::EncounterDef* def =
-        sts::registry::encounter_by_game_id(key);
-    return def != nullptr ? def->id : uint8_t{0};
 }
 
 void encode_always_block(const RunController& rc, PublicView& out) noexcept {

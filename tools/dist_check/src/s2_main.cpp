@@ -225,13 +225,16 @@ void act_pool_sweep(Campaign& c, int act, ActPoolCounts& out) {
         exact(c, lists.boss_list_count == kMaxBossList,
               "generated boss list did not contain three keys");
 
-        const int w0 = index_of_key(weak, lists.monster_list[0]);
-        const int w1 = index_of_key(weak, lists.monster_list[1]);
-        const int s0 = index_of_key(strong, lists.monster_list[2]);
-        const int e0 = index_of_key(elite, lists.elite_list[0]);
-        const int e1 = index_of_key(elite, lists.elite_list[1]);
-        const int b0 = index_of_key(boss, lists.boss_list[0]);
-        const int b1 = index_of_key(boss, lists.boss_list[1]);
+        // A list slot holds an encounter key ID; the PoolRow tables are keyed
+        // by the game's strings, so resolve at the use site.
+        const int w0 = index_of_key(weak, encounter_key_of(lists.monster_list[0]));
+        const int w1 = index_of_key(weak, encounter_key_of(lists.monster_list[1]));
+        const int s0 =
+            index_of_key(strong, encounter_key_of(lists.monster_list[2]));
+        const int e0 = index_of_key(elite, encounter_key_of(lists.elite_list[0]));
+        const int e1 = index_of_key(elite, encounter_key_of(lists.elite_list[1]));
+        const int b0 = index_of_key(boss, encounter_key_of(lists.boss_list[0]));
+        const int b1 = index_of_key(boss, encounter_key_of(lists.boss_list[1]));
         exact(c, w0 >= 0 && w1 >= 0 && s0 >= 0 && e0 >= 0 && e1 >= 0 &&
                      b0 >= 0 && b1 >= 0,
               "generated encounter key fell outside its act's registry pool");

@@ -484,22 +484,24 @@ TEST(EncountersS2, ActTwoAndThreeListsDrawOnlyFromTheirOwnPools) {
             // two weak entries, Exordium three). What this pins is that no draw
             // can ever leave the act's own pools.
             for (std::size_t i = 0; i < la.monster_list_count; ++i) {
+                const sv key = encounter_key_of(la.monster_list[i]);
                 const bool in_act_pools =
-                    row_of(la.monster_list[i], act, EncounterPool::WEAK) !=
-                        nullptr ||
-                    row_of(la.monster_list[i], act, EncounterPool::STRONG) !=
-                        nullptr;
+                    row_of(key, act, EncounterPool::WEAK) != nullptr ||
+                    row_of(key, act, EncounterPool::STRONG) != nullptr;
                 EXPECT_TRUE(in_act_pools)
                     << "act " << act << " list position " << i << " key "
-                    << la.monster_list[i];
+                    << key;
             }
             for (std::size_t i = 0; i < la.elite_list_count; ++i) {
-                EXPECT_NE(row_of(la.elite_list[i], act, EncounterPool::ELITE),
+                EXPECT_NE(row_of(encounter_key_of(la.elite_list[i]), act,
+                                 EncounterPool::ELITE),
                           nullptr);
             }
             ASSERT_EQ(la.boss_list_count, 3u);
-            std::vector<sv> bosses(la.boss_list.begin(),
-                                   la.boss_list.begin() + la.boss_list_count);
+            std::vector<sv> bosses;
+            for (std::size_t i = 0; i < la.boss_list_count; ++i) {
+                bosses.push_back(encounter_key_of(la.boss_list[i]));
+            }
             std::sort(bosses.begin(), bosses.end());
             const std::vector<sv> expected =
                 act == 2 ? std::vector<sv>{"Automaton", "Champ", "Collector"}

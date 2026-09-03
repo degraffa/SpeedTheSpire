@@ -708,7 +708,8 @@ TEST(Encounters, ActsTwoAndThreeDrawTwoWeakNotThree) {
         for (std::size_t i = 0; i < 2u; ++i) {
             bool found = false;
             for (std::size_t j = 0; j < weak->count; ++j) {
-                found = found || lists.monster_list[i] == weak->keys[j];
+                found = found || lists.monster_list[i] ==
+                                     encounter_key_id(weak->keys[j]);
             }
             weak_prefix += found ? 1 : 0;
         }
@@ -765,10 +766,11 @@ TEST(Encounters, BossShuffleConsumesExactlyOneRandomLongPerAct) {
             act, sts::registry::EncounterPool::BOSS);
         ASSERT_NE(bosses, nullptr);
         ASSERT_EQ(bosses->count, 3u);
-        std::string_view expect[3] = {bosses->keys[0], bosses->keys[1],
-                                      bosses->keys[2]};
+        EncounterKeyId expect[3] = {encounter_key_id(bosses->keys[0]),
+                                    encounter_key_id(bosses->keys[1]),
+                                    encounter_key_id(bosses->keys[2])};
         JdkRandom jr(shuffle_seed);
-        jdk_shuffle(std::span<std::string_view>(expect, 3), jr);
+        jdk_shuffle(std::span<EncounterKeyId>(expect, 3), jr);
         for (std::size_t i = 0; i < 3u; ++i) {
             EXPECT_EQ(lists.boss_list[i], expect[i])
                 << "act " << act << " boss " << i;
@@ -796,9 +798,10 @@ TEST(Encounters, ThreeDarklingsSelfExclusionFires) {
         RngStream mrng = from_seed(seed);
         MonsterLists lists{};
         generate_monster_lists(3, mrng, lists);
-        if (lists.monster_list[1] != std::string_view{"3 Darklings"}) continue;
+        const EncounterKeyId darklings = encounter_key_id("3 Darklings");
+        if (lists.monster_list[1] != darklings) continue;
         observed = true;
-        EXPECT_NE(lists.monster_list[2], std::string_view{"3 Darklings"})
+        EXPECT_NE(lists.monster_list[2], darklings)
             << "seed " << seed << ": the first-strong roll must reject its own "
                "key while the exclusion is live";
     }
@@ -867,7 +870,7 @@ TEST(ActTransition, TheActBossIsMirroredIntoSaveParityState) {
     cross_act(rc);
     EXPECT_EQ(rc.run.boss_ids[0], act1_boss) << "Act 1's stays put";
     ASSERT_NE(rc.run.boss_ids[1], 0);
-    const auto* def = sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+    const auto* def = encounter_def_of(rc.lists.boss_list[0]);
     ASSERT_NE(def, nullptr);
     EXPECT_EQ(rc.run.boss_ids[1], static_cast<uint16_t>(def->id));
 }

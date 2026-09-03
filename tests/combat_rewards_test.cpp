@@ -1056,7 +1056,8 @@ int64_t find_first_monster_seed() {
         RngStream m = from_seed(s);
         MonsterLists ml{};
         generate_monster_lists(1, m, ml);
-        if (ml.monster_list_count > 0 && ml.monster_list[0] == "Jaw Worm") {
+        if (ml.monster_list_count > 0 &&
+            ml.monster_list[0] == encounter_key_id("Jaw Worm")) {
             return s;
         }
     }

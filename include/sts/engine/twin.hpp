@@ -56,11 +56,13 @@ void make_hidden_twin(RunController& rc, SamplerRng& rng) noexcept;
 // Convenience: one twin from one seed, by value.
 //
 // The copy is a MEMCPY of the object representation, not the implicit copy
-// constructor. RunController owns structs with implicit alignment gaps
-// (MonsterLists), and a memberwise copy leaves those bytes unspecified
+// constructor. A memberwise copy leaves any byte no member owns unspecified
 // (conventions §8's RunState padding incident) -- so a twin built with `=`
 // could differ from its source in bytes no member owns, which is exactly the
-// kind of difference a byte-comparison test must not be able to see.
+// kind of difference a byte-comparison test must not be able to see. The
+// tripwire's EveryByteIsAMember is what keeps that set empty today (it was
+// MonsterLists' string_view alignment slack that put it here); the memcpy is
+// belt-and-braces against the next struct that grows some.
 [[nodiscard]] RunController make_hidden_twin(const RunController& rc,
                                              int64_t twin_seed) noexcept;
 

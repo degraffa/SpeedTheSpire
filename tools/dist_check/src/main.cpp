@@ -92,10 +92,12 @@ void encounter_weight_checks(Campaign& c) {
               "elite list did not contain 10 rows");
         exact(c, lists.boss_list_count == kMaxBossList,
               "boss list did not contain 3 rows");
-        const int wi = index_of(weak, lists.monster_list[0]);
-        const int si = index_of(strong, lists.monster_list[3]);
-        const int ei = index_of(elite, lists.elite_list[0]);
-        const int bi = index_of(boss, lists.boss_list[0]);
+        // A list slot holds an encounter key ID; these cited tables are keyed
+        // by the game's strings, so resolve at the use site.
+        const int wi = index_of(weak, encounter_key_of(lists.monster_list[0]));
+        const int si = index_of(strong, encounter_key_of(lists.monster_list[3]));
+        const int ei = index_of(elite, encounter_key_of(lists.elite_list[0]));
+        const int bi = index_of(boss, encounter_key_of(lists.boss_list[0]));
         exact(c, wi >= 0 && si >= 0 && ei >= 0 && bi >= 0,
               "generated encounter key fell outside cited Exordium tables");
         if (wi >= 0) ++weak_observed[static_cast<std::size_t>(wi)];

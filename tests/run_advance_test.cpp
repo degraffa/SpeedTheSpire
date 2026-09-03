@@ -70,7 +70,8 @@ int64_t find_jaw_worm_seed() {
         RngStream m = from_seed(s);
         MonsterLists ml{};
         generate_monster_lists(1, m, ml);
-        if (ml.monster_list_count > 0 && ml.monster_list[0] == "Jaw Worm") {
+        if (ml.monster_list_count > 0 &&
+            ml.monster_list[0] == encounter_key_id("Jaw Worm")) {
             return s;
         }
     }
@@ -83,7 +84,8 @@ int64_t find_two_louse_seed() {
         RngStream m = from_seed(s);
         MonsterLists ml{};
         generate_monster_lists(1, m, ml);
-        if (ml.monster_list_count > 0 && ml.monster_list[0] == "2 Louse") {
+        if (ml.monster_list_count > 0 &&
+            ml.monster_list[0] == encounter_key_id("2 Louse")) {
             return s;
         }
     }
@@ -259,7 +261,7 @@ TEST(RunBegin, BossIdsMirrorsTheRolledActBoss) {
     const RunController rc = run_begin(kSeed, kA20);
     ASSERT_GT(rc.lists.boss_list_count, 0);
     const sts::registry::EncounterDef* boss =
-        sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+        encounter_def_of(rc.lists.boss_list[0]);
     ASSERT_NE(boss, nullptr);
     EXPECT_EQ(rc.run.boss_ids[0], static_cast<uint16_t>(boss->id));
     EXPECT_NE(rc.run.boss_ids[0], 0) << "0 is the 'unset' sentinel";
@@ -1213,7 +1215,7 @@ TEST(RunCombatBattleStart, StoneCalendarCounterSequenceMatchesTheJavaOrder) {
     // STS00683's floor-12 witness fight: three Sentries, killed outright by the
     // 52 THORNS in the capture. Sentries never gain block or change their own
     // HP, so the fight's whole damage ledger on their side is the calendar's.
-    rc.lists.monster_list[0] = "3 Sentries";
+    rc.lists.monster_list[0] = encounter_key_id("3 Sentries");
     set_run_relics(rc, {RelicId::STONE_CALENDAR});
     rc.run.relics[0].counter = -1;  // the out-of-combat value
     leave_neow(rc);
@@ -1520,7 +1522,7 @@ TEST(RunCombatWasHpLost, CentennialPuzzleReArmsInASecondCombat) {
     rc.run.map[run_state_map_index(next, 1)].room_type =
         static_cast<uint8_t>(RoomType::Monster);
     ASSERT_LT(rc.monster_cursor, rc.lists.monster_list.size());
-    rc.lists.monster_list[rc.monster_cursor] = "Jaw Worm";
+    rc.lists.monster_list[rc.monster_cursor] = encounter_key_id("Jaw Worm");
     step(rc, make_action(ActionVerb::CHOOSE, next));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
         << "second combat did not open";
@@ -2066,7 +2068,7 @@ int count_reward_kind(const RewardScreen& s, RewardItemKind k) {
 // a strong-pool floor).
 RunController enter_looter_combat() {
     RunController rc = run_begin(kSeed, kA20);
-    rc.lists.monster_list[0] = "Looter";
+    rc.lists.monster_list[0] = encounter_key_id("Looter");
     leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
@@ -3388,7 +3390,7 @@ uint8_t AddRunHand(RunController& rc, CardId id) {
 
 RunController enter_two_thieves_combat() {
     RunController rc = run_begin(kSeed, kA20);
-    rc.lists.monster_list[0] = "2 Thieves";  // Looter slot 0, Mugger slot 1
+    rc.lists.monster_list[0] = encounter_key_id("2 Thieves");  // Looter slot 0, Mugger slot 1
     leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
@@ -4100,7 +4102,7 @@ TEST(BossVictory, TheA20DoubleBossInterposesASecondBossRoomBeforeTheTerminal) {
         PublicView pv{};
         encode_public_view(rc, pv);
         const sts::registry::EncounterDef* second =
-            sts::registry::encounter_by_game_id(rc.lists.boss_list[1]);
+            encounter_def_of(rc.lists.boss_list[1]);
         ASSERT_NE(second, nullptr);
         EXPECT_EQ(pv.second_boss_reserved, second->id)
             << "second_boss_reserved (v5) carries the revealed second boss";
@@ -4123,7 +4125,7 @@ TEST(BossVictory, TheA20DoubleBossInterposesASecondBossRoomBeforeTheTerminal) {
     PublicView pv{};
     encode_public_view(rc, pv);
     const sts::registry::EncounterDef* second =
-        sts::registry::encounter_by_game_id(rc.lists.boss_list[1]);
+        encounter_def_of(rc.lists.boss_list[1]);
     ASSERT_NE(second, nullptr);
     EXPECT_EQ(pv.second_boss_reserved, second->id);
     EXPECT_EQ(pv.current_encounter_id, 0)
@@ -4163,9 +4165,9 @@ TEST(BossVictory, TheA20DoubleBossHandoffMovesTheActsBossIdToTheSecondBoss) {
     // the controller to act 3 by hand, so seed the act-3 slot the same way the
     // act transition would (rs.boss_ids[next_act - 1] = boss_list[0]).
     const sts::registry::EncounterDef* first =
-        sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+        encounter_def_of(rc.lists.boss_list[0]);
     const sts::registry::EncounterDef* second =
-        sts::registry::encounter_by_game_id(rc.lists.boss_list[1]);
+        encounter_def_of(rc.lists.boss_list[1]);
     ASSERT_NE(first, nullptr);
     ASSERT_NE(second, nullptr);
     ASSERT_NE(first->id, second->id)
@@ -4217,7 +4219,7 @@ TEST(BossVictory, AnActTwoBossVictoryLeavesTheActsBossIdWhereItWas) {
     ASSERT_EQ(rc.boss_cursor, 0);
 
     const sts::registry::EncounterDef* first =
-        sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+        encounter_def_of(rc.lists.boss_list[0]);
     ASSERT_NE(first, nullptr);
     rc.run.boss_ids[1] = static_cast<uint16_t>(first->id);
 

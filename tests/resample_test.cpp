@@ -18,9 +18,12 @@
 //     See the comment on that group for how the canary is built and what a
 //     failure would mean.
 //
-// BYTE COMPARISON DISCIPLINE. RunController contains structs with implicit
-// alignment gaps (MonsterLists, for one), so a memcmp is only meaningful
-// between objects whose padding provably came from the same bytes. Every
+// BYTE COMPARISON DISCIPLINE. A memcmp over RunController is only meaningful
+// between objects whose padding provably came from the same bytes -- and while
+// the tripwire's EveryByteIsAMember says there is no such padding today (it was
+// MonsterLists' std::string_view alignment slack that put this rule here), the
+// discipline is cheap and the next struct to grow some should not need to
+// rediscover it. Every
 // comparison below therefore starts from `clone_bytes`, a std::memcpy of the
 // object REPRESENTATION -- not the implicit copy constructor, which is defined
 // as memberwise and leaves padding unspecified. That is the same trap
@@ -91,7 +94,8 @@ int64_t find_first_encounter_seed(std::string_view key) {
         RngStream m = from_seed(s);
         MonsterLists ml{};
         generate_monster_lists(1, m, ml);
-        if (ml.monster_list_count > 0 && ml.monster_list[0] == key) {
+        if (ml.monster_list_count > 0 &&
+            ml.monster_list[0] == encounter_key_id(key)) {
             return s;
         }
     }
@@ -470,7 +474,8 @@ TEST(SamplerEncounterSuffix, PrefixPinnedSuffixRedrawnAndChainRulesHold) {
 
         std::string key;
         for (uint8_t i = 3; i < p.lists.monster_list_count; ++i) {
-            key.append(p.lists.monster_list[i]).push_back('|');
+            key.append(encounter_key_of(p.lists.monster_list[i]))
+                .push_back('|');
         }
         suffixes.insert(key);
     }
@@ -511,8 +516,8 @@ TEST(SamplerEncounterSuffix, BossListConditionsOnTheirPublicHead) {
         ASSERT_EQ(p.lists.boss_list_count, truth.lists.boss_list_count);
         EXPECT_EQ(p.lists.boss_list[0], truth.lists.boss_list[0])
             << "boss_list[0] is public (the act boss is named on the map)";
-        std::multiset<std::string_view> before;
-        std::multiset<std::string_view> after;
+        std::multiset<EncounterKeyId> before;
+        std::multiset<EncounterKeyId> after;
         for (uint8_t i = 0; i < truth.lists.boss_list_count; ++i) {
             before.insert(truth.lists.boss_list[i]);
             after.insert(p.lists.boss_list[i]);
@@ -520,7 +525,7 @@ TEST(SamplerEncounterSuffix, BossListConditionsOnTheirPublicHead) {
         EXPECT_EQ(before, after);
         std::string key;
         for (uint8_t i = 1; i < p.lists.boss_list_count; ++i) {
-            key.append(p.lists.boss_list[i]).push_back('|');
+            key.append(encounter_key_of(p.lists.boss_list[i])).push_back('|');
         }
         tails.insert(key);
     }

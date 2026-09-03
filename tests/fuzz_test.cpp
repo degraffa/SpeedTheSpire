@@ -1050,30 +1050,42 @@ TEST(FuzzPolicy, RestGridCancelIsEnumeratedAndReturnsToTheMenu) {
 
 // --- 3b. the controller hash is a CONTENT hash, not a byte hash --------------
 
-TEST(FuzzHash, ControllerHashIgnoresEncounterKeyADDRESSES) {
-    // The trap this pins, found by running the induced-failure test rather than
-    // by reasoning: RunController embeds std::string_view encounter keys, so a
-    // raw byte hash of the struct hashes POINTERS into .rodata. Under ASLR
-    // those differ per process, so the guard was stable inside one process and
-    // different in the next -- every emitted reproducer "failed to reproduce".
+TEST(FuzzHash, ControllerHashIsPositionIndependentAndSeesEveryEncounterKey) {
+    // WHAT THIS USED TO PIN, and why the check changed shape.
     //
-    // Re-point one key at an identical character sequence held somewhere else.
-    // The bytes of the struct change; the CONTENT does not; the hash must not.
+    // RunController used to embed std::string_view encounter keys, so a raw byte
+    // hash of the struct hashed POINTERS into .rodata. Under ASLR those differ
+    // per process, so the guard was stable inside one process and different in
+    // the next -- every emitted reproducer "failed to reproduce". The old test
+    // re-pointed one key at an identical character sequence held elsewhere and
+    // demanded the hash not move.
+    //
+    // A list slot is an `EncounterKeyId` now (encounters.hpp), so there is no
+    // address left to re-point and the old manoeuvre is not expressible. The
+    // PROPERTY survives in the two halves that still mean something: the hash of
+    // a controller must be a function of its content only -- so two independent
+    // constructions of the same run agree, in a process where nothing guarantees
+    // they landed at the same addresses -- and it must still notice a change to
+    // any key.
     engine::RunController rc = engine::run_begin(4242, 20);
     ASSERT_GT(rc.lists.monster_list_count, 0);
 
     const uint64_t before = hash_controller(rc);
-    const std::string copy(rc.lists.monster_list[0]);
-    ASSERT_NE(copy.data(), rc.lists.monster_list[0].data())
-        << "the test needs a genuinely different address";
-    rc.lists.monster_list[0] = std::string_view(copy.data(), copy.size());
+    const engine::RunController again = engine::run_begin(4242, 20);
+    EXPECT_EQ(hash_controller(again), before)
+        << "hash_controller is not a pure function of controller CONTENT";
 
-    EXPECT_EQ(hash_controller(rc), before)
-        << "hash_controller is hashing string_view POINTERS, not their contents";
+    // ... and it must still notice a real change to a key, in every list.
+    const engine::EncounterKeyId original = rc.lists.monster_list[0];
+    rc.lists.monster_list[0] = static_cast<engine::EncounterKeyId>(
+        original == 1 ? 2 : 1);
+    EXPECT_NE(hash_controller(rc), before);
+    rc.lists.monster_list[0] = original;
+    ASSERT_EQ(hash_controller(rc), before);
 
-    // ... and it must still notice a real change to the key.
-    const std::string other = copy + "X";
-    rc.lists.monster_list[0] = std::string_view(other.data(), other.size());
+    const engine::EncounterKeyId boss = rc.lists.boss_list[0];
+    rc.lists.boss_list[0] =
+        static_cast<engine::EncounterKeyId>(boss == 1 ? 2 : 1);
     EXPECT_NE(hash_controller(rc), before);
 }
 

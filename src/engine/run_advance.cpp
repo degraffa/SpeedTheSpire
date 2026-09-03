@@ -1480,21 +1480,27 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
     switch (room) {
         case RoomType::Monster:
             if (rc.monster_cursor < rc.lists.monster_list_count) {
-                enter_combat(rc, rc.lists.monster_list[rc.monster_cursor], room);
+                enter_combat(
+                    rc, encounter_key_of(rc.lists.monster_list[rc.monster_cursor]),
+                    room);
             } else {
                 stall(room);  // list exhausted (beyond Act-1 length; not expected)
             }
             break;
         case RoomType::Elite:
             if (rc.elite_cursor < rc.lists.elite_list_count) {
-                enter_combat(rc, rc.lists.elite_list[rc.elite_cursor], room);
+                enter_combat(
+                    rc, encounter_key_of(rc.lists.elite_list[rc.elite_cursor]),
+                    room);
             } else {
                 stall(room);
             }
             break;
         case RoomType::Boss:
             if (rc.boss_cursor < rc.lists.boss_list_count) {
-                enter_combat(rc, rc.lists.boss_list[rc.boss_cursor], room);
+                enter_combat(
+                    rc, encounter_key_of(rc.lists.boss_list[rc.boss_cursor]),
+                    room);
             } else {
                 stall(room);
             }
@@ -2062,10 +2068,10 @@ namespace {
 // which is the right shape for an act whose lists are never rolled. Reading
 // them from the generated header is what keeps this branch and the registry
 // from drifting apart, and it is why the join in on_player_entry now resolves.
-constexpr std::string_view kActEndingEncounter =
-    sts::registry::kAct4EliteEncounter;
-constexpr std::string_view kActEndingBoss = sts::registry::kAct4BossEncounter;
-static_assert(kActEndingEncounter == sts::registry::kAct4MonsterEncounter,
+// (The keys themselves are kActEndingEncounterKey / kActEndingBossKey in
+// encounters.hpp, aliased to the generated constants, beside the engine-local
+// EncounterKeyId fallback block; encounter_key_id resolves registry-first.)
+static_assert(kActEndingEncounterKey == sts::registry::kAct4MonsterEncounter,
               "TheEnding puts the SAME key in monsterList and eliteMonsterList "
               "(TheEnding.java:163-170); if the registry ever splits them this "
               "branch needs two keys, not one");
@@ -2255,15 +2261,16 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     // monsterRng under the Act-4 shop and everything after it -- which is why
     // this is a branch and not a table of counts.
     if (to_ending) {
+        const EncounterKeyId ending_enc =
+            encounter_key_id(kActEndingEncounterKey);
+        const EncounterKeyId ending_boss = encounter_key_id(kActEndingBossKey);
         rc.lists.monster_list_count = 0;
         rc.lists.elite_list_count = 0;
         rc.lists.boss_list_count = 0;
         for (int i = 0; i < kActEndingListLen; ++i) {
-            rc.lists.monster_list[static_cast<std::size_t>(i)] =
-                kActEndingEncounter;
-            rc.lists.elite_list[static_cast<std::size_t>(i)] =
-                kActEndingEncounter;
-            rc.lists.boss_list[static_cast<std::size_t>(i)] = kActEndingBoss;
+            rc.lists.monster_list[static_cast<std::size_t>(i)] = ending_enc;
+            rc.lists.elite_list[static_cast<std::size_t>(i)] = ending_enc;
+            rc.lists.boss_list[static_cast<std::size_t>(i)] = ending_boss;
         }
         rc.lists.monster_list_count = kActEndingListLen;
         rc.lists.elite_list_count = kActEndingListLen;
@@ -2281,7 +2288,7 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     // with next_act == 4 -- and it is UNVERIFIED-until-captured under S3.62.
     if (rc.lists.boss_list_count > 0) {
         const sts::registry::EncounterDef* boss =
-            sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+            encounter_def_of(rc.lists.boss_list[0]);
         if (boss != nullptr && next_act <= static_cast<int32_t>(kBossIdCap)) {
             rs.boss_ids[next_act - 1] = static_cast<uint16_t>(boss->id);
         }
@@ -2537,7 +2544,7 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     // differ compares the field for real.
     if (rc.lists.boss_list_count > 0) {
         const sts::registry::EncounterDef* boss =
-            sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+            encounter_def_of(rc.lists.boss_list[0]);
         if (boss != nullptr) {
             rs.boss_ids[0] = static_cast<uint16_t>(boss->id);
         }
@@ -3321,8 +3328,7 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
             if (rc.boss_cursor + 1 < rc.lists.boss_list_count &&
                 rc.run.act <= static_cast<uint8_t>(kBossIdCap)) {
                 const sts::registry::EncounterDef* next_boss =
-                    sts::registry::encounter_by_game_id(
-                        rc.lists.boss_list[rc.boss_cursor + 1]);
+                    encounter_def_of(rc.lists.boss_list[rc.boss_cursor + 1]);
                 if (next_boss != nullptr) {
                     rc.run.boss_ids[rc.run.act - 1] =
                         static_cast<uint16_t>(next_boss->id);

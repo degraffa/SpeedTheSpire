@@ -5,8 +5,9 @@
 //
 //   1. generate_monster_lists() -- the RUN-scoped monsterRng pool draw
 //      (Exordium.generateMonsters -> generateWeak/Strong/Elites + initializeBoss).
-//      Produces the ordered encounter-KEY lists a run walks through (weak-first,
-//      then strong; a separate elite list; the shuffled boss list).
+//      Produces the ordered encounter-key-id lists a run walks through
+//      (weak-first, then strong; a separate elite list; the shuffled boss
+//      list).
 //   2. resolve_composition() -- the FLOOR-scoped miscRng composition draw
 //      (MonsterHelper.getEncounter + its spawn* helpers). Turns one encounter key
 //      into the concrete spawn-order list of monster game_ids.
@@ -136,40 +137,121 @@ static_assert(monster_list_len_for_act(2) == 15);
 static_assert(monster_list_len_for_act(3) == 15);
 static_assert(monster_list_len_for_act(1) <= kMaxMonsterList);
 
-// The run's generated monster lists (encounter KEYS, in walk order). `monster_list`
-// is the shared weak-then-strong combat list; `elite_list` the separate elite
-// list; `boss_list` the shuffled boss order.
+// --- The encounter-key ID space ---------------------------------------------
+//
+// WHAT A LIST SLOT HOLDS, AND WHY IT IS AN INTEGER.
+//
+// It used to be a `std::string_view` into the generated registry's `.rodata`,
+// which made `MonsterLists` -- and therefore `RunController`, which embeds it
+// -- a struct carrying POINTERS. `RunController` is `static_assert`ed trivially
+// copyable and is memcpy'd everywhere (the batch `advance()` API, `twin.cpp`,
+// snapshot/keyframe writers), and trivially copyable is NOT position
+// independent. Two consequences, both observed rather than reasoned about:
+//
+//   * CROSS-PROCESS: a controller written to disk by one process and read back
+//     by another carries dangling pointers. The training repo's snapshot bank
+//     (SpireTrainer T2.1) SEGFAULTED the first time `bank_check` loaded a bank
+//     another process had written, in `encode_public_view` -> `encode_prefix`,
+//     dereferencing a stored view. It worked around it consumer-side (store
+//     registry ids beside the state, zero the views, rebind on restore); this
+//     is the durable fix, and it retires that workaround.
+//   * DETERMINISM: under ASLR the addresses differ per launch, so any byte hash
+//     of a controller was a function of WHERE THE BINARY LOADED. `tools/fuzz`
+//     hit exactly that -- a trajectory hashed stably inside one process and
+//     differently in the next, so every emitted reproducer "failed to
+//     reproduce" -- and had to hash the keys by their characters instead.
+//
+// So a slot holds an `EncounterKeyId`, and text is resolved AT THE USE SITE
+// (`encounter_key_of`) by the handful of consumers that need it: the
+// `enter_combat` composition join, the oracle-replay list comparison, the
+// distribution checks and the scratch witnesses. Nothing on the hot path
+// resolves anything.
+//
+// THE VALUE IS THE REGISTRY'S CANONICAL id, not a per-row id. `encounter_key_id`
+// goes through `registry::encounter_by_game_id`, which returns the LOWEST-id row
+// carrying a game key -- and a key can appear in two pools (Act 3's
+// "3 Darklings" is both WEAK and STRONG, trap 8). Every consumer already
+// resolved a stored key that way, so canonicalising on the way IN keeps this
+// change a pure representation change: `PublicView`'s encounter bytes, the
+// composition program a slot resolves to, and the exclusion comparisons are all
+// bit-for-bit what they were when the slot held the string.
+using EncounterKeyId = uint8_t;
+
+// The empty slot. Registry ids are assigned from 1 upward (registry/
+// encounters.yaml), so 0 names no encounter -- which is also the value
+// `PublicView` has always carried for a key it could not resolve.
+inline constexpr EncounterKeyId kNoEncounterKey = 0;
+
+// ENGINE-LOCAL KEY IDS: game keys the ENGINE names that registry/encounters.yaml
+// does not carry. Act 4 is the only case -- `TheEnding.generateMonsters` /
+// `initializeBoss` add three literal "Shield and Spear" / "The Heart" entries
+// with no RNG at all (s3-design §5 trap 3), and those rows are S3.41's grant.
+// Before this change the list simply held the literal and every registry join
+// on it returned nullptr; the id space has to be able to say the same thing.
+//
+// Resolution is REGISTRY-FIRST (`encounter_key_id`), so the day the rows land
+// these ids stop being produced and every consumer keeps working unchanged --
+// the same way the string spelling grew into its registry row.
+inline constexpr EncounterKeyId kEngineKeyBase = 200;
+
+inline constexpr std::string_view kActEndingEncounterKey = sts::registry::kAct4EliteEncounter;  // S3.41 row 62
+inline constexpr std::string_view kActEndingBossKey = sts::registry::kAct4BossEncounter;  // S3.41 row 63
+inline constexpr EncounterKeyId kEngineKeyShieldAndSpear = kEngineKeyBase + 0;
+inline constexpr EncounterKeyId kEngineKeyTheHeart = kEngineKeyBase + 1;
+
+// The registry has to stay clear of the engine-local block. Its ids are
+// append-only and its row count is well under this base, so the margin is wide;
+// this fires long before an engine-local id could alias a registry one.
+static_assert(sts::registry::kEncounterCount < kEngineKeyBase,
+              "registry encounter ids have grown into the engine-local key "
+              "block -- raise kEngineKeyBase (and nothing else: the ids are "
+              "engine-internal, never persisted)");
+
+// Resolve a game key (an Exordium pool / getEncounter string) to the id a list
+// slot stores. Registry-first; then the engine-local table; then kNoEncounterKey
+// for a key nothing knows.
+[[nodiscard]] EncounterKeyId encounter_key_id(std::string_view key) noexcept;
+
+// The inverse: the game key a stored id names, or an empty view for
+// kNoEncounterKey / an id nothing knows. This is the ONLY place a list slot
+// becomes text.
+[[nodiscard]] std::string_view encounter_key_of(EncounterKeyId id) noexcept;
+
+// The registry row a stored id names, or nullptr -- which is what an
+// engine-local id (Act 4, until S3.41) and kNoEncounterKey both give, exactly
+// as `encounter_by_game_id` gave nullptr for their strings.
+[[nodiscard]] const sts::registry::EncounterDef* encounter_def_of(
+    EncounterKeyId id) noexcept;
+
+// The run's generated monster lists (encounter key IDS, in walk order).
+// `monster_list` is the shared weak-then-strong combat list; `elite_list` the
+// separate elite list; `boss_list` the shuffled boss order.
+//
+// NO PADDING, DECLARED OR OTHERWISE. The three 7-byte `pad_*` members this
+// struct used to carry existed only because `std::string_view`'s 8-byte
+// alignment inserted a gap after each `uint8_t` count, and an implicit gap in a
+// struct that is memcmp'd and byte-HASHED is indeterminate (conventions §8's
+// rule-of-three: RunState, CombatState/RunController, and MonsterLists itself
+// -- each read zero on Linux and garbage on Windows).
+// A `uint8_t` array has alignment 1, so the gaps are gone rather than declared,
+// and the struct is 32 bytes of pure content. The tripwire's
+// `NoDeclaredGapsInByteHashedStructs` and
+// `EveryByteOfAByteHashedStructBelongsToAMember` still hold it.
 struct MonsterLists {
-    std::array<std::string_view, kMaxMonsterList> monster_list{};
+    std::array<EncounterKeyId, kMaxMonsterList> monster_list{};
     uint8_t monster_list_count = 0;
-    // The three alignment gaps std::string_view's 8-byte alignment inserts after
-    // each count. DECLARED, not implicit, for the reason conventions section 8
-    // records twice already (RunState 2026-07-28, CombatState/RunController
-    // 2026-08-03): this struct is embedded in RunController, which is memcmp'd
-    // and byte-HASHED (hash_controller_bytes in the act-transition suite,
-    // twin.cpp, resample_test.cpp). Value-initialisation initialises MEMBERS,
-    // and padding is not a member -- it merely TENDS to read as zero, because
-    // fresh stack frames and heap pages tend to be zero. Making each gap a
-    // member is what makes it written.
-    //
-    // That tendency is exactly what failed here. These three gaps were implicit,
-    // and the byte_class table declared them as literal GAPS rather than rows --
-    // which satisfies the tiling tripwire without making anything write them.
-    // On Linux the two runs of ThreeActSim's determinism check read zeros and
-    // agreed; on Windows, where the second call reuses a dirty stack frame, they
-    // diverged. Nothing about the gaps changed to cause it: growing
-    // sizeof(RunController) merely moved the frame layout enough to stop the two
-    // calls landing on identically-dirty memory.
-    //
-    // Adding these members changes no offset and no size.
-    uint8_t pad_after_monster_count[7]{};
-    std::array<std::string_view, kMaxEliteList> elite_list{};
+    std::array<EncounterKeyId, kMaxEliteList> elite_list{};
     uint8_t elite_list_count = 0;
-    uint8_t pad_after_elite_count[7]{};
-    std::array<std::string_view, kMaxBossList> boss_list{};
+    std::array<EncounterKeyId, kMaxBossList> boss_list{};
     uint8_t boss_list_count = 0;
-    uint8_t pad_tail[7]{};
 };
+static_assert(alignof(MonsterLists) == 1,
+              "MonsterLists is all uint8_t -- alignment 1 is what makes it "
+              "gap-free wherever it is embedded");
+static_assert(sizeof(MonsterLists) ==
+                  kMaxMonsterList + kMaxEliteList + kMaxBossList + 3,
+              "MonsterLists is its three lists plus their three counts and "
+              "nothing else -- no padding, declared or implicit");
 
 // Generate the act's monster lists from `monster_rng` (the run-scoped stream),
 // in the exact generateMonsters draw order: weak (weak_segment_for_act(act)),

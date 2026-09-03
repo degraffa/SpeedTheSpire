@@ -164,11 +164,17 @@ bool replay_actions(const CaseId& id, const std::vector<engine::Action>& actions
 // reward screen, treasure chest, encounter lists) that RunState/CombatState do
 // not cover.
 //
-// It is emphatically NOT a byte hash of the struct. RunController embeds
-// `std::string_view` encounter keys, so its bytes contain POINTERS whose values
-// move with ASLR -- a byte hash is stable within one process and different in
-// the next, which is the one failure mode a determinism guard must not have.
-// The full story, and how it was found, is at the definition in fuzz_run.cpp.
+// It is emphatically NOT `sizeof`-based over the struct, even though
+// RunController is pointer-free today (its `MonsterLists` slots are
+// `EncounterKeyId`, an integer, not the `std::string_view` this once was --
+// see encounters.hpp). It used to BE a byte hash, and that was the bug this
+// function was written to fix: a `std::string_view` encounter key put POINTERS
+// into the bytes, whose values moved with ASLR, so a byte hash was stable
+// within one process and different in the next -- the one failure mode a
+// determinism guard must not have. Hashing declared members rather than raw
+// bytes survives that class of defect even after the specific instance is
+// gone, and costs nothing else. The full story, and how it was found, is at
+// the definition in fuzz_run.cpp.
 // `run_h`/`combat_h` (optional) receive the two engine::hash_state values the
 // combined hash is built from -- free, since they are computed anyway.
 uint64_t hash_controller(const engine::RunController& rc, uint64_t* run_h,

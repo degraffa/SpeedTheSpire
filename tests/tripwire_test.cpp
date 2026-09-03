@@ -210,15 +210,17 @@ TEST(TripwireNegative, FiresWhenAPaddingRowIsDeclaredTooSmall) {
     // themselves around a change. Shrinking one must be caught by the NEXT
     // member's offsetof, not absorbed.
     //
-    // This used to shrink one of MonsterLists' declared GAPS. Those are gone --
-    // all four became real `pad_*` members when the ThreeActSim determinism
-    // failure showed that a gap tiles without ever being written -- so the
-    // control now shrinks the PADDING ROW that replaced one of them. The
-    // property under test is unchanged: a literal byte count that no longer
-    // matches the struct must fail loudly.
+    // This used to shrink one of MonsterLists' declared GAPS, then -- once
+    // those four gaps became real `pad_*` members, after the ThreeActSim
+    // determinism failure showed a gap tiles without ever being written -- one
+    // of the members that replaced them. Both are gone now: a MonsterLists slot
+    // holds a uint8_t encounter key id, so the struct has alignment 1 and no
+    // slack at all. The control therefore shrinks RunController's own
+    // `pad_emerald`. The property under test is unchanged: a literal byte count
+    // that no longer matches the struct must fail loudly.
     std::vector<ClassRow> rows(
-        kMonsterListsTable.rows,
-        kMonsterListsTable.rows + kMonsterListsTable.row_count);
+        kRunControllerTable.rows,
+        kRunControllerTable.rows + kRunControllerTable.row_count);
     bool shrunk = false;
     for (ClassRow& r : rows) {
         if (r.cls == ByteClass::PADDING && r.size > 1) {
@@ -227,12 +229,12 @@ TEST(TripwireNegative, FiresWhenAPaddingRowIsDeclaredTooSmall) {
             break;
         }
     }
-    ASSERT_TRUE(shrunk) << "MonsterLists must still declare its alignment "
+    ASSERT_TRUE(shrunk) << "RunController must still declare its alignment "
                            "padding as a member";
 
-    const ClassTable mutated{"MonsterLists(mutated)", sizeof(MonsterLists),
+    const ClassTable mutated{"RunController(mutated)", sizeof(RunController),
                              rows.data(), rows.size()};
-    const TilingFault f = check_tiling(mutated, sizeof(MonsterLists));
+    const TilingFault f = check_tiling(mutated, sizeof(RunController));
     EXPECT_FALSE(f.ok) << "a shrunken padding row was absorbed silently";
     GTEST_LOG_(INFO) << "negative control fired: " << describe(f);
 }

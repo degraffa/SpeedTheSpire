@@ -387,10 +387,27 @@ Gate: `phase == NEOW`.
 
 | Member | Class | v1 | Notes |
 |---|---|---|---|
-| `monster_list[16]` | prefix public / suffix **hidden** | → `monster_prefix[16]` for `i < monster_cursor` | Entries are registry encounter keys; carried as `EncounterDef.id`. |
+| `monster_list[16]` | prefix public / suffix **hidden** | → `monster_prefix[16]` for `i < monster_cursor` | A slot IS a registry `EncounterDef.id` (an `EncounterKeyId`, encounters.hpp), so the prefix copy is now an identity rather than a key lookup, and the PublicView bytes are unchanged by that. It used to hold a `std::string_view` into the registry's static strings, which made a memcpy'd `RunController` carry pointers -- see the note under §8.7's table. |
 | `elite_list[10]` | same | → `elite_prefix[10]` for `i < elite_cursor` | |
 | `boss_list[3]` | same, plus `[0]` always | → `boss_prefix[3]` | `boss_list[0]` is public from the map screen from act start, so it is carried whether or not the cursor has passed it. |
 | `monster_list_count` / `elite_list_count` / `boss_list_count` | **hidden** | excluded | The generated list LENGTH is a property of the unrevealed suffix, not of anything observed; the cursors are the public counts. |
+
+**A slot holds an ID, not a pointer.** `MonsterLists` used to be three
+`std::array<std::string_view, N>` into the generated registry's `.rodata`, which
+made `RunController` -- a struct this repo memcpy's everywhere and the training
+repo writes to disk -- carry POINTERS. The training repo's snapshot bank
+(SpireTrainer T2.1) segfaulted in `encode_public_view` → `encode_prefix` the
+first time it loaded a bank another PROCESS had written, and the same flaw made a
+byte hash of a controller a function of where the binary loaded. The slots are
+`EncounterKeyId` (`uint8_t`) now and text is resolved at the few use sites that
+need it. **Nothing in this table changed**: the encoder already wrote
+`encounter_by_game_id(key)->id`, and the ids stored are that same canonical id,
+so `PUBLIC_VIEW_VERSION` does not move and `public_hash` is unchanged: a
+per-decision dump under this representation (20 seeds x up to 100 decisions,
+1,968 rows) is internally reproducible byte-for-byte across independent runs
+of the dump tool, and the three committed oracle corpora replay zero-diff
+against this build (`tools/corpus_replay.sh`) -- see the discharge evidence in
+[training-tasks.md](training-tasks.md) for the full run.
 
 ## 9. RunActionMask / ActionMask → the mask channel
 

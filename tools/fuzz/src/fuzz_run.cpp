@@ -56,41 +56,43 @@ bool fail_kind_from_name(std::string_view name, FailKind& out) noexcept {
 
 // WHY THIS IS NOT `XXH3_64bits(&rc, sizeof(rc))`.
 //
-// It was, for exactly as long as it took to run the induced-failure test. A raw
-// byte hash of RunController is NOT a content hash, because `RunController.lists`
-// is a `MonsterLists` of `std::string_view` encounter keys -- and a string_view
-// is a POINTER plus a length. The keys point into the generated registry's
-// .rodata, so under a PIE/ASLR load their addresses differ on every process
-// launch. The symptom was that a trajectory hashed to a different chain in every
-// process while being perfectly stable inside one, which is precisely what a
-// replay-twice guard must never confuse with a real divergence: identical inside
-// a process (so the soak saw zero failures) and different across processes (so
-// every emitted reproducer failed to reproduce).
+// IT NO LONGER HAS TO BE ANYTHING ELSE FOR THE ORIGINAL REASON, and the reason
+// is worth keeping because it is the whole shape of the defect class.
+//
+// It WAS a raw byte hash, for exactly as long as it took to run the
+// induced-failure test. Back then `RunController.lists` was a `MonsterLists` of
+// `std::string_view` encounter keys -- and a string_view is a POINTER plus a
+// length. The keys pointed into the generated registry's .rodata, so under a
+// PIE/ASLR load their addresses differed on every process launch. The symptom
+// was that a trajectory hashed to a different chain in every process while
+// being perfectly stable inside one, which is precisely what a replay-twice
+// guard must never confuse with a real divergence: identical inside a process
+// (so the soak saw zero failures) and different across processes (so every
+// emitted reproducer failed to reproduce).
 //
 // `RunController` is `static_assert`ed trivially copyable and described as a
 // POD batch entry, and it is -- but TRIVIALLY COPYABLE IS NOT POSITION
-// INDEPENDENT. Anything that hashes, persists, or ships a RunController must go
-// through a content view like this one.
+// INDEPENDENT. That is why the same latent flaw resurfaced in the training
+// repo's snapshot bank, as a SEGFAULT rather than a hash mismatch, the first
+// time a controller crossed a process boundary. The durable fix landed in the
+// engine: a list slot is a `EncounterKeyId` (a uint8_t), so `MonsterLists` --
+// and with it `RunController` -- is a pointer-free image again.
 //
-// So: the two real states go through the engine's own hash_state (which carries
-// the value-initialization contract), the transient scalars are hashed by value,
-// and the encounter lists are hashed by their CHARACTERS, never their addresses.
+// This function stays a CONTENT view anyway, for two reasons that outlive the
+// pointers. It hashes the two real states through the engine's own hash_state,
+// which carries the value-initialization contract; and it hashes the lists by
+// their declared members rather than by `sizeof`, so the day a member with
+// slack reappears the hash does not silently start eating indeterminate bytes.
+// The keys themselves are now hashed as the ids they are.
 namespace {
 
 void update_lists(XXH3_state_t* st, const engine::MonsterLists& l) noexcept {
-    auto put_keys = [st](const std::string_view* keys, size_t n) {
-        for (size_t i = 0; i < n; ++i) {
-            const uint32_t len = static_cast<uint32_t>(keys[i].size());
-            XXH3_64bits_update(st, &len, sizeof(len));
-            if (len != 0) XXH3_64bits_update(st, keys[i].data(), len);
-        }
-    };
     const uint8_t counts[3] = {l.monster_list_count, l.elite_list_count,
                                l.boss_list_count};
     XXH3_64bits_update(st, counts, sizeof(counts));
-    put_keys(l.monster_list.data(), l.monster_list.size());
-    put_keys(l.elite_list.data(), l.elite_list.size());
-    put_keys(l.boss_list.data(), l.boss_list.size());
+    XXH3_64bits_update(st, l.monster_list.data(), l.monster_list.size());
+    XXH3_64bits_update(st, l.elite_list.data(), l.elite_list.size());
+    XXH3_64bits_update(st, l.boss_list.data(), l.boss_list.size());
 }
 
 [[nodiscard]] uint64_t lists_hash(const engine::MonsterLists& l) noexcept {

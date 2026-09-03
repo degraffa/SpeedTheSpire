@@ -32,12 +32,16 @@
 //
 // GAPS ARE DECLARED, NOT INFERRED. A member row's offset and size come from the
 // struct itself, so they follow it; an implicit alignment gap between two
-// members is declared as its own row with a LITERAL byte count. That asymmetry
-// is deliberate: deriving a gap's size from its neighbours would let the table
-// re-fit itself around any change, which is the one thing a tripwire must not
-// do. Engine structs declare their padding explicitly (conventions §8), so the
-// only literal gaps here are the ones `MonsterLists` creates -- its
-// `std::string_view` members force pointer alignment.
+// members would be declared as its own row with a LITERAL byte count. That
+// asymmetry is deliberate: deriving a gap's size from its neighbours would let
+// the table re-fit itself around any change, which is the one thing a tripwire
+// must not do. Engine structs declare their padding explicitly (conventions
+// §8), so THERE ARE NO GAP ROWS AT ALL -- `STS_BC_GAP` stays defined because
+// the negative controls need the shape, and because the next struct to grow one
+// should reach for it rather than quietly re-fitting a neighbour.
+// `MonsterLists` used to be the one exception (its `std::string_view` members
+// forced pointer alignment); its slots are `uint8_t` encounter key ids now, so
+// the struct has alignment 1 and no slack to declare.
 //
 // NESTING. `run`, `combat` and the transient structs whose members do not share
 // one class are decomposed into sub-tables, each of which must tile its own
@@ -158,26 +162,20 @@ inline constexpr ClassRow kMonsterListsRows[] = {
                "monsterRng realization. No sub-table: the split is by INDEX "
                "against a runtime cursor, not by byte range, so it is "
                "encode_public_view's prefix copy and the twin suite that hold "
-               "it"),
+               "it. One uint8_t encounter key id per slot -- the three 7-byte "
+               "pad_* rows that used to sit between these members were "
+               "std::string_view's alignment slack and are gone with it"),
     STS_BC_ROW(MonsterLists, monster_list_count, ByteClass::HIDDEN,
                "audit 8.7: a generated LENGTH is a property of the unrevealed "
                "suffix; the public counts are the cursors on RunController"),
-    STS_BC_ROW(MonsterLists, pad_after_monster_count, ByteClass::PADDING,
-               "std::string_view forces 8-byte alignment on the next array. A "
-               "DECLARED member since the ThreeActSim determinism failure -- as "
-               "a literal gap it tiled fine and was still never written"),
     STS_BC_ROW(MonsterLists, elite_list, ByteClass::MIXED, "as monster_list"),
     STS_BC_ROW(MonsterLists, elite_list_count, ByteClass::HIDDEN,
                "as monster_list_count"),
-    STS_BC_ROW(MonsterLists, pad_after_elite_count, ByteClass::PADDING,
-               "as above"),
     STS_BC_ROW(MonsterLists, boss_list, ByteClass::MIXED,
                "audit 8.7: boss_list[0] is public from the map screen from act "
                "start; the rest is the same suffix realization"),
     STS_BC_ROW(MonsterLists, boss_list_count, ByteClass::HIDDEN,
                "as monster_list_count"),
-    STS_BC_ROW(MonsterLists, pad_tail, ByteClass::PADDING,
-               "rounds MonsterLists back to its 8-byte alignment"),
 };
 STS_BC_TABLE(kMonsterListsTable, MonsterLists, kMonsterListsRows);
 
@@ -452,9 +450,12 @@ inline constexpr ClassRow kRunControllerRows[] = {
                "screen -- and an INPUT the engine never advances (0.0f on "
                "every simulator trajectory; only an oracle replay sets it). "
                "Took over what was pad_lists_align[4], the slack MonsterLists' "
-               "std::string_view 8-alignment inserts. Not separately encoded "
-               "in PublicView: it is the same value for a state and its "
-               "hidden twin, so it carries no hidden information"),
+               "std::string_view 8-alignment used to insert -- the lists are "
+               "uint8_t key ids now and MonsterLists aligns to 1, so this "
+               "member is simply the next four bytes and asks for no slack of "
+               "its own. Not separately encoded in PublicView: it is the same "
+               "value for a state and its hidden twin, so it carries no hidden "
+               "information"),
     STS_BC_SUB(RunController, lists, kMonsterListsTable, "audit 5 / 8.7"),
     STS_BC_ROW(RunController, monster_cursor, ByteClass::PUBLIC,
                "audit 5: the consumed-prefix length"),

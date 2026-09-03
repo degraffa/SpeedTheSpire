@@ -115,7 +115,8 @@ int64_t find_first_encounter_seed(std::string_view key) {
         RngStream m = from_seed(s);
         MonsterLists ml{};
         generate_monster_lists(1, m, ml);
-        if (ml.monster_list_count > 0 && ml.monster_list[0] == key) {
+        if (ml.monster_list_count > 0 &&
+            ml.monster_list[0] == encounter_key_id(key)) {
             return s;
         }
     }

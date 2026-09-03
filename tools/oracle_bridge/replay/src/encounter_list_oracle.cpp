@@ -19,6 +19,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "sts/engine/encounters.hpp"  // EncounterKeyId, encounter_key_of
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/rng_stream.hpp"
 
@@ -89,9 +90,13 @@ struct Capture {
     throw std::runtime_error("artifact has no in-game action record");
 }
 
+// The oracle names encounters by their game KEY, which is what the capture
+// carries; a sim list slot holds that key's id (encounters.hpp). This is one of
+// the handful of USE SITES that resolve an id back to text -- the comparison is
+// against the game's own strings, so it has to.
 template <std::size_t N>
 bool compare_list(const char* name, const std::vector<std::string>& expected,
-                  const std::array<std::string_view, N>& actual,
+                  const std::array<sts::engine::EncounterKeyId, N>& actual,
                   uint8_t actual_count) {
     bool clean = true;
     if (expected.size() != actual_count) {
@@ -102,10 +107,11 @@ bool compare_list(const char* name, const std::vector<std::string>& expected,
     const std::size_t shared =
         std::min(expected.size(), static_cast<std::size_t>(actual_count));
     for (std::size_t i = 0; i < shared; ++i) {
-        if (expected[i] != actual[i]) {
+        const std::string_view key = sts::engine::encounter_key_of(actual[i]);
+        if (expected[i] != key) {
             std::printf("  %s[%zu]: oracle=\"%s\" sim=\"%.*s\"\n", name, i,
-                        expected[i].c_str(), static_cast<int>(actual[i].size()),
-                        actual[i].data());
+                        expected[i].c_str(), static_cast<int>(key.size()),
+                        key.data());
             clean = false;
         }
     }
