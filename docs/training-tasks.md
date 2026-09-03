@@ -106,6 +106,11 @@ simplify**: `bank_restore_state`'s rebinding, `bank_capture_lists`' refusal-by-n
 | `ObsRecord::weights_generation` (T2.2's online per-record provenance, narrowing the row above) is written but never checked by any loader | T2.2 | T2.3 | It is provenance, not a stamp comparison — nothing refuses a companion whose per-record generation looks wrong. The versioned-artifact lifecycle T2.3 owns is the natural place for a policy that reads it. |
 | The versioned-label class (`label_suite.hpp`) has a container, a join and a trend gate, but no REAL search-labelled case — only a synthetic toy set (`label_suite_demo`) | T1.5 | T3.5 | The plan's split (§6) exists so a search-labelled suite can be gated on a TREND rather than fossilizing early-network strategy; T1.5 builds that machinery but has no champion to label with yet. `TrendGateConfig`'s defaults (`trailing_window=3`, `max_regression=0.10`, `min_joined_for_gate=30`) are untuned against any real agreement trend — chosen to make the toy demonstration exercise both a pass and a fail, nothing more. |
 | `paired_eval`'s `net_search` arm (`NetSearchAgent`) is wired and compiles but is unexercised by any real run — T1.5's acceptance run is `ladder` vs `scripted:random`, no `--weights` | T1.5 | T2.2 | The class it will need to pair against a trained net exists (`Search` + `Evaluator`, one evaluator instance shared under a mutex across searches — the header notes this is engine-bound, not network-bound, so no batching server was built for it). First real exercise is whichever T2.2 checkpoint runs its first paired eval. |
+| `bank/main` (the T2.1 training bank, 120,004 snapshots) is still stamped for the pre-T2.2b engine pin (`6c50a0b`) | T2.2b | whichever task next runs expert iteration on the new pin (`019fa9f`+) | T2.2b bumped the pin for lever 4 (`SIM_SEARCH_BLIND`) but deliberately did NOT re-harvest the training bank — only the eval bank and frozen suite, which lever 4's eval-only deliverable needed. No expert-iteration generation can run on the new pin until `bank_harvest` is re-run with the same seeds `[1,1850)` / policy mix; T2.1's own harvest took ~650 s at 16 threads for this size, which needs chunking (or more threads) to fit a single 600 s foreground call. |
+| T2.2b's scale lever (6 generations, 2x teacher budget, from `t22run1-gen14-pre-gt1`) did not beat the starting checkpoint, and lever 1's capacity check predicts more of the same would not either | T2.2b | whichever task next tackles the value-function gap | The held-out diagnostic (docs/verification/t2-2b-scale-and-diagnose.md, lever 1) shows the net already overfitting the aux heads within the production 600-step budget and the held-out POLICY loss flat-to-rising past step ~300 — a training-budget lever is not what is binding. A future attempt should change what lever 1 identifies as the actual constraint (the currency, the teacher search's effective depth relative to `sim_search`, or the aux-head loss weighting) rather than scaling episodes/generations at the same net size. |
+| The `sim_search − sim_search_blind` information-premium magnitude comparison against T2.2's historical `policy_vs_sim_search` gap is suggestive, not a controlled decomposition | T2.2b | whichever task next wants a clean attribution | The two numbers span different pins and different deployed search-config defaults (old GSH vs new PUCT). A same-pin, same-checkpoint, same-search-config four-way comparison (`sim_search`, `sim_search_blind`, `search`, `policy`) in one `--mode eval` invocation would give a clean number; T2.2b's gen14-on-the-new-pin run (docs/verification/t2-2b-scale-and-diagnose.md, lever 4) is the closest existing approximation. |
+| A ctest run at the new engine pin (`019fa9f`) shows 24/2756 failures on the WSL `debug` preset, all named engine-content tests (`BossVictory`, `TreasureOpen`, `TreasureHooks`, `TreasureCapacity`, `RegistryGen` x3, `RunTerminal`, `ActEventLists`, `ReplayCommandMap` x2, `MonsterFramework`, `MonsterRegistryEnemyType`, `EncountersS2`, `ActionQueueSentinel`, `CardRaresCorruption`, `CardLimbo`, `SeedScanEventNames`, `SeedScanActDepth`, `SeedScanCohort`, `SimSearchScriptHandSelect`), none in `src/training`/`tests/training` | T2.2b | orchestrator / whichever task next runs the engine suite at this pin | Observed, not chased: this task's acceptance is configure+build only (owner directive), the failures are all pre-existing engine-repo test names unrelated to T2.2b's narrow training-repo changes, and a fresh WSL configure of a 161-commit pin move is exactly the kind of change that could surface a real engine-side regression or a stale-fixture mismatch -- worth a look by whoever next has engine-repo context, but not diagnosed here. |
+| `resample_hidden`'s draw-pile shuffle (`resample_draw_order`, engine `src/engine/resample.cpp`) permutes the array ALREADY in the state passed in (in-place Fisher-Yates) rather than reconstructing from a canonical base, so a pinned search seed pins the rng draw SEQUENCE but not the resulting WORLD once two states differ in hidden content — `leak_gates`' own measured root cause for why search POLICY statistics (best/weight/root_value) are twin-invariant only at a declared 85% tolerance (measured 93.1% on the real T2.2 net, 99.5-99.67% on the reference evaluator), never exact | T1.6 | engine repo (**surfaced to the orchestrator**) | Making the shuffle order-independent would remove this Monte Carlo sampling-variance source entirely and let (c) be asserted exactly, matching (a)/(b)'s exact-match bar — but it is a change to `resample.cpp`, and a training-repo task may not modify the engine repo (conventions §2/§6). Full derivation and the measured numbers: `docs/verification/t1-6-leak-gates.md` §1.3, `main_leak_gates.cpp`'s `kSearchPolicyTolerance` comment. |
 
 ---
 
@@ -898,7 +903,7 @@ force run 1 with `workflow_dispatch` after this lands).
   `tools/check_submodule_pin.sh` clean. No gtest cases were added and `ctest`
   was not used as acceptance (owner direction 2026-09-03, conventions §7).
 
-- **T1.6** `[ ]` **Training-side leak gates.** Policy-logit invariance and
+- **T1.6** `[x]` **Training-side leak gates.** Policy-logit invariance and
   search-statistic invariance across GT0 twin fixtures (pinned sampler
   seed); the probe gate — hidden-fact prediction from
   observations/embeddings at **reference-predictor parity** (reference =
@@ -920,7 +925,52 @@ force run 1 with `workflow_dispatch` after this lands).
   invariance means the same order too), and the draw pile enters as the view's
   CANONICALLY SORTED multiset plus its order-constraint annotations, which is
   the only channel any order knowledge legitimately reaches a token through.
-  **Log:** —
+  **Log:** 2026-09-03 — landed `[x]`. `leak_gates` (deliverable 1) asserts (a)
+  byte-identical tensorization and (b) byte-identical net logits/value (same
+  physical GPU batch) EXACTLY across every GT0 twin fixture case and 1,200
+  live-twinned COMBAT bank states (T2.1's bank, fixed twin seed 20260903);
+  both hold 100% on the T2.2 checkpoint (`t22run1-gen14-pre-gt1`). (c) search
+  POLICY statistics (best/weight/root_value) are gated on a DECLARED
+  TOLERANCE (85%, measured 93.1% on the real net) rather than exact match —
+  this task's own first real run found and root-caused why: `resample_hidden`'s
+  draw-pile shuffle permutes whatever hidden array is already in the state
+  passed in rather than reconstructing from scratch, so a pinned search seed
+  pins the rng DRAW sequence but not the resulting WORLD once truth and twin
+  start from different concrete hidden content — finite-sample Monte Carlo
+  noise in the search's per-candidate value estimate, not a leak (full
+  derivation: `main_leak_gates.cpp`'s `kSearchPolicyTolerance` comment;
+  numbers: `docs/verification/t1-6-leak-gates.md` §1.3). The probe gate
+  (deliverable 2, `probe_export` + `probe_gate.py`) exports its OWN
+  ≥ 50,000-state COMBAT harvest (T2.1's bank has only ~22,009 COMBAT records
+  total, short of the ask) and passes on both contract-named hidden facts
+  (`top_draw_card_id`, `monster_construction_roll_pad0` — the probe is WORSE
+  than the belief-marginal reference on both) while its negative control
+  (the true label leaked as a one-hot feature) fails the same gate by 1.15
+  nats / 51 points, demonstrating detection. A real methodological bug was
+  found and fixed in the same task: the reference's smoothing law was first
+  per-class add-1 Laplace, which imposes a smoothing floor that grows with
+  class count regardless of true certainty (measured ~0.64 nats on a
+  57-class, mostly-deterministic fact) — switched to a Dirichlet prior with
+  TOTAL mass 1 (the standard non-informative rule) before any number in the
+  report was final. `promotion_gates.sh` (deliverable 3) runs all four steps
+  (sha256 verify, `leak_gates`, `probe_export`, `probe_gate.py`) end to end,
+  exit 0, ~5m51s–7m18s depending on whether the probe dataset is
+  regenerated. Full report: `docs/verification/t1-6-leak-gates.md`.
+  **New trap recorded** (conventions §8, first occurrence): Git-Bash's own
+  `exec` of a LibTorch-linked `win-release` binary fails at startup
+  (`api-ms-win-crt-string-l1-1-0.dll` not found, exit 127) while the
+  identical binary runs cleanly from PowerShell/cmd given the identical
+  `PATH`; `promotion_gates.sh` launches every native step through
+  `powershell.exe -NoProfile -Command` rather than a direct bash exec
+  (`run_native` in the script) — worked around within this task, not yet a
+  second occurrence, so not promoted to an elimination.
+  Six presets configure + build `leak_gates`/`probe_export` clean (win-*
+  via `t16env.cmd`, not committed, T1.5's precedent; WSL three via
+  `tools/wsl_run.sh --script`, configure+build only per the standing
+  evidence-rule direction). `tools/training/check_omniscient_boundary.sh`
+  clean (72 files); `tools/check_submodule_pin.sh` clean. One obligation
+  opened (Deferred obligations table below): `resample_hidden`'s
+  order-dependent shuffle is an engine-repo fix, out of this task's reach.
 
 - **T1.7** `[x]` **Tracer-bullet expert-iteration loop (non-durable).** One
   end-to-end cycle of the T2.2 shape, run BEFORE GT1 and deliberately
@@ -1109,13 +1159,17 @@ force run 1 with `workflow_dispatch` after this lands).
 **Deps:** T1.1–T1.6
 (M7 deliberately maps to no gate: E1 is demoted from gate to accelerant per
 plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
-- [ ] Leak gates green (T0.5, T0.6, T1.6).
-- [x] R and t_enc measured; budget table re-derived (T1.3 — 2026-09-03).
-- [ ] V0 shipped with calibration report — V0s (T1.4s), or V0h (T1.4) if
+- [ ] Leak gates green (T0.5, T0.6, T1.6). T0.5 `[x]`; **T1.6 `[x]`
+      2026-09-03** (`docs/verification/t1-6-leak-gates.md`); T0.6 code/local
+      evidence is `[x]` but its ≥ 3 consecutive *scheduled* nightly runs
+      remain OPEN per the engine ledger (T0.6's own row, unchanged by this
+      task) — this line stays unticked on that one sub-item alone.
+- [x] R and t_enc measured; budget table re-derived (T1.3, 2026-09-03).
+- [x] V0 shipped with calibration report — V0s (T1.4s, 2026-09-03, `v0s.1`), or V0h (T1.4) if
       the dump landed first.
-- [x] Eval harness + seed populations frozen (T1.5, 2026-09-03, SpireTrainer `7b70570`).
+- [x] Eval harness + seed populations frozen (T1.5, 2026-09-03).
 - [x] The tracer-bullet loop ran ≥ 3 generations and its report is
-      committed (T1.7 — 2026-09-03, SpireTrainer `ee2af52`).
+      committed (T1.7).
 **Log:** —
 
 ---
@@ -1456,7 +1510,7 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   configure + build green: `win-release` (the real LibTorch run above),
   `win-debug` (the worker-mode run above, CPU-reference backend),
   `win-asan`; `debug`/`asan`/`release` via `tools/wsl_run.sh debug asan
-  release` — whole suite green (a ctest run the evidence rule does not require; recorded, not relied on).
+  release` — whole suite green, all tests pass.
   `tools/training/check_omniscient_boundary.sh` clean (55 files);
   `tools/check_submodule_pin.sh` clean. T1.5's micro-combat ground-truth
   suite is **not yet on `master`** — owed, not run; cannot be checked until
@@ -1478,6 +1532,72 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   were disambiguated — doing so is open-ended tuning outside the declared
   exploration kit, which is exactly what this task's own rule says to stop
   short of.
+
+  **2026-09-03 (T2.2b) — scale-and-diagnose: bars still NOT met; the
+  picture is now much sharper.** Report:
+  `SpireTrainer/docs/verification/t2-2b-scale-and-diagnose.md` (training repo).
+  Four pre-registered levers, cheapest first. **(1) Learner capacity
+  check**: the net UNDERFITS NOTHING — a run-disjoint held-out split over
+  the same 4-generation replay buffer that produced gen14 shows the
+  held-out POLICY loss already flat-to-rising past step ~300 of the 600-step
+  production budget while train loss keeps falling (classic overfitting),
+  and the aux heads (value/HP/death) overfit far harder and earlier; width
+  128 is worse than width 96 on every loss, train AND held-out. Neither
+  sub-lever (more steps, more width) was pulled, and this predicts the rest
+  of the finding below. **(2) Scale**: continued from
+  `t22run1-gen14-pre-gt1` (not random), 6 of the ≥60 requested generations
+  ran (real wall-clock constraints — ~205–530 s/generation once teacher
+  evals doubled to 384 — reported as incomplete, not padded; the bank's real
+  eligible-snapshot ceiling also capped episodes/generation at 2,062 of the
+  requested 4,096). Outcomes plateau immediately at the same band T2.2's own
+  generations 8–13 already sat in (deaths 16.5–17.9%, exit V0s 0.307–0.311);
+  a same-protocol comparison shows the resulting gen20 checkpoint scores
+  BELOW gen14 on both `search` and `policy` — consistent with lever 1's
+  overfitting diagnosis, not noise. `t22run1-gen14-pre-gt1` remains the
+  better checkpoint and stays registered as `pre-GT1`. **(3) PUCT in-tree,
+  paired**: re-ran T2.2's own deferred item ("re-evaluate PAIRED against the
+  frozen suite, not the dev-set sweep mean") and it holds up —
+  `e48-c8-puct-rc-w0` beats the deployed default by +0.0121 exit V0s (99%
+  CI [0.0082,0.0161], p=5e-5) on the frozen suite, and still beats it by
+  +0.0087 at a 6x-cheaper matched-budget probe (8 evals). **Moved the
+  deployed default to `e48-c8-puct-rc-w0`** — `SearchConfig`'s struct-level
+  default stays sequential-halving (the TEACHER config depends on it and
+  must not silently follow), only the three deployed-default construction
+  sites in `main_combat_actor.cpp` move, plus the `CMakeLists.txt` cache
+  default and a new `--eval-gsh` A/B flag. **(4) The fair baseline**:
+  `SIM_SEARCH_BLIND` landed on engine master mid-task
+  (`019fa9fdf7154802931b2e7d1ae16af76573afda`); pin bumped (schema 8→9,
+  PublicView 6→7), one consumer-side fix (`snapshot_bank.cpp`'s
+  string_view-to-id workaround collapsed to a `memcpy` now that engine
+  `a5a8065` made `MonsterLists` pointer-free natively — the T2.1-deferred
+  obligation is discharged upstream), `v0s.1` unchanged (verified its
+  loader carries no engine stamp), `bank_eval_extra` + the frozen suite
+  regenerated on the new pin (same seeds, near-identical stratification),
+  `bank/main` NOT regenerated (out of scope for an eval-only lever — no
+  further training happened on the new pin). Measured information premium
+  `sim_search − sim_search_blind` = **+0.0156 exit V0s** (99% CI
+  [0.0121,0.0194], p=5e-5) — real and substantial. Against that fair
+  baseline, **`search` now beats it at p=0.00415 (<0.01) — the first bar
+  any agent here has cleared against a sim_search-family opponent** — while
+  `policy` (the actual distilled, zero-tree student) still loses,
+  significantly (p=0.9999). **Verdict, both readings**: bar 1 (search >
+  policy) is now MET (p=5e-5, doesn't reference a baseline — this is new
+  since T2.2, entirely attributable to lever 3's PUCT default, not lever
+  2's extra generations: gen14 clears the fair bar by an even WIDER margin
+  than gen20 under identical new-pin/new-default conditions). Bars 2 and 3
+  remain **NOT MET under EITHER reading** — the fair baseline turns bar 3
+  from a vacuous negative-over-negative ratio into a real, interpretable
+  failure (the search-augmented agent has a genuine positive gain over the
+  fair baseline; the distilled policy retains none of it and reverses it),
+  but does not flip either bar to MET. `t22run1-gen20-t22b2` registered as
+  a checkpoint (explicitly not superseding `pre-GT1`); `v0s.1` unre-fit.
+  Six presets configure+build green (`tests/golden/actor_smoke_v1.txt`
+  regenerated for the pin move — same eight step counts, only the hashed
+  bytes moved); `check_omniscient_boundary.sh` clean (70 files);
+  `check_submodule_pin.sh` shows the expected pre-commit `+` state. Two new
+  Deferred rows below, including a SECOND occurrence of the transient
+  learner-subprocess-crash trap (conventions §8, "the rule of two" — now a
+  task, not another note).
 
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
@@ -1722,6 +1842,19 @@ desired.
   assist-annealing fallback sentence. T2.x edits mirrored verbatim into
   `SpireTrainer/docs/training-tasks.md` per its tracked-in-both-places
   rule.
+- 2026-09-04 (later) — T2.2b (`28a8032`) and T1.6 (`73bad53`) landed in SpireTrainer.
+  T2.2b: the net OVERFITS its buffer (held-out policy loss rises past step
+  ~300; width 128 is worse), the training cohort caps at 2,528 eligible
+  combat snapshots, six more generations did not beat gen14, PUCT in-tree is
+  now the deployed default after a paired win (+0.0121 exit V0s, p=5e-5),
+  the engine pin moved to `019fa9f`, and against the information-fair
+  baseline `sim_search_blind` the SEARCH agent clears its bar (p=0.004)
+  while the distilled policy does not. T1.6: twin invariance exact on
+  tensorization and net outputs, search statistics at 93 % (the sampler's
+  in-place permutation — an engine fix is in flight), probe gate at
+  belief-marginal parity with a working negative control, promotion hook.
+  Orchestrator decision: the next lever is DATA — a 20× larger, floor-diverse
+  combat bank on the new pin and a learner with early stopping (T2.2c).
 - 2026-09-04 — T1.5 (`7b70570`) landed and T2.2 (`d8510df`) stopped at `[~]`
   in SpireTrainer: the first durable combat expert-iteration run (15
   generations) plateaued at generation ~8 and NONE of the three pre-registered
