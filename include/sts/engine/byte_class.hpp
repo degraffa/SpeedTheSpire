@@ -338,7 +338,9 @@ inline constexpr ClassRow kCombatStateRows[] = {
     STS_BC_ROW(CombatState, cards_played_this_turn, ByteClass::PUBLIC,
                "own observed plays"),
     STS_BC_ROW(CombatState, player_power_count, ByteClass::PUBLIC, ""),
-    STS_BC_ROW(CombatState, pad_player, ByteClass::PADDING, ""),
+    STS_BC_ROW(CombatState, damaged_this_combat, ByteClass::PUBLIC,
+               "AbstractPlayer.damagedThisCombat -- own witnessed HP-loss "
+               "event count, S3.53's Blood for Blood makeCopy() cost seed"),
     STS_BC_ROW(CombatState, player_powers, ByteClass::PUBLIC,
                "audit 1/2: the full list; PowerSlot.pad0 is that struct's own "
                "declared padding"),

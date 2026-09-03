@@ -383,6 +383,47 @@ void corruption_hand_cost_sweep(CombatState& s, uint8_t visible_hand) noexcept {
     }
 }
 
+// AbstractCard.makeCopy() for Blood for Blood (BloodForBlood.java:60-67):
+//
+//     public AbstractCard makeCopy() {
+//         BloodForBlood tmp = new BloodForBlood();
+//         if (AbstractDungeon.player != null)
+//             tmp.updateCost(-AbstractDungeon.player.damagedThisCombat);
+//         return tmp;
+//     }
+//
+// EVERY freshly instantiated Blood for Blood -- not a stat-equivalent copy of
+// an existing instance (op_make_card's self_copy branch / makeStatEquivalent-
+// Copy, unaffected: those carry a LIVE instance's cost forward, they never
+// call makeCopy()) -- is seeded pre-reduced by the number of in-combat
+// HP-loss events already witnessed (damaged_this_combat, CombatState's own
+// mirror of damagedThisCombat, incremented in cards_took_player_damage
+// above). updateCost clamps at 0 (AbstractCard.java:1985-1987). Every other
+// card's makeCopy() is the trivial default (`new XCard()`, no override), so
+// this returns the plain registry cost for anything but Blood for Blood --
+// zero behavior change for every other consumer of the two call sites below
+// (op_make_card's fresh-copy branch: Codex / Dead Branch, both of which pull
+// from the combat pool Blood for Blood is a member of; add_library_copy_to_
+// hand: Discovery / Jack of All Trades / Transmutation).
+//
+// Before this existed, EVERY fresh-copy site reseeded the flat registry cost
+// with no awareness of the combat's damage history -- witnessed live via a
+// played Discovery mid-fight (S3.53 sweep s2v3_wave2_STS227212_ps88 floor 35,
+// s2v3_wave2_STS228756_ps285 floor 31: the drawn Blood for Blood's cost sat
+// one HIGHER in the sim than the capture, in the HAND, the one pile --costs
+// tolerates nothing in).
+[[nodiscard]] uint8_t fresh_combat_card_cost(const CombatState& s, CardId id,
+                                             const CardDef& def,
+                                             uint8_t upgrade) noexcept {
+    const uint8_t registry = card_cost(def, upgrade);
+    if (id != CardId::BLOOD_FOR_BLOOD) {
+        return registry;
+    }
+    const int reduced = static_cast<int>(registry) -
+                        static_cast<int>(s.damaged_this_combat);
+    return static_cast<uint8_t>(reduced > 0 ? reduced : 0);
+}
+
 namespace {
 
 // Allocate a fresh library copy and add it to the hand, spilling to discard at
@@ -395,11 +436,20 @@ namespace {
 // upgrades BEFORE setCostForTurn(0) (:49), that is the cost the this-turn zero
 // replaces and the cost the end-of-turn sweep restores.
 //
-// The `free_this_turn && cost != 0` guard is also the X-cost story:
-// setCostForTurn is a no-op while costForTurn < 0 (AbstractCard.java:2002), and
-// an X-cost row carries CardFlag::XCOST with a registry cost of 0, so a
-// generated X-cost card (Transmutation can generate another Transmutation) keeps
-// its X-cost play semantics and gains no this-turn marker.
+// The this-turn zero is applied by DELEGATING to set_cost_for_turn (rather
+// than hand-rolling the SAVED_BASE_COST bookkeeping a second time): the fresh
+// instance's cost_now is first seeded to its true combat base
+// (fresh_combat_card_cost -- the registry row, or Blood for Blood's
+// makeCopy()-reduced value) with no runtime flag bits, which is exactly the
+// state instance_base_cost reads cost_now directly for, so set_cost_for_turn
+// stashes the RIGHT base (not the flat registry one) into SAVED_BASE_COST
+// when the two differ. For every non-Blood-for-Blood card `base` IS the
+// registry cost, so this is behaviorally identical to the previous inline
+// form -- including the X-cost story: setCostForTurn only sets
+// COST_MODIFIED_FOR_TURN when its argument differs from the base, and an
+// X-cost row's base is 0 either way (CardFlag::XCOST, not a nonzero cost),
+// so a generated X-cost card keeps its X-cost play semantics and gains no
+// this-turn marker, unchanged.
 void add_library_copy_to_hand(CombatState& s, CardId id, bool free_this_turn,
                               bool upgraded = false) noexcept {
     const CardDef* def = card_def(id);
@@ -420,14 +470,13 @@ void add_library_copy_to_hand(CombatState& s, CardId id, bool free_this_turn,
     CardInstance& c = s.card_pool[slot];
     c.card_id = static_cast<uint16_t>(id);
     c.upgrade = upg;
-    c.cost_now = free_this_turn ? 0 : card_cost(*def, upg);
+    c.cost_now = fresh_combat_card_cost(s, id, *def, upg);
     c.flags = card_flags(*def, upg);
-    if (free_this_turn && card_cost(*def, upg) != 0) {
-        c.flags = static_cast<uint16_t>(
-            c.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
-    }
     c.misc = 0;
     const CardPoolIndex pi = static_cast<CardPoolIndex>(slot);
+    if (free_this_turn) {
+        set_cost_for_turn(s, pi, 0);
+    }
     if (s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = pi;
         // ShowCardAndAddToHandEffect:47 / :69 -- the Corruption sweep. A
@@ -975,9 +1024,14 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
             // comment for the live witness).
             make_stat_equivalent_copy(s, slot, source_pi);
         } else {
+            // fresh_combat_card_cost (above): AbstractCard.makeCopy()'s
+            // registry-cost default for every card but Blood for Blood --
+            // Codex and Dead Branch (both draw from the combat pool Blood
+            // for Blood is a member of) reach this branch and need the same
+            // makeCopy() override Discovery does (add_library_copy_to_hand).
             s.card_pool[slot].card_id = card_id_raw;
             s.card_pool[slot].upgrade = upg;
-            s.card_pool[slot].cost_now = card_cost(*def, upg);
+            s.card_pool[slot].cost_now = fresh_combat_card_cost(s, id, *def, upg);
             s.card_pool[slot].flags = card_flags(*def, upg);
             s.card_pool[slot].misc = 0;
         }

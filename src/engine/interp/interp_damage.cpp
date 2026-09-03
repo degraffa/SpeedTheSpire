@@ -812,6 +812,17 @@ void try_player_revive(CombatState& s) noexcept {
 // SAVED_BASE_COST payload is exactly that hidden base while a this-turn
 // modifier is live.
 void cards_took_player_damage(CombatState& s) noexcept {
+    // AbstractPlayer.java:1465-1466: `++this.damagedThisCombat;` runs
+    // unconditionally, right alongside the updateCardsOnDamage() call both
+    // callers below already gate on `hp_lost > 0 && phase == COMBAT` (the
+    // phase test is structural here -- this function is reached only from
+    // in-combat op_damage/op_lose_hp). Clamped rather than wrapped: a byte is
+    // generous for a real fight, and Blood for Blood's makeCopy() reduction
+    // (fresh_combat_card_cost below) is clamped at 0 either way once the
+    // combat has taken more hits than the card's base cost.
+    if (s.damaged_this_combat < 0xFFu) {
+        ++s.damaged_this_combat;
+    }
     auto update = [&](const CardPoolIndex* pile, uint8_t count) noexcept {
         for (uint8_t i = 0; i < count; ++i) {
             CardInstance& c = s.card_pool[pile[i]];

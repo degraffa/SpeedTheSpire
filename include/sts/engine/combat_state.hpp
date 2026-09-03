@@ -1152,7 +1152,21 @@ struct CombatState {
     uint8_t stance;                   // stance id (0 = None); skeleton is stanceless
     uint8_t cards_played_this_turn;   // per-turn counter (design doc §4.2)
     uint8_t player_power_count;       // live length of player_powers[]
-    uint8_t pad_player;               // explicit padding
+    // AbstractPlayer.damagedThisCombat (AbstractPlayer.java:1466, incremented
+    // right after updateCardsOnDamage): the count of positive in-combat
+    // player HP-loss EVENTS witnessed so far, one per cards_took_player_
+    // damage call (interp_damage.cpp), not per HP point. Occupies what was
+    // `pad_player` -- zero bytes, zero offset moved, the pad_* precedent
+    // (conventions.md 8). Its one consumer today is Blood for Blood's
+    // makeCopy() override (BloodForBlood.java:60-67): `tmp.updateCost(
+    // -AbstractDungeon.player.damagedThisCombat)` on every FRESHLY
+    // instantiated copy (Discovery/Codex/Dead Branch -- any "pull a base
+    // library copy from the combat pool" site), which is why a Blood for
+    // Blood drawn from Discovery mid-fight starts already reduced by however
+    // many hits already landed (S3.53 sweep witness s2v3_wave2_STS227212_ps88
+    // / _STS228756_ps285). A single byte is generous: no A20 fight comes
+    // close to 255 HP-loss events.
+    uint8_t damaged_this_combat;
     PowerSlot player_powers[kPowerCap];
 
     // -- shared card-instance pool (design doc §4.2: "one pool, piles
