@@ -108,12 +108,46 @@ void resample_draw_order(CombatState& s, const KnowledgeState& k,
         return false;
     };
 
-    // Build the permutable window (positions [exact, n)) as a slot list: one
-    // MARKER per relative-order member, then every genuinely free card.
+    // Collect the free (non-chain) cards in the permutable window [exact, n)
+    // -- deliberately WITHOUT keeping their physical positions. The physical
+    // order is exactly the hidden truth two twins of the same public state can
+    // disagree on (each twin already ran its own Fisher-Yates over whatever
+    // concrete order ITS memcpy'd source happened to carry), so reading it
+    // back here would let that disagreement leak straight into the result:
+    // shuffle_span applied to two different starting arrays with the same RNG
+    // draws produces two different final permutations, even though both starts
+    // are equally valid continuations of the identical public information.
+    //
+    // The starting array instead has to be a CANONICAL ordering over the same
+    // multiset -- a pure function of what the pile PUBLICLY contains, not of
+    // which concrete slot each card currently sits in. Ascending CardPoolIndex
+    // is one such total order; any deterministic total order works, because
+    // two twins of one public state always agree on this window's multiset
+    // (resample_hidden only ever reorders the pile here, never adds or removes
+    // a member -- see the "pure copies" note at the end of this file), so
+    // sorting it always yields the identical starting array. That is what
+    // public_view.cpp's own draw[] projection does too (CANONICALLY SORTED
+    // unordered multiset), for the same reason.
+    std::array<CardPoolIndex, kDrawCap> free{};
+    int free_count = 0;
+    for (int p = exact; p < n; ++p) {
+        const CardPoolIndex pi = s.draw[index_of_position(p)];
+        if (!is_ordered_member(pi)) {
+            free[static_cast<std::size_t>(free_count++)] = pi;
+        }
+    }
+    std::sort(free.begin(), free.begin() + free_count);
+
+    // Build the permutable window as a slot list: one MARKER per relative-
+    // order member, then every free card in the canonical order just built.
     // Shuffling the list and then re-labelling the markers left-to-right with
     // the chain order gives each admissible arrangement exactly m! preimages,
     // hence a UNIFORM draw over the interleavings -- which is the contract's
-    // declared posterior (knowledge.hpp).
+    // declared posterior (knowledge.hpp). That uniformity argument never
+    // depended on the window's pre-shuffle arrangement, only on shuffle_span
+    // being a proper Fisher-Yates over it -- so fixing the arrangement to a
+    // canonical one changes nothing about the distribution, only about which
+    // arrangement two twins start from.
     struct Slot {
         CardPoolIndex card;
         uint8_t is_marker;
@@ -123,11 +157,9 @@ void resample_draw_order(CombatState& s, const KnowledgeState& k,
     for (int i = 0; i < ordered_count; ++i) {
         window[static_cast<std::size_t>(window_count++)] = Slot{0, 1};
     }
-    for (int p = exact; p < n; ++p) {
-        const CardPoolIndex pi = s.draw[index_of_position(p)];
-        if (!is_ordered_member(pi)) {
-            window[static_cast<std::size_t>(window_count++)] = Slot{pi, 0};
-        }
+    for (int i = 0; i < free_count; ++i) {
+        window[static_cast<std::size_t>(window_count++)] =
+            Slot{free[static_cast<std::size_t>(i)], 0};
     }
 
     shuffle_span(window.data(), window_count, rng);

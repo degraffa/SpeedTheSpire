@@ -407,6 +407,22 @@ sampler seed — must be **identical on the two rebuilt states of every case**.
 They differ only in hidden state, and every stored payload is byte-identical
 between them by construction.
 
+The engine now GUARANTEES the mechanism that property depends on: **the world
+`resample_hidden` samples is a function of the public state and the sampler
+seed alone** — never of which concrete hidden layout the input state happened
+to carry. Before this was a mechanism, not just a claim about observations,
+`resample_draw_order` permuted whatever draw-pile order was already sitting in
+the array passed in, so two hidden twins of one public state (which
+necessarily start from two different concrete orders) could reach different
+sampled worlds at the SAME sampler seed even though every observation of that
+world stayed byte-identical — the divergence lived one layer below the
+observation, in per-simulation search statistics that average over many
+sampled worlds (`docs/training-tasks.md`'s Deferred obligations table has the
+measured before/after). `resample_draw_order` now reconstructs its shuffle's
+starting order from the pile's public multiset before permuting it, which is
+what makes the guarantee hold for every consumer, not only the ones that only
+ever look at `PublicView`.
+
 ## 9. Where each thing lives
 
 | Thing | Home |
