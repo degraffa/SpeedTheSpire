@@ -1906,6 +1906,72 @@ TEST(RunPotion, AFairyObtainedMidCombatStillRevives) {
     EXPECT_EQ(combat_fairy_armed(rc.combat.flags), 0);
 }
 
+// Capture STS224800 (floor 25, three Cultists, turn 1; seq 318-319). The belt
+// held [Entropic Brew, Colorless Potion]. `potion use 1` opened the Colorless
+// Potion's discovery (CARD_REWARD: madness / deep breath / apotheosis) and,
+// with that screen still open, `potion use 0` drank the Brew. The sim wrote
+// both rolls onto the belt at use time and its next step drank the Blood
+// Potion it had just placed in slot 0; the game's next dump showed slot 0 as an
+// empty `Potion Slot` under the same open discovery, and the follower stopped.
+//
+// The game's ordering: EntropicBrew.use in COMBAT queues one ObtainPotionAction
+// per slot with addToBot (EntropicBrew.java:40-42) -- the ROLLS happen inside
+// that loop, the OBTAINS only when each action reaches the queue head
+// (ObtainPotionAction.java:29-38) -- and AbstractRoom.update runs the action
+// manager only while no screen is up (AbstractRoom.java:264-265), so the two
+// obtains wait behind the DiscoveryAction that already holds the head and land
+// only after the choice closes the screen.
+TEST(RunPotion, EntropicBrewInCombatObtainsWaitBehindAnOpenDiscovery) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_GE(rc.run.potion_slots, 2);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::COLORLESS_POTION);
+
+    // The Colorless Potion opens its discovery; the pump blocks on it.
+    step(rc, make_action(ActionVerb::USE_POTION, 1));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.combat.choice_pending);
+    ASSERT_TRUE(mask.combat.choice_from_generated);
+    ASSERT_TRUE(mask.can_use_potion[0])
+        << "the belt stays drinkable under an open discovery (the game "
+           "advertises `potion` on CARD_REWARD)";
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::NONE));
+
+    RngStream expected_rng = rc.run.potion_rng;
+    const PotionId first = hand_limited_potion_roll(expected_rng);
+    const PotionId second = hand_limited_potion_roll(expected_rng);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    // The rolls are synchronous (potionRng moved by the full limited pair)...
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng));
+    // ...and the obtains are not: the queue cannot run under the screen.
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE))
+        << "the game's dump after `potion use 0` shows an empty slot 0";
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::NONE));
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.combat.choice_pending) << "the discovery is still open";
+    EXPECT_FALSE(mask.can_use_potion[0])
+        << "the sim's own next step in STS224800 -- drinking from slot 0 -- "
+           "must be illegal here";
+    EXPECT_FALSE(mask.can_use_potion[1]);
+
+    // The choice closes the screen: the DiscoveryAction completes first (its
+    // card reaches the hand), then the two ObtainPotionActions behind it fill
+    // the belt front-first, in roll order.
+    const uint8_t hand_before = rc.combat.hand_count;
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.combat.hand_count, hand_before + 1);
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(first));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(second));
+    EXPECT_EQ(rc.combat.pending_potion_count, 0) << "the accumulator is drained";
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.combat.choice_pending);
+}
+
 TEST(RunPotion, TargetPotionDelegatesToCombatPumpAndConsumesSlot) {
     RunController rc = enter_jaw_worm_combat();
     rc.run.potions[0] = static_cast<uint16_t>(PotionId::FIRE_POTION);

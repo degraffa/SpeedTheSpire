@@ -46,6 +46,7 @@
 #include "sts/engine/shop.hpp"             // merchant stock / purchases / purge
 #include "relics/relic_pickup.hpp"         // gain_gold (the one run-layer gold door)
 #include "interp/interp_powers.hpp"        // op_apply_power (emerald elite buff)
+#include "sts/registry/manifest.hpp"       // kPotionsCount (pending_potion fits a byte)
 #include "sts/registry/monster_table.hpp"  // monster_def / MonsterDef::is_boss (Smoke Bomb)
 #include "sts/engine/treasure_rooms.hpp"   // fixed-row chest lifecycle
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
@@ -192,11 +193,12 @@ void spend_wing_boots_charge(RunState& rs) noexcept {
 //
 // THE MIRROR'S INVARIANT: combat_fairy_armed counts the belt's not-yet-consumed
 // Fairies, maintained on BOTH edges -- armed at enter_combat, armed again by
-// any in-combat belt gain (use_entropic_brew is the one such writer), and
-// decremented by try_player_revive and by step_discard_potion. `held - left`
-// then names exactly the Fairies a revive consumed; an obtain that failed to
-// arm would make this subtraction eat the new potion at the next boundary
-// (seed STS432580, the S2.43 triage).
+// any in-combat belt gain (drain_pending_potions, placing Entropic Brew's
+// queued obtains, is the one such writer), and decremented by
+// try_player_revive and by step_discard_potion. `held - left` then names
+// exactly the Fairies a revive consumed; an obtain that failed to arm would
+// make this subtraction eat the new potion at the next boundary (seed
+// STS432580, the S2.43 triage).
 void burn_consumed_fairies(RunController& rc) noexcept {
     const uint8_t held = count_belt_fairies(rc.run);
     const uint8_t left = combat_fairy_armed(rc.combat.flags);
@@ -211,6 +213,66 @@ void burn_consumed_fairies(RunController& rc) noexcept {
             rc.run.potions[i] = static_cast<uint16_t>(PotionId::NONE);
             --to_burn;
         }
+    }
+}
+
+// Drain CombatState.pending_potion onto the belt -- drain_pending_obtains'
+// sibling (below) for potions.
+//
+// The OBTAIN_POTION opcode (ObtainPotionAction.update's first tick,
+// ObtainPotionAction.java:29-38) cannot write the belt itself: the combat layer
+// takes CombatState& and never sees a RunState. So it accrues, and this is the
+// other half. Each accrued id is placed exactly as the action places it: under
+// the action's own Sozu gate (:31-33 -- a relic flash and NO obtain, checked at
+// resolve time, which is why use_entropic_brew queues under Sozu too), then
+// AbstractPlayer.obtainPotion (AbstractPlayer.java:2067-2083) -- the FIRST
+// PotionSlot, or dropped with a red top-panel flash when no slot is free. A
+// Fairy that lands is LIVE (AbstractPlayer.damage reads hasPotion off the belt
+// at the moment of death, :1485-1493), so it arms the combat mirror; placed
+// potions only, a dropped roll arms nothing (the STS432580 rule, unchanged).
+//
+// CALLED AT EVERY COMBAT-PHASE COMMAND BOUNDARY and as fold_back_combat's
+// closing sync. Placing at the boundary rather than at the pump step that
+// popped the item is observably exact, for two reasons that both hold by
+// construction: the belt has no other in-combat writer between two boundaries
+// (use and discard are commands), and nothing that reads the belt can run
+// behind the obtains inside the same pump -- a potion is drinkable only while
+// the queue is empty or blocked on a screen (WAITING_ON_USER), so the items
+// draining after the obtains are the blocking screen's own completion and, at
+// most, Toy Ornithopter's queued heal, never damage to the player.
+void drain_pending_potions(RunController& rc) noexcept {
+    static_assert(kPendingPotionCap >= kPotionCap,
+                  "Entropic Brew queues potionSlots (<= kPotionCap) obtains in "
+                  "one use; the accumulator must hold a whole belt");
+    static_assert(sts::registry::manifest::kPotionsCount <= 255,
+                  "pending_potion stores a PotionId per byte");
+    const uint8_t n = rc.combat.pending_potion_count < kPendingPotionCap
+                          ? rc.combat.pending_potion_count
+                          : static_cast<uint8_t>(kPendingPotionCap);
+    rc.combat.pending_potion_count = 0;
+    if (n == 0 || run_has_relic(rc.run, RelicId::SOZU)) {
+        return;  // every ObtainPotionAction resolves as a flash only
+    }
+    const uint8_t slots =
+        rc.run.potion_slots < kPotionCap ? rc.run.potion_slots : kPotionCap;
+    uint8_t fairies_placed = 0;
+    for (uint8_t i = 0; i < n; ++i) {
+        const auto id = static_cast<PotionId>(rc.combat.pending_potion[i]);
+        for (uint8_t dst = 0; dst < slots; ++dst) {
+            if (rc.run.potions[dst] == static_cast<uint16_t>(PotionId::NONE)) {
+                rc.run.potions[dst] = static_cast<uint16_t>(id);
+                if (id == PotionId::FAIRY_POTION) {
+                    ++fairies_placed;
+                }
+                break;
+            }
+        }
+    }
+    if (fairies_placed > 0) {
+        rc.combat.flags = with_combat_fairy_armed(
+            rc.combat.flags,
+            static_cast<uint8_t>(combat_fairy_armed(rc.combat.flags) +
+                                 fairies_placed));
     }
 }
 
@@ -256,6 +318,9 @@ void sync_run_persistent_misc(RunController& rc) noexcept {
 }
 
 void fold_back_combat(RunController& rc) noexcept {
+    // The closing belt syncs: an obtain the terminal step's pump resolved lands
+    // first (and arms), then the burn settles what a revive consumed.
+    drain_pending_potions(rc);
     burn_consumed_fairies(rc);
     rc.run.hp = rc.combat.player_hp;
     rc.run.max_hp = rc.combat.player_max_hp;
@@ -440,20 +505,46 @@ void use_fruit_juice(RunController& rc, uint8_t slot) noexcept {
 void use_entropic_brew(RunController& rc, uint8_t slot) noexcept {
     // EntropicBrew.use (EntropicBrew.java:38-50), three branches:
     //
-    //  IN COMBAT (:39-42): potionSlots x ObtainPotionAction(
-    //  returnRandomPotion(true)) -- limited=true, and the rolls are NOT gated
-    //  on Sozu; while Sozu is owned each obtain is then suppressed at resolve
-    //  (ObtainPotionAction.java:29-38 -- flash, no obtainPotion), so the
-    //  stream moves by the full limited sequence and the belt gains nothing.
+    //  IN COMBAT (:39-42): potionSlots x addToBot(ObtainPotionAction(
+    //  returnRandomPotion(true))) -- limited=true, and the rolls are NOT gated
+    //  on Sozu. THE ROLLS ARE SYNCHRONOUS AND THE OBTAINS ARE NOT. Every
+    //  returnRandomPotion call runs inside use()'s loop, at use time, so
+    //  potionRng moves by the full limited sequence here; but each potion
+    //  reaches the belt only when its ObtainPotionAction reaches the head of
+    //  the action queue (ObtainPotionAction.java:29-38 -- obtainPotion on the
+    //  first tick, or under Sozu a flash and nothing). The queue does not run
+    //  while a screen is up (AbstractRoom.update, AbstractRoom.java:264-265:
+    //  `if (!AbstractDungeon.isScreenUp) actionManager.update()`), and the
+    //  belt stays drinkable under one (CommunicationMod advertises `potion`
+    //  on CARD_REWARD), so a Brew drunk while a Colorless Potion's discovery
+    //  is open leaves the belt EMPTY until the choice is made, and the obtains
+    //  then land BEHIND the DiscoveryAction that already held the head. Capture
+    //  STS224800 (floor 25, seq 318-319) is the witness: the sim wrote the belt
+    //  at use time and drank the Blood Potion it had just placed while the
+    //  screen was still open; the game's next dump showed two empty slots
+    //  under the same open discovery. So this branch QUEUES one OBTAIN_POTION
+    //  item per roll, carrying the rolled id in `amount`; the interpreter
+    //  accrues each resolution into CombatState.pending_potion and
+    //  drain_pending_potions places it at the command boundary, applying the
+    //  Sozu gate where the action applies it. When nothing blocks the queue,
+    //  the caller's pump resolves the items in the same step and the belt
+    //  reads exactly as before.
     //
     //  OUT OF COMBAT with Sozu (:43-45): the check comes BEFORE any roll --
     //  potionRng does not move at all and nothing is obtained.
     //
     //  OUT OF COMBAT otherwise (:46-48): potionSlots x ObtainPotionEffect(
-    //  returnRandomPotion()) -- the NO-ARG overload, i.e. limited=false
-    //  (AbstractDungeon.java:825-827). `limited` is RNG-visible, not
-    //  cosmetic: the limited spam-check loop always redraws at least once
-    //  and rejects Fruit Juice, so the two flags spend different draw counts.
+    //  returnRandomPotion()) on AbstractDungeon.effectsQueue -- the NO-ARG
+    //  overload, i.e. limited=false (AbstractDungeon.java:825-827). `limited`
+    //  is RNG-visible, not cosmetic: the limited spam-check loop always
+    //  redraws at least once and rejects Fruit Juice, so the two flags spend
+    //  different draw counts. The effect commits on its first update tick
+    //  (ObtainPotionEffect.java:20-25), a frame or two after the command, and
+    //  no queue or screen can hold it -- so the belt IS written synchronously
+    //  here, and the one observable consequence, a capture dump taken inside
+    //  those frames, is the differ's recognised Entropic-Brew obtain race
+    //  (replay/src/main.cpp is_entropic_brew_obtain_race; STS216263 floor 42),
+    //  a capture-timing gap and not a rules one.
     //
     // Every use() branch runs before PotionPopUp destroys the Brew, so the
     // draws all happen even if only one resulting potion fits after the
@@ -472,34 +563,24 @@ void use_entropic_brew(RunController& rc, uint8_t slot) noexcept {
         rolls[i] = return_random_potion(rc.run.potion_rng, /*limited=*/in_combat);
     }
     clear_potion_slot(rc.run, slot);
-    if (sozu) {
-        return;  // in combat: every ObtainPotionAction resolves as a flash only
+    if (in_combat) {
+        // One queued ObtainPotionAction per roll, at the queue BOTTOM, in roll
+        // order -- Sozu included, since the game gates at resolve, not here.
+        for (uint8_t i = 0; i < count; ++i) {
+            ActionQueueItem it{};
+            it.opcode = static_cast<uint16_t>(Opcode::OBTAIN_POTION);
+            it.amount = static_cast<int32_t>(rolls[i]);
+            add_to_bottom(rc.combat, it);
+        }
+        return;
     }
-    uint8_t fairies_placed = 0;
     for (uint8_t i = 0; i < count; ++i) {
         for (uint8_t dst = 0; dst < count; ++dst) {
             if (rc.run.potions[dst] == static_cast<uint16_t>(PotionId::NONE)) {
                 rc.run.potions[dst] = static_cast<uint16_t>(rolls[i]);
-                if (rolls[i] == PotionId::FAIRY_POTION) {
-                    ++fairies_placed;
-                }
                 break;
             }
         }
-    }
-    // A Fairy the Brew just put on the belt is LIVE: AbstractPlayer.damage
-    // reads hasPotion("FairyPotion") off the belt at the moment of death
-    // (AbstractPlayer.java:1485-1493), so a mid-combat obtain both revives and
-    // must be counted by the combat mirror -- otherwise the very next step
-    // boundary's burn_consumed_fairies computes held(1) - armed(0) and eats
-    // the brand-new potion as if a revive had spent it (seed STS432580, the
-    // S2.43 triage). Placed potions only: a roll that found no empty slot is
-    // dropped by the game too (AbstractPlayer.java:2078-2080) and never arms.
-    if (in_combat && fairies_placed > 0) {
-        rc.combat.flags = with_combat_fairy_armed(
-            rc.combat.flags,
-            static_cast<uint8_t>(combat_fairy_armed(rc.combat.flags) +
-                                 fairies_placed));
     }
 }
 
@@ -2955,6 +3036,8 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
         // index-keyed copy.
         sync_run_persistent_misc(rc);
         drain_pending_obtains(rc);
+        // The Brew's own obtains, when nothing blocked the pump just run.
+        drain_pending_potions(rc);
         finish_combat_after_action(rc, res);
     } else {
         fill_run_result(rc, res);
@@ -2983,10 +3066,10 @@ bool step_discard_potion(RunController& rc, Action a, StepResult& res) noexcept 
         // Keep the combat's armed-Fairy mirror in step with the belt. A Fairy
         // is discardable IN COMBAT (canDiscard has no combat gate,
         // AbstractPotion.java:398-400). The belt has exactly one other
-        // mid-combat writer -- Entropic Brew's in-combat branch, which ARMS
-        // the mirror for each Fairy it places (see use_entropic_brew; a Fairy
-        // can never be USED, canUse is false). If the mirror were left alone
-        // here, a thrown-away Fairy would still revive.
+        // mid-combat writer -- drain_pending_potions, placing Entropic Brew's
+        // queued obtains, which ARMS the mirror for each Fairy it places (a
+        // Fairy can never be USED, canUse is false). If the mirror were left
+        // alone here, a thrown-away Fairy would still revive.
         // DECREMENT, do not recompute from the belt: the mirror is
         // (held - already consumed), and a discard lowers `held` by one without
         // changing what was consumed. Recomputing would resurrect a fairy that
@@ -3421,6 +3504,11 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
             // and end it: an obtain that happened during this step must reach
             // the deck while the run layer still has the combat in hand.
             drain_pending_obtains(rc);
+            // Same boundary for the belt: the CHOOSE that closes a discovery
+            // lets the queued OBTAIN_POTION items behind it resolve in this
+            // step's pump, and they must reach the belt before the next
+            // command's legal_actions reads it.
+            drain_pending_potions(rc);
             finish_combat_after_action(rc, res);
             break;
         }

@@ -131,6 +131,16 @@ inline constexpr int kPreTurnActionQueueCap = 16;
 // comment on CombatState.pending_obtain). Sized to exactly consume the 7 bytes
 // that were `pad_relics`, so the accumulator costs nothing.
 inline constexpr int kPendingObtainCap = 3;
+// In-combat BELT obtain accumulator depth (see CombatState.pending_potion). The
+// OBTAIN_POTION opcode is ObtainPotionAction's first tick, and the combat layer
+// can no more reach RunState.potions than it can the master deck, so the
+// resolution accrues here and the run layer places it at the command boundary.
+// Sized to the belt itself: Entropic Brew queues exactly `potionSlots` obtains
+// in one use (EntropicBrew.java:40-42) and the belt holds at most five slots
+// (run_state.hpp kPotionCap -- asserted against this constant where the drain
+// lives), and to exactly consume the 6 bytes that were `pad_rng_align`
+// (1 byte of count + 5 one-byte ids), so it costs nothing.
+inline constexpr int kPendingPotionCap = 5;
 
 // CombatState.flags BIT 0 IS RETIRED -- deliberately left unallocated.
 //
@@ -1175,20 +1185,34 @@ struct CombatState {
     // `relic_count` sits at an even offset (RelicSlot is 4-aligned).
     uint8_t pending_obtain_count;                // live length of pending_obtain[]
     uint16_t pending_obtain[kPendingObtainCap];  // CardId per pending obtain
-    // The 6 further bytes RngStream's 8-byte alignment inserts before the
-    // stream block. `pad_relics` above rounds the relic mirror to 8 bytes but
-    // does NOT reach the stream block, so these were implicit until the T0.5
-    // classification tripwire (byte_class.hpp) named them. Declared for the
-    // same reason as pad_monsters above -- conventions §8's memcmp'd-struct
-    // incident. Changes no offset and no size.
-    uint8_t pad_rng_align[6];
+    // The in-combat BELT obtain accumulator -- pending_obtain's sibling for
+    // potions. The OBTAIN_POTION opcode (ObtainPotionAction.update's first
+    // tick, ObtainPotionAction.java:29-38) appends the rolled PotionId here and
+    // the run layer drains it onto RunState.potions at every combat-phase
+    // command boundary (run_advance.cpp drain_pending_potions), applying the
+    // action's own Sozu gate and AbstractPlayer.obtainPotion's first-empty-slot
+    // placement there. Its producer is Entropic Brew's in-combat branch, whose
+    // obtains are QUEUED in the game (EntropicBrew.java:41 addToBot) and so
+    // wait behind an open discovery screen -- the very ordering a synchronous
+    // belt write cannot express (capture STS224800, floor 25). PotionId fits a
+    // byte (kPotionsCount is asserted <= 255 beside the drain), and the count
+    // SATURATES rather than overflowing, the pending_obtain contract.
+    //
+    // The two fields exactly consume what was `pad_rng_align[6]`: the 6 bytes
+    // RngStream's 8-byte alignment inserts before the stream block (`pad_relics`
+    // above rounds the relic mirror to 8 bytes but does NOT reach the stream
+    // block). Zero bytes, no offset moves, monster_hp_rng stays where it was --
+    // the combat_gold-into-pad_piles / pending_obtain-into-pad_relics precedent,
+    // and byte_class.hpp's row moves from PADDING to PUBLIC.
+    uint8_t pending_potion_count;               // live length of pending_potion[]
+    uint8_t pending_potion[kPendingPotionCap];  // PotionId per pending obtain
 
     // -- RNG: the 5 floor-scoped streams (design doc §3.4 / §3.6). Named
     //    exactly as the game's streams so combat_begin() can derive each via
     //    floor_stream(seed, floor) with an obvious 1:1 mapping. RngStream is
     //    8-byte aligned, so CombatState is 8-byte aligned; the bytes that
-    //    alignment costs are declared as pad_rng_align above rather than left
-    //    to the compiler. --
+    //    alignment costs are declared above (the pending_potion accumulator,
+    //    formerly pad_rng_align) rather than left to the compiler. --
     RngStream monster_hp_rng;         // monster max-HP rolls
     RngStream ai_rng;                 // monster move selection
     RngStream shuffle_rng;            // deck shuffles (feeds the JDK LCG)

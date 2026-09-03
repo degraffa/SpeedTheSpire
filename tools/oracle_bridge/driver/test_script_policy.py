@@ -17,9 +17,11 @@ import io
 import json
 import os
 import random
+import shutil
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 import campaign_driver
 import script_policy_cmd as spc
@@ -1122,6 +1124,149 @@ class DiscoverySkipTest(unittest.TestCase):
                 {"k": "choose_card", "src": "generated", "card": "Bash",
                  "up": 0, "ord": 0, "index": 0},
                 self.STATE, self.CANDIDATES)
+
+
+class BrewSettleTest(unittest.TestCase):
+    """The post-Entropic-Brew belt settle (module header, "ONE SETTLE RULE").
+
+    Built from the tenth live witness, divergence_STS216263_ps198: floor 42,
+    Act 3, the MAP screen after a combat reward. Step 522 drank the Entropic
+    Brew in slot 0 (capture seq 531, belt [EntropicBrew, Potion Slot]); step
+    523 wanted the Blood Potion the Brew had rolled into slot 1, and the
+    game's very next dump still read slot 1 as an empty `Potion Slot` with
+    candidates ['choose 0', 'return'] -- the ObtainPotionEffect had not
+    ticked yet. The run-level replay of that capture is CLEAN with the
+    obtain race noted, so the follower must wait, not stop.
+    """
+
+    STEPS = [
+        {"i": 522, "floor": 42, "act": 3, "phase": "MAP_CHOICE",
+         "k": "potion", "slot": 0, "potion": "EntropicBrew", "t": -1},
+        {"i": 523, "floor": 42, "act": 3, "phase": "MAP_CHOICE",
+         "k": "potion", "slot": 1, "potion": "BloodPotion", "t": -1},
+        {"i": 524, "floor": 42, "act": 3, "phase": "MAP_CHOICE",
+         "k": "map", "x": 6, "sym": "T"},
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        patcher = mock.patch.object(spc, "BREW_SETTLE_SLEEP_S", 0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _policy_with(self, steps):
+        # decide_request() sends policy_seed 0, so the file is the ps0 line.
+        path = os.path.join(self.tmp,
+                            "STS216263__sim_search__ps0.script.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(make_script_lines("STS216263", steps)) + "\n")
+        return spc.ScriptPolicy({"script_dir": self.tmp})
+
+    @staticmethod
+    def _map(potions):
+        return {"available_commands": ["choose", "potion", "return", "key",
+                                       "click", "wait", "state"],
+                "ready_for_command": True, "in_game": True,
+                "game_state": {"screen_type": "MAP", "floor": 42, "act": 3,
+                               "choice_list": ["x=6"],
+                               "screen_state": {"boss_available": False,
+                                                "next_nodes": [
+                                                    {"symbol": "T", "x": 6,
+                                                     "y": 9}]},
+                               "potions": potions}}
+
+    BEFORE = [{"id": "EntropicBrew", "can_use": True, "can_discard": True,
+               "requires_target": False},
+              {"id": "Potion Slot", "can_use": False, "can_discard": False}]
+    LAGGING = [{"id": "Potion Slot", "can_use": False, "can_discard": False},
+               {"id": "Potion Slot", "can_use": False, "can_discard": False}]
+    LANDED = [{"id": "Block Potion", "can_use": False, "can_discard": True},
+              {"id": "BloodPotion", "can_use": True, "can_discard": True,
+               "requires_target": False}]
+
+    def _decide(self, policy, potions, candidates=None):
+        state = self._map(potions)
+        if candidates is None:
+            candidates = campaign_driver.expand_legal_actions(
+                state, random.Random(0))
+        return policy.decide(decide_request("STS216263", state, candidates))
+
+    def test_the_witness_shape_re_requests_state_and_then_matches(self):
+        policy = self._policy_with(self.STEPS)
+        self.assertEqual(self._decide(policy, self.BEFORE), "potion use 0")
+        self.assertEqual(policy._script.cursor, 1)
+        # The witness's exact next dump: both slots empty, no belt command.
+        got = self._decide(policy, self.LAGGING, ["choose 0", "return"])
+        self.assertEqual(got, "state")
+        self.assertEqual(policy._script.cursor, 1)  # not consumed
+        # The re-dump shows the obtains landed; the step now matches.
+        self.assertEqual(self._decide(policy, self.LANDED), "potion use 1")
+        self.assertEqual(policy._script.cursor, 2)
+
+    def test_the_settle_is_bounded_and_the_stop_names_the_re_requests(self):
+        policy = self._policy_with(self.STEPS)
+        self._decide(policy, self.BEFORE)
+        for _ in range(spc.BREW_SETTLE_MAX):
+            self.assertEqual(
+                self._decide(policy, self.LAGGING, ["choose 0", "return"]),
+                "state")
+        with self.assertRaises(spc.Divergence) as ctx:
+            self._decide(policy, self.LAGGING, ["choose 0", "return"])
+        self.assertIn("post-Entropic-Brew", ctx.exception.reason)
+        self.assertIn("slot 1", ctx.exception.reason)
+        self.assertEqual(policy._script.cursor, 1)
+
+    def test_an_empty_slot_with_no_preceding_brew_still_stops(self):
+        # Same dump, but the previous decision was the map step: nothing is
+        # landing, so the empty slot is a real divergence.
+        policy = self._policy_with([self.STEPS[2], self.STEPS[1]])
+        self.assertEqual(self._decide(policy, self.LAGGING), "choose 0")
+        with self.assertRaises(spc.Divergence):
+            self._decide(policy, self.LAGGING, ["choose 0", "return"])
+
+    def test_a_slot_holding_a_different_potion_stops_without_settling(self):
+        # A wrong roll is a divergence, not a lag: the shape is EMPTY only.
+        policy = self._policy_with(self.STEPS)
+        self._decide(policy, self.BEFORE)
+        wrong = [{"id": "Block Potion", "can_use": False, "can_discard": True},
+                 {"id": "Fire Potion", "can_use": False, "can_discard": True}]
+        with self.assertRaises(spc.Divergence):
+            self._decide(policy, wrong)
+        self.assertEqual(policy._script.cursor, 1)
+
+    def test_a_brew_drunk_in_combat_does_not_arm_the_settle(self):
+        # STS224800's shape: in combat the obtains are queued actions the
+        # game resolves before readiness, and their wait behind an open
+        # discovery is the engine's to model. No re-request here.
+        steps = [{"k": "potion", "slot": 0, "potion": "EntropicBrew",
+                  "t": -1},
+                 {"k": "potion", "slot": 0, "potion": "BloodPotion",
+                  "t": -1}]
+        policy = self._policy_with(steps)
+
+        def combat(potions):
+            return {"available_commands": ["play", "end", "potion", "state"],
+                    "game_state": {"screen_type": "NONE", "floor": 25,
+                                   "potions": potions,
+                                   "combat_state": {"hand": [],
+                                                    "monsters": []}}}
+        before = combat(self.BEFORE)
+        self.assertEqual(
+            policy.decide(decide_request("STS216263", before, [
+                "end", "potion use 0", "potion discard 0"])),
+            "potion use 0")
+        lagging = combat(self.LAGGING)
+        with self.assertRaises(spc.Divergence):
+            policy.decide(decide_request("STS216263", lagging, ["end"]))
+
+    def test_any_other_matched_command_disarms_the_settle(self):
+        policy = self._policy_with([self.STEPS[0], self.STEPS[2],
+                                    self.STEPS[1]])
+        self._decide(policy, self.BEFORE)
+        self.assertEqual(self._decide(policy, self.LAGGING), "choose 0")
+        with self.assertRaises(spc.Divergence):
+            self._decide(policy, self.LAGGING, ["choose 0", "return"])
 
 
 class ConfigTest(unittest.TestCase):

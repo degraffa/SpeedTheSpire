@@ -318,6 +318,25 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             ++s.pending_obtain_count;
             return;
         }
+        case Opcode::OBTAIN_POTION: {
+            // ObtainPotionAction.update's first tick (ObtainPotionAction.java:
+            // 29-38). NOTHING IS WRITTEN HERE either: the belt is RunState's,
+            // so the rolled id (`amount`, stamped by use_entropic_brew) is
+            // ACCRUED and the run layer places it at the command boundary --
+            // drain_pending_potions applies the Sozu gate the action itself
+            // applies at resolve time and obtainPotion's first-empty-slot walk.
+            // Saturates rather than overflowing, like OBTAIN_CARD: the one
+            // producer queues at most potionSlots <= kPendingPotionCap items
+            // per use, and the drain empties the accumulator every command, so
+            // a full one is unreachable; dropping beats corrupting the struct.
+            if (s.pending_potion_count >= kPendingPotionCap) {
+                return;
+            }
+            s.pending_potion[s.pending_potion_count] =
+                static_cast<uint8_t>(static_cast<uint32_t>(item.amount) & 0xFFu);
+            ++s.pending_potion_count;
+            return;
+        }
         case Opcode::CLEAR_CARD_QUEUE: {
             // ClearCardQueueAction. The Java body is
             //     for (item : cardQueue)

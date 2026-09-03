@@ -3457,6 +3457,10 @@ for line in sys.stdin:
             "command": "definitely-not-legal"}) + "\\n")
     elif mode == "die":
         sys.exit(3)
+    elif mode == "state":
+        sys.stdout.write(json.dumps({
+            "format": req["format"], "kind": "decision",
+            "command": "state"}) + "\\n")
     else:
         sys.stdout.write(json.dumps({
             "format": req["format"], "kind": "decision",
@@ -3504,6 +3508,20 @@ class ExternalPolicyHookTest(unittest.TestCase):
                         campaign_driver.ExternalPolicyError,
                         "not one of the 2 legal candidates"):
                     policy.decide(SEED, 1234, ["end", "choose 0"], {})
+            finally:
+                policy.close()
+
+    def test_the_state_no_op_is_accepted_outside_the_candidate_list(self):
+        # b1.7.2: `state` changes nothing and is never in the expansion, so a
+        # policy asking for a fresh dump (the script follower's post-Entropic-
+        # Brew belt settle) is honoured rather than treated as an illegal pick.
+        with tempfile.TemporaryDirectory() as root:
+            cmd_path, config_path = _write_stub_policy(root, mode="state")
+            policy = campaign_driver.ExternalPolicy(cmd_path, config_path)
+            try:
+                self.assertEqual(
+                    "state",
+                    policy.decide(SEED, 1234, ["end", "choose 0"], {}))
             finally:
                 policy.close()
 

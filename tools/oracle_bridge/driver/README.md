@@ -342,7 +342,7 @@ python validate_artifacts.py --campaign D:/STS_BG_Mod/_oracle_data/campaigns/b14
 | `random-legal` (default) | uniform over `expand_legal_actions` — the game's own `available_commands`, expanded to concrete arguments |
 | `greedy` | the **same** expansion, ranked by `greedy_policy.score_action` |
 | `script` | a fixed command list (one per line), `--script <file>` or `--script-dir <dir>` |
-| `external` | the **same** expansion, sent to a policy binary (`--policy-cmd <exe-or-.py>`, optional `--policy-config <file>`) over STS-POLICY-IO v1; the reply must be one of the candidates |
+| `external` | the **same** expansion, sent to a policy binary (`--policy-cmd <exe-or-.py>`, optional `--policy-config <file>`) over STS-POLICY-IO v1; the reply must be one of the candidates, or the protocol's `state` no-op (a forced re-dump; b1.7.2, the script follower's post-Entropic-Brew belt settle) |
 
 **`--policy external` (TE.1 hook).** The campaign harness accepts a policy
 binary plus config as the action source: each decision ships

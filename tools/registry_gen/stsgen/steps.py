@@ -174,6 +174,10 @@ ENGINE_EMITTED_OPS = frozenset({
     # queued item at the pump head, so there is nothing a YAML author could
     # operand it with.
     "CODEX",
+    # OBTAIN_POTION's operand is a PotionId rolled at use time by Entropic
+    # Brew's run-layer body (run_advance.cpp use_entropic_brew), the only
+    # producer; no registry program may put a potion on the belt.
+    "OBTAIN_POTION",
 })
 
 # Every opcode must land in exactly one group: a new opcode is then a DELIBERATE

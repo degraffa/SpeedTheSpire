@@ -39,6 +39,14 @@ seed cannot wedge the campaign).
 Dependency-free (Python 3 standard library only): it runs under the game's own
 Windows Python, outside the WSL build/CI world.
 
+b1.7.2 -- an external policy may answer the protocol's `state` no-op
+outside the candidate list. `state` forces a fresh dump and changes nothing
+(PROTOCOL.md 2; the driver itself already sends it to settle and to probe),
+so a follower that can see a capture-timing lag -- the STS-SCRIPT follower's
+post-Entropic-Brew belt settle, divergence_STS216263_ps198 -- can ask for a
+re-dump and re-decide instead of stopping. Every other reply is still
+required to be one of the candidates.
+
 b1.7.1 (S2.43) -- `--boss-reward-via-policy` routes the boss combat-reward
 screen through the policy loop (scripted-line followers claim for
 themselves; driver-owned claiming left the script cursor permanently
@@ -108,7 +116,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.7.1"
+DRIVER_VERSION = "b1.7.2"
 SCHEMA_VERSION = 1
 
 # A temporarily empty legal-action expansion is normal while an animated
@@ -695,7 +703,12 @@ class ExternalPolicy:
             raise ExternalPolicyError(
                 f"external policy answered out of contract: {response!r}")
         command = response.get("command")
-        if command not in candidates:
+        # b1.7.2: `state` is the protocol's pure no-op -- a forced re-dump that
+        # changes nothing (PROTOCOL.md 2), the same command this driver sends
+        # to settle and to probe -- so a policy may answer it to see a fresh
+        # state before deciding (the STS-SCRIPT follower's post-Entropic-Brew
+        # belt settle). It is never in the expansion, hence the explicit door.
+        if command != "state" and command not in candidates:
             raise ExternalPolicyError(
                 f"external policy chose {command!r}, which is not one of the "
                 f"{len(candidates)} legal candidates")

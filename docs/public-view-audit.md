@@ -93,7 +93,7 @@ are carried whole, so every allocated bit is classified) and the
 | `monster_queue[5]` + `monster_queue_count` + `monster_attacks_queued` | derived | excluded | Turn-order bookkeeping; deterministic from public state. |
 | `relics[40]` + `relic_count` | public | → `relics[40]`, `relic_count` | The combat relic mirror. Relics + displayed counters are the plan §2.1 always-block; while `phase == COMBAT` the encoder reads THIS live mirror, not `RunState.relics`, because in-combat counter ticks (Kunai, Ink Bottle) land here until the end-of-combat fold-back and the mirror is what the screen shows. Pinned by `PublicViewRun.RelicCountersComeFromTheCombatMirrorInCombat`. |
 | `pad_relics[7]` | padding | excluded | |
-| `pad_rng_align[6]` | padding | excluded | Declared by T0.5, same story as `pad_monsters`: `pad_relics` rounds the relic mirror out but does not reach the 8-aligned stream block, so six bytes were implicit. |
+| `pending_potion_count` + `pending_potion[5]` | public | excluded | The in-combat belt-obtain accumulator (Entropic Brew's queued `ObtainPotionAction`s, `Opcode::OBTAIN_POTION`), in what was `pad_rng_align[6]` -- declared by T0.5 (`pad_relics` rounds the relic mirror out but does not reach the 8-aligned stream block, so six bytes were implicit). PUBLIC but not separately encoded, for the `pending_obtain` reason: the run layer drains it onto `RunState.potions` (which IS encoded) at the same command boundary, so no observable `PublicView` is taken while it is non-zero. |
 | `monster_hp_rng` / `ai_rng` / `shuffle_rng` / `card_random_rng` / `misc_rng` | hidden | excluded | The five floor-scoped stream states are exactly the realizations the contract hides. Resampled by T0.4. |
 
 ## 2. Projected element types

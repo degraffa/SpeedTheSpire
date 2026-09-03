@@ -405,9 +405,16 @@ inline constexpr ClassRow kCombatStateRows[] = {
                "ever taken while it is non-zero. These two took over what was "
                "pad_relics[7] in schema v7"),
     STS_BC_ROW(CombatState, pending_obtain, ByteClass::PUBLIC, "as above"),
-    STS_BC_ROW(CombatState, pad_rng_align, ByteClass::PADDING,
-               "declared by T0.5 after this tripwire found it implicit -- see "
-               "combat_state.hpp and conventions section 8"),
+    STS_BC_ROW(CombatState, pending_potion_count, ByteClass::PUBLIC,
+               "audit 1: an in-combat potion obtain (Entropic Brew's queued "
+               "ObtainPotionActions) is announced on screen as it lands. Not "
+               "separately encoded in PublicView for the pending_obtain reason: "
+               "the run layer DRAINS it onto RunState.potions (which IS encoded) "
+               "at the same command boundary, so no PublicView a caller can "
+               "observe is ever taken while it is non-zero. These two took over "
+               "what was pad_rng_align[6] (declared by T0.5 after this tripwire "
+               "found it implicit)"),
+    STS_BC_ROW(CombatState, pending_potion, ByteClass::PUBLIC, "as above"),
     STS_BC_ROW(CombatState, monster_hp_rng, ByteClass::HIDDEN,
                "audit 1: the five floor-scoped stream states are exactly the "
                "realizations the contract hides"),

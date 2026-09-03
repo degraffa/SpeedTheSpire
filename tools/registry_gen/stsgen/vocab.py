@@ -456,6 +456,16 @@ OPCODES = {
     # addToRandomSpot (:463-468), ONE cardRandomRng draw unless the pile is
     # empty. ENGINE_EMITTED: only the relic's native body queues it.
     "CODEX": 74,
+    # OBTAIN_POTION is ObtainPotionAction's first tick (ObtainPotionAction.java:
+    # 29-38): `amount` is the PotionId to put on the belt. The body accrues into
+    # CombatState.pending_potion and the run layer drains it onto
+    # RunState.potions at the command boundary (drain_pending_potions), where the
+    # action's own Sozu gate and obtainPotion's first-empty-slot placement are
+    # applied -- the OBTAIN_CARD layer-boundary shape. ENGINE_EMITTED: queued
+    # only by Entropic Brew's in-combat branch (EntropicBrew.java:40-42, one
+    # addToBot per potionSlots roll), so the obtains wait behind an open
+    # discovery screen exactly as the game's queue does.
+    "OBTAIN_POTION": 76,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional

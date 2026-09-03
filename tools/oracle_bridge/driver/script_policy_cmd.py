@@ -140,6 +140,35 @@ and stopped on a step that had already said what it wanted. This is a
 matcher arm, not glue: the step IS consumed, and a screen offering no skip
 alias still stops.
 
+ONE SETTLE RULE, for a capture-timing gap the game itself opens (tenth live
+witness, divergence_STS216263_ps198, floor 42, the MAP screen): OUT OF
+COMBAT, Entropic Brew fills the belt through `ObtainPotionEffect`s on
+`AbstractDungeon.effectsQueue` (EntropicBrew.java:46-48), and an effect
+commits its potion only on its first update tick (ObtainPotionEffect.java:
+20-25) -- a frame or two AFTER the `potion use` command, with no action
+queue or screen able to hold it. The fork's readiness hold covers only
+`ShowCardAndObtainEffect` (GameStateListener.pendingObtainEffect), so the
+dump the next decide request carries can be taken inside those frames and
+show the just-rolled slots still EMPTY; the whole-run differ already
+recognises exactly this shape as the Entropic-Brew obtain race
+(replay/src/main.cpp is_entropic_brew_obtain_race) and the run replays
+clean. So when the PREVIOUS decision was `potion use <k>` with the live
+slot k holding EntropicBrew out of combat, and the next step is a
+`potion`/`potion_discard` naming a slot that reads as an EMPTY `Potion
+Slot`, this follower answers the protocol's `state` no-op (a forced re-dump
+that changes nothing, PROTOCOL.md 2) after a short sleep, WITHOUT consuming
+the step, and re-matches against the fresh dump -- at most BREW_SETTLE_MAX
+times, after which the divergence stands with the re-requests named. The
+shape is deliberately that narrow: a slot holding a DIFFERENT potion still
+stops at once (a wrong roll is a real divergence), any other preceding
+command disarms it, and a Brew drunk IN COMBAT never arms it -- there the
+obtains are queued `ObtainPotionAction`s (EntropicBrew.java:40-42) that the
+game resolves before it reports readiness, and their ordering behind an
+open discovery screen is the ENGINE's to model (run_advance.cpp
+use_entropic_brew / drain_pending_potions, capture STS224800), not the
+follower's to wait out. The driver accepts `state` from an external policy
+outside the candidate list for exactly this use (campaign_driver b1.7.2).
+
 CONFIG (`--config <json>`), strict like survival_policy_cmd:
 
     {
@@ -169,6 +198,17 @@ SCRIPT_FORMAT = "STS-SCRIPT v1"
 # Exit code for a script/game desync (distinct from 2 = config/protocol).
 EXIT_DIVERGED = 3
 
+# The post-Entropic-Brew settle (module header, "ONE SETTLE RULE"): how many
+# `state` re-requests an out-of-combat Brew buys a scripted belt step whose
+# slot still reads empty, and the pause before each. The effect lands on the
+# next frame or two (~33 ms at 60 fps), so one re-request is the normal case;
+# the bound keeps a genuinely empty slot a divergence, well inside the
+# driver's 40-repeat stuck detector.
+BREW_SETTLE_MAX = 8
+BREW_SETTLE_SLEEP_S = 0.25
+ENTROPIC_BREW_ID = "EntropicBrew"
+EMPTY_SLOT_IDS = (None, "Potion Slot", "PotionSlot")
+
 
 class ConfigError(ValueError):
     pass
@@ -195,6 +235,51 @@ def _screen(state):
 
 def _choice_list(state):
     return _gs(state).get("choice_list") or []
+
+
+def _in_combat(state):
+    # CommunicationMod emits `combat_state` only while the room phase is
+    # COMBAT (GameStateConverter.getGameState), on every combat screen
+    # including an open discovery's CARD_REWARD.
+    return "combat_state" in _gs(state)
+
+
+def _live_slot(state, slot):
+    potions = _gs(state).get("potions") or []
+    if isinstance(slot, int) and 0 <= slot < len(potions):
+        return potions[slot] or {}
+    return None
+
+
+def used_entropic_brew_out_of_combat(cmd, state):
+    """Did this decision drink an Entropic Brew outside combat?
+
+    `cmd` is the concrete command the follower is about to answer and
+    `state` the dump it was decided on; true exactly when it is
+    `potion use <k>` and the live slot k holds EntropicBrew with no combat
+    running -- the one case whose obtains land on a later frame.
+    """
+    parts = str(cmd).split()
+    if len(parts) < 3 or parts[0] != "potion" or parts[1] != "use":
+        return False
+    try:
+        slot = int(parts[2])
+    except ValueError:
+        return False
+    live = _live_slot(state, slot)
+    return bool(live) and live.get("id") == ENTROPIC_BREW_ID \
+        and not _in_combat(state)
+
+
+def names_an_empty_slot(step, state):
+    """Is this a scripted belt step whose live slot reads as an empty
+    `Potion Slot` (the shape a still-landing obtain leaves)?"""
+    if step.get("k") not in ("potion", "potion_discard"):
+        return False
+    if _in_combat(state):
+        return False
+    live = _live_slot(state, step.get("slot"))
+    return live is not None and live.get("id") in EMPTY_SLOT_IDS
 
 
 def _require(cmd, candidates, step, what):
@@ -620,6 +705,10 @@ class ScriptPolicy:
         self.divergence_dir = config.get("divergence_dir") or script_dir
         self._seed = None
         self._script = None
+        # The post-Entropic-Brew settle (module header): armed by a matched
+        # out-of-combat Brew, disarmed by any other matched command.
+        self._brew_pending = False
+        self._brew_settle_left = 0
 
     def script_path(self, seed, policy_seed):
         return os.path.join(
@@ -665,6 +754,19 @@ class ScriptPolicy:
             try:
                 cmd = match_step(step, state, candidates)
             except Divergence as exc:
+                if self._brew_pending and names_an_empty_slot(step, state):
+                    # The settle rule (module header): the previous decision
+                    # drank an Entropic Brew out of combat and this belt step
+                    # names a slot its ObtainPotionEffect has not yet filled.
+                    # Re-request the state; the cursor does not move.
+                    if self._brew_settle_left > 0:
+                        self._brew_settle_left -= 1
+                        if BREW_SETTLE_SLEEP_S > 0:
+                            time.sleep(BREW_SETTLE_SLEEP_S)
+                        return "state"
+                    raise Divergence(
+                        f"{exc.reason} -- still empty after {BREW_SETTLE_MAX} "
+                        "post-Entropic-Brew `state` re-requests", step)
                 progress = progress_candidates(candidates)
                 if len(progress) == 1 and progress[0] == "proceed":
                     return "proceed"  # confirmation-only screen: glue rule 1
@@ -675,6 +777,9 @@ class ScriptPolicy:
                     return click  # one-click dialog: glue rule 3
                 raise exc
             self._script.consume()
+            self._brew_pending = used_entropic_brew_out_of_combat(cmd, state)
+            self._brew_settle_left = BREW_SETTLE_MAX if self._brew_pending \
+                else 0
             return cmd
         # Script exhausted: trailing confirmation-only screens still glue
         # (the run's terminal can sit behind one); anything else is a desync.

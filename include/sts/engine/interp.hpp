@@ -823,6 +823,27 @@ enum class Opcode : uint16_t {
                               // action deep (S2.V3 seed STS237405); folding
                               // the children into the damage site put the
                               // block in front of the clear. ENGINE_EMITTED_OPS.
+    OBTAIN_POTION = 76,       // ObtainPotionAction (ObtainPotionAction.java:
+                              // 22-38): put the potion in `amount` (a PotionId)
+                              // on the BELT, mid-combat. No target, no flags.
+                              //
+                              // The body does NOT write the belt -- it cannot:
+                              // the combat layer has no RunState. It appends to
+                              // CombatState.pending_potion and the run layer
+                              // drains that at the command boundary
+                              // (run_advance.cpp drain_pending_potions), which
+                              // is where the action's own Sozu gate (:31-33, a
+                              // flash and no obtain) and obtainPotion's
+                              // first-empty-slot placement (AbstractPlayer.java:
+                              // 2067-2083) are applied -- the OBTAIN_CARD shape.
+                              // Producer: Entropic Brew's in-combat branch
+                              // (EntropicBrew.java:40-42 addToBot, one item per
+                              // potionSlots roll). Queued rather than written at
+                              // use time because the game's queue does not run
+                              // under an open screen (AbstractRoom.java:264-265),
+                              // so a Brew drunk over a Colorless Potion's
+                              // discovery fills the belt only after the choice
+                              // (capture STS224800, floor 25). ENGINE_EMITTED_OPS.
 };
 
 // --- SPAWN_MONSTER field encoding --------------------------------------------
