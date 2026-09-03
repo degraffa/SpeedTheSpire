@@ -456,6 +456,15 @@ OPCODES = {
     # addToRandomSpot (:463-468), ONE cardRandomRng draw unless the pile is
     # empty. ENGINE_EMITTED: only the relic's native body queues it.
     "CODEX": 74,
+    # MONSTER_CHANGE_STATE is ChangeStateAction.update (ChangeStateAction.
+    # java:25-31) as a QUEUED action: `monsters[tgt].changeState(amount)`,
+    # dispatched by monster_id in the engine (monster_change_state). It exists
+    # for the changeState bodies whose own addToBottom children must land
+    # behind whatever was queued between the action and its resolution -- the
+    # Guardian's Defensive Mode (GainBlock 20 behind MonsterStartTurnAction
+    # when Combust's end-of-turn damage drives the flip) is the first consumer.
+    # ENGINE_EMITTED: `amount` is a monster module's private state id.
+    "MONSTER_CHANGE_STATE": 75,
     # OBTAIN_POTION is ObtainPotionAction's first tick (ObtainPotionAction.java:
     # 29-38): `amount` is the PotionId to put on the belt. The body accrues into
     # CombatState.pending_potion and the run layer drains it onto

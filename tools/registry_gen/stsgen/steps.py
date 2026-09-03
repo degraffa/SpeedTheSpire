@@ -174,6 +174,10 @@ ENGINE_EMITTED_OPS = frozenset({
     # queued item at the pump head, so there is nothing a YAML author could
     # operand it with.
     "CODEX",
+    # MONSTER_CHANGE_STATE's operand is a monster module's private state id and
+    # its target a runtime monster slot; emitted only by native monster bodies
+    # (the Guardian's damage() override, monster_guardian.cpp).
+    "MONSTER_CHANGE_STATE",
     # OBTAIN_POTION's operand is a PotionId rolled at use time by Entropic
     # Brew's run-layer body (run_advance.cpp use_entropic_brew), the only
     # producer; no registry program may put a potion on the belt.

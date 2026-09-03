@@ -475,6 +475,85 @@ TEST(GuardianModeShift, OvershootAndMultiHitFlipExactlyOnce) {
         << "one threshold growth, not four";
 }
 
+// The S2.V3 STS203393/ps35 witness of the end-of-turn flip (floor 16, turn 2
+// -> 3), the twin of GuardianDirectedScript.
+// DefensiveBlockFromAnEndOfTurnFlipSurvivesTheMonsterTurn (STS237405) at the
+// EXACT boundary: Mode Shift reads 1 when the turn ends and Combust's 7 is what
+// crosses it. The damage() override queues ONE MONSTER_CHANGE_STATE item
+// (TheGuardian.java:288); its GainBlock(20) / RemoveSpecificPower children are
+// queued only when IT resolves (:238,240), behind the DiscardAtEndOfTurnAction
+// and AbstractRoom$1 -> MonsterStartTurnAction that AbstractRoom.endTurn
+// (AbstractRoom.java:393-409) queued first -- so applyPreTurnLogic's block
+// clear (MonsterGroup.java:98-105) runs BEFORE the block lands and the 20
+// stands at the player's next turn. The capture had the Guardian at 204 HP /
+// block 20 at the top of turn 3 where the engine had block 0, and a Heavy
+// Blade the game's block absorbed cost the sim's Guardian 20 HP.
+TEST(GuardianModeShift, EndOfTurnFlipKeepsDefensiveBlockPastMonsterStartTurn) {
+    CombatState s = make_guardian_state(21019);
+    MonsterState& g = s.monsters[0];
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    s.turn = 1;
+    s.monster_attacks_queued = 1;
+
+    hit_guardian(s, kA20Threshold - 1);  // one HP short of the flip
+    ASSERT_EQ(g.move_history[0], kChargeUp);
+    ASSERT_EQ(find_monster_power(s, 0, PowerId::MODE_SHIFT)->amount, 1);
+
+    // Combust 7: atEndOfTurn queues LoseHP(1) then DamageAllEnemies(7, THORNS)
+    // (CombustPower.java:39-47) -- the 7 crosses the threshold from inside the
+    // end-of-turn sequence.
+    s.player_powers[s.player_power_count].power_id =
+        static_cast<uint16_t>(PowerId::COMBUST);
+    s.player_powers[s.player_power_count].amount = 7;
+    ++s.player_power_count;
+
+    Action action[1] = {make_action(ActionVerb::END_TURN)};
+    StepResult result[1]{};
+    advance(std::span<CombatState>(&s, 1), std::span<const Action>(action, 1),
+            std::span<StepResult>(result, 1));
+    ASSERT_FALSE(result[0].terminal);
+
+    EXPECT_EQ(g.hp, kA20Hp - (kA20Threshold - 1) - 7) << "39, then Combust's 7";
+    EXPECT_EQ(s.player_hp, 500 - 1) << "Combust's hpLoss";
+    EXPECT_EQ(find_monster_power(s, 0, PowerId::MODE_SHIFT), nullptr)
+        << "RemoveSpecificPowerAction(\"Mode Shift\") resolved (:238)";
+    EXPECT_NE(find_monster_power(s, 0, PowerId::SHARP_HIDE), nullptr)
+        << "the Guardian took its Close Up turn (:183-191)";
+    EXPECT_EQ(g.move_history[0], kRollAttack) << "Close Up telegraphs Roll";
+    EXPECT_EQ(g.block, 20)
+        << "GainBlockAction(20) (:240) resolves BEHIND MonsterStartTurnAction's "
+           "loseBlock, so the block stands at the player's next turn";
+    EXPECT_EQ(s.turn, 2);
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+}
+
+// The same flip driven mid-turn by an attack card meets no block clear before
+// the player's turn resumes: the block is 20 either way, and it is then the
+// Guardian's OWN next turn start that clears it (applyPreTurnLogic), not the
+// change of state. Pins that the queued body did not move the mid-turn case --
+// the one every earlier fixture and tier-2 test exercised.
+TEST(GuardianModeShift, MidTurnFlipBlockStandsUntilTheGuardiansNextTurnStart) {
+    CombatState s = make_guardian_state(21020);
+    MonsterState& g = s.monsters[0];
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    s.turn = 1;
+    s.monster_attacks_queued = 1;
+
+    hit_guardian(s, kA20Threshold);  // the MONSTER_CHANGE_STATE item drains here
+    EXPECT_EQ(g.block, 20);
+    EXPECT_EQ(g.move_history[0], kCloseUp);
+    EXPECT_EQ(find_monster_power(s, 0, PowerId::MODE_SHIFT), nullptr);
+
+    Action action[1] = {make_action(ActionVerb::END_TURN)};
+    StepResult result[1]{};
+    advance(std::span<CombatState>(&s, 1), std::span<const Action>(action, 1),
+            std::span<StepResult>(result, 1));
+    ASSERT_FALSE(result[0].terminal);
+    EXPECT_EQ(g.block, 0) << "MonsterStartTurnAction.loseBlock (MonsterGroup."
+                             "java:102) -- Close Up itself gains none";
+    EXPECT_NE(find_monster_power(s, 0, PowerId::SHARP_HIDE), nullptr);
+}
+
 // A fully-blocked hit is not damage taken: `tmpHealth > currentHealth` (:279).
 TEST(GuardianModeShift, FullyBlockedHitDoesNotAccumulate) {
     CombatState s = make_guardian_state(21005);

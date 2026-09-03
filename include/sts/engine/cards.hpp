@@ -387,6 +387,8 @@ static_assert(
             static_cast<uint16_t>(Opcode::RITUAL_DAGGER) &&
         static_cast<uint16_t>(sts::registry::Opcode::CODEX) ==
             static_cast<uint16_t>(Opcode::CODEX) &&
+        static_cast<uint16_t>(sts::registry::Opcode::MONSTER_CHANGE_STATE) ==
+            static_cast<uint16_t>(Opcode::MONSTER_CHANGE_STATE) &&
         static_cast<uint16_t>(sts::registry::Opcode::OBTAIN_POTION) ==
             static_cast<uint16_t>(Opcode::OBTAIN_POTION),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
