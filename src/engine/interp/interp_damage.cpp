@@ -566,6 +566,63 @@ void cards_took_player_damage(CombatState& s) noexcept;
     return 0;
 }
 
+// Step 2, SECOND MEMBER (S3.43). InvinciblePower.onAttackedToChangeDamage
+// (InvinciblePower.java:82-93):
+//     if (damageAmount > this.amount) damageAmount = this.amount;
+//     this.amount -= damageAmount;
+//     if (this.amount < 0) this.amount = 0;
+//     return damageAmount;
+// -- a CAP THAT ALSO DRAINS. The pool is per-turn damage CAPACITY: an over-cap
+// hit is CLIPPED to whatever is left (not refused), and what it took is gone
+// until InvinciblePower.atStartOfTurn refills `amount` from `maxAmt`
+// (PowerSlot.counter; powers/power_invincible.cpp).
+//
+// WHY IT IS HERE AND NOT IN atDamageFinalReceive: s3-design §5 trap 9.
+// onAttackedToChangeDamage is a DIFFERENT PASS from all three atDamage* hooks --
+// those are DamageInfo.applyPowers, which runs before the hit is delivered,
+// while this one runs BETWEEN decrementBlock and the onAttacked fan-out
+// (AbstractMonster.damage:638-650). Putting the cap in the wrong pass changes
+// its interaction with block, Buffer, Torii and Tungsten Rod.
+//
+// WHY IT IS A BESPOKE SITE RATHER THAN A REGISTRY HOOK: the same reason Buffer
+// above is. onAttackedToChangeDamage returns an INTEGER into the middle of the
+// receive chain; a queued hook program cannot express that. The power's row IS
+// `native: true` -- for its atStartOfTurn refill, which is a queued-phase hook
+// and does live in powers/power_invincible.cpp.
+//
+// ORDER AGAINST BUFFER IS UNOBSERVABLE. The Java runs ONE loop over the victim's
+// powers, so a creature holding both would take them in slot order; no creature
+// can hold both. Buffer is applied only by Fossilized Helix and is player-only;
+// Invincible is applied only by CorruptHeart.usePreBattleAction (:101) and is
+// Heart-only. Written in Buffer-then-Invincible order and recorded as arbitrary.
+//
+// NO DAMAGE-TYPE GUARD, and none is added: the Java body tests neither
+// `info.type` nor `info.owner`, so a THORNS reflect and an HP_LOSS drain the
+// pool exactly as a NORMAL attack does -- which is why op_lose_hp calls this too.
+[[nodiscard]] int apply_invincible(CombatState& s, uint8_t tgt,
+                                   int dmg) noexcept {
+    if (tgt == kActorPlayer || tgt >= kMonsterCap) {
+        return dmg;  // the power is monster-owned; no player can hold it
+    }
+    MonsterState& m = s.monsters[tgt];
+    for (uint8_t i = 0; i < m.power_count; ++i) {
+        if (m.powers[i].power_id != static_cast<uint16_t>(PowerId::INVINCIBLE)) {
+            continue;
+        }
+        int pool = m.powers[i].amount;
+        if (dmg > pool) {
+            dmg = pool;  // (:84-86) -- the CAP
+        }
+        pool -= dmg;     // (:87) -- the DRAIN, of the CLIPPED amount
+        if (pool < 0) {
+            pool = 0;    // (:88-90)
+        }
+        m.powers[i].amount = static_cast<int16_t>(pool);
+        return dmg;
+    }
+    return dmg;
+}
+
 // The PLAYER-AS-ATTACKER relic pass, AbstractMonster.damage:639-643 (and its
 // twin AbstractPlayer.damage:1399-1403 for a player hitting itself). Boot is the
 // only relic in the game that overrides it.
@@ -933,6 +990,10 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // whose Java body has NO owner test (BufferPower.java:41-47), so a
     // null-source hit still spends it.
     dmg = apply_buffer(s, tgt, dmg);
+    // ... and the second member of that same Java loop (S3.43): the Heart's
+    // Invincible pool, capped and drained at the same stage. See apply_invincible
+    // for why the Buffer-then-Invincible order is arbitrary and unreachable.
+    dmg = apply_invincible(s, tgt, dmg);
     // onAttacked (AbstractPlayer.damage:1425-1426): the VICTIM's powers fire
     // AFTER decrementBlock and REGARDLESS of whether damage penetrated (Thorns
     // reflects even a fully-blocked hit). A NULL-SOURCE NORMAL hit dispatches
@@ -1066,6 +1127,7 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     // are byte-unchanged.
     int dmg = intangible_cap(s, tgt, amount);   // AbstractPlayer.java:1397-1399
     dmg = apply_buffer(s, tgt, dmg);            // AbstractPlayer.java:1412-1415
+    dmg = apply_invincible(s, tgt, dmg);        // InvinciblePower.java:82-93
     dmg = apply_tungsten_rod(s, tgt, dmg);      // AbstractPlayer.java:1433-1435
     // The victim's powers' onAttacked, HP_LOSS arm. LoseHPAction routes through
     // creature.damage() (LoseHPAction.java:41), and that method's onAttacked

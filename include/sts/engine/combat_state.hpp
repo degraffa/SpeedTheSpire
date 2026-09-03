@@ -899,6 +899,48 @@ inline constexpr uint32_t kMonsterFlagBronzeOrbUsedStasis = 0x1000u;
 inline constexpr uint32_t kMonsterFlagCollectorInitialSpawn = 0x2000u;
 inline constexpr uint32_t kMonsterFlagCollectorUltUsed = 0x4000u;
 
+// S3.43 (the Act-4 BOSS). ONE latch and TWO packed counters, all type-scoped,
+// all read only by monster_corrupt_heart.cpp, and all a DELIBERATE REUSE of the
+// 0x0800-0x10000 span the Hexaghost, the Act-2 City bosses, the Act-3 Beyond
+// bosses, the S2.27 elites, the Byrd (0x8000) and the Spheric Guardian
+// (0x10000) already hold. The reuse is legal for the region's own reason,
+// argued rather than assumed: `The Heart` is a SOLO BOSS group
+// (MonsterHelper.java:596-598, encounters.yaml 63) in Act 4, so a Corrupt Heart
+// record can co-occur with no other monster AT ALL -- not another boss, not an
+// elite, not a normal -- and every bit below is read only after `monster_id ==
+// CORRUPT_HEART`. The power-owned-bit caveat does not bite either: none of
+// these is a power's latch (Invincible's second number is PowerSlot.counter,
+// Beat of Death has none).
+//
+// WHY flags AND NOT pad0, which is also free for this type: all three are
+// consequences of OBSERVED events -- which move was telegraphed, how many moves
+// have been decided, how many BUFF moves have resolved -- so they belong in the
+// word PvMonster carries in full (public_view.hpp), not in the byte it
+// deliberately omits because that byte can hold an unrevealed construction roll.
+//
+//   * FIRST_MOVE   -- CorruptHeart.isFirstMove (CorruptHeart.java:61,173-177).
+//                     SET == the opening DEBILITATE is still pending, the
+//                     Nemesis/Awakened convention (set explicitly by init, so a
+//                     zeroed record is not a plausible un-inited Heart). Its arm
+//                     RETURNS EARLY, which is why the opener does not advance
+//                     MOVE_COUNT -- the one selection in the roster that skips
+//                     its own increment.
+//   * MOVE_COUNT   -- CorruptHeart.moveCount (:62,178,199), stored MOD 3 in two
+//                     bits. Exact, not a compression: the field's ONLY reader is
+//                     `this.moveCount % 3` (:178), and `++` then `% 3` commutes
+//                     with `(x + 1) % 3`.
+//   * BUFF_COUNT   -- CorruptHeart.buffCount (:63,128,149), the buff-ladder rung,
+//                     three bits SATURATING AT 4. Exact for the same kind of
+//                     reason: the readers are `== 0`, `== 1`, `== 2`, `== 3` and
+//                     `default:` (:129-147), so every value >= 4 selects the same
+//                     arm (StrengthPower(50), forever) and holding it at 4
+//                     is indistinguishable from letting it run.
+inline constexpr uint32_t kMonsterFlagCorruptHeartFirstMove = 0x0800u;
+inline constexpr uint32_t kMonsterFlagCorruptHeartMoveCountShift = 12u;
+inline constexpr uint32_t kMonsterFlagCorruptHeartMoveCountMask = 0x3000u;
+inline constexpr uint32_t kMonsterFlagCorruptHeartBuffCountShift = 14u;
+inline constexpr uint32_t kMonsterFlagCorruptHeartBuffCountMask = 0x1C000u;
+
 // ESCAPED -- the FIRST global flag bit, bit 24, the bottom of the 24-31 global
 // region: the monster left the fight ALIVE. (HALF_DEAD, bit 25, is the second;
 // it is declared just below.)

@@ -18,6 +18,7 @@
 #include "sts/engine/monster_byrd.hpp"     // the Byrd: Flight + the airborne latch
 #include "sts/engine/monster_champ.hpp"    // the Champ: threshold latch + forge counter
 #include "sts/engine/monster_collector.hpp"  // The Collector: slot-recycling summons
+#include "sts/engine/monster_corrupt_heart.hpp"  // S3.43: the Act-4 boss -- the buff ladder
 #include "sts/engine/monster_torch_head.hpp"  // the Torch Head: ctor telegraph, one draw
 #include "sts/engine/monster_bandits.hpp"     // S2.32: the Masked Bandits event trio
 #include "sts/engine/monster_centurion.hpp"  // the Centurion: aliveCount-driven tree
@@ -298,6 +299,15 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &bandit_leader_init;
         case MonsterId::BANDIT_BEAR:
             return &bandit_bear_init;
+        // S3.43 -- the Act-4 BOSS. ONE degenerate monster_hp_rng roll
+        // (single-arg setHp is setHp(hp, hp), AbstractMonster.java:777-779; the
+        // S2.28 reading, restated by s3-design section 5 trap 4 as REWRITTEN by
+        // S3.41). Registering this init fn is what UN-PARKS the `The Heart`
+        // encounter (encounters.yaml 63): the run layer's gate is
+        // monster_init_fn(id) == nullptr, asked of this switch directly. The
+        // Act-4 ELITE pair is S3.42's and takes its own cases beside this one.
+        case MonsterId::CORRUPT_HEART:
+            return &corrupt_heart_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -433,6 +443,9 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &bandit_leader_take_turn;
         case MonsterId::BANDIT_BEAR:
             return &bandit_bear_take_turn;
+        // S3.43 -- the Act-4 BOSS.
+        case MonsterId::CORRUPT_HEART:
+            return &corrupt_heart_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -686,6 +699,17 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             // derived slot map), so it takes the whole state -- the Centurion
             // reason.
             return &collector_roll_move;
+        // S3.43 -- the Act-4 BOSS. CorruptHeart.takeTurn ends in
+        // `addToBottom(new RollMoveAction(this))` OUTSIDE the switch
+        // (CorruptHeart.java:168), so every move body reaches it and getMove
+        // runs once per turn. It IGNORES its `num` on every arm and registers
+        // anyway, for the Spheric Guardian / Bronze Automaton reason: the
+        // rollMove draw itself moves the shared ai stream
+        // (AbstractMonster.java:465-467). One arm of the cycle spends a SECOND
+        // draw -- `aiRng.randomBoolean()` at :180 -- which is why the per-turn
+        // cost is 1 or 2 and not a constant.
+        case MonsterId::CORRUPT_HEART:
+            return &corrupt_heart_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -1641,6 +1665,14 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::MAW:
             return nullptr;
 
+        // S3.43 -- the Act-4 BOSS. usePreBattleAction (CorruptHeart.java:88-103)
+        // queues TWO items and NO ARTIFACT: InvinciblePower at 300 (200 at A19+,
+        // the branch SUBTRACTS) then BeatOfDeathPower at 1 (2 at A19+). No RNG.
+        // The Artifact the Heart eventually holds comes from its buff ladder's
+        // rung 0, not from here.
+        case MonsterId::CORRUPT_HEART:
+            return &corrupt_heart_use_pre_battle_action;
+
         default:
             // Checked, not assumed: outside the cases above, the only registry
             // monsters that declare the method at all are JawWorm,
@@ -1945,6 +1977,20 @@ MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
             // deferred-obligations table) discharged as a verified
             // negative (monster_bandits.hpp; pinned by
             // CityEventsII.BearDeathReactIsPresentationOnly).
+            return nullptr;
+        // S3.43 -- the Act-4 BOSS, and an EXPLICIT nullptr rather than a body.
+        // CorruptHeart.die (:202-211) wraps everything in
+        // `if (!getCurrRoom().cannotLose)` -- a room-flag TEST, not a write --
+        // and inside it runs super.die() FIRST, then removeListener /
+        // onBossVictoryLogic / onFinalBossVictoryLogic / stopClock. Every one of
+        // those four is achievements, the StatsScreen or the wall clock;
+        // onFinalBossVictoryLogic (AbstractMonster.java:1058-1085) is the same
+        // achievements + stopClock body the Act-3 bosses already reach through
+        // this table as nullptrs. The SIM-VISIBLE consequence of the Heart's
+        // death -- the true-victory terminal, and the surviving
+        // miscRng.random(-5,5) boss-gold draw (s3-design section 5 trap 5) --
+        // is the RUN layer's and landed with S3.33, not a combat effect.
+        case MonsterId::CORRUPT_HEART:
             return nullptr;
         default:
             return nullptr;  // no post-super content (or no die() at all)

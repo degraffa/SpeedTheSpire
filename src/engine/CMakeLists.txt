@@ -57,6 +57,8 @@ add_library(sts_engine
     monster_awakened_one.cpp
     monster_time_eater.cpp
     monster_donu_deca.cpp
+    # S3.43 -- the Act-4 boss.
+    monster_corrupt_heart.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -76,6 +78,7 @@ add_library(sts_engine
     powers/power_anger.cpp
     powers/power_angry.cpp
     powers/power_artifact.cpp
+    powers/power_beat_of_death.cpp
     powers/power_combust.cpp
     powers/power_confusion.cpp
     powers/power_constricted.cpp
@@ -98,6 +101,7 @@ add_library(sts_engine
     powers/power_frail.cpp
     powers/power_hex.cpp
     powers/power_intangible_monster.cpp
+    powers/power_invincible.cpp
     powers/power_lose_dexterity.cpp
     powers/power_lose_strength.cpp
     powers/power_magnetism.cpp

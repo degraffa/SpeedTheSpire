@@ -105,10 +105,10 @@ granted windows (`monsters` 48 and 66, `powers` 112–135, `cards` 133,
 | `RunPhase` (`run_advance.hpp`) | **12** contingency — the preferred model rides `EVENT_DIALOG` (design §4.1); release unspent | S3.31 — **RELEASED UNSPENT 2026-09-03.** The `Spire Heart` dialog rides `EVENT_DIALOG` exactly as predicted, and the Act-3 boss's proceed needed no phase either (it is run inline off the kill, the goToDoubleBoss precedent), so no new run phase exists. 12 gaps permanently; `RunPhase::BOSS_TREASURE` (11) remains the last enumerator and `legal_actions`' `static_assert` on it is unmoved |
 | `RoomType` (`map_rooms.hpp`) | **9** `Victory`, **10** `TrueVictory`; `kRoomTypeCount` 9 → 11 with its `static_assert` | **BOTH SPENT.** S3.31 spent 9 `Victory` (`kRoomTypeCount` 9 → 10); S3.33 spent 10 `TrueVictory` (10 → 11), with the `static_assert`, `room_symbol` and the fuzz coverage mirror (`coverage.hpp`'s own `static_assert` + the `default:`-less `room_name` switch) re-pinned on it. The block is exhausted |
 | fuzz `MoveCat` (`tools/fuzz/.../policy.hpp`) | **32–35** (`REWARD_CLAIM_KEY`, the Act-4 map choice, the Spire-Heart dialog, one reserve); `COUNT` → 36 | S3.52 |
-| Opcode (`interp.hpp`, `vocab.py`) | **75–77** contingency — design §2.3 expects the four powers to be native binders on existing opcodes; release unspent | S3.42 / S3.43 |
-| power `Hook` | **18** `on_attacked_to_change_damage` contingency (`kHookCount` → 19) — Invincible may instead ride the existing `apply_buffer` site natively, in which case release it | S3.43 |
+| Opcode (`interp.hpp`, `vocab.py`) | **75–77** contingency — design §2.3 expects the four powers to be native binders on existing opcodes; release unspent | S3.42 / **S3.43 — HALF RELEASED UNSPENT 2026-09-03.** Beat of Death is an ordinary `DAMAGE` item with `DamageType::THORNS` and Invincible queues nothing at all, so neither Act-4 boss power needed an opcode; the Heart's own moves are `DAMAGE` / `APPLY_POWER` / `MAKE_CARD`. S3.42 still holds the other half |
+| power `Hook` | **18** `on_attacked_to_change_damage` contingency (`kHookCount` → 19) — Invincible may instead ride the existing `apply_buffer` site natively, in which case release it | **S3.43 — RELEASED UNSPENT 2026-09-03.** The contingency's own escape was the right one: `onAttackedToChangeDamage` returns an INTEGER into the middle of the receive chain, which no queued hook program can express, so it is the bespoke `apply_invincible` site in `interp/interp_damage.cpp` beside Buffer's (powers.yaml 28 binds no hook either). `kHookCount` stays 18 and `ON_AFTER_USE_CARD` (16) remains the last-but-one enumerator. Invincible's row IS `native: true` — for its `at_start_of_turn` refill, which is a queued-phase hook and does have a body |
 | `RewardItemKind` (`combat_rewards.hpp`) | **two new values** `EMERALD_KEY` (6), `SAPPHIRE_KEY` (7); `kRewardKindCount` 5 → **8**, not 7 — see S3.11's Log for why the granted arithmetic was wrong (the constant lived only in the fuzz coverage table and already under-covered `STOLEN_GOLD`) | S3.11 `[x]` |
-| `MonsterState.flags` | a **type-scoped block** for the three Act-4 classes' per-instance counters (Shield/Spear `moveCount` 2 bits each; Heart `isFirstMove` 1 bit + `moveCount` 2 bits + a saturating `buffCount` ≥ 3 bits); exact bits claimed at dispatch | S3.42 / S3.43 |
+| `MonsterState.flags` | a **type-scoped block** for the three Act-4 classes' per-instance counters (Shield/Spear `moveCount` 2 bits each; Heart `isFirstMove` 1 bit + `moveCount` 2 bits + a saturating `buffCount` ≥ 3 bits); exact bits claimed at dispatch | S3.42 / **S3.43 — HEART HALF SPENT 2026-09-03:** `kMonsterFlagCorruptHeartFirstMove` `0x0800`, `…MoveCountMask` `0x3000` (2 bits, stored MOD 3), `…BuffCountMask` `0x1C000` (3 bits, SATURATING AT 4). All type-scoped and a deliberate REUSE of the Hexaghost / Act-2 / Act-3 boss span: `The Heart` is a SOLO group, so the record co-occurs with nothing at all. **`pad0` was deliberately NOT used** even though it is free for this type — all three are consequences of observed events, so they belong in the word `PvMonster` carries in full, not in the byte it omits |
 | `SCHEMA_VERSION` | **8 → 9**, one site | **S3.31 only — SPENT 2026-09-03.** A PAD CARVE of `pad_gold_align[2]` into `victory_kind` + `act4_floor_base`: no offset moved, neither `sizeof` moved, and the Act-4 floor base is front-loaded so S3.32 needs no second bump |
 | `PUBLIC_VIEW_VERSION` | **6 → 7**, one site | **S3.51 only** |
 
@@ -1905,7 +1905,7 @@ are S3's own.
   requires, replayed `--combat` zero-diff; named here.
   **Log:** —
 
-- **S3.43** `[ ]` **The Corrupt Heart.** The final boss
+- **S3.43** `[x]` **The Corrupt Heart.** The final boss
   (CorruptHeart.java:49-211). Fixed HP 750/800@A9, damage 40/2 → 45/2@A4 with
   `bloodHitCount` 12 → 15@A4. Pre-battle (:88-103): `InvinciblePower(300)`,
   **200 at A19+**, and `BeatOfDeathPower(1)`, **2 at A19+** — and **no
@@ -1969,7 +1969,141 @@ are S3's own.
   which a single hit exceeds the Invincible pool and a later turn's hit lands
   after the restore (the trap-9 witness) and the `buffCount` ladder reaches at
   least step 3; named here.
-  **Log:** —
+  **Log:** 2026-09-03 (`s343`, base `6e94458`). The final boss, its two
+  powers and the buff cycle, with the `native: true` flags landing beside the
+  bodies as S3.41's rows demanded. **Mechanisms, each as read rather than as
+  paraphrased.** (1) `getMove`'s `isFirstMove` arm RETURNS EARLY
+  (CorruptHeart.java:173-177), so the opening DEBILITATE does **not** run
+  `++moveCount` at :199 — the roster's only selection shaped that way, and a
+  body that incremented unconditionally would put every later ECHO / BLOOD_SHOTS
+  and every buff turn one step out of phase. (2) The cycle's ai cost is **1 or
+  2 draws and depends on the arm**: every roll spends `rollMove`'s
+  `aiRng.random(99)` (the `num` is discarded by all four arms), and only
+  `moveCount % 3 == 0` spends a second — the `aiRng.randomBoolean()` at :180.
+  (3) The buff move NEGATES a negative Strength before adding its +2
+  (:121-127), read off the Heart's own live slot at QUEUE time; the `+2` itself
+  is the registry's authored step, read out of the table so `monsters.yaml`
+  stays the single home of the number and the `PowerId`, and only the runtime
+  addend is native. (4) The `buffCount` ladder queues a SECOND item after that
+  Strength — 0 Artifact 2, 1 Beat of Death +1, 2 Painful Stabs (the Heart is
+  the power's second producer, at the 1-arg ctor's amount −1), 3 Strength 10,
+  ≥ 4 Strength 50 forever — then `++buffCount`. (5) BLOOD_SHOTS is
+  `bloodHitCount` SEPARATE DamageActions (12, 15 from A4), the Book of
+  Stabbing's shape, because an effect list carries per-tier amounts and not
+  per-tier counts. (6) `usePreBattleAction` is two items and **no Artifact**,
+  and the A19 branch SUBTRACTS from Invincible while it pre-increments Beat of
+  Death — so A19+ is Invincible **200** / Beat of Death **2**, the smaller
+  Invincible number being the one that reads like a typo and is not. (7) The
+  spawn spends **exactly one `monster_hp_rng` draw** over the degenerate
+  `min == max` column (single-arg `setHp` is `setHp(hp, hp)`,
+  AbstractMonster.java:777-779), the corrected S3.41 reading and s3-design §5
+  trap 4. **Invincible is split across two sites, and that split is the task's
+  main judgement.** `atStartOfTurn` (`amount = maxAmt`) is the `at_start_of_turn`
+  hook in `powers/power_invincible.cpp`, the FlightPower precedent at the same
+  `apply_pre_turn_logic` dispatch site; `onAttackedToChangeDamage` is the
+  bespoke `apply_invincible` stage in `interp/interp_damage.cpp`, sitting
+  BETWEEN `decrementBlock` and the `onAttacked` fan-out beside `apply_buffer`
+  (s3-design §5 trap 9) — **not** in `atDamageFinalReceive`, which is a
+  different pass. Power `Hook` **18 is therefore RELEASED UNSPENT**. `maxAmt`
+  rides `PowerSlot.counter`, written through the `APPLY_POWER` COUNTER OPERAND
+  at the one call site that knows the value (the Bomb's operand, not Flight's
+  ctor-mirroring special case). Buffer-then-Invincible order at that site is
+  recorded as ARBITRARY AND UNREACHABLE: Buffer is Fossilized Helix's and
+  player-only, Invincible is the Heart's and monster-only, so the Java's single
+  loop can never contain both. Beat of Death binds `on_after_use_card` (16, not
+  `on_use_card` 1) and queues ONE `DAMAGE` item typed THORNS at its live stack —
+  no opcode, no card filter (the `dontTriggerOnUseCard` skip is upstream, in
+  `op_use_card`), and the THORNS type is what keeps Painful Stabs from paying a
+  Wound for it. `die()` gets an EXPLICIT `nullptr` in `monster_die_after_fn`:
+  its whole post-`super.die()` half is achievements / StatsScreen / the wall
+  clock, and the sim-visible true-victory edge plus the surviving
+  `miscRng.random(-5,5)` boss gold are the RUN layer's, landed at S3.33.
+  **Evidence (no unit test written or run, per the §1 owner directive).** Six
+  presets BUILD: WSL `debug` / `asan` / `release` (GCC 13) and `win-debug` /
+  `win-asan` / `win-release` (clang-cl via a vcvars64 + LLVM wrapper); the only
+  `-Wswitch` warnings left in `monster_dispatch.cpp` name `SPIRE_SHIELD` /
+  `SPIRE_SPEAR`, i.e. S3.42's, and `CORRUPT_HEART` is gone from that list.
+  `tools/corpus_replay.sh` (re-run after rebasing onto master's
+  `a5a8065`/`13634ce` — the `MonsterLists` id-not-`string_view` change and
+  S3.53's `--costs`/`--masks` extension of this very script, neither of which
+  touches a file this task owns): `act1_a20_50` / `three_act_a20_5` /
+  `keys_a20_4`, all THREE modes (`--replay`, `--costs`, `--masks`) ZERO-DIFF,
+  all six injected-divergence controls (two per mode) failing loud.
+  `--replay --vitals` over every entry of both corpora, run directly (not
+  through the smoke wrapper, which only prints a failing entry): three-act
+  run-clean 5/5 vitals-divergent 0, Act-1 run-clean 50/50 vitals-divergent 0.
+  `gen_combat_fixtures` re-run once,
+  `git status tests/golden/` EMPTY — the 20 traces are byte-identical.
+  `check_stale_counts.sh` clean; `check_doc_links.sh` clean (58 files, 62
+  indexed). `fuzz_soak --seeds 500 --threads 6` at A20: 4,500 cases /
+  654,355 counted actions, **failures 0, `no_progress` 0, `no_legal_moves` 0,
+  `room_unimplemented` 0**; `livelock` 82 (1.8 %) is the documented
+  SIM_SEARCH hand-select-toggle class (s2v2-sim-reach §7 measured 4.3 %), not
+  a regression. The soak's own "never seen" list still names `CorruptHeart`
+  and both Act-4 powers, **and that is the honest report, not a hole**: no E0
+  or SIM_SEARCH policy enters Act 4 at all (the report's own
+  "act never entered by any case: 4" line), which is exactly why the reach is
+  produced by the directed harness below.
+  **The witness harness needed one post-rebase fix, recorded rather than
+  silently made:** `a5a8065` retyped `MonsterLists`' slots from
+  `std::string_view` to `EncounterKeyId`, so the harness's three direct
+  `.elite_list[i]`/`.boss_list[0]` string reads and its `= "Gremlin Nob"`
+  assignment no longer compiled; they now go through `encounter_key_of` /
+  `encounter_key_id` (`encounters.hpp`), the same resolution every other
+  consumer of that commit was moved onto. Re-run after the fix, both A20 and
+  A19 reproduce their pre-rebase printouts **byte-for-byte**, with the sole
+  diff being one corrected harness comment (the S3.41 encounter row for
+  `Shield and Spear` already exists; it is `monster_init_fn` for
+  `SPIRE_SHIELD`/`SPIRE_SPEAR` — S3.42's — that is still absent, which is why
+  the room still parks) — confirming the rebase changed nothing this task's
+  numbers depend on.
+  **REAL-RUN WITNESS, in lieu of a capture** (the S3.33 harness extended;
+  seed `STS103509`, `sim_search`, policy-seed 347; the only non-real inputs
+  are the three keys forced at the Door and the Act-4 ELITE list substituted
+  because S3.42 has not landed — **the BOSS list is left REAL**, so the fight
+  below is `The Heart` itself). At A20 and again at A19:
+  `bossList[0]=[The Heart]`; spawn `HEART id=69 hp=800/800`,
+  `monster_hp_rng counter = 1` (one draw, s3-design trap 4);
+  `heart powers: [138 BeatOfDeath amt=2 ctr=0] [139 Invincible amt=200 ctr=200]`
+  — Beat of Death 2 and Invincible 200 with `maxAmt` carried in `counter`, and
+  **no Artifact**; opening `intent=8` (STRONG_DEBUFF) with `hist=[3 0 0]`,
+  `moveCount=0` — the early return, witnessed. After the opener:
+  `player Vulnerable=2 Weak=2 Frail=2`, `card_random_rng 0 → 5` (five
+  `DRAW_RANDOM` inserts, one draw each) and the A19 draw pile shows all five
+  status cards at their shuffled positions
+  (`28 2 1 75 119 25 14 72 61 40 26 1 22 49 61 74 24 1 1 76 2 27 40`).
+  Per-turn ai cost printed at every boundary: **2, 1, 1, 2, 1** for
+  `moveCount % 3` = 0, 1, 2, 0, 1 — the extra `randomBoolean` on the coin-flip
+  arm only. A **scripted `buffCount` ladder** (fork; the player's HP raised so
+  the Heart runs its cycle uninterrupted, END_TURN only) reaches every rung:
+  `buffCount 0→1 [Strength 2][Artifact 2]`, `1→2 [BeatOfDeath 3][Strength 4]`,
+  `2→3 [PainfulStabs -1][Strength 6]`, `3→4 [Strength 18]` (+10 +2), and
+  `≥4 [Strength 70]` (+50 +2) with `buffCount` **saturating at 4** thereafter.
+  A **scripted Invincible cap + restore** (fork; the pool forced to 5, `maxAmt`
+  left at 200 — the trap-9 shape): `attack 0: heart hp 771→766 (took 5)
+  Invincible 5→0`; `attack 1: took 0, Invincible 0→0`; `after END_TURN
+  (the Heart's own turn began): Invincible=200` — the cap CLIPS rather than
+  refuses, drains what it clipped, and refills at the owner's turn start.
+  A **scripted lethal turn with a negative control** (two forks of the same
+  fight, identical but for the Beat of Death slot, both reaching
+  `victory_kind=2 true_victor=1 reward=1.0`): banked `run.hp` **CONTROL 46 −
+  LIVE 44 = 2**, exactly the Beat of Death stack — so the killing card's pulse,
+  queued at `ON_AFTER_USE_CARD` and therefore BEHIND the kill, still lands
+  (S3.44's terminal resolver drains what is queued rather than a snapshot;
+  S2.49's attacker-side cancel exempts THORNS). A dropped pulse would make that
+  difference 0. **A19 vs A20 is a measured NON-difference and is stated
+  rather than implied:** every Heart threshold is ≤ 19 (HP ≥ 9, damage/hit
+  count ≥ 4, Invincible/Beat of Death ≥ 19), so the two ascensions select the
+  same column in the real game — and this engine additionally pins combat at
+  `kMonsterAscension = 20` (monster_dispatch.hpp), so the sub-A19 arms
+  (Invincible 300, Beat of Death 1, HP 750, damage 40, 12 hits) are WRITTEN and
+  UNREACHABLE here. **UNVERIFIED-until-captured — S3.62 owes the ONE Heart
+  capture** replayed `--combat` zero-diff, in which a single hit exceeds the
+  Invincible pool, a later turn's hit lands after the restore (the trap-9
+  witness) and the `buffCount` ladder reaches at least step 3; that same
+  capture is also the first witness of `Invincible/maxAmt`, the one member of
+  the translator's five-way untagged power `misc` union that no capture has
+  yet exercised (S3.21's `power.misc_field`).
 
 - **S3.44** `[x]` ∥ **Pump/combat-over ordering: THORNS retaliation on the
   killing blow.** The owner-approved stage-b obligation, taken now because Act
@@ -2104,6 +2238,30 @@ are S3's own.
   [training-contract.md](training-contract.md) updated with the new fields and
   its field-by-field completeness audit re-run;
   [docs/public-view-audit.md](public-view-audit.md) extended.
+  **Inherited:** from **S3.43**, what the Heart adds to the information layer,
+  and the answer is **nothing new in the struct** — recorded so this task
+  re-derives none of it. (a) **Invincible's remaining pool IS public**: it is
+  the number the power's own icon renders (`InvinciblePower.updateDescription`,
+  :101-104), so it is a displayed counter and the contract's rule applies
+  directly. It needs no field, because it lives in `PowerSlot.amount`, which
+  `PvPower` already carries for every monster slot; **`maxAmt` likewise rides
+  `PowerSlot.counter`**, which `PvPower` also already carries and whose header
+  comment already covers ("the second oracle-visible per-instance number").
+  So the Heart's two powers are complete in v6's shape, and the audit doc gains
+  two ROWS, not two fields. (b) The Heart's three per-instance numbers —
+  `isFirstMove`, `moveCount` (mod 3), `buffCount` (saturating at 4) — were
+  deliberately put in **`MonsterState.flags`, not `pad0`**, precisely so this
+  task inherits no decision: every one of them is a consequence of an OBSERVED
+  event (which move was telegraphed, how many decisions have been made, how
+  many BUFF moves have resolved), `PvMonster` carries the whole flags word by
+  value already, and `pad0` is the byte `PvMonster` omits because it can hold
+  an unrevealed construction roll. The bit-by-bit audit in
+  [public-view-audit.md](public-view-audit.md) therefore gains three entries
+  under the existing type-scoped-flags argument and no new exemption. (c) The
+  saturation and the mod-3 storage are EXACT (every Java reader is `% 3` or a
+  `== k` / `default:` arm — see `kMonsterFlagCorruptHeart*` in
+  `combat_state.hpp`), so a consumer reading the flags word sees the same
+  distinctions the game's own branches make; nothing is coarsened.
   **Deps:** S3.33, S3.43 **Acceptance:** the GT0 leak gates re-run green as
   the **replay-and-compare instruments they are** — hidden-twin byte equality
   in every phase including the Act-4 ones, the total-byte classification
