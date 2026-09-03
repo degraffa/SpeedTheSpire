@@ -20,8 +20,23 @@ the precedence chain below.
 `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked.
 
 A task is **done only when its Acceptance block passes** — run the commands,
-don't infer. Tests land in the same change as the code they verify. Registry
-YAML is code: entries land with their tier-2 tests in one commit.
+don't infer.
+
+> **OWNER DIRECTIVE, 2026-09-03 — the marker of truth is the oracle, not a
+> unit test.** From this date the project **neither writes nor runs unit
+> tests.** Acceptance for engine work is: the code builds (a `win-*` preset
+> and a WSL `release` build), the witness live-game capture(s) replay CLEAN
+> through `replay_run_diff --replay` (`--combat` / `--vitals` where the drift
+> is combat-internal), and the committed three-act oracle corpus under
+> `tests/golden/oracle_corpus/` still replays zero-diff. For training-repo
+> work the analogue is a real run — real seeds through the real engine, real
+> shards, reconstruction by real replay — never a test. The existing gtest
+> suites stay in the tree but are not maintained, extended, or run as
+> acceptance; ledgers written after this date phrase every Acceptance block
+> as build + real-run evidence, and a behaviour with no capture is
+> UNVERIFIED until one exists. Every older sentence in this file or a ledger
+> that says "tests land with the code" / "tier-2 tests" / "ctest green" is
+> read through this directive.
 
 Respect `Deps:` exactly. Tasks marked ∥ with satisfied deps and disjoint
 deliverables may run in parallel — but never two agents whose deliverables
@@ -173,9 +188,10 @@ it.
 
 ## 5. Hygiene
 
-- **No rule without its test** — the test lands in the same commit as the
-  behavior. For registry entries the test is the tier-2 table test; for
-  bridge/campaign code the test is the recorded acceptance run.
+- **No rule without its witness** *(rewritten 2026-09-03 per the §1 owner
+  directive; formerly "no rule without its test")* — a behaviour lands with
+  the live-game capture, corpus file, or recorded real run that witnesses
+  it, cited in the commit body; there is no unit test to land.
 - Golden mismatch, fixture divergence, or **campaign divergence** =
   stop-the-line. Debugging step 1 is re-reading the cited Java; step 2 is
   auditing the fork's strip patches (design §1.3); root cause goes in the task
