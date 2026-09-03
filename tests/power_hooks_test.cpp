@@ -37,6 +37,7 @@
 #include "sts/engine/power_hooks.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // MonsterIntent (the Flight onRemove telegraph)
 #include "sts/engine/powers.hpp"
+#include "sts/engine/relic_hooks.hpp"  // dispatch_relics_at_battle_start (Regen x Red Skull)
 #include "sts/engine/state_hash.hpp"
 #include "sts/engine/types.hpp"
 
@@ -839,6 +840,95 @@ TEST(PowerHooks, RegenClampsToMaxHpAndRemovesAtZero) {
     dispatch_at_end_of_turn(s);
     EXPECT_EQ(s.player_hp, 50) << "heal clamped to max HP";
     EXPECT_EQ(player_power_stack(s, PowerId::REGEN), -1) << "Regen removed at 0";
+}
+
+// REGEN heals through the FULL AbstractCreature.heal (RegenAction.java:38 ->
+// AbstractCreature.java:386-417), not a bare HP write, and the difference is
+// the NOT-BLOODIED cross at :404-408: a heal that lifts the player above
+// maxHealth / 2.0f fires RedSkull.onNotBloodied (RedSkull.java:55-63), the
+// addToTop ApplyPowerAction(StrengthPower -3). Capture s2v3_wave2_STS205404_
+// ps296, floor 41 "3 Darklings", seq 710 -> 711 exactly: 37/75 HP, Strength 4
+// (Vajra 1 + Red Skull 3), Regeneration 4 at end of turn 2 -> 41 HP and
+// Strength 1 in the game; the sim kept 4 and out-damaged the game by 3 on
+// every attack for the rest of the fight.
+TEST(PowerHooks, RegenHealCrossesRedSkullAndRemovesTheStrength) {
+    CombatState s{};
+    s.player_hp = 37;
+    s.player_max_hp = 75;
+    s.monster_count = 1;
+    s.monsters[0].hp = 50;
+    s.monsters[0].max_hp = 50;
+    give_player_power(s, PowerId::STRENGTH, 1);  // Vajra's battle-start +1
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
+    s.relic_count = 1;
+    dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
+    drain_actions(s);  // the entry decider: 37 <= 37.5 -> bloodied -> +3
+    ASSERT_EQ(player_power_stack(s, PowerId::STRENGTH), 4);
+    ASSERT_TRUE(combat_red_skull_active(s.flags));
+    give_player_power(s, PowerId::REGEN, 4);
+
+    dispatch_at_end_of_turn(s);
+    EXPECT_EQ(s.player_hp, 41) << "the heal itself is unchanged";
+    EXPECT_EQ(player_power_stack(s, PowerId::REGEN), 3) << "and so is the decay";
+    ASSERT_EQ(s.action_count, 1)
+        << "41 > 37.5 with isActive set -> exactly one queued -3";
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags), PowerId::STRENGTH);
+    EXPECT_EQ(queued(s, 0).amount, -3);
+    EXPECT_FALSE(combat_red_skull_active(s.flags))
+        << "isActive cleared (RedSkull.java:61)";
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::STRENGTH), 1)
+        << "the game's Strength 1 at seq 711, not the sim's former 4";
+
+    // Negative control: the same tick from 33 lands on 37 <= 37.5 -- still
+    // bloodied, no cross, the +3 stands (the game's turn-1 -> turn-2 shape,
+    // where 38 -> 37 armed the relic and nothing since has disarmed it).
+    CombatState s2{};
+    s2.player_hp = 33;
+    s2.player_max_hp = 75;
+    s2.monster_count = 1;
+    s2.monsters[0].hp = 50;
+    s2.monsters[0].max_hp = 50;
+    s2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
+    s2.relic_count = 1;
+    dispatch_relics_at_battle_start(s2, s2.relics, s2.relic_count);
+    drain_actions(s2);
+    ASSERT_EQ(player_power_stack(s2, PowerId::STRENGTH), 3);
+    give_player_power(s2, PowerId::REGEN, 4);
+    dispatch_at_end_of_turn(s2);
+    EXPECT_EQ(s2.player_hp, 37);
+    EXPECT_EQ(s2.action_count, 0);
+    EXPECT_TRUE(combat_red_skull_active(s2.flags));
+    EXPECT_EQ(player_power_stack(s2, PowerId::STRENGTH), 3);
+}
+
+// The other half of the same seam: AbstractCreature.heal's onPlayerHeal relic
+// fold (:393-395) runs over a Regeneration tick too -- Magic Flower's
+// MathUtils.round(amount * 1.5f) (MagicFlower.java:30-37) and Mark of the
+// Bloom's unconditional 0 (MarkOfTheBloom.java:25-29).
+TEST(PowerHooks, RegenHealRunsTheOnPlayerHealRelicFold) {
+    CombatState s{};
+    s.player_hp = 40;
+    s.player_max_hp = 80;
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::MAGIC_FLOWER), -1};
+    s.relic_count = 1;
+    give_player_power(s, PowerId::REGEN, 4);
+    dispatch_at_end_of_turn(s);
+    EXPECT_EQ(s.player_hp, 46) << "round(4 * 1.5f) == 6, not 4";
+    EXPECT_EQ(player_power_stack(s, PowerId::REGEN), 3);
+
+    CombatState s2{};
+    s2.player_hp = 40;
+    s2.player_max_hp = 80;
+    s2.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::MARK_OF_THE_BLOOM), -1};
+    s2.relic_count = 1;
+    give_player_power(s2, PowerId::REGEN, 4);
+    dispatch_at_end_of_turn(s2);
+    EXPECT_EQ(s2.player_hp, 40) << "Mark of the Bloom zeroes every heal";
+    EXPECT_EQ(player_power_stack(s2, PowerId::REGEN), 3)
+        << "the decay is RegenAction's own and does not read the heal";
 }
 
 // REGENERATE_MONSTER: heals `amount` at end of turn, clamped to max HP, and

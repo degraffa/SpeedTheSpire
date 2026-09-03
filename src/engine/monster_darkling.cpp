@@ -186,9 +186,11 @@ void darkling_use_pre_battle_action(CombatState& s, uint8_t mi) noexcept {
     s.flags |= kCombatFlagCannotLose;
 
     // addToBottom ApplyPowerAction(this, this, new RegrowPower(this)) (:97).
-    // 3-arg, so the stack amount is powerToApply.amount -- 1. Regrow is a pure
-    // marker with no hooks at all (powers.yaml id 99); the revival lives in this
-    // file, not in the power.
+    // 3-arg, so the stack amount is powerToApply.amount -- and RegrowPower's
+    // ctor never assigns `amount`, so that is AbstractPower's -1, not 1
+    // (kDarklingRegrowAmount, monster_darkling.hpp). Regrow is a pure marker
+    // with no hooks at all (powers.yaml id 99); the revival lives in this file,
+    // not in the power.
     ActionQueueItem apply{};
     apply.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
     apply.src = mi;
@@ -278,9 +280,13 @@ void darkling_take_turn(CombatState& s, uint8_t mi) noexcept {
         // ChangeStateAction("REVIVE") (:132) -- see darkling_roll_move for where
         // its `halfDead = false` lands and why that is the same program.
 
-        // ApplyPowerAction(this, this, new RegrowPower(this), 1) (:133). Every
-        // revival re-grants it and nothing ever removes it, so the stack counts
-        // the revivals.
+        // ApplyPowerAction(this, this, new RegrowPower(this), 1) (:133). The
+        // explicit 1 is the STACK amount and it never lands: half-death cleared
+        // the power list (:211), so this is always the !hasBuffAlready branch,
+        // which adds the constructed object at its own unassigned -1. Every
+        // revival re-grants Life Link and nothing removes it, but the amount
+        // stays -1 forever rather than counting the revivals -- see
+        // kDarklingRegrowAmount (monster_darkling.hpp).
         ActionQueueItem regrow{};
         regrow.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
         regrow.src = mi;

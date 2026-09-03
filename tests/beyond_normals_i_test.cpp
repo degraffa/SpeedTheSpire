@@ -1098,7 +1098,10 @@ TEST(BeyondNormalsI, DarklingPreBattleLatchesCannotLoseAndGrantsRegrow) {
     EXPECT_NE(s.flags & kCombatFlagCannotLose, 0u)
         << "a BARE field assignment (Darkling.java:96), not a CannotLoseAction";
     for (uint8_t mi = 0; mi < 3; ++mi) {
-        EXPECT_EQ(monster_power(s, mi, PowerId::REGROW), 1) << "slot " << mi;
+        EXPECT_EQ(monster_power(s, mi, PowerId::REGROW), -1)
+            << "slot " << mi
+            << ": RegrowPower's ctor assigns no amount, so the 3-arg "
+               "ApplyPowerAction applies AbstractPower's -1";
     }
 }
 
@@ -1187,15 +1190,73 @@ TEST(BeyondNormalsI, DarklingReincarnatesToHalfMaxHpAndClearsHalfDead) {
         << "ChangeState(REVIVE) cleared the bit";
     EXPECT_FALSE(monster_basically_dead(s.monsters[0]));
     EXPECT_FALSE(monster_dead_or_escaped(s.monsters[0]));
-    EXPECT_EQ(monster_power(s, 0, PowerId::REGROW), 1)
-        << "the pre-battle stack was cleared at half-death; the revival "
-           "re-grants exactly one";
+    EXPECT_EQ(monster_power(s, 0, PowerId::REGROW), -1)
+        << "the pre-battle slot was cleared at half-death; the revival "
+           "re-grants exactly one, still at the unassigned -1";
     EXPECT_NE(s.monsters[0].move_history[0], r::kDarklingMoveReincarnate)
         << "the post-revival roll takes the NORMAL tree, because the REVIVE "
            "clear resolves BEFORE it";
 
     // And the polluted history is what that first normal decision reads.
     EXPECT_EQ(s.monsters[0].move_history[1], r::kDarklingMoveReincarnate);
+}
+
+// THE TIMING RULE, through the real pump rather than directed take_turn calls,
+// because it is the rule a divergence brief got wrong: a Darkling half-killed
+// during the PLAYER'S turn N does NOT come back on monster turn N. Its damage()
+// override sets move 4 COUNT synchronously (Darkling.java:220-223); the
+// monster-turn loop still queues it (MonsterGroup.queueMonsters :119 keeps
+// `halfDead` records) and step 5 still runs it (GameActionManager.java:310),
+// so turn N's body is COUNT -- a TextAboveCreatureAction, nothing -- and only
+// the RollMoveAction behind it reads halfDead and telegraphs REINCARNATE
+// (getMove :145-148). The heal (:131) and the REVIVE clear (:132 -> :193-196)
+// land on monster turn N+1. Capture s2v3_wave2_STS205404_ps296 shows exactly
+// this for Darkling#0: half-dead at seq 709 (turn 2, intent UNKNOWN), 0 HP with
+// intent BUFF at seq 711 (turn 3 start), 51/2 = 25 HP at seq 717 (turn 4
+// start, minus Mercury Hourglass's 3) -- and at turn 6 the game's legal
+// targets are only the one Darkling that never went down.
+TEST(BeyondNormalsI, DarklingHalfKilledOnThePlayersTurnRevivesOneMonsterTurnLater) {
+    CombatState s = MakeDarklingGroup(31);
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    s.turn = 2;
+    const int16_t max_hp = s.monsters[1].max_hp;
+
+    // Player turn 2: Darkling#1 goes down.
+    telegraph(s, 1, r::kDarklingMoveNip, MonsterIntent::ATTACK);
+    player_attacks(s, 1, 500);
+    drain(s);
+    ASSERT_TRUE(monster_half_dead(s.monsters[1]));
+    ASSERT_EQ(s.monsters[1].hp, 0);
+    ASSERT_EQ(s.monsters[1].move_history[0], r::kDarklingMoveCount);
+
+    // End turn 2 -> monster turn 2 -> start of turn 3.
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, dispatch_monster_turn);
+    ASSERT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(s.turn, 3);
+    EXPECT_EQ(s.monsters[1].hp, 0)
+        << "monster turn 2 was COUNT -- no heal on the turn it went down";
+    EXPECT_TRUE(monster_half_dead(s.monsters[1]))
+        << "still half dead at the start of turn 3 (seq 711: hp 0, intent BUFF)";
+    EXPECT_EQ(s.monsters[1].move_history[0], r::kDarklingMoveReincarnate)
+        << "the trailing roll read halfDead and telegraphed REINCARNATE";
+    EXPECT_TRUE(monster_dead_or_escaped(s.monsters[1]))
+        << "and it is NOT a legal target on turn 3 -- isDeadOrEscaped is true "
+           "for a halfDead record (AbstractCreature.java:780-782)";
+
+    // End turn 3 -> monster turn 3 -> start of turn 4: the revival lands.
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, dispatch_monster_turn);
+    ASSERT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(s.turn, 4);
+    EXPECT_EQ(s.monsters[1].hp, max_hp / 2)
+        << "HealAction(this, this, maxHealth / 2) on monster turn N+1";
+    EXPECT_FALSE(monster_half_dead(s.monsters[1]));
+    EXPECT_FALSE(monster_dead_or_escaped(s.monsters[1]))
+        << "targetable again from turn 4";
+    EXPECT_EQ(monster_power(s, 1, PowerId::REGROW), -1);
+    EXPECT_NE(s.monsters[1].move_history[0], r::kDarklingMoveReincarnate)
+        << "the post-revival roll took the normal tree";
 }
 
 // PhilosopherStone.onSpawnMonster (PhilosopherStone.java:50-53) is a DIRECT
@@ -1241,7 +1302,7 @@ TEST(BeyondNormalsI, DarklingRevivalStrengthFromPhilosophersStoneLandsWhileHalfD
     EXPECT_FALSE(monster_half_dead(s.monsters[0]));
     EXPECT_EQ(monster_power(s, 0, PowerId::STRENGTH), 1)
         << "and it survives the revival";
-    EXPECT_EQ(monster_power(s, 0, PowerId::REGROW), 1);
+    EXPECT_EQ(monster_power(s, 0, PowerId::REGROW), -1);
 }
 
 // The captured monster turn, in numbers (STS239327 seq 407 -> 408: floor 35,

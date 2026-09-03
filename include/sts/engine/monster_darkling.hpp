@@ -83,10 +83,29 @@
 
 namespace sts::engine {
 
-// RegrowPower's stack amount, at both grant sites: the 3-arg pre-battle
-// ApplyPowerAction (Darkling.java:97, amount defaults to powerToApply.amount = 1)
-// and the explicit 1 at every REINCARNATE (:133).
-inline constexpr int32_t kDarklingRegrowAmount = 1;
+// RegrowPower's applied amount, at both grant sites. It is -1, NOT 1.
+//
+// RegrowPower's ctor (RegrowPower.java:21-28) sets name/ID/owner/description/
+// region and type and NEVER ASSIGNS `amount`, so the object carries
+// AbstractPower's field initialiser -1 (AbstractPower.java:65) -- the same shape
+// as MinionPower (kMinionAppliedAmount, monster_dispatch.hpp), Confusion and
+// Split. A live capture reads it back as -1: `monsters[0..2].powers[Life
+// Link]: -1` at s2v3_wave1_STS212624_ps13 seq 489 (floor 37, turn 1), and in the
+// committed corpus files s2v2_awk_105835 / s2v2_mb_102529. This constant said 1
+// and the sim published 1.
+//
+// THE TWO GRANT SITES PASS DIFFERENT NUMBERS IN THE JAVA AND STILL LAND ON THE
+// SAME ONE. usePreBattleAction (Darkling.java:97) is the 3-arg
+// ApplyPowerAction, whose stack amount defaults to powerToApply.amount == -1.
+// REINCARNATE (:133) is the 4-arg form with an explicit 1 -- but that number is
+// only ever the STACK amount: ApplyPowerAction's !hasBuffAlready branch adds
+// the constructed power object, which carries its own -1, and the stacking
+// branch is unreachable here because half-death runs `this.powers.clear()`
+// (:211) before any revival, so the Darkling never holds a Life Link when
+// REINCARNATE re-applies it. (Were it reachable, AbstractPower.stackPower's
+// `if (amount == -1) return` guard at :153-157 would make it a no-op anyway.)
+// One constant is therefore exact for both sites.
+inline constexpr int32_t kDarklingRegrowAmount = -1;
 
 void darkling_init(CombatState& state, uint8_t monster_index) noexcept;
 
