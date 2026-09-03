@@ -1438,8 +1438,50 @@ struct ShopTarget {
                     }
                     filtered = std::move(browse_order);
                 }
-                if (ordinal < 0 ||
-                    ordinal >= static_cast<int>(filtered.size())) {
+                // TWO INDEX SPACES ON A MULTI-PICK GRID (S3.23). The game's
+                // GridCardSelectScreen keeps every row on screen and tracks the
+                // picks in `selectedCards`, applying them only at the confirm
+                // (DiscardPileToHandAction opens the screen and moves the cards
+                // in its own update); the engine applies each CHOOSE as it is
+                // made, so the sim's source pile SHRINKS by one per pick while
+                // the capture's row list does not. From the second pick on, the
+                // live ordinal therefore over-counts by the number of already
+                // applied picks that sit to its left.
+                //
+                // Recover the mapping by aligning the sim's remaining pile
+                // against the capture's full row list as a LEFT-TO-LEFT
+                // subsequence over card identity. It runs only when the two
+                // lists actually differ in length -- an equal-length grid keeps
+                // the identity mapping it has always had, bit for bit -- and it
+                // must consume the whole sim pile, so a genuinely wrong pile
+                // still falls through to the same named stop. The identity
+                // cross-check below then re-proves the chosen row either way.
+                int sim_ordinal = ordinal;
+                if (ordinal >= 0 &&
+                    filtered.size() < s.card_offer.size() &&
+                    !filtered.empty()) {
+                    std::vector<int> row_to_sim(s.card_offer.size(), -1);
+                    std::size_t next = 0;
+                    for (std::size_t row = 0;
+                         row < s.card_offer.size() && next < filtered.size();
+                         ++row) {
+                        const CardId cand = static_cast<CardId>(
+                            rc.combat.card_pool[pile[filtered[next]]].card_id);
+                        if (sts::registry::card_game_id(cand) ==
+                            s.card_offer[row]) {
+                            row_to_sim[row] = static_cast<int>(next);
+                            ++next;
+                        }
+                    }
+                    if (next == filtered.size() &&
+                        ordinal < static_cast<int>(row_to_sim.size()) &&
+                        row_to_sim[static_cast<std::size_t>(ordinal)] >= 0) {
+                        sim_ordinal =
+                            row_to_sim[static_cast<std::size_t>(ordinal)];
+                    }
+                }
+                if (sim_ordinal < 0 ||
+                    sim_ordinal >= static_cast<int>(filtered.size())) {
                     m.reason = "combat " + std::string(source_name) +
                                " grid index " + std::to_string(ordinal) +
                                " is off the sim's " +
@@ -1452,7 +1494,7 @@ struct ShopTarget {
                     return m;
                 }
                 const uint8_t source_index =
-                    filtered[static_cast<std::size_t>(ordinal)];
+                    filtered[static_cast<std::size_t>(sim_ordinal)];
                 const CardId id = static_cast<CardId>(
                     rc.combat.card_pool[pile[source_index]].card_id);
                 const auto capture_index =
