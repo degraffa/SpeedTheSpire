@@ -120,6 +120,40 @@ struct ScreenInfo {
     std::vector<std::string> map_next_symbol;
     bool boss_available = false;
     std::vector<std::string> card_offer;     // CARD_REWARD: offered game ids
+    // The same rows' `upgrades`, parallel to `card_offer` and defaulted 0 for a
+    // row that carried none. Only the S3.53 grid-mask compare (grid_masks.hpp)
+    // reads it: a grid's row identity is (id, upgrades), and a purge grid that
+    // offered Strike where the deck holds Strike+ is a real mask defect that an
+    // id-only compare cannot see.
+    std::vector<int> card_offer_upgrades;
+    // GRID: `screen_state.confirm_up`, which the converter builds as
+    // `confirmScreenUp || isJustForConfirming` (GameStateConverter:576) -- ONE
+    // key for TWO different screens, and the S3.53 mask compare has to tell
+    // them apart:
+    //
+    //   * `confirmScreenUp` is a single-pick upgrade / transform / one-card
+    //     purge grid that HAS its pick and is showing the preview
+    //     (GridCardSelectScreen.java:161, :177, :193 -- the only three writers,
+    //     each inside its own `for*` branch). `targetGroup` is untouched, so
+    //     `cards` is still the whole candidate list; only the BUTTONS changed.
+    //   * `isJustForConfirming` is `openConfirmationGrid` (:468-483): a display
+    //     grid with nothing to pick at all -- Pandora's Box's ten transform
+    //     results, Calling Bell's three relics. `callOnOpen` (:486-494) has
+    //     just cleared forUpgrade / forTransform / forPurge / anyNumber, and
+    //     nothing sets them afterwards.
+    //
+    // So the three `for*` flags ARE the discriminator, and `grid_just_confirming`
+    // below is that derivation, made once where the JSON is read.
+    bool grid_confirm_up = false;
+    bool grid_for_upgrade = false;
+    bool grid_for_transform = false;
+    bool grid_for_purge = false;
+    // `confirm_up` with none of the three `for*` flags: the display-only
+    // `isJustForConfirming` grid, where `getGridScreenChoices` really does
+    // present nothing (ChoiceScreenUtils.java:460-469).
+    bool grid_just_confirming = false;
+    // BOSS_REWARD: `bossRelicScreen.relics` by game id, in screen order.
+    std::vector<std::string> boss_relic_offer;
     std::vector<std::string> reward_types;   // COMBAT_REWARD: rewards[].reward_type
     // The same reward rows with the fields a chest read-out compares (gold
     // amount, relic identity, and a SAPPHIRE_KEY row's link). `reward_types`

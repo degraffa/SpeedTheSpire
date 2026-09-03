@@ -5,7 +5,7 @@
 //                   [--replay | --neow | --shop | --treasure | --event]
 //                   [--verbose] [--pool-evidence] [--stop-on-diff]
 //                   [--combat] [--combat-summary] [--trace-powers] [--vitals]
-//                                                          (--replay triage aids)
+//                   [--costs] [--masks]              (--replay companion compares)
 //
 // SIX MODES, one per acceptance read-out, all over the same artifacts:
 //
@@ -106,9 +106,41 @@
 // and counted too (the run-level DIFF owns that). `--combat` remains the raw
 // CombatState walk for diagnosis; the two are independent.
 //
-// The exit code is the number of files that ended with a divergence or an
-// unmapped command (0 == every file replayed clean to its terminal); a vitals
-// divergence alone does not change it.
+// --costs (with --replay): THE IN-COMBAT CARD-COST COMPARE. `--replay` compares
+// RunState, which holds no in-combat card at all, and `--vitals` keys its piles
+// on (id, upgrades) and says in its own header that per-card cost is out of
+// scope -- so before S3.53 NO acceptance surface in this repository compared a
+// card's live cost against a capture, which is how a whole cost-state family
+// reached the S2 depth wave undetected (s2-verification.md §9 limit 2).
+// `--costs` compares, at every in-combat record, each pile's cards grouped by
+// the same (id, upgrades) key with their DISPLAYED costs as a sorted multiset:
+// `costForTurn` straight out of the dump on the capture side, and the same
+// number reconstructed on the sim side from `cost_now` plus the XCOST /
+// UNPLAYABLE flags that hold the game's two negative sentinels
+// (sts/translate/combat_vitals.hpp `diff_combat_costs` has the whole contract,
+// including what the dump does NOT carry -- `AbstractCard.cost`,
+// `isCostModified`, `freeToPlayOnce` -- and the one animation-deferred
+// `resetAttributes` lag). It skips the same records `--vitals` does, plus any
+// record whose dump carried no `cost` key at all.
+//
+// --masks (with --replay): THE GRID-SCREEN LEGAL-ACTION MASK COMPARE. Every
+// card/relic grid the game shows is chosen from a candidate list the game
+// builds and CommunicationMod dumps verbatim; the engine builds its own as a
+// legal-action mask. Nothing put the two side by side before S3.53 -- the
+// command mapping only ever resolves the ONE row a capture pressed, so a mask
+// offering the wrong SET, or the right set in the wrong ORDER, was invisible on
+// every row nobody clicked. `--masks` compares them on master-deck grids (Neow,
+// campfire Smith/Toke, event grids, the shop purge grid, the boss-chest equip
+// grid and the two phase-independent overlays), confirmation grids, combat-pile
+// grids, The Library board and the boss-relic screen, each in its own index
+// space (grid_masks.hpp has the contract and the citations).
+//
+// The exit code is the number of files that ended with a divergence, an
+// unmapped command, a COST divergence or a MASK divergence (0 == every file
+// replayed clean to its terminal). A vitals divergence alone still does not
+// change it -- `--vitals` is a frontier report by design -- but the two S3.53
+// compares DO, because each was written to be an acceptance surface and a
+// comparison that cannot fail a run is an inspection.
 
 #include <algorithm>
 #include <cctype>
@@ -117,6 +149,7 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <span>
 #include <sstream>
@@ -138,6 +171,8 @@
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
 #include "sts/translate/combat_vitals.hpp"
+
+#include "grid_masks.hpp"
 #include "sts/translate/translate.hpp"
 
 #include "command_map.hpp"
@@ -205,7 +240,27 @@ void read_stock(const json& screen_state, const char* key,
             }
             s.boss_available = ss->value("boss_available", false);
             if (const auto c = ss->find("cards"); c != ss->end() && c->is_array()) {
-                for (const json& card : *c) s.card_offer.push_back(card.value("id", std::string{}));
+                for (const json& card : *c) {
+                    s.card_offer.push_back(card.value("id", std::string{}));
+                    // Parallel to `card_offer`; only the grid-mask compare
+                    // reads it (command_map.hpp's field comment).
+                    s.card_offer_upgrades.push_back(card.value("upgrades", 0));
+                }
+            }
+            s.grid_confirm_up = ss->value("confirm_up", false);
+            s.grid_for_upgrade = ss->value("for_upgrade", false);
+            s.grid_for_transform = ss->value("for_transform", false);
+            s.grid_for_purge = ss->value("for_purge", false);
+            s.grid_just_confirming =
+                s.grid_confirm_up && !s.grid_for_upgrade &&
+                !s.grid_for_transform && !s.grid_for_purge;
+            if (s.screen_type == "BOSS_REWARD") {
+                if (const auto rl = ss->find("relics");
+                    rl != ss->end() && rl->is_array()) {
+                    for (const json& relic : *rl)
+                        s.boss_relic_offer.push_back(
+                            relic.value("id", std::string{}));
+                }
             }
             if (const auto r = ss->find("rewards"); r != ss->end() && r->is_array()) {
                 for (const json& item : *r) {
@@ -498,6 +553,8 @@ struct Options {
     bool trace_powers = false;  // per-record monster power lists, both sides
     bool combat_summary = false;  // print the sim's combat sheet per in-combat record
     bool vitals = false;   // the index-normalised combat-vitals compare (--replay only)
+    bool costs = false;    // the per-instance in-combat CARD COST compare (--replay only)
+    bool masks = false;    // the grid-screen legal-action MASK compare (--replay only)
     bool full_replay = false;  // whole-run replay instead of the reward spot-diff
     bool neow = false;         // the floor-0 blessing spot-diff
     bool shop = false;         // the merchant spot-diff
@@ -799,6 +856,29 @@ struct Verdict {
     int vitals_first_turn = -1;
     std::size_t vitals_first_fields = 0;
     std::set<std::string> vitals_unknown_ids;  // "<domain>:<id>", each reported once
+
+    // --costs (combat_vitals.hpp `diff_combat_costs`). UNLIKE --vitals these
+    // two DO reach the exit code -- see the file header's `--costs` block.
+    int costs_records = 0;             // in-combat records cost-compared
+    int costs_diverged_records = 0;    // ...of which differed
+    int costs_skipped_race = 0;        // skipped: tolerated race / handoff record
+    int costs_skipped_phase = 0;       // ...skipped: the sim is already out of the fight
+    int costs_skipped_unemitted = 0;   // ...skipped: the dump carried no `cost` key
+    int costs_soul_lag_records = 0;    // ...tolerated: the Soul's deferred reset
+    int costs_first_seq = -1;
+    int costs_first_floor = -1;
+    int costs_first_turn = -1;
+    std::size_t costs_first_fields = 0;
+
+    // --masks (grid_masks.hpp).
+    int mask_records = 0;              // records carrying a card/relic grid, compared
+    int mask_diverged_records = 0;     // ...of which differed
+    int mask_unpaired_records = 0;     // ...the sim was not on the same screen
+    int mask_by_kind[7] = {};          // compared records per MaskKind ordinal
+    int mask_first_seq = -1;
+    int mask_first_floor = -1;
+    std::string mask_first_kind;
+    std::size_t mask_first_fields = 0;
 };
 
 // Print the sim's assembled reward offer beside the artifact's, which is the
@@ -1272,6 +1352,115 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
                                     rec.seq, s.floor, rec.vitals.turn,
                                     rec.action_command.c_str(), vrep.size(),
                                     vrep.size() == 1 ? "" : "s");
+                    }
+                }
+            }
+        }
+
+        // --costs: the per-instance in-combat CARD COST compare
+        // (sts/translate/combat_vitals.hpp `diff_combat_costs`). Same records
+        // and the same skip rules as --vitals -- both sides are the state
+        // BEFORE this record's command, and a mid-animation dump is not the
+        // state the rules describe -- plus one skip of its own: a record whose
+        // dump carried no `cost` key for some card cannot be cost-compared and
+        // is declined rather than read against a defaulted zero.
+        if (opts.costs && rec.in_combat) {
+            if (capture_race || double_boss_handoff) {
+                ++v.costs_skipped_race;
+            } else if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT)) {
+                ++v.costs_skipped_phase;
+            } else if (!rec.vitals.costs_available) {
+                ++v.costs_skipped_unemitted;
+            } else {
+                const sts::translate::CombatVitals sim_vitals =
+                    sts::translate::vitals_from_combat_state(rc.combat);
+                const sts::translate::VitalsReport crep =
+                    sts::translate::diff_combat_costs(rec.vitals, sim_vitals);
+                ++v.costs_records;
+                // Rows the compare recognised as the game's animation-deferred
+                // resetAttributes (combat_vitals.hpp's `--costs` block) are
+                // COUNTED, not silent, and --verbose names them: a tolerance
+                // nobody can see is indistinguishable from a blind spot.
+                if (!crep.tolerated.empty()) {
+                    ++v.costs_soul_lag_records;
+                    if (opts.verbose) {
+                        for (const sts::translate::VitalsFieldDiff& d :
+                             crep.tolerated) {
+                            std::printf("CLAG  seq=%d floor=%d turn=%d: %s: %s -> %s "
+                                        "(deferred resetAttributes, tolerated)\n",
+                                        rec.seq, s.floor, rec.vitals.turn,
+                                        d.field.c_str(), d.game.c_str(),
+                                        d.sim.c_str());
+                        }
+                    }
+                }
+                if (!crep.empty()) {
+                    const bool first = v.costs_diverged_records == 0;
+                    ++v.costs_diverged_records;
+                    if (first) {
+                        v.costs_first_seq = rec.seq;
+                        v.costs_first_floor = s.floor;
+                        v.costs_first_turn = rec.vitals.turn;
+                        v.costs_first_fields = crep.size();
+                    }
+                    if (first || opts.verbose) {
+                        std::printf("CDIFF seq=%d floor=%d turn=%d screen=%s cmd='%s' "
+                                    "(%zu field%s%s)\n%s\n",
+                                    rec.seq, s.floor, rec.vitals.turn,
+                                    s.screen_type.c_str(), rec.action_command.c_str(),
+                                    crep.size(), crep.size() == 1 ? "" : "s",
+                                    first ? "; the FIRST cost divergence" : "",
+                                    crep.to_string().c_str());
+                    } else {
+                        std::printf("CDIFF seq=%d floor=%d turn=%d cmd='%s' (%zu field%s; "
+                                    "--verbose prints the rows)\n",
+                                    rec.seq, s.floor, rec.vitals.turn,
+                                    rec.action_command.c_str(), crep.size(),
+                                    crep.size() == 1 ? "" : "s");
+                    }
+                    if (opts.stop_on_diff) {
+                        v.stop_reason = "first cost divergence";
+                        return v;
+                    }
+                }
+            }
+        }
+
+        // --masks: the grid-screen legal-action MASK compare (grid_masks.hpp).
+        // Not gated on `in_combat`: a run-layer grid is a run-layer screen, and
+        // the combat-pile grids the compare also classifies live inside the
+        // combat the run-level walk is already standing in. A record where the
+        // sim is not on the same screen is UNPAIRED and counted, never judged
+        // -- that desync is the run-level DIFF's to name.
+        if (opts.masks) {
+            const sts::replay::MaskReport mrep =
+                sts::replay::compare_grid_mask(rc, s);
+            const auto kind_ord = static_cast<std::size_t>(mrep.kind);
+            if (mrep.kind == sts::replay::MaskKind::UNPAIRED) {
+                ++v.mask_unpaired_records;
+            } else if (mrep.kind != sts::replay::MaskKind::NONE) {
+                ++v.mask_records;
+                if (kind_ord < std::size(v.mask_by_kind)) ++v.mask_by_kind[kind_ord];
+                if (!mrep.empty()) {
+                    const bool first = v.mask_diverged_records == 0;
+                    ++v.mask_diverged_records;
+                    if (first) {
+                        v.mask_first_seq = rec.seq;
+                        v.mask_first_floor = s.floor;
+                        v.mask_first_kind = sts::replay::mask_kind_name(mrep.kind);
+                        v.mask_first_fields = mrep.size();
+                    }
+                    std::printf("MDIFF seq=%d floor=%d screen=%s kind=%s cmd='%s' "
+                                "(%zu field%s%s)\n%s\n",
+                                rec.seq, s.floor, s.screen_type.c_str(),
+                                sts::replay::mask_kind_name(mrep.kind),
+                                rec.action_command.c_str(), mrep.size(),
+                                mrep.size() == 1 ? "" : "s",
+                                first ? "; the FIRST mask divergence" : "",
+                                mrep.to_string().c_str());
+                    if (opts.stop_on_diff) {
+                        v.stop_reason = "first mask divergence";
+                        return v;
                     }
                 }
             }
@@ -3475,6 +3664,8 @@ int main(int argc, char** argv) {
         else if (a == "--trace-powers") opts.trace_powers = true;
         else if (a == "--combat-summary") opts.combat_summary = true;
         else if (a == "--vitals") opts.vitals = true;
+        else if (a == "--costs") opts.costs = true;
+        else if (a == "--masks") opts.masks = true;
         else if (a == "--replay") opts.full_replay = true;
         else if (a == "--neow") opts.neow = true;
         else if (a == "--shop") opts.shop = true;
@@ -3490,7 +3681,8 @@ int main(int argc, char** argv) {
                      "usage: replay_run_diff <run.jsonl> [...] "
                      "[--replay | --neow | --shop | --treasure | --event]\n"
                      "         [--verbose] [--pool-evidence] [--stop-on-diff] [--combat]\n"
-                     "         [--trace-powers] [--combat-summary] [--vitals]\n"
+                     "         [--trace-powers] [--combat-summary] [--vitals] "
+                     "[--costs] [--masks]\n"
                      "  default:    per-reward-screen spot-diff seeded from the capture\n"
                      "  --replay:   whole-run replay from run_begin, diffed per record\n"
                      "  --neow:     floor-0 blessing spot-diff (options / activation / "
@@ -3524,6 +3716,26 @@ int main(int argc, char** argv) {
                      "              report the first differing record; the CLEAN/PART "
                      "verdict and exit\n"
                      "              code are unchanged\n"
+                     "  --costs:    (with --replay) compare every in-combat card's live "
+                     "cost --\n"
+                     "              costForTurn, sentinels included -- per pile, grouped "
+                     "by (id,\n"
+                     "              upgrades) with the costs as a sorted multiset. UNLIKE "
+                     "--vitals a\n"
+                     "              divergence here FAILS the file (exit code), which is "
+                     "what makes\n"
+                     "              it an acceptance surface\n"
+                     "  --masks:    (with --replay) compare the engine's legal-action MASK "
+                     "against the\n"
+                     "              live ChoiceScreenUtils candidate list on every "
+                     "card/relic grid\n"
+                     "              screen -- master-deck grids (Neow, Smith/Toke, event, "
+                     "shop purge,\n"
+                     "              boss-chest equip), confirmation grids, combat-pile "
+                     "grids, The\n"
+                     "              Library board and the boss-relic screen -- honouring "
+                     "each screen's\n"
+                     "              own index space. Also FAILS the file on a divergence\n"
                      "  the mode flags are mutually exclusive\n");
         return 2;
     }
@@ -3797,7 +4009,73 @@ int main(int argc, char** argv) {
                                 v.vitals_unknown_ids.size());
                 }
             }
-            if (!v.clean) ++failures;
+            // --costs and --masks (S3.53). Their verdict words live on their
+            // own lines like --vitals', but UNLIKE --vitals they reach the exit
+            // code: each was written to be an acceptance surface, and a
+            // comparison that cannot fail a run is an inspection.
+            if (opts.costs) {
+                std::printf("      costs: %s -- %d in-combat record%s compared, %d "
+                            "differed; %d skipped on tolerated race/handoff records, "
+                            "%d skipped with the sim already out of the fight, "
+                            "%d skipped with no `cost` key emitted\n",
+                            v.costs_diverged_records == 0 ? "costs-clean"
+                                                          : "costs-divergent",
+                            v.costs_records, v.costs_records == 1 ? "" : "s",
+                            v.costs_diverged_records, v.costs_skipped_race,
+                            v.costs_skipped_phase, v.costs_skipped_unemitted);
+                if (v.costs_soul_lag_records > 0) {
+                    std::printf("      %d record(s) carried ONLY the Soul's "
+                                "animation-deferred resetAttributes lag and are "
+                                "tolerated (Soul.java:193-231; piles.hpp "
+                                "reset_cost_for_turn)\n",
+                                v.costs_soul_lag_records);
+                }
+                if (v.costs_first_seq >= 0) {
+                    std::printf("      first cost divergence: seq=%d floor=%d turn=%d "
+                                "(%zu field%s)\n",
+                                v.costs_first_seq, v.costs_first_floor,
+                                v.costs_first_turn, v.costs_first_fields,
+                                v.costs_first_fields == 1 ? "" : "s");
+                } else {
+                    std::printf("      first cost divergence: none -- every "
+                                "cost-compared record was zero-diff\n");
+                }
+            }
+            if (opts.masks) {
+                std::printf("      masks: %s -- %d grid record%s compared, %d "
+                            "differed; %d unpaired (the sim was on another "
+                            "screen)\n",
+                            v.mask_diverged_records == 0 ? "masks-clean"
+                                                         : "masks-divergent",
+                            v.mask_records, v.mask_records == 1 ? "" : "s",
+                            v.mask_diverged_records, v.mask_unpaired_records);
+                std::printf("      mask kinds: master-deck %d, confirmation %d, "
+                            "combat-pile %d, Library board %d, boss-relic %d\n",
+                            v.mask_by_kind[static_cast<std::size_t>(
+                                sts::replay::MaskKind::MASTER_DECK)],
+                            v.mask_by_kind[static_cast<std::size_t>(
+                                sts::replay::MaskKind::CONFIRM)],
+                            v.mask_by_kind[static_cast<std::size_t>(
+                                sts::replay::MaskKind::COMBAT_PILE)],
+                            v.mask_by_kind[static_cast<std::size_t>(
+                                sts::replay::MaskKind::LIBRARY_BOARD)],
+                            v.mask_by_kind[static_cast<std::size_t>(
+                                sts::replay::MaskKind::BOSS_RELIC)]);
+                if (v.mask_first_seq >= 0) {
+                    std::printf("      first mask divergence: seq=%d floor=%d "
+                                "kind=%s (%zu field%s)\n",
+                                v.mask_first_seq, v.mask_first_floor,
+                                v.mask_first_kind.c_str(), v.mask_first_fields,
+                                v.mask_first_fields == 1 ? "" : "s");
+                } else {
+                    std::printf("      first mask divergence: none -- every "
+                                "mask-compared record was zero-diff\n");
+                }
+            }
+            if (!v.clean || v.costs_diverged_records > 0 ||
+                v.mask_diverged_records > 0) {
+                ++failures;
+            }
         } catch (const std::exception& e) {
             std::printf("ERROR %s: %s\n", f.c_str(), e.what());
             ++failures;

@@ -390,7 +390,18 @@ void set_event_flag_block(eng::RunState& rs, uint16_t first_id, int count,
     if (const json* cost = fr.take("cost")) {  // costForTurn -> cost_now (>=0 only)
         int64_t cv = as_i64(*cost, ctx, path + ".cost");
         ci.cost_now = static_cast<uint8_t>(cv < 0 ? 0 : cv);
+        // The vitals projection keeps the number RAW, sentinels and all: -1
+        // (X-cost) and -2 (unplayable) are real claims about the card that
+        // CardInstance::cost_now, being unsigned, cannot hold, and the
+        // `--costs` compare reconstructs the same two values on the sim side
+        // from the XCOST / UNPLAYABLE flags (combat_vitals.hpp).
+        if (vitals != nullptr) {
+            vitals->cost = static_cast<int>(cv);
+            vitals->cost_known = true;
+        }
         fr.mapped();
+    } else if (vitals != nullptr) {
+        vitals->cost_known = false;
     }
     if (const json* m = fr.take("misc")) {  // per-instance misc (§3.13) -> CardInstance.misc
         ci.misc = static_cast<uint16_t>(as_i64(*m, ctx, path + ".misc"));
@@ -1958,6 +1969,21 @@ bool translate_record(const json& rec, Ctx& ctx, TranslatedRun& run) {
                              " (schema drift, translation aborted)");
     }
     if (out.in_combat) ++run.combat_record_count;
+    // `costs_available` is a WHOLE-RECORD fact, so it is folded once, here,
+    // after every pile is filled -- including the HAND_SELECT screen's
+    // `selected` cards, which rejoin the vitals hand after parse_combat_state
+    // has already returned. A record where any card's dump carried no `cost`
+    // key cannot be cost-compared, and `--costs` declines and counts it rather
+    // than reading a defaulted 0 as a claim (combat_vitals.hpp).
+    if (out.in_combat) {
+        for (const std::vector<VitalsCard>* pile :
+             {&out.vitals.hand, &out.vitals.draw, &out.vitals.discard,
+              &out.vitals.exhaust, &out.vitals.limbo}) {
+            for (const VitalsCard& c : *pile) {
+                if (!c.cost_known) out.vitals.costs_available = false;
+            }
+        }
+    }
     run.records.push_back(std::move(out));
     return true;
 }

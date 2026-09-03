@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Integrity-check, extract, and replay the committed oracle CI corpus."""
+"""Integrity-check, extract, and replay the committed oracle CI corpus.
+
+`--extra-flag` adds a replay_run_diff mode to the walk (S3.53's `--costs` and
+`--masks`), and `--inject-kind` selects which synthetic divergence
+`--inject-divergence` plants, so each mode gets a negative control of its own:
+a comparison nobody has seen fail is not a comparison.
+"""
 
 from __future__ import annotations
 
@@ -230,24 +236,124 @@ def inject_divergence(path: Path) -> None:
     raise CorpusError("cannot inject divergence: no action record")
 
 
+def inject_cost_divergence(path: Path) -> bool:
+    """Raise one in-HAND card's `cost` by 1 (S3.53's `--costs` negative control).
+
+    THREE THINGS MAKE THIS THE RIGHT SITE, and each is load-bearing:
+      * the HAND, because it is the one pile the costs compare tolerates
+        nothing in -- the draw / discard / exhaust piles excuse the game's
+        animation-deferred resetAttributes (combat_vitals.hpp), and a control
+        planted in one of those could be swallowed by that very tolerance;
+      * RAISING rather than lowering, because the tolerated shape is a
+        capture-side ZERO under a higher sim value, and a raise is its
+        opposite by construction;
+      * `cost` alone, because nothing else in the record moves: the run-level
+        `--replay` compare reads RunState, which carries no in-combat card, so
+        a red here can only have come from `--costs`.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        record = json.loads(line)
+        if record.get("record_kind") != "action":
+            continue
+        combat = record["state_json"]["game_state"].get("combat_state")
+        if not combat:
+            continue
+        for card in combat.get("hand", []):
+            if int(card.get("cost", -1)) < 0:
+                continue  # an X-cost / unplayable sentinel is not a number
+            card["cost"] = int(card["cost"]) + 1
+            lines[index] = json.dumps(record, separators=(",", ":"),
+                                      sort_keys=True)
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return True
+    return False
+
+
+def inject_mask_divergence(path: Path) -> bool:
+    """Upgrade one row of a live grid screen (S3.53's `--masks` negative control).
+
+    The grid mask compares row identity as (card id, upgrades), so bumping
+    `upgrades` on `screen_state.cards[0]` makes the capture's candidate list
+    disagree with the engine's mask at row 0 and nowhere else. It moves NO
+    RunState field -- the master deck is translated from `game_state.deck`, not
+    from the grid screen -- so, as with the cost control, a red can only have
+    come from `--masks`. A `confirm_up` grid is skipped: that screen is either
+    display-only or a pick already made, and neither is the row-identity claim
+    this control means to break.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        record = json.loads(line)
+        if record.get("record_kind") != "action":
+            continue
+        game = record["state_json"]["game_state"]
+        if game.get("screen_type") != "GRID":
+            continue
+        screen = game.get("screen_state") or {}
+        if screen.get("confirm_up"):
+            continue
+        cards = screen.get("cards") or []
+        if not cards:
+            continue
+        cards[0]["upgrades"] = int(cards[0].get("upgrades", 0)) + 1
+        lines[index] = json.dumps(record, separators=(",", ":"), sort_keys=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return True
+    return False
+
+
+# `--inject-kind` -> (injector, what a member must carry to host it). Each
+# returns False when THIS member has no site for it, so `run` can walk on to
+# the next member instead of reporting a control that "passed" because nothing
+# was ever injected -- the failure mode a negative control exists to avoid.
+INJECTORS = {
+    "state": None,  # the original whole-run control; every member hosts it
+    "cost": inject_cost_divergence,
+    "mask": inject_mask_divergence,
+}
+
+
 def run(archive: Path, manifest_path: Path, replay_bin: Path,
-        scratch: Path, inject: bool, expect_entries: int = 50) -> int:
+        scratch: Path, inject: bool, expect_entries: int = 50,
+        extra_flags: list[str] | None = None,
+        inject_kind: str = "state") -> int:
     manifest, members = validate_archive(archive, manifest_path, expect_entries)
     if scratch.exists():
         shutil.rmtree(scratch)
     scratch.mkdir(parents=True)
+    flags = list(extra_flags or [])
     raw_paths = []
-    entries = manifest["entries"][:1] if inject else manifest["entries"]
-    for entry in entries:
-        member = raw_member_name(manifest, entry)
-        path = scratch / Path(member).name
-        path.write_bytes(members[member])
-        raw_paths.append(path)
-    if inject:
-        inject_divergence(raw_paths[0])
+    if inject and inject_kind != "state":
+        # Walk the members until one hosts the injection site, and replay only
+        # that one. Taking entries[0] blindly would let a control PASS because
+        # its exit code came from "cannot inject", not from the comparison.
+        injector = INJECTORS[inject_kind]
+        for entry in manifest["entries"]:
+            member = raw_member_name(manifest, entry)
+            path = scratch / Path(member).name
+            path.write_bytes(members[member])
+            if injector(path):
+                raw_paths = [path]
+                break
+            path.unlink()
+        if not raw_paths:
+            raise CorpusError(
+                f"cannot inject a {inject_kind} divergence: no member of this "
+                f"corpus carries the site")
+    else:
+        entries = manifest["entries"][:1] if inject else manifest["entries"]
+        for entry in entries:
+            member = raw_member_name(manifest, entry)
+            path = scratch / Path(member).name
+            path.write_bytes(members[member])
+            raw_paths.append(path)
+        if inject:
+            inject_divergence(raw_paths[0])
+
     def replay_one(path: Path) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [str(replay_bin), str(path), "--replay", "--stop-on-diff"],
+            [str(replay_bin), str(path), "--replay", "--stop-on-diff"] + flags,
             check=False, capture_output=True, text=True)
 
     # Whole-run replay is independent per seed. Four bounded workers keep the
@@ -270,13 +376,25 @@ def main() -> int:
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--inject-divergence", action="store_true")
     parser.add_argument(
+        "--inject-kind", choices=sorted(INJECTORS), default="state",
+        help="which synthetic divergence --inject-divergence plants: `state` "
+             "(the original: one action record's current_hp), `cost` (S3.53: "
+             "one in-hand card's cost) or `mask` (S3.53: one grid row's "
+             "upgrades)")
+    parser.add_argument(
+        "--extra-flag", action="append", default=[], dest="extra_flags",
+        help="an extra replay_run_diff flag, repeatable -- `--costs` and "
+             "`--masks` are the S3.53 comparisons, each of which reaches the "
+             "exit code so it can be an acceptance surface")
+    parser.add_argument(
         "--expect-entries", type=int, default=50,
         help="the corpus's committed entry count, asserted rather than read "
              "off the manifest it is checking")
     args = parser.parse_args()
     try:
         return run(args.archive, args.manifest, args.replay_bin, args.scratch,
-                   args.inject_divergence, args.expect_entries)
+                   args.inject_divergence, args.expect_entries,
+                   args.extra_flags, args.inject_kind)
     except (CorpusError, OSError, json.JSONDecodeError, tarfile.TarError) as exc:
         print(f"oracle corpus error: {exc}")
         return 2

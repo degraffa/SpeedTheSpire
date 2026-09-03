@@ -49,6 +49,20 @@ void project_powers(const eng::PowerSlot* slots, uint8_t count,
     } else {
         out.id = std::string(reg::card_game_id(id));
     }
+    // costForTurn as the game would report it (combat_vitals.hpp VitalsCard).
+    // The registry stores the game's two negative sentinels as FLAGS with
+    // base_cost 0 (stsgen/emit/cards.py parse_card_flags), and the per-instance
+    // flags word carries the authored half at the instance's live upgrade level
+    // (advance.cpp seeds it from card_flags(def, upgrade), and an in-combat
+    // upgrade() re-reads it), so reading the bits here is reading the same fact
+    // the dump prints -- not a guess about the row.
+    if (eng::has_card_flag(c.flags, eng::CardFlag::XCOST)) {
+        out.cost = -1;
+    } else if (eng::has_card_flag(c.flags, eng::CardFlag::UNPLAYABLE)) {
+        out.cost = -2;
+    } else {
+        out.cost = static_cast<int>(c.cost_now);
+    }
     return out;
 }
 
@@ -149,6 +163,19 @@ using PowerSet = std::map<std::string, std::vector<int>>;
     return out;
 }
 
+// Is every element of `a` present in `b` with at least the same multiplicity?
+// Both are sorted. Used only by the HAND_SELECT containment rule below.
+[[nodiscard]] bool is_submultiset(const std::vector<int>& a,
+                                  const std::vector<int>& b) {
+    std::size_t i = 0;
+    for (int x : a) {
+        while (i < b.size() && b[i] < x) ++i;
+        if (i >= b.size() || b[i] != x) return false;
+        ++i;
+    }
+    return true;
+}
+
 [[nodiscard]] std::string amounts_repr(const std::vector<int>& v) {
     if (v.size() == 1) return std::to_string(v[0]);
     std::string s = "[";
@@ -215,6 +242,106 @@ void cmp_pile(VitalsReport& r, const std::string& pile,
     }
 }
 
+// ---- the cost compare (combat_vitals.hpp, the `--costs` block) -------------
+
+// card key -> the SORTED costs of every instance carrying that key. Same key as
+// `cmp_pile`, so a cost row names a card exactly the way a vitals pile row does.
+using CostSet = std::map<std::string, std::vector<int>>;
+
+[[nodiscard]] CostSet cost_set(const std::vector<VitalsCard>& cards) {
+    CostSet out;
+    for (const VitalsCard& c : cards) out[card_key(c)].push_back(c.cost);
+    for (auto& [k, v] : out) std::sort(v.begin(), v.end());
+    return out;
+}
+
+// Is this row the game's animation-deferred `resetAttributes` rather than a
+// cost divergence? The conjuncts and their citations are in combat_vitals.hpp's
+// `--costs` block; `deferred_pile` is the caller's answer to the first one.
+//
+// IT IS A MULTISET DIFFERENCE, NOT A POSITIONAL WALK, and that is not a
+// refinement -- a positional walk over the two SORTED lists gets the answer
+// wrong whenever a key has several instances. `[0|1] -> [1|2]` is one card the
+// game has not reset yet (0 against the sim's 2) beside one both sides agree on
+// at 1; sorting pairs it as (0,1) and (1,2) instead, and the second pair --
+// a capture-side 1, not 0 -- then fails a per-position test that the row
+// actually satisfies. So cancel what the two sides have in common first, and
+// judge only what is left over: every remaining CAPTURE cost must be 0 (the
+// `setCostForTurn` family: Corruption, Mummified Hand, Infernal Blade,
+// Madness) and every remaining SIM cost must be positive (the value the reset
+// restored). Anything else -- a capture cost that is low but not zero, a
+// capture cost HIGHER than the sim's -- is a divergence and is reported.
+[[nodiscard]] bool deferred_reset_shape(const std::vector<int>& game,
+                                        const std::vector<int>& sim,
+                                        bool deferred_pile) {
+    if (!deferred_pile || game.size() != sim.size()) return false;
+    // Both are sorted ascending (`cost_set`), so the common part is a
+    // straight merge walk.
+    std::vector<int> rest_game;
+    std::vector<int> rest_sim;
+    std::size_t i = 0;
+    std::size_t j = 0;
+    while (i < game.size() && j < sim.size()) {
+        if (game[i] == sim[j]) { ++i; ++j; continue; }
+        if (game[i] < sim[j]) rest_game.push_back(game[i++]);
+        else rest_sim.push_back(sim[j++]);
+    }
+    while (i < game.size()) rest_game.push_back(game[i++]);
+    while (j < sim.size()) rest_sim.push_back(sim[j++]);
+    if (rest_game.empty() || rest_game.size() != rest_sim.size()) return false;
+    for (int c : rest_game) {
+        if (c != 0) return false;
+    }
+    for (int c : rest_sim) {
+        if (c <= 0) return false;
+    }
+    return true;
+}
+
+// `containment_only` is the HAND_SELECT rule, inherited from `cmp_pile`: the
+// capture's hand is a subset of the sim's, so a key whose capture-side cost
+// list is a sub-multiset of the sim's is the held-aside remainder and is not
+// judged. Anything the capture has that the sim does not still reports.
+void cmp_costs(VitalsReport& r, const std::string& pile,
+               const std::vector<VitalsCard>& game,
+               const std::vector<VitalsCard>& sim,
+               bool containment_only = false,
+               bool deferred_pile = false) {
+    const CostSet g = cost_set(game);
+    const CostSet s = cost_set(sim);
+    std::set<std::string> keys;
+    for (const auto& [k, v] : g) keys.insert(k);
+    for (const auto& [k, v] : s) keys.insert(k);
+    for (const std::string& k : keys) {
+        const auto gi = g.find(k);
+        const auto si = s.find(k);
+        const bool has_g = gi != g.end();
+        const bool has_s = si != s.end();
+        if (has_g && has_s && gi->second == si->second) continue;
+        if (containment_only && has_g && has_s &&
+            is_submultiset(gi->second, si->second)) {
+            continue;
+        }
+        // A MEMBERSHIP divergence is `--vitals`' row to report, not this
+        // compare's: reporting it here too would double-count the same fact
+        // under a `.cost` name that says nothing about cost, and there is no
+        // like-for-like pairing to read a cost delta out of. That covers both
+        // shapes -- a key only one side holds, and a key both hold but in
+        // different NUMBERS (the live case is a limbo Armaments the capture
+        // has twice and the sim once). Only a key both sides hold the same
+        // number of, with different costs, is a cost divergence.
+        if (!has_g || !has_s) continue;
+        if (gi->second.size() != si->second.size()) continue;
+        VitalsFieldDiff row{pile + "[" + k + "].cost",
+                            amounts_repr(gi->second), amounts_repr(si->second)};
+        if (deferred_reset_shape(gi->second, si->second, deferred_pile)) {
+            r.tolerated.push_back(std::move(row));
+            continue;
+        }
+        r.diffs.push_back(std::move(row));
+    }
+}
+
 void collect_unknown(std::set<std::string>& out, const CombatVitals& v) {
     for (const VitalsPower& p : v.player_powers)
         if (!p.known) out.insert(unknown_entry("power", p.id));
@@ -270,6 +397,26 @@ std::string VitalsReport::to_string() const {
     for (const VitalsFieldDiff& d : diffs)
         os << d.field << ": " << d.game << " -> " << d.sim << "\n";
     return os.str();
+}
+
+VitalsReport diff_combat_costs(const CombatVitals& game, const CombatVitals& sim) {
+    VitalsReport r;
+    const bool partial = game.hand_partial || sim.hand_partial;
+    // The third argument is the HAND_SELECT containment rule; the fourth says
+    // whether this pile is one of the game's ANIMATION-DEFERRED reset seams
+    // (draw / discard via Soul, exhaust via ExhaustCardEffect). Hand and limbo
+    // are deliberately not -- see the header.
+    cmp_costs(r, "hand", game.hand, sim.hand, partial, false);
+    cmp_costs(r, "draw", game.draw, sim.draw, false, true);
+    cmp_costs(r, "discard", game.discard, sim.discard, false, true);
+    cmp_costs(r, "exhaust", game.exhaust, sim.exhaust, false, true);
+    cmp_costs(r, "limbo", game.limbo, sim.limbo, false, false);
+
+    std::set<std::string> unknown;
+    collect_unknown(unknown, game);
+    collect_unknown(unknown, sim);
+    r.unknown_ids.assign(unknown.begin(), unknown.end());
+    return r;
 }
 
 VitalsReport diff_combat_vitals(const CombatVitals& game, const CombatVitals& sim) {

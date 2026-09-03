@@ -137,8 +137,8 @@ are S3's own.
 | **~60 out-of-yaml MIRROR sites carrying citations `wave3-citations` corrected in `registry/*.yaml`** | wave3-citations, 2026-07-28 (stage-b, UNASSIGNED) | **S3.65** | **ACCEPTED INTO S3 SCOPE**, together with the three sibling citation rows the same sweep left open (the nine repo-wide out-of-range `File.java:line`s, the eleven and fifteen `relics.yaml` +1000-class ones, the nine `cards.yaml` ones). Folded into one provenance task because S3 touches `src/`, `include/` and `tools/` broadly and a split-brain between the registry and its mirrors is precisely the thing that makes a re-read at task time untrustworthy. Comment/provenance only — a behaviour change discovered mid-sweep is stop-the-line, not a drive-by |
 | **Windows CI job** | build effort (stage-b, UNASSIGNED) | **S3.66** | **ACCEPTED INTO S3 SCOPE**, and promoted in importance by the evidence rule: with unit tests gone, CI's job is to prove the six presets still **build** and that the committed corpora still replay zero-diff, which is now the whole automated safety net. **Pin the LLVM version** (the googletest `/WX-` workaround exists because a clang release added a warning gtest trips over). The proposed workflow is unverified because Actions cannot run locally; S3.67 owes a green run on a real push, not a plausible YAML |
 | **Translator: power `misc` fields other than player-owned Combust** (the five-way untagged union) | B3.7 (stage-b, UNASSIGNED; re-scoped by `wave2-harness` stage 3) | **S3.21** | **ACCEPTED INTO S3 SCOPE because Act 4 makes it live.** `GameStateConverter` emits whichever of `basePower`/`maxAmt`/`storedAmount`/`hpLoss`/`cardsDoubledThisTurn` is present first (PROTOCOL §3.14), with nothing telling a reader which. `InvinciblePower` carries a private **`maxAmt`** (InvinciblePower.java:18-29) — the union's *second* member — on a power the differ must compare every turn of the Heart fight. S3.21 owns the disambiguation as part of the redeploy (a tagged emission is the obvious fix and is a fork change, so it rides the same jar). **DISCHARGED 2026-09-03 by S3.21** — `power.misc_field` names the source field and is emitted only alongside `misc` (PROTOCOL §3.14, §5.6(c)); the translator keeps its inference on an untagged (pre-redeploy) capture and VERIFIES it against the tag on a new one, so a Combust whose tag is not `hpLoss` aborts. The tag's LIVE witness is `UNVERIFIED-until-captured` and is **S3.23**'s: exactly five classes declare the union's members (Malleable, Invincible, Flight, Combust, Echo Form) and none of them can appear in an Act-1 Ironclad run, so the preflight could not witness it and an Act-2 crossing witnesses it automatically |
-| **`--replay` compares `RunState`, not in-combat card COSTS** | S2.43 read-out ("worth its own row"); [verification/s2-verification.md](verification/s2-verification.md) §9 limit 2 | **S3.53** | **ACCEPTED INTO S3 SCOPE, and re-rated from "worth a row" to load-bearing.** A whole cost-state family reached the S2 depth wave undetected because no acceptance surface compared in-combat card costs against a capture. Under the evidence rule the replay differ *is* the acceptance surface, so a blind spot in it is a blind spot in the project's only marker of truth. S3.53 closes it and the event-grid-mask sibling below |
-| **Audit the event-grid legal-action masks against live captures** | raised as a background-task chip at the S2-G2 close (2026-08-27); **no ledger row was ever written for it**, which is why it is being written here | **S3.53** | **ACCEPTED INTO S3 SCOPE, with its provenance stated honestly:** this obligation exists as a one-line note in the S2 session hand-off and nowhere in the repository, so its exact original scope is not recoverable. S3.53 therefore defines it: for every screen that presents a card/relic grid (Neow, campfire Smith/Toke, event grids, the shop purge grid, the boss-relic screen), compare the **engine's legal-action mask** against the live `ChoiceScreenUtils` candidate list on a real capture, and make the comparison an acceptance surface rather than an inspection. Motivated by the same S2 findings the row above cites, plus The Library GRID identity and the Match-and-Keep index-space fixes |
+| **`--replay` compares `RunState`, not in-combat card COSTS** | S2.43 read-out ("worth its own row"); [verification/s2-verification.md](verification/s2-verification.md) §9 limit 2 | **DISCHARGED 2026-09-03 by S3.53** | **ACCEPTED INTO S3 SCOPE, and re-rated from "worth a row" to load-bearing.** A whole cost-state family reached the S2 depth wave undetected because no acceptance surface compared in-combat card costs against a capture. Under the evidence rule the replay differ *is* the acceptance surface, so a blind spot in it is a blind spot in the project's only marker of truth. S3.53 closes it and the event-grid-mask sibling below. **DISCHARGED 2026-09-03 by S3.53** — `replay_run_diff --costs` (`sts::translate::diff_combat_costs`, `combat_vitals.hpp`/`.cpp`) compares every in-combat card's live cost (`costForTurn`, XCOST/UNPLAYABLE sentinels included) per pile, grouped by the vitals compare's own (id, upgrades) key, as a sorted multiset — and UNLIKE `--vitals` a divergence reaches the exit code. Zero-diff on all three committed corpora under all three touched presets; the negative control (raising one in-HAND card's cost by 1) fails loud on every corpus (`tools/corpus_replay.sh`). What the dump cannot supply is named in the compare's own header rather than assumed away: `AbstractCard.cost`, `isCostModified`/`isCostModifiedForTurn` and `freeToPlayOnce` are never emitted, only `costForTurn`, so a mis-set persistent-cost bit is observable only through the number it later produces. A 90-capture real-run sweep outside the committed corpora (`_oracle_data/s3/s353_sweep.tsv`) found the compare has teeth: 5 of 90 captures show a real, reproducible cost divergence, every one traced to Snecko's Eye/Confusion or Blood for Blood (new Deferred rows below), none a false positive of the compare itself |
+| **Audit the event-grid legal-action masks against live captures** | raised as a background-task chip at the S2-G2 close (2026-08-27); **no ledger row was ever written for it**, which is why it is being written here | **DISCHARGED 2026-09-03 by S3.53** | **ACCEPTED INTO S3 SCOPE, with its provenance stated honestly:** this obligation exists as a one-line note in the S2 session hand-off and nowhere in the repository, so its exact original scope is not recoverable. S3.53 therefore defines it: for every screen that presents a card/relic grid (Neow, campfire Smith/Toke, event grids, the shop purge grid, the boss-relic screen), compare the **engine's legal-action mask** against the live `ChoiceScreenUtils` candidate list on a real capture, and make the comparison an acceptance surface rather than an inspection. Motivated by the same S2 findings the row above cites, plus The Library GRID identity and the Match-and-Keep index-space fixes. **DISCHARGED 2026-09-03 by S3.53** — `replay_run_diff --masks` (`tools/oracle_bridge/replay/src/grid_masks.hpp`, new file) compares the engine's legal-action mask against the live `ChoiceScreenUtils` candidate list on five screen kinds, each honouring its own index space: MASTER_DECK (positional, reusing `open_grid_session`'s ascending/pending-bottle-reversed order), CONFIRM (the display-only `isJustForConfirming` grid, discriminated from an ordinary mid-pick `confirmScreenUp` MASTER_DECK grid via the three `for_upgrade`/`for_transform`/`for_purge` flags — the first draft conflated the two and reported false 0-vs-16 divergences on every mid-selection Smith grid), COMBAT_PILE (multiset, containment for a multi-pick grid's shrinking sim list), LIBRARY_BOARD (positional, reverse roll order, the same mapping `command_map.hpp` uses to resolve a press) and BOSS_RELIC (positional against `RunState::boss_chest.relics[]`, schema v8). An unpaired screen is counted, never judged. Zero-diff on all three committed corpora; the negative control (bumping one grid row's `upgrades` by 1, skipping a `confirm_up` row) fails loud on every corpus. The 90-capture sweep found **zero** mask divergences anywhere — every compared grid record across 70 S2.V3 + 20 S3.23 captures agreed with the capture's candidate list |
 | **SecretPortal: should the simulator model a wall clock?** | S2.43 ("OWNER CALL LEFT OPEN"); [verification/s2-verification.md](verification/s2-verification.md) §9 limit 4 | **RE-DEFERRED — owner policy call, not engineering** | Both sides are pinned to `playtime = 0` today (the engine's `kUnmodelledPlaytimeSeconds`; the fork's `OraclePlaytimePinPatch`), so **no capture can disagree with the sim** and the question is invisible to every S3 bar. The 2026-08-10 ratification rested on "the event is avoidable and essentially never optimal", which is true of the event and not of the draw-index shift its omission causes — that is the open half. It is out of S3 scope because deciding it is a scope decision about what the simulator *is*, and because acting on it would unpin the fork mid-stage. Surfaced to the owner with the S3 plan; carried by s2-design §5 trap 5 until answered |
 | `colorlessCardPool` is shuffled IN PLACE by `returnColorlessCard` | B4.13 (stage-b, UNASSIGNED) | **RE-DEFERRED** | Act 4 adds no colorless consumer beyond the shop, which S1 already models; the row's named consumer turned out not to be one and S3 does not create a new one. Stays in the stage-b table |
 | `replay` generalized to seed a sim replay from any translated `RunState` (narrowed to the mid-run resume) | B1.6 (stage-b, UNASSIGNED) | **RE-DEFERRED** | Tempting under the evidence rule and still wrong for S3: a mid-run resume would let a capture be scored from Act 4 without the run that got there, which is exactly the shortcut design §6.1 refuses. Revisit only if the Act-4 reach cost proves prohibitive **and** the owner sanctions a weaker evidence chain |
@@ -146,6 +146,9 @@ are S3's own.
 | `RETAIN` `CardFlag` end-of-turn sweep | B3.1 (stage-b, "first content consumer") | **RE-DEFERRED** | No Act-4 card or relic uses Retain; the first consumer is still an S4 character |
 | Archived soak kv summaries predating the `victories` counter no longer parse | fix-postboss-shop (stage-b, UNASSIGNED) | **RE-DEFERRED** | S3.52 rewrites the soak's counters again (four-act buckets, key coverage), so any parser work done now is thrown away; the loud-failure behaviour is correct in the meantime |
 | --- | --- | --- | --- |
+| **Snecko's Eye/Confusion: a `MAKE_CARD` self-copy does not inherit the source card's Confusion-randomized cost** | S3.53 sweep (`_oracle_data/s3/s353_sweep.tsv`, 2026-09-03) | **UNASSIGNED** | Witnessed in 3 of the 70 S2.V3 captures the sweep ran `--costs` over, all three carrying Snecko's Eye (`Confusion`): `s2v3_wave1_STS206243_ps5` (seq=338 floor=31 turn=3, `discard[Anger].cost: [1\|1] -> [0\|1]`, persisting through at least seq=345), `s2v3_wave1_STS216263_ps95` (seq=285 floor=27 turn=3, `discard[Anger].cost: [2\|2] -> [0\|2]`) and `s2v3_wave2_STS200527_ps9` (seq=39 floor=3 turn=4, `discard[Anger].cost: [1\|1] -> [0\|1]`). Anger's `MAKE_CARD` self-copy (`registry/cards.yaml` id 11) reseeds the copy at the registry base cost (0); the real game's `makeStatEquivalentCopy` (AbstractCard.java:825-848, already cited in the card's `provenance` for `timesUpgraded`) is not yet checked for whether it also carries forward a Confusion-rolled `cost`/`costForTurn` on the source instance, which is what the capture shows it does. `--replay` and `--vitals` both stay clean because neither compares cost, so this was invisible before S3.53. Not chased past identification, per the task's scope (conventions.md's 2026-09-03 owner directive: real-run evidence over root-cause spelunking outside a task's own brief) |
+| **Blood for Blood's `tookDamage` cost reduction under-counts by one HP-loss event relative to the capture, in the HAND** | S3.53 sweep (`_oracle_data/s3/s353_sweep.tsv`, 2026-09-03) | **UNASSIGNED** | Witnessed in 2 of the 70 S2.V3 captures: `s2v3_wave2_STS227212_ps88` (seq=508 floor=35 turn=5, `hand[Blood for Blood].cost: 2 -> 3`) and `s2v3_wave2_STS228756_ps285` (seq=452 floor=31 turn=2, `hand[Blood for Blood].cost: 3 -> 4`) — in both, the SIM's cost sits one HIGHER than the capture's. The HAND is the one pile `--costs` tolerates nothing in (combat_vitals.hpp), so this is not the animation-deferred `resetAttributes` shape the compare already excuses. `cards_took_player_damage` (`src/engine/interp/interp_damage.cpp:714-754`) does implement the per-event `updateCost(-1)` on hand/discard/draw and is called once per positive player HP-loss event (:954-955), so the gap reads as one missed or miscounted trigger rather than an absent feature — a HP-loss path that reaches the player without routing through the counted call site is the leading candidate. Not chased past identification, per the task's scope |
+| **A pre-existing `--replay` RunState divergence at an Act-3 double-boss `proceed` handoff, unrelated to cost or mask** | S3.53 sweep (`_oracle_data/s3/s353_sweep.tsv`, 2026-09-03) | **UNASSIGNED** | `s2v3_wave2_STS205404_ps20` diverges on the base `--replay` walk (not `--costs`/`--masks`, both clean on this file) at seq=894 floor=50 screen=COMPLETE cmd='proceed': `hp: 36 -> 61`, `floor: 50 -> 51`, six `relics[i].counter` rows, and `boss_ids[2]: 59 -> 58`. This is an S2.V3-era capture (2026-08-27 campaign) predating the S2-G2 divergence-harvest's double-boss handoff fixes named in the session hand-off ("the double-boss handoff bossKey"), so it may be stale rather than live — no other capture in this sweep, and neither committed corpus, reproduces it. Outside S3.53's two-named blind spots; recorded rather than chased. A fresh capture on the current engine would settle stale-vs-live |
 | **conventions.md still carries the superseded unit-test wording** | this planning exercise (S3 ledger creation, 2026-09-03) | **DISCHARGED 2026-09-03** — conventions `dd15937` (§1 owner-directive block, §5 "no rule without its witness") | Recorded while this ledger was drafted, before the orchestrator amended conventions.md the same day. No S3 brief was dispatched in between, so the condition ("before the first S3 task is dispatched") held. A real document conflict under conventions §4, recorded rather than silently tolerated. conventions §1 ("Tests land in the same change as the code they verify. Registry YAML is code: entries land with their tier-2 tests in one commit"), §5's "No rule without its test — … for registry entries the test is the tier-2 table test", and §6's three-ways-the-test-suite-lies subsection all describe a practice the 2026-09-03 owner directive retires. This planning exercise was scoped to two new documents plus two one-line cross-references and could not edit that file. conventions.md is the authority that wins on conflict, so **it must be amended to carry the directive before it is quoted at an S3 agent**, or the first brief will cite a rule the ledger contradicts |
 | **The `SpireHeart$CUR_SCREEN` enum order is derived, not read** | s3-design §4.1 | **DISCHARGED 2026-09-03 by S3.31** — recovered mechanically, and the derivation was RIGHT: `INTRO 0, MIDDLE 1, MIDDLE_2 2, DEATH 3, GO_TO_ENDING 4`. The `RECOVERED-INNER-CLASSES.md` §2 procedure was run against the shipped `desktop-1.0.jar` (SHA-256 `cfad868a…e081673`, the value that file pins, re-verified at task time) — but with `javap` rather than CFR, because the tree's `cfr-0.152.jar` and `sts-classes.jar` are no longer on disk and the switch-map is more legible as bytecode anyway. `javap -c -p 'SpireHeart$1'` shows `$SwitchMap[INTRO.ordinal()] = 1 … [GO_TO_ENDING.ordinal()] = 5` in order, and `javap -p 'SpireHeart$CUR_SCREEN'` declares the five constants in that same order, so the decompile's bare `case N:` labels are the ordinals plus one. `VictoryRoom$EventType` was recovered in the same pass (`HEART = 1`, `NONE = 2`), confirming that `VictoryRoom.onPlayerEntry`'s `case 1:` is the HEART arm. The recovered classes are NOT committed (conventions §2 licence hygiene); the derivation is recorded at `src/engine/events/spire_heart.cpp`'s header, and `EventDialogState::screen` IS the game's ordinal so no second numbering exists to drift | The inner enum was stripped from the decompile source jar, so CFR rendered the switch with bare integer labels. The mapping (INTRO=1, MIDDLE=2, MIDDLE_2=3, DEATH=4, GO_TO_ENDING=5) is derived unambiguously from the arms' bodies, but "derived" is not "read in full" (stage-a §1). Recover it mechanically via `RECOVERED-INNER-CLASSES.md` §2 and cite the recovered file, or record the derivation as the provenance with the reason |
 | **Back-attack facing: model it, or collapse it?** | s3-design §2.3 | **S3.42** | `applyBackAttack` (AbstractMonster.java:1015-1017) reads the player's `flipHorizontal`, which changes when a target is hovered (AbstractPlayer.java:1291-1293) and is re-evaluated on every hand layout (CardGroup.java:204-223). The proposed collapse — "with exactly two guards, the one the player is not facing takes 1.5×" — must be proven exact or rejected, against those three methods read in full **and** against a live Shield-and-Spear capture where the player attacks each guard in turn |
@@ -2131,7 +2134,7 @@ are S3's own.
   uncommitted under the campaign data root.
   **Log:** —
 
-- **S3.53** `[ ]` ∥ **Close the two replay blind spots.** Under the evidence
+- **S3.53** `[x]` ∥ **Close the two replay blind spots.** Under the evidence
   rule the replay differ *is* the acceptance surface, so its blind spots are
   the project's blind spots. Two, both inherited. (a) **In-combat card
   costs:** `--replay` compares `RunState` and therefore not card cost state,
@@ -2154,7 +2157,95 @@ are S3's own.
   and names (the `OracleCorpusReplay.ThreeActInjectedSyntheticDivergenceFailsLoud`
   pattern — a comparison nobody has seen fail is not a comparison); six
   presets **build**.
-  **Log:** —
+  **Log:** 2026-09-03. Landed both blind-spot closures as new `replay_run_diff`
+  modes, `--costs` and `--masks`, each reaching the exit code (an acceptance
+  surface, not an inspection) — full contract in each's block at the top of
+  `tools/oracle_bridge/replay/src/main.cpp` and, for costs, the doc comment
+  above `diff_combat_costs` in `combat_vitals.hpp`.
+
+  **(a) `--costs`** (`sts::translate::diff_combat_costs`,
+  `combat_vitals.hpp`/`.cpp`): every in-combat card's live cost —
+  `costForTurn`, XCOST/UNPLAYABLE sentinels included — grouped per pile by the
+  `--vitals` compare's own (id, upgrades) key, compared as a sorted multiset.
+  What the dump cannot supply is named rather than assumed away:
+  `convertCardToJson` emits only `costForTurn`, never `AbstractCard.cost`,
+  `isCostModified`/`isCostModifiedForTurn`, or `freeToPlayOnce`, so the
+  engine's SAVED_BASE_COST payload and its two modifier bits are observable
+  only through the number they later produce — a filed emitter gap, not
+  something this compare can close. One tolerated shape: the game's
+  animation-deferred `resetAttributes` (Soul.java, on a move into
+  draw/discard; ExhaustCardEffect, on exhaust) leaves the capture briefly
+  behind the sim's already-settled value in exactly those three piles,
+  recognised by cancelling the two sides' common instances and requiring
+  every leftover capture cost be 0 against a positive sim cost; HAND and
+  LIMBO get no tolerance. Every tolerated row is counted and named under
+  `--verbose`.
+
+  **(b) `--masks`** (`tools/oracle_bridge/replay/src/grid_masks.hpp`, new
+  file): the engine's legal-action mask against the live `ChoiceScreenUtils`
+  candidate list, on five screen kinds each in its own index space —
+  MASTER_DECK (positional, reusing `open_grid_session`'s
+  ascending/pending-bottle-reversed order rather than restating it), CONFIRM
+  (the display-only `isJustForConfirming` grid, discriminated from an
+  ordinary mid-pick `confirmScreenUp` MASTER_DECK grid via the three
+  `for_upgrade`/`for_transform`/`for_purge` flags — the first draft conflated
+  the two and reported false 0-vs-16 divergences on every mid-selection Smith
+  grid), COMBAT_PILE (multiset, containment for a multi-pick grid's shrinking
+  sim list), LIBRARY_BOARD (positional, reverse roll order, the same mapping
+  `command_map.hpp` uses to resolve a press) and BOSS_RELIC (positional
+  against `RunState::boss_chest.relics[]`, schema v8). A record with no
+  paired sim screen is UNPAIRED and counted, never judged — that desync is
+  `--replay`'s to name.
+
+  **Corpus acceptance.** All three committed corpora (`act1_a20_50`,
+  `three_act_a20_5`, `keys_a20_4`) replay zero-diff under `--replay`,
+  `--costs` and `--masks` alike (`tools/corpus_replay.sh`, extended with the
+  two new `clean`/`control` call families); `--vitals` stays clean on
+  `three_act_a20_5`. Nine injected negative controls all fail loud, one per
+  corpus per kind: `state` (the inherited whole-run control, one action
+  record's `current_hp`), `cost` (raises one in-HAND card's `cost` by 1 — the
+  HAND because it is the one pile `--costs` tolerates nothing in), `mask`
+  (bumps one grid row's `upgrades` by 1, skipping a `confirm_up` row so the
+  control breaks the row-identity claim and nothing else).
+  `tools/verify_report/ci_corpus_smoke.py`'s `run()` now walks a corpus's
+  members until one hosts the requested injection kind's site and FAILS if
+  none does, so a green control here can never mean "nothing was injected."
+
+  **Sweep.** Both new modes ran over 90 real captures outside the committed
+  corpora — the 70 S2.V3 depth-campaign captures
+  (`_oracle_data/campaigns/s2v3_*.worker-001-of-001/run_*_a20_ironclad.jsonl`)
+  and the 20 S3.23 key-claim captures (`s323_*`) — tabulated per capture
+  (run/costs/masks verdict, first divergent seq + floor/turn/kind + field
+  count) in `_oracle_data/s3/s353_sweep.tsv`. 84 of 90 are clean on every
+  axis; **masks are clean on all 90**, zero divergences anywhere in the
+  sweep. Six captures carry a finding:
+  - **Snecko's Eye/Confusion vs. `MAKE_CARD`** (3 captures, all carrying
+    Snecko's Eye) — Anger's self-copy does not inherit the source card's
+    Confusion-randomized cost; the sim reseeds the copy at the registry base
+    (0) while the capture keeps the rolled value. New Deferred row
+    (UNASSIGNED).
+  - **Blood for Blood** (2 captures) — in the HAND, the sim's cost sits
+    consistently one HIGHER than the capture's, i.e. `cards_took_player_damage`
+    is missing or miscounting one HP-loss trigger. New Deferred row
+    (UNASSIGNED).
+  - **One unrelated finding** — `s2v3_wave2_STS205404_ps20` diverges on the
+    base `--replay` walk (not cost/mask) at the Act-3 double-boss `proceed`
+    handoff; an S2.V3-era capture possibly stale against the S2-G2
+    divergence-harvest fixes. New Deferred row (UNASSIGNED).
+
+  None of the six is a false positive of the two new compares — every
+  divergence is a real capture-vs-sim disagreement — and the sweep's own
+  design (walking real, uncurated captures rather than only the hand-picked
+  committed corpora) is what surfaced them: exactly the blind-spot-closing
+  this task exists for. Per the task's scope and the conventions.md
+  2026-09-03 owner directive, none of the three findings was chased into an
+  engine fix; each is recorded as its own Deferred row above the line drawn
+  for S3's own obligations.
+
+  **Builds.** All six presets green: `win-debug`, `win-release`, `win-asan`
+  (via a task-scoped `vcvars64`+LLVM wrapper) and WSL `debug`/`asan`/`release`
+  (`tools/build_presets.sh` through `tools/wsl_run.sh --script`).
+  `tools/check_stale_counts.sh` and `tools/check_doc_links.sh` both exit 0.
 
 ### S3-G1 `[ ]` **Gate: S3 rules complete** — tag `s3-g1-content`
 **Deps:** all S3.1x, S3.2x, S3.3x, S3.4x, S3.5x

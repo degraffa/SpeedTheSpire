@@ -47,9 +47,10 @@
 //     reads a dead monster's block or powers. A HALF-DEAD monster (Darkling,
 //     Awakened One phase 1) is `isDeadOrEscaped` too but still takes its turn
 //     and keeps its powers, so its block and powers ARE compared.
-//   * per-card cost / misc / flag state, and power `counter`s. Neither is on
-//     the vitals bar this projection answers; both remain in the raw
-//     `--combat` walk.
+//   * per-card misc / flag state, and power `counter`s. Neither is on the
+//     vitals bar this projection answers; both remain in the raw `--combat`
+//     walk. Per-card COST is no longer on this list -- it has its own compare,
+//     `diff_combat_costs`, over the same projection; see the block below.
 //   * monster intent / move history: `move_id` is compared by the raw walk and
 //     the intent banner is display-derived (PROTOCOL.md §3.12).
 //   * on a HAND_SELECT record, a card the CAPTURE'S hand is missing. The action
@@ -99,11 +100,30 @@ struct VitalsPower {
     bool known = true;
 };
 
-// One card instance, by identity: (game id, timesUpgraded).
+// One card instance, by identity: (game id, timesUpgraded), plus the DISPLAYED
+// energy cost the `--costs` compare (below) reads. `--vitals` never looks at
+// `cost`: its multiset key is (id, upgrades) and stays exactly that.
 struct VitalsCard {
     std::string id;
     int upgrades = 0;
     bool known = true;
+    // AbstractCard.costForTurn AS THE GAME REPORTS IT, sentinels included:
+    // -1 == X-cost, -2 == unplayable, otherwise the energy actually charged.
+    // Capture side: `cost` straight out of the dump (GameStateConverter
+    // .convertCardToJson:822), taken BEFORE the translator's clamp of the
+    // sentinels to CardInstance::cost_now's unsigned 0. Sim side: the same
+    // number reconstructed from the live instance -- -1 for an XCOST row, -2
+    // for an UNPLAYABLE one, else `cost_now` -- because the registry maps the
+    // game's two negative cost sentinels onto those flags with base_cost 0
+    // (tools/registry_gen/stsgen/emit/cards.py `parse_card_flags`), so a
+    // sentinel is stored as a flag and a real cost as a number.
+    int cost = 0;
+    // False on a capture card whose dump carried NO `cost` key. The stock
+    // converter always emits one, so this is only ever false for a capture
+    // made by some future/older emitter; `CombatVitals::costs_available`
+    // aggregates it per record and the compare declines such a record rather
+    // than reading a defaulted 0 as a claim. Always true on the sim side.
+    bool cost_known = true;
 };
 
 struct VitalsMonster {
@@ -136,6 +156,11 @@ struct CombatVitals {
     // equality. Never set by `vitals_from_combat_state` -- the sim's hand is
     // always whole.
     bool hand_partial = false;
+    // Set on the CAPTURE side by the translator: every card of every pile in
+    // this record carried a `cost` key, so `diff_combat_costs` may read them.
+    // A record where it is false is DECLINED by the costs compare and counted,
+    // never compared against a defaulted zero. Always true on the sim side.
+    bool costs_available = true;
 };
 
 // The sim side of the compare: project a live CombatState. Monster liveness
@@ -154,6 +179,12 @@ struct VitalsFieldDiff {
 
 struct VitalsReport {
     std::vector<VitalsFieldDiff> diffs;
+    // `diff_combat_costs` only: the rows it recognised as the game's
+    // ANIMATION-DEFERRED `resetAttributes` and therefore kept OUT of `diffs`.
+    // They are carried rather than dropped so the caller can count them, name
+    // them under --verbose, and never mistake "tolerated" for "not there".
+    // Always empty from `diff_combat_vitals`.
+    std::vector<VitalsFieldDiff> tolerated;
     // Every unresolved id met on either side, as "<domain>:<id>" (domain in
     // {power, card, monster}), deduplicated and sorted -- the caller reports
     // each once per file.
@@ -174,5 +205,90 @@ struct VitalsReport {
 // "(absent)"; a pile row's value is the count of that key.
 [[nodiscard]] VitalsReport diff_combat_vitals(const CombatVitals& game,
                                               const CombatVitals& sim);
+
+// ---- the in-combat COST compare (S3.53 (a), behind `--costs`) --------------
+//
+// THE GAP THIS CLOSES. `--replay` compares RunState, which has no in-combat
+// card at all, and the two combat-side compares above it both look away from
+// cost by construction: `--vitals` keys its piles on (id, upgrades) and says so,
+// and `--combat`'s raw CombatState walk is index-sensitive and is a diagnosis
+// print, never a verdict. So no acceptance surface in this repository has ever
+// compared a card's live cost against a capture -- which is how a whole
+// cost-state family (Corruption's combat-persistent zero, the
+// COST_MODIFIED_FOR_TURN / SAVED_BASE_COST bookkeeping, and the
+// `resetAttributes`-on-every-move-into-draw/discard rule) reached the S2 depth
+// wave undetected (s2-verification.md §9 limit 2).
+//
+// WHAT IS COMPARED. Per pile (hand / draw / discard / exhaust / limbo), the
+// cards are grouped by the SAME (id, upgrades) key `--vitals` uses and each
+// group's costs are compared as a SORTED MULTISET. Two Strikes at 1 and 0 read
+// `[0|1]`, so one instance's drift is one row that names both cost lists --
+// rather than the two phantom rows a (id, upgrades, cost) key would produce
+// (`Strike` 2 -> 1 and `Strike@0` 0 -> 1), neither of which says "cost".
+// Pile order never enters it, exactly as in `--vitals`: the dump's draw pile is
+// not the shuffled order (PROTOCOL.md §3.10), so a positional cost compare
+// there would be comparing the protocol's shuffle, not the rules.
+//
+// WHAT THE DUMP CANNOT SUPPLY, stated precisely because it bounds the claim.
+// `convertCardToJson` emits exactly ONE cost number per card, `card.costForTurn`
+// (:822). It does NOT emit `AbstractCard.cost` (the combat BASE cost a permanent
+// writer -- Confusion, Blood for Blood, Enlightenment+ -- moves), nor
+// `isCostModified` / `isCostModifiedForTurn`, nor `freeToPlayOnce`. So the
+// engine's SAVED_BASE_COST payload, its COST_MODIFIED_FOR_TURN bit and its
+// FREE_TO_PLAY_ONCE bit are each only OBSERVABLE here through the costForTurn
+// they later produce -- a mis-set bit is caught at the reset that restores the
+// wrong number, one record later, not at the moment it is set. Closing that
+// last gap needs three more fields from the fork; it is a filed emitter gap,
+// not something this compare can infer.
+//
+// THE ONE TOLERATED SHAPE, and why it is not an exclusion of convenience.
+// Two of the three seams at which the game runs `resetAttributes` are
+// ANIMATION-DEFERRED, so the CAPTURE is behind the rules on exactly those
+// transitions while the headless model, which collapses the animation, is
+// already at the settled value:
+//
+//   * a move into the DRAW or DISCARD pile hands the card to a `Soul`, which
+//     reaches its pile a beat later and only then runs `clearPowers() ->
+//     resetAttributes()` (Soul.java:193-231; piles.hpp `reset_cost_for_turn`
+//     has the full seam list). The recorded case is STS101166 floor 20:
+//     `Bash+(cost 0)` in the discard at seq 330 and `Bash+(cost 2)` at 331.
+//   * an EXHAUST runs through `ExhaustCardEffect.update:41-43`, an
+//     AbstractGameEffect with a duration, and resets when it expires.
+//
+// The third seam -- the end-turn sweep over draw/discard/hand
+// (AbstractRoom.endTurn:397-405) -- is a direct call, not an effect, so it is
+// NOT deferred; the HAND and LIMBO are therefore never excused here.
+//
+// So a row is classified as the deferred reset, moved to `tolerated` and kept
+// out of `diffs`, iff ALL of: the pile is draw / discard / exhaust; the two
+// cost lists are the same length; and, AFTER CANCELLING WHAT THE TWO SIDES
+// HAVE IN COMMON, every remaining capture cost is 0 -- the `setCostForTurn`
+// family (Corruption, Mummified Hand, Infernal Blade, Madness) that every
+// observed instance of the lag belongs to -- while every remaining sim cost is
+// positive. The cancellation is what makes it right for a key with several
+// instances; `deferred_reset_shape` in the .cpp says why a positional walk is
+// not.
+//
+// THE RESIDUAL WEAKNESS, named rather than glossed: with the fields the dump
+// carries this shape is not distinguishable, at a single record, from an
+// engine that simply failed to zero a card sitting in one of those three
+// piles. `isCostModifiedForTurn` is exactly the field that would separate them
+// and the fork does not emit it (the gap above). Two things bound the cost of
+// that: the shape excuses ONLY a capture-side 0 against a higher sim value in
+// those three piles -- a live `Blood for Blood: 3 -> 4` stays a reported
+// divergence -- and the HAND, which is where a cost modifier is actually
+// spent, is compared with no tolerance at all. The caller counts and prints
+// every tolerated record.
+//
+// The HAND_SELECT containment rule is inherited unchanged: on such a record the
+// capture's hand is the opening action's eligible SUBSET, so a key whose costs
+// the capture merely has FEWER of is not judged, while a cost the capture has
+// and the sim does not is still a divergence.
+//
+// Field names: `<pile>[<card key>].cost`, with the same card key `--vitals`
+// prints (`Strike_R`, `Bash+`, `Searing Blow+3`). A value is the sorted cost
+// list (`1`, `[0|1]`) or `(absent)`.
+[[nodiscard]] VitalsReport diff_combat_costs(const CombatVitals& game,
+                                             const CombatVitals& sim);
 
 }  // namespace sts::translate
