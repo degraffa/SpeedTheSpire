@@ -123,7 +123,32 @@ enum class PolicyKind : uint8_t {
     // before and after this value existed. Key-seeking is measured COSTLY --
     // see docs/verification/s3-22-key-reach.md for the paired table.
     SIM_SEARCH_KEYS = 8,
-    COUNT = 9,
+    // The information-limited twin of SIM_SEARCH (GT1/T2.2's fair scripted
+    // baseline). T2.2's first combat expert-iteration run lost to SIM_SEARCH
+    // at p=1.0, and nobody knew how much of that gap was SEARCH QUALITY versus
+    // INFORMATION: SIM_SEARCH's rollout copy carries the TRUE controller,
+    // hidden draw order and all, while a trained agent can only search over
+    // `resample_hidden` particles (training-contract.md's declared hidden
+    // set). This kind answers that by making exactly ONE substitution at
+    // sim_search_pick's rollout-snapshot sites (policy_search.cpp): the
+    // world every candidate is rolled out against is a `resample_hidden`
+    // twin of `rc`, drawn ONCE per decision from a `SamplerRng` seeded off a
+    // fresh `PolicyRng::next()` draw -- so every candidate in one decision is
+    // compared under the SAME resampled world (common random numbers), and
+    // the case stays a pure function of its CaseId (`--verify-determinism`
+    // holds). Scorer, run-layer heuristics and the shared one-draw tie-break
+    // are otherwise byte-identical to SIM_SEARCH -- every kind gate above
+    // (`kind_holds_powers`, `kind_seeks_keys`, the `SIM_SEARCH_SKIP`
+    // boss-relic answer) is an explicit `==` against ITS kind, so this value
+    // falls through to SIM_SEARCH's behaviour in all of them by construction.
+    // IT IS A SEPARATE KIND, NOT A CHANGE TO SIM_SEARCH, on the
+    // SIM_SEARCH_HOLD/SIM_SEARCH_KEYS precedent: SIM_SEARCH's own output over
+    // a fixed seed_scan range must stay byte-identical, which this kind's
+    // acceptance proves by sha256. `SIM_SEARCH - SIM_SEARCH_BLIND` on paired
+    // seeds is the measured information premium -- see
+    // docs/verification/sim-search-blind.md.
+    SIM_SEARCH_BLIND = 9,
+    COUNT = 10,
 };
 
 [[nodiscard]] const char* policy_name(PolicyKind k) noexcept;

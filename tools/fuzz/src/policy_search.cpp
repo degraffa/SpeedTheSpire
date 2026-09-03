@@ -73,6 +73,7 @@
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/neow.hpp"
 #include "sts/engine/potions.hpp"
+#include "sts/engine/resample.hpp"
 #include "sts/engine/run_advance.hpp"
 
 namespace sts::fuzz {
@@ -81,9 +82,12 @@ using engine::Action;
 using engine::ActionVerb;
 using engine::CardId;
 using engine::RelicId;
+using engine::resample_hidden;
 using engine::RunActionMask;
 using engine::RunController;
 using engine::RunPhase;
+using engine::sampler_rng_from_seed;
+using engine::SamplerRng;
 using engine::StepResult;
 using sts::registry::CardTargetKind;
 using sts::registry::CardType;
@@ -1303,6 +1307,26 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
     const bool in_combat = rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
     if (n > kMoveCap) n = kMoveCap;  // enumerate_moves already guarantees this
 
+    // SIM_SEARCH_BLIND: THE ONE SUBSTITUTION (docs/verification/
+    // sim-search-blind.md). Every other kind rolls candidates out over `rc`
+    // itself -- the TRUE controller, hidden draw order and all. This kind
+    // instead rolls every candidate out over `rollout_world`, a
+    // `resample_hidden` TWIN of `rc` drawn exactly ONCE here, before the
+    // candidate loop, so every candidate THIS DECISION sees the SAME
+    // resampled world (common random numbers -- candidates differ only in the
+    // move applied, never in which particle they were compared under). The
+    // seed is a fresh `PolicyRng::next()` draw: `rng` is the policy's own
+    // stream (never an engine stream), so this draw is SAMPLER-PRIVATE and
+    // costs the engine zero draws (resample.hpp's header note), and the case
+    // stays a pure function of its CaseId. `rollout_world` equals `rc` for
+    // every other kind, i.e. every "RunController sim = rc" rollout snapshot
+    // below reads `rollout_world` and the substitution is a no-op there.
+    RunController rollout_world = rc;
+    if (kind == PolicyKind::SIM_SEARCH_BLIND) {
+        SamplerRng sampler_rng = sampler_rng_from_seed(static_cast<int64_t>(rng.next()));
+        resample_hidden(rollout_world, sampler_rng);
+    }
+
     // One score per candidate. Combat: 1-ply + scripted completion over an
     // engine snapshot. Run layer: the greedy_policy.py band port. The scores
     // live in a fixed stack array (kMoveCap entries) so each candidate is
@@ -1332,7 +1356,7 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             if (rc.combat.turn > kSearchTurns) {
                 scores[i] = completion_rank(rc, moves[i], false, hold_powers);
             } else {
-                RunController sim = rc;  // trivially-copyable snapshot
+                RunController sim = rollout_world;  // trivially-copyable snapshot
                 apply_one(sim, moves[i].action);
                 scores[i] =
                     rc.room_type ==
@@ -1375,7 +1399,7 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             // keeps its greedy_policy.py band -- rest/smith and card-take
             // value lives in state the run evaluation cannot see (upgrades,
             // deck quality), so a rollout would systematically misjudge them.
-            RunController sim = rc;
+            RunController sim = rollout_world;
             apply_one(sim, moves[i].action);
             scores[i] = rollout_floor_and_eval(kind, sim);
             // K3/K4 (S3.22): the key appetite, on the OUTER map decision only.
@@ -1411,6 +1435,10 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             for (size_t i = 0; i < n; ++i) {
                 if (scores[i] != m) continue;
                 any_at_max = true;
+                // Deliberately `rc`, not `rollout_world`: this is a structural
+                // check of whether the REAL game's advance() is a no-op for
+                // this action (the Drug Dealer re-pick corner above), not part
+                // of the rollout scoring the twin substitution covers.
                 RunController sim = rc;
                 apply_one(sim, moves[i].action);
                 if (std::memcmp(&sim, &rc, sizeof(RunController)) != 0) {
