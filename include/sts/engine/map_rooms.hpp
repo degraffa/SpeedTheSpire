@@ -46,11 +46,12 @@
 //   setEmeraldElite (a live-oracle finding, not read off the decompiled source):
 //     on the fully-unlocked A20 profile the guard
 //     `Settings.isFinalActAvailable && !hasEmeraldKey` (AbstractDungeon.java:543)
-//     PASSES, so mapRng.random(0, eliteNodes.size()-1) (:551) FIRES exactly once
-//     after room assignment -> +1 wrapper draw. This overturns the scoping
-//     report's H6/R3 ("gated off in S1"); the live oracle settled it. Modelled
-//     here (the chosen elite's key flag itself is out of S1 scope; the DRAW and
-//     its s0/s1 effect are what the {counter,s0,s1} oracle match needs).
+//     PASSES **while the run holds no emerald key**, so mapRng.random(0,
+//     eliteNodes.size()-1) (:551) FIRES exactly once after room assignment ->
+//     +1 wrapper draw. This overturns the scoping report's H6/R3 ("gated off in
+//     S1"); the live oracle settled it. S3.11 made the SECOND conjunct live:
+//     the draw is skipped, and no node marked, on every act generated after the
+//     key is taken (the `has_emerald_key` parameter of assign_room_types).
 //   H2 float Math.round: quotas are Math.round((float)count * chance), the
 //     multiply in float precision. Java 8 Math.round(float) is replicated
 //     bit-for-bit in java_round_f below (not a naive double round -- half-integer
@@ -316,8 +317,19 @@ namespace detail {
 // 517-540 + RoomTypeAssigner). `g.rng` must be at the post-path mapRng state
 // (as produced by map_gen.hpp generate_map / generate_map_graph). Returns the
 // room grid and the END-of-generateMap mapRng state.
-[[nodiscard]] constexpr RoomAssignment assign_room_types(const GeneratedMap& g,
-                                                        int ascension) noexcept {
+//
+// `has_emerald_key` is `Settings.hasEmeraldKey` AT THE MOMENT THIS ACT IS
+// GENERATED -- the run's `rs.keys & kKeyEmerald`. It is the second conjunct of
+// setEmeraldElite's guard (AbstractDungeon.java:543), and that guard wraps the
+// WHOLE body: once the run holds the key, every subsequently generated act
+// skips the `mapRng.random(0, eliteNodes.size() - 1)` draw entirely and marks
+// no node, so its end-of-generateMap mapRng {counter, s0, s1} -- and therefore
+// every map generated after it -- differs from a run that never took the key.
+// This is s3-design §5 trap 1, the single highest-risk change in S3, and the
+// reason the keys are a run-layer feature rather than three booleans.
+[[nodiscard]] constexpr RoomAssignment assign_room_types(
+    const GeneratedMap& g, int ascension,
+    bool has_emerald_key = false) noexcept {
     RoomAssignment ra{};
     ra.rng = g.rng;  // continue on the exact post-path mapRng.
 
@@ -424,7 +436,7 @@ namespace detail {
         for (int x = 0; x < kGameMapCols; ++x)
             if (ra.rooms[y][x] == RoomType::Elite) ++elite_nodes;
     ra.elite_node_count = elite_nodes;
-    if (elite_nodes >= 1) {
+    if (kFinalActAvailable && !has_emerald_key && elite_nodes >= 1) {
         const int32_t chosen = random(ra.rng, 0, elite_nodes - 1);  // counter += 1
         int seen = 0;
         for (int y = 0; y < kGameMapFloors && ra.emerald_x < 0; ++y) {
@@ -444,11 +456,11 @@ namespace detail {
 
 // Convenience: path generation (map_gen.hpp) + room assignment from a run seed.
 // act_num is 1..4 (S1 = act 1); ascension gates the elite x1.6 branch (A20 = 20).
-[[nodiscard]] constexpr RoomAssignment generate_map_rooms(int64_t run_seed,
-                                                        int act_num,
-                                                        int ascension) noexcept {
+[[nodiscard]] constexpr RoomAssignment generate_map_rooms(
+    int64_t run_seed, int act_num, int ascension,
+    bool has_emerald_key = false) noexcept {
     GeneratedMap g = generate_map(run_seed, act_num);
-    return assign_room_types(g, ascension);
+    return assign_room_types(g, ascension, has_emerald_key);
 }
 
 // Encode an assigned room grid into RunState.MapNode.room_type (u8) and store the

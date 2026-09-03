@@ -65,6 +65,11 @@ namespace {
         case engine::RewardItemKind::RELIC: return "RELIC";
         case engine::RewardItemKind::CARDS: return "CARD";
         case engine::RewardItemKind::STOLEN_GOLD: return "STOLEN_GOLD";
+        // S3.11's key rows. The strings are CommunicationMod's own
+        // `reward_type` spellings, so a script line naming one joins the
+        // capture's vocabulary; the follower steps that CLAIM them are S3.22's.
+        case engine::RewardItemKind::EMERALD_KEY: return "EMERALD_KEY";
+        case engine::RewardItemKind::SAPPHIRE_KEY: return "SAPPHIRE_KEY";
         case engine::RewardItemKind::NONE: break;
     }
     return "NONE";

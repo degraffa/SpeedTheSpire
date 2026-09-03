@@ -146,11 +146,30 @@ bool dispatch_on_chest_open_impl(RunState& rs, RewardScreen& out,
     return true;
 }
 
+// AbstractRoom.removeOneRelicFromRewards (AbstractRoom.java:549-559), read in
+// full: walk the list, remove the FIRST RELIC row, then -- and only then --
+// look at the element the iterator has advanced to and remove it too when it is
+// that relic's `relicLink` (`if (!i.hasNext() || rewardItem.relicLink !=
+// i.next()) break;`). So the partner removal is an ADJACENCY test on the row
+// that followed the relic, which is exactly what
+// reward_relic_row_is_key_linked asks -- and it is why S3.11 stores no link
+// field (combat_rewards.hpp's invariant). A Matryoshka relic sitting ahead of
+// the base relic is removed instead, and its successor (the gold row) is not
+// its link, so the key survives with its own base relic: the Java breaks there
+// too.
 void remove_first_relic_item(RewardScreen& s) noexcept {
     for (uint8_t i = 0; i < s.count; ++i) {
         if (static_cast<RewardItemKind>(s.items[i].kind) !=
             RewardItemKind::RELIC) {
             continue;
+        }
+        if (reward_relic_row_is_key_linked(s, i)) {
+            // Remove the partner first so `i` still names the relic row.
+            for (uint8_t j = static_cast<uint8_t>(i + 2); j < s.count; ++j) {
+                s.items[j - 1] = s.items[j];
+            }
+            --s.count;
+            s.items[s.count] = RunRewardItem{};
         }
         for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.count; ++j) {
             s.items[j - 1] = s.items[j];
@@ -242,6 +261,14 @@ bool chest_rewards_fit(const RunState& rs,
             slot.counter > 0) {
             ++required;
         }
+    }
+    // The trailing SAPPHIRE_KEY row (AbstractChest.java:95-97), under the same
+    // gate the open applies. Counted here so a chest reported legal cannot fail
+    // mid-open at the key append -- the same discipline the relic and curse
+    // preflights follow. The worst case is gold + Matryoshka relic + base relic
+    // + key == 4, well under kRewardItemCap.
+    if (kFinalActAvailable && (rs.keys & kKeySapphire) == 0u) {
+        ++required;
     }
     return required <= kRewardItemCap;
 }
@@ -348,6 +375,23 @@ bool open_treasure_chest(RunState& rs, TreasureChest& chest,
             static_cast<RelicTier>(trial_chest.relic_tier))) {
         return false;
     }
+
+    // The SAPPHIRE_KEY append (AbstractChest.java:95-97 ->
+    // AbstractRoom.addSapphireKey, AbstractRoom.java:545-547). It sits BETWEEN
+    // the base relic and the onChestOpenAfter fan-out, which is load-bearing:
+    // N'loth's Mask fires in that fan-out and its removeOneRelicFromRewards
+    // takes the linked key with the relic, so a key appended afterwards could
+    // never be removed. No stream moves here.
+    //
+    // `!Settings.hasSapphireKey` (:95) is the gate that makes holding the key
+    // change every LATER chest (s3-design §3.4 item 2): once the run owns one,
+    // no further chest carries a key row, and the reward list shape changes
+    // even though no RNG does.
+    if (kFinalActAvailable && (trial_rs.keys & kKeySapphire) == 0u &&
+        !add_sapphire_key_reward(trial_out)) {
+        return false;
+    }
+
     dispatch_on_chest_open_after_impl(
         trial_rs, trial_out, /*boss_chest=*/false);
     trial_chest.opened = 1;

@@ -447,6 +447,33 @@ void roll_colorless_card_reward_item(RunState& rs, RewardScreen& s) noexcept {
     push_item(s) = item;
 }
 
+// AbstractRoom.addSapphireKey (AbstractRoom.java:545-547). The row links to
+// `rewards.get(rewards.size() - 1)` and is appended immediately after it, which
+// is the whole of the link (see the adjacency invariant in combat_rewards.hpp).
+bool add_sapphire_key_reward(RewardScreen& s) noexcept {
+    if (s.count == 0 || s.count >= kRewardItemCap) {
+        return false;
+    }
+    RunRewardItem& item = push_item(s);
+    item.kind = static_cast<uint8_t>(RewardItemKind::SAPPHIRE_KEY);
+    return true;
+}
+
+bool reward_relic_row_is_key_linked(const RewardScreen& s,
+                                    uint8_t index) noexcept {
+    if (index >= s.count || index >= kRewardItemCap) {
+        return false;
+    }
+    if (static_cast<RewardItemKind>(s.items[index].kind) !=
+        RewardItemKind::RELIC) {
+        return false;
+    }
+    const uint8_t next = static_cast<uint8_t>(index + 1);
+    return next < s.count && next < kRewardItemCap &&
+           static_cast<RewardItemKind>(s.items[next].kind) ==
+               RewardItemKind::SAPPHIRE_KEY;
+}
+
 bool remove_first_card_reward_item(RewardScreen& s) noexcept {
     for (uint8_t i = 0; i < s.count; ++i) {
         if (s.items[i].kind == static_cast<uint8_t>(RewardItemKind::CARDS)) {
@@ -491,7 +518,8 @@ int roll_normal_gold(RngStream& treasure_rng) noexcept {
 void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
                              RewardOutcome outcome, RewardScreen& out,
                              int32_t stolen_gold_return,
-                             bool preserve_existing) noexcept {
+                             bool preserve_existing,
+                             bool node_has_emerald_key) noexcept {
     if (!preserve_existing) {
         out = RewardScreen{};
     }
@@ -561,10 +589,28 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
             second.id = static_cast<uint16_t>(
                 return_random_non_campfire_relic_key(rs, tier2, ctx));
         }
-        // The EMERALD_KEY item (MonsterRoomElite.addEmeraldKey:94-98) follows
-        // the emerald-elite node flag, which is documented out of S1 scope
-        // (map_rooms.hpp setEmeraldElite note) -- the mapRng draw is modelled,
-        // the flag is not stored, so no key item is assembled.
+        // addEmeraldKey (MonsterRoomElite.java:94-98), called LAST in
+        // dropReward (:90) -- after the relic and after Black Star's second
+        // relic, which is why it sits here and not beside the gold. The
+        // `!this.rewards.isEmpty()` conjunct is `out.count != 0`: at an elite
+        // the gold row above always satisfies it, but the Java tests it and so
+        // does this, because "always true today" is not the guard. The row is
+        // FREE-STANDING (the EMERALD arm of RewardItem(RewardItem, RewardType)
+        // assigns no relicLink, RewardItem.java:91-95), so the linked argument
+        // the Java passes -- rewards.get(rewards.size()-1) -- is discarded and
+        // nothing here needs to name it.
+        //
+        // This is also what makes AbstractRoom.java:597-599's four-item potion
+        // suppression REACHABLE for the first time (s3-design §5 trap 6): with
+        // gold + relic + Black Star relic + EMERALD_KEY assembled, step (3)
+        // below sees out.count == 4 and forces the chance to 0 -- while the
+        // roll and its +/-10 ratchet still run.
+        if (kFinalActAvailable && (rs.keys & kKeyEmerald) == 0u &&
+            out.count != 0 && node_has_emerald_key &&
+            out.count < kRewardItemCap) {
+            RunRewardItem& key_item = push_item(out);
+            key_item.kind = static_cast<uint8_t>(RewardItemKind::EMERALD_KEY);
+        }
     }
 
     // (3) addPotionToRewards (AbstractRoom.java:580-608). Elite and every
@@ -680,6 +726,17 @@ bool reward_claim_legal(const RunState& rs, const RewardScreen& s,
             return false;
         case RewardItemKind::RELIC:
             return relic_acquire_legal(rs, static_cast<RelicId>(item.id));
+        case RewardItemKind::EMERALD_KEY:
+        case RewardItemKind::SAPPHIRE_KEY:
+            // Both key arms of RewardItem.claimReward return true with no
+            // precondition (:317-332): the key is a Settings boolean, so there
+            // is no pool, no slot and no capacity that can refuse it. The row
+            // is therefore always claimable while the screen is up, which is
+            // what the legal-action mask publishes -- and every conjunct that
+            // decided whether the row EXISTS (the node flag, the key bits, the
+            // final-act constant) was already public at assembly time, so this
+            // bit leaks nothing the screen does not already show.
+            return true;
         case RewardItemKind::NONE:
         default:
             return false;
@@ -804,6 +861,19 @@ bool claim_reward_impl(RunState& rs, RngStream& misc_rng, RewardScreen& s,
                     apply_egg_preview_to_open_offers(rs, s, rid);
                 }
             }
+            {
+                // claimReward case 4's tail (RewardItem.java:298-301): a relic
+                // row with a relicLink marks its partner `isDone = true;
+                // ignoreReward = true`, so the linked SAPPHIRE_KEY row is
+                // removed and -- because the ObtainKeyEffect sits behind
+                // `!this.ignoreReward` (:318) -- NO key is obtained. Taking the
+                // relic silently kills the key. The partner is the row
+                // immediately after this one (the adjacency invariant); remove
+                // it FIRST so `index` still names this row.
+                if (reward_relic_row_is_key_linked(s, index)) {
+                    remove_item(s, static_cast<uint8_t>(index + 1));
+                }
+            }
             remove_item(s, index);
             return true;
         case RewardItemKind::CARDS:
@@ -812,6 +882,46 @@ bool claim_reward_impl(RunState& rs, RngStream& misc_rng, RewardScreen& s,
             // bowl is sung).
             s.open_card_item = index;
             return true;
+        case RewardItemKind::EMERALD_KEY:
+            // claimReward case 7 (RewardItem.java:327-332): queue
+            // ObtainKeyEffect(GREEN), dispose the two textures, return true.
+            // Nothing else moves -- the EMERALD row has no relicLink to write.
+            //
+            // The flag is set here, synchronously, where the game sets it 0.33 s
+            // later when ObtainKeyEffect's animation expires
+            // (ObtainKeyEffect.java:54-77). That is a DEVIATION WITH AN
+            // ARGUMENT, ratified at s3-design §3: the effect consumes no RNG and
+            // touches no other state, it is deliberately exempted from the
+            // topLevelEffects purge at nextRoomTransition
+            // (AbstractDungeon.java:1731) so a claim on the last frame still
+            // lands, and observing the lag would need a second key-gated read
+            // inside 0.33 s of the claim, which no route produces.
+            rs.keys = static_cast<uint8_t>(rs.keys | kKeyEmerald);
+            remove_item(s, index);
+            return true;
+        case RewardItemKind::SAPPHIRE_KEY: {
+            // claimReward case 6 (RewardItem.java:317-326). Two writes, in this
+            // order: the key is obtained behind `!this.ignoreReward` (:318),
+            // then the LINKED relic row is marked `isDone = true;
+            // ignoreReward = true` (:321-322) -- i.e. removed UNREWARDED. The
+            // relic stays popped from its pool, which is the whole cost of
+            // taking the key.
+            //
+            // `ignoreReward` is never observable on a key row in this engine:
+            // the only writer of it is the relic's own claim (:298-301), which
+            // sets `isDone` in the same breath, and this engine removes a
+            // done row immediately rather than letting an update loop sweep it.
+            // So the guard is spelled by construction, not by a stored flag.
+            const uint8_t partner = static_cast<uint8_t>(index - 1);
+            const bool linked =
+                index > 0 && reward_relic_row_is_key_linked(s, partner);
+            rs.keys = static_cast<uint8_t>(rs.keys | kKeySapphire);
+            remove_item(s, index);
+            if (linked) {
+                remove_item(s, partner);
+            }
+            return true;
+        }
         case RewardItemKind::NONE:
         default:
             return false;

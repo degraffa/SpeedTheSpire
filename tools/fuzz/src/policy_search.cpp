@@ -585,6 +585,15 @@ enum class GridWants : uint8_t { WORST, BEST };
             return wants_card_from(rc, &rc.rewards.items[arg0])
                        ? kRewardCardTake
                        : kRewardCardClosed;
+        case engine::RewardItemKind::EMERALD_KEY:
+        case engine::RewardItemKind::SAPPHIRE_KEY:
+            // Spelled out to keep the fall-through EXPLICIT rather than
+            // implicit: this policy does not seek keys, so a key row scores the
+            // same "do not pick" it scored before S3.11 assembled it. The
+            // key-seeking variant is S3.22's deliverable (s3-tasks.md), and it
+            // is a policy change, not a scoring-table repair -- taking the
+            // sapphire key costs the chest relic, which no weight here knows.
+            return kRewardCardClosed;
         case engine::RewardItemKind::NONE:
             break;
     }

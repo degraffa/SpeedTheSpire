@@ -107,7 +107,7 @@ granted windows (`monsters` 48 and 66, `powers` 112–135, `cards` 133,
 | fuzz `MoveCat` (`tools/fuzz/.../policy.hpp`) | **32–35** (`REWARD_CLAIM_KEY`, the Act-4 map choice, the Spire-Heart dialog, one reserve); `COUNT` → 36 | S3.52 |
 | Opcode (`interp.hpp`, `vocab.py`) | **75–77** contingency — design §2.3 expects the four powers to be native binders on existing opcodes; release unspent | S3.42 / S3.43 |
 | power `Hook` | **18** `on_attacked_to_change_damage` contingency (`kHookCount` → 19) — Invincible may instead ride the existing `apply_buffer` site natively, in which case release it | S3.43 |
-| `RewardItemKind` (`combat_rewards.hpp`) | **two new values** `EMERALD_KEY`, `SAPPHIRE_KEY`; `kRewardKindCount` 5 → 7 | S3.11 |
+| `RewardItemKind` (`combat_rewards.hpp`) | **two new values** `EMERALD_KEY` (6), `SAPPHIRE_KEY` (7); `kRewardKindCount` 5 → **8**, not 7 — see S3.11's Log for why the granted arithmetic was wrong (the constant lived only in the fuzz coverage table and already under-covered `STOLEN_GOLD`) | S3.11 `[x]` |
 | `MonsterState.flags` | a **type-scoped block** for the three Act-4 classes' per-instance counters (Shield/Spear `moveCount` 2 bits each; Heart `isFirstMove` 1 bit + `moveCount` 2 bits + a saturating `buffCount` ≥ 3 bits); exact bits claimed at dispatch | S3.42 / S3.43 |
 | `SCHEMA_VERSION` | **8 → 9**, one site | **S3.31 only** |
 | `PUBLIC_VIEW_VERSION` | **6 → 7**, one site | **S3.51 only** |
@@ -130,8 +130,13 @@ are S3's own.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+<<<<<<< HEAD
 | **Keys as obtainable content** — emerald-elite node flag + `EMERALD_KEY` reward row; `SAPPHIRE_KEY` linked-row claim semantics | stage-b design §1.1 "Out" / s2-design §1; owner-directed to S3 planning 2026-08-10 | **S3.11** | **ACCEPTED INTO S3 SCOPE, and the row's premise is corrected.** The row says "the mapRng draw is already modelled — combat_rewards.hpp:107-112 records that only the node flag is missing". The node flag is **not** missing: `setEmeraldElite`'s chosen node has been stored as `emerald_x`/`emerald_y` since the S1 map work (map_rooms.hpp:226-243, :414-435) and the entry buff is applied (`run_advance.cpp` step (9)). What is actually owed is (a) the `EMERALD_KEY` reward row at the burning elite (MonsterRoomElite.java:90,94-98), (b) the sapphire chest's real two-way claim semantics (RewardItem.java:85-90, :298-301, :317-326), and (c) the item the row never mentions — the `!Settings.hasEmeraldKey` guard that **removes the `mapRng` draw from every act generated after the key is taken** (AbstractDungeon.java:543), which changes later maps and is S3's highest-risk trap (design §5 trap 1). Ruby is already live. The S2 row stays as written (it is history); s3-design §9 carries the correction |
 | **The Courier's restocked colored-card identity** (the one unseeded value in scope) | S1 shop model (`shop.hpp` `kShopRestockedUnknownCard`); owner-directed 2026-08-10 to a post-S2-G2 task | **S3.24** | **ACCEPTED INTO S3 SCOPE, sized to ride the one fork redeploy S3 is doing anyway** — which is exactly the condition the row set ("ride it with one that is happening anyway"). Both halves land together: sim-side a dedicated seeded stream reproducing retail's uniform draw over the eligible (rarity, type) pool, fork-side one patched call consuming the same stream under the patched-fork oracle-contract precedent. S3.21 carries the patch into the redeploy; S3.24 owns the sim half and the zero-diff shop capture that witnesses it. **DISCHARGED 2026-09-03 by S3.24** — both halves landed in one commit: `courier_restock_stream` (shop.hpp, a derived stream, no schema byte) and `patches/CourierRestockSeedPatch` (flag `oracleCourierRestockSeed`), with `kShopRestockedUnknownCard` and its buy-refusal deleted. Two live tails remain, each owned elsewhere and named in the S3.24 Log: the jar redeploy + `PROTOCOL.md` §5.5 are **S3.21**'s (hand-over in the fork tree), and the witnessing restock capture is **S3.62**'s, so the S3.24 row stands `UNVERIFIED-until-captured` |
+=======
+| **Keys as obtainable content** — emerald-elite node flag + `EMERALD_KEY` reward row; `SAPPHIRE_KEY` linked-row claim semantics | stage-b design §1.1 "Out" / s2-design §1; owner-directed to S3 planning 2026-08-10 | **DISCHARGED 2026-09-03 by S3.11** (engine surface), with its behaviour evidence `UNVERIFIED-until-captured` under **S3.23** — see the two forward rows below the rule | **ACCEPTED INTO S3 SCOPE, and the row's premise is corrected.** The row says "the mapRng draw is already modelled — combat_rewards.hpp:107-112 records that only the node flag is missing". The node flag is **not** missing: `setEmeraldElite`'s chosen node has been stored as `emerald_x`/`emerald_y` since the S1 map work (map_rooms.hpp:226-243, :414-435) and the entry buff is applied (`run_advance.cpp` step (9)). What is actually owed is (a) the `EMERALD_KEY` reward row at the burning elite (MonsterRoomElite.java:90,94-98), (b) the sapphire chest's real two-way claim semantics (RewardItem.java:85-90, :298-301, :317-326), and (c) the item the row never mentions — the `!Settings.hasEmeraldKey` guard that **removes the `mapRng` draw from every act generated after the key is taken** (AbstractDungeon.java:543), which changes later maps and is S3's highest-risk trap (design §5 trap 1). Ruby is already live. The S2 row stays as written (it is history); s3-design §9 carries the correction |
+| **The Courier's restocked colored-card identity** (the one unseeded value in scope) | S1 shop model (`shop.hpp` `kShopRestockedUnknownCard`); owner-directed 2026-08-10 to a post-S2-G2 task | **S3.24** | **ACCEPTED INTO S3 SCOPE, sized to ride the one fork redeploy S3 is doing anyway** — which is exactly the condition the row set ("ride it with one that is happening anyway"). Both halves land together: sim-side a dedicated seeded stream reproducing retail's uniform draw over the eligible (rarity, type) pool, fork-side one patched call consuming the same stream under the patched-fork oracle-contract precedent. S3.21 carries the patch into the redeploy; S3.24 owns the sim half and the zero-diff shop capture that witnesses it |
+>>>>>>> 724fd0a (S3.11: keys as obtainable content -- emerald reward row, the sapphire two-way link, and the held-key map/chest gates)
 | **Per-step throughput attribution across S2** (×0.712 combat step / ×0.498 batch vs B5.5) | S2.45 | **S3.64** | **ACCEPTED INTO S3 SCOPE.** The named A/B is `d57e077` against `646bd18` on `bench_advance_mask` + `bench_throughput`, interleaved through `tools/bench_ab.sh` (never two sequential runs), with `RESULT: UNMEASURED` an acceptable answer. S3.64 also owns the *new* honest whole-run baseline: S2's "three-act runs/sec" was unquotable because no weight-free policy leaves Act 1 ([verification/s245-throughput.md](verification/s245-throughput.md)), and S3 is the first stage with a policy that finishes runs |
 | **Sharp Hide THORNS retaliation on the killing blow** | TE.1 (stage-b table: "UNASSIGNED — S1 pump semantics, owner-approved task") | **S3.44** | **ACCEPTED INTO S3 SCOPE.** Witness STS420252 (te1_survival_b160) already exists and is a promoted reproducer — under the 2026-09-03 evidence rule this row is unusually well placed, because the capture that proves the fix is already on disk. Act 4 sharpens the motive: `BeatOfDeathPower` fires a THORNS-typed hit after **every** card the player plays (BeatOfDeathPower.java:40-44), so terminal adjudication at the Heart is exactly this ordering question at its most consequential |
 | **~60 out-of-yaml MIRROR sites carrying citations `wave3-citations` corrected in `registry/*.yaml`** | wave3-citations, 2026-07-28 (stage-b, UNASSIGNED) | **S3.65** | **ACCEPTED INTO S3 SCOPE**, together with the three sibling citation rows the same sweep left open (the nine repo-wide out-of-range `File.java:line`s, the eleven and fifteen `relics.yaml` +1000-class ones, the nine `cards.yaml` ones). Folded into one provenance task because S3 touches `src/`, `include/` and `tools/` broadly and a split-brain between the registry and its mirrors is precisely the thing that makes a re-read at task time untrustworthy. Comment/provenance only — a behaviour change discovered mid-sweep is stop-the-line, not a drive-by |
@@ -151,13 +156,15 @@ are S3's own.
 | **Back-attack facing: model it, or collapse it?** | s3-design §2.3 | **S3.42** | `applyBackAttack` (AbstractMonster.java:1015-1017) reads the player's `flipHorizontal`, which changes when a target is hovered (AbstractPlayer.java:1291-1293) and is re-evaluated on every hand layout (CardGroup.java:204-223). The proposed collapse — "with exactly two guards, the one the player is not facing takes 1.5×" — must be proven exact or rejected, against those three methods read in full **and** against a live Shield-and-Spear capture where the player attacks each guard in turn |
 | **Act-4 first-row map choice width** | s3-design §4.4 | **S3.32** | `MapRoomNode.update`'s first-room arm gates only on `y == 0` and hover (:254-279), and Act 4's row 0 has six roomless nodes beside the rest room. Whether the game offers 1 or 7 candidates decides the legal-action mask; an over-wide mask is a leak-gate problem, not a cosmetic one. Answer from the fork's own `ChoiceScreenUtils` output on the first Act-4 capture, and pin the same source for the elite→boss action kind (`MAP_BOSS` vs `MAP_NODE`, DungeonMap.java:68) |
 | **The Act-4 floor pair is A20-dependent** | s3-design §4.3 | **S3.32** | Act 4's floor base is 51 below A20 and 52 at A20, because the A20 second Act-3 boss room is a real floor. That breaks `act_floor_base(act) = (act-1) * kActFloorSpan`, so the base must be run state written at the crossing and `run_cur_row` must read it. Both halves need **separate** witnesses at **both** ascension bands — a single matching number on one band hides the pair, which is the mistake s2-design §4.2's row existed to prevent |
+| **The emerald key's CLAIM, and with it §5 trap 1, has no capture** | S3.11 | **S3.23** | The engine assembles the `EMERALD_KEY` row, skips `setEmeraldElite`'s `mapRng` draw once the key is held, and both are corpus-clean — but no committed capture ever *presses* the key row, and none takes a key and then crosses an act. So the highest-risk change in S3 is landed on a source read plus a zero-diff that cannot see it. The discharging capture is a PAIR on one seed: emerald claimed → next act generated, and emerald skipped → next act generated, with the two acts' maps **differing**. A single matching run is not evidence, because a sim that kept drawing would still match a capture that never took the key |
+| **`RunState.keys` is neutralized on both sides of every replay comparison** | S3.11 (inherited shape from the ruby bit) | **S3.21** | `neutralize_incomparable` and `neutralize_presentation_only` both zero `keys`: the sim has three writers now (Recall, and S3.11's two key-row claims) while neither CommunicationMod's `game_state` nor the fork's oracle block exposes `Settings.hasRubyKey/hasEmeraldKey/hasSapphireKey`, so the capture side is structurally 0. Until S3.21 (a) emits the three booleans, every key claim is proved only through its CONSEQUENCES — the spent campfire, the abandoned relic still popped from `relic_pool_*`, the moved `map_rng`. Remove both zeroings in the same change that lands the emit, or the new field is emitted and still not compared |
 | **`Spire Heart` clicks 1–2: collapse or model?** | s3-design §4.1 | **S3.31** | Clicks 1 and 2 change no run state and are exactly the shape the engine already collapses (shrines.cpp / beyond_events.cpp, accepted at G7), and the follower's glue rule 3 answers collapsed one-click dialogs either way. But the differ compares **record counts**, so the choice must be made once, recorded, and reflected in the follower — not discovered during scoring |
 
 ---
 
 ## Phase S3.1 — Keys: the engine surface (reach precedes content)
 
-- **S3.11** `[ ]` **Keys as obtainable content.** The three keys become real
+- **S3.11** `[x]` **Keys as obtainable content.** The three keys become real
   run content, discharging the owner-directed deferred row. Three parts, all
   from source read in full at task time. (a) **Emerald:**
   `MonsterRoomElite.addEmeraldKey` (MonsterRoomElite.java:90, :94-98) appends a
@@ -194,7 +201,88 @@ are S3's own.
   this task must name in its Log with the exact captures it needs: an emerald
   claim + the next act's crossing, a sapphire claim on **both** branches, and
   a paired key-not-taken control on the same seed.
-  **Log:** —
+  **Log:** 2026-09-03. All three parts landed. **(a) Emerald:**
+  `assemble_combat_rewards` gained a `node_has_emerald_key` parameter and
+  appends a free-standing `EMERALD_KEY` row inside its Elite arm, after the
+  relic and after Black Star's second relic, under `kFinalActAvailable &&
+  !(keys & kKeyEmerald) && out.count != 0 && node flag`
+  (MonsterRoomElite.java:90, :94-98); the linked argument the Java passes is
+  discarded because the EMERALD arm assigns no `relicLink`
+  (RewardItem.java:91-95). `run_advance.cpp` supplies the node flag from the
+  new `on_emerald_elite_node(rc)` predicate, which the entry buff (step (9))
+  now shares instead of inlining. **(b) Sapphire:** `open_treasure_chest`
+  appends the linked row between the base relic and the `onChestOpenAfter`
+  fan-out (AbstractChest.java:95-97 → AbstractRoom.java:545-547) under
+  `!hasSapphireKey`; both destructive claim branches are in `claim_reward`
+  (relic-taken silently kills the key row, RewardItem.java:298-301; key-taken
+  kills the relic row unrewarded, :317-326) and `remove_first_relic_item` takes
+  the pair for N'loth's Mask (:549-559). **The link is stored as adjacency, not
+  a field** — `addSapphireKey` always appends directly after the row it links
+  to, nothing is ever inserted mid-list, removal compacts, and the Java itself
+  tests `relicLink != i.next()`; so `RunRewardItem` keeps its 24-byte layout.
+  **(c) Held keys change later acts:** `assign_room_types` gained
+  `has_emerald_key` and now skips the `mapRng.random(0, eliteNodes.size()-1)`
+  draw entirely (AbstractDungeon.java:543), fed from `rs.keys` at BOTH
+  generation sites; the chest append is gated on `!hasSapphireKey`; the ruby
+  campfire gate was verified live at `rest_sites.cpp:203` and needed nothing.
+  `kFinalActAvailable` moved from `rest_sites.hpp` to `run_state.hpp` beside the
+  `kKey*` bits, because four gates in four modules now read it and
+  `relic_pools.hpp` includes `map_rooms.hpp` (so map generation can never reach
+  `rest_sites.hpp`). Mask + PublicView: the key rows are ordinary reward rows
+  and need no new code — `reward_claim_legal` returns true unconditionally for
+  both (`claimReward` cases 6/7 have no precondition), the existing
+  `can_claim_reward[i]` loop publishes them, and `PvRewardItem.kind` already
+  carried the byte; `docs/public-view-audit.md` §8.1 gained the classification
+  rows and a change-log entry, and **`PUBLIC_VIEW_VERSION` did not move** (S3.51
+  still owns 6 → 7).
+  **Grant deviation, recorded:** the ledger granted `kRewardKindCount` 5 → 7.
+  It is **8**. `kRewardKindCount` was not an engine constant at all — it was a
+  hand-written `5` in `tools/fuzz/.../coverage.hpp` sizing `reward_claimed[]`,
+  and it had ALREADY under-covered the enum (`STOLEN_GOLD` == 5 was outside the
+  array and `reward_kind_name` had no case for it). 7 would have dropped
+  `SAPPHIRE_KEY` == 7 the same way. It is now published by the engine as
+  last-enumerator + 1 with a `static_assert`, and the fuzz constant aliases it —
+  the pattern `kRoomTypeCount` already uses two lines above, for the same
+  stated reason. No id was renumbered and no schema moved.
+  **Acceptance evidence (commands + verdicts).** Six presets BUILD:
+  `cmake --preset win-{debug,asan,release} && cmake --build --preset win-…`
+  through a vcvars64+LLVM wrapper — all three exit 0; and
+  `tools/wsl_run.sh --script tools/build_presets.sh debug asan release` —
+  `PRESETS BUILT: debug asan release`. Both committed corpora replay
+  **zero-diff** via `tools/wsl_run.sh --script tools/corpus_replay.sh`
+  (`replay_run_diff <capture> --replay --stop-on-diff` per seed, through
+  `ci_corpus_smoke.py`): `act1_a20_50 --replay: ZERO-DIFF (exit 0)` (50 seeds),
+  `three_act_a20_5 --replay: ZERO-DIFF (exit 0)` (5 whole three-act runs), with
+  BOTH injected-divergence negative controls failing loud. The chest append did
+  change reward-row shape and the corpora do exercise it: 2 of 50 act-1 and 5 of
+  5 three-act captures carry `SAPPHIRE_KEY` rows (18 chest screens), and the
+  three-act `s2v2_mb_102529__STS102529` carries an `EMERALD_KEY` row at floor 12
+  (`[GOLD,RELIC,EMERALD_KEY,POTION,CARD]`). `tools/check_stale_counts.sh` and
+  `tools/check_doc_links.sh` clean.
+  **What the corpora already witness, and what they do not.** Both sapphire
+  branches are witnessed: 17 chest screens claim the RELIC (the key row must
+  vanish with it or the next ordinal misindexes) and `STS71037` seq 83 claims
+  the KEY (`choose 1` on `[RELIC,SAPPHIRE_KEY]`), whose abandoned relic must
+  stay popped from `relic_pool_*` — a compared field. The emerald ROW's
+  presence and position are witnessed by STS102529's seq 134-136, where the
+  capture claims ordinals 1, 0, 1 across a shrinking list: `choose 1` at seq 136
+  is the POTION only if the sim carries the key row at index 0. Two things are
+  **UNVERIFIED-until-captured** and are S3.23's: the emerald key CLAIM (no
+  corpus capture presses it), and with it §5 trap 1 — no committed capture takes
+  a key and then crosses an act, so the skipped `setEmeraldElite` draw has no
+  witness. `RunState.keys` itself is still neutralized on both sides by the
+  replay differ (the fork emits no `Settings.has*Key`; S3.21 (a) returns it), so
+  the key BITS are proved only through their consequences.
+  **S3.23 needs exactly these captures:** (1) an emerald claim at a burning
+  elite **and the run continuing into the next act's map generation**, with (2)
+  its paired key-NOT-taken control on the same seed, the two acts' maps
+  differing — that pair is the whole of trap 1 and the claim record alone
+  cannot witness it; (3) a sapphire claim on the KEY branch and (4) a sapphire
+  claim on the RELIC branch, each with (5) a key-not-taken control on the same
+  seed; and, for §5 trap 6, (6) a burning-elite claim on a **Black Star** run,
+  whose four assembled rows force the potion chance to 0 while the ±10 ratchet
+  still moves. A directed capture of (6) is the only way that branch is ever
+  seen: gold + relic + EMERALD_KEY is three rows, not four.
 
 ## Phase S3.2 — Reach instruments and the oracle contract (∥ where marked)
 
@@ -220,6 +308,7 @@ are S3's own.
   (`seed_scan.hpp:221-229`) so `--need-*-act 4` stops being a refusal
   (`planner/src/main.cpp:285-300`).
   **Inherited:** the stage-b "translator power `misc` fields" row (see
+<<<<<<< HEAD
   Deferred obligations); **S3.24's Courier restock patch** —
   `patches/CourierRestockSeedPatch` + the `oracleCourierRestockSeed` flag are
   in the tree and build, and this task carries them into the jar, records the
@@ -228,6 +317,13 @@ are S3's own.
   after, the exact seed formula, the offline seam verification, the three
   differ consequences) is in
   [../tools/oracle_bridge/communicationmod-oracle/COURIER-RESTOCK-HANDOVER.md](../tools/oracle_bridge/communicationmod-oracle/COURIER-RESTOCK-HANDOVER.md).
+=======
+  Deferred obligations), and S3.11's `RunState.keys` neutralization row: the
+  same change that makes the fork emit the three key booleans must delete the
+  `s.keys = 0` in BOTH `neutralize_incomparable` and
+  `neutralize_presentation_only` (`replay/src/main.cpp`), or the new field is
+  emitted and still never compared.
+>>>>>>> 724fd0a (S3.11: keys as obtainable content -- emerald reward row, the sapphire two-way link, and the held-key map/chest gates)
   **Deps:** S3.24 (the Courier patch, so one redeploy carries both)
   **Acceptance:** the new jar's SHA-256 recorded and **live-preflighted** by a
   clean single-seed campaign, the way every prior redeploy was; every S2
@@ -270,6 +366,12 @@ are S3's own.
   Recall, and a paired key-not-taken control on the same seed for each. Triage
   every divergence to a root cause per the Stage B process; promote each
   reproducer.
+  **Inherited:** S3.11's `UNVERIFIED-until-captured` behaviour evidence — the
+  emerald-key CLAIM and §5 trap 1 (see Deferred obligations). S3.11's Log names
+  the six captures it needs; note the sixth, which this block's prose does not:
+  a burning-elite claim on a **BLACK STAR** run, the only shape in which
+  `addPotionToRewards`' four-item suppression (AbstractRoom.java:597-599, §5
+  trap 6) is reachable — gold + relic + `EMERALD_KEY` is three rows, not four.
   **Deps:** S3.21, S3.22 **Acceptance:** each of the captures above replays
   **zero-diff** to its terminal through `replay_run_diff --replay` with zero
   capture-race records, and the emerald pair shows the two runs' Act-2/3 maps

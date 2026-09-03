@@ -849,13 +849,18 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
     // miscRng (rc.combat.misc_rng -- trap 18); a Smoke Bomb consumes the
     // gold / elite-relic / potion draws but offers nothing (openCombat's smoked
     // path never calls setupItemReward, CombatRewardScreen.java:267-289).
+    // The last argument is `getCurrMapNode().hasEmeraldKey` for the node this
+    // fight was on -- addEmeraldKey's one non-derivable conjunct
+    // (MonsterRoomElite.java:96). The controller has not moved since the combat
+    // started, so the same predicate the entry buff read still holds.
     assemble_combat_rewards(rc.run, rc.combat.misc_rng,
                             static_cast<RoomType>(rc.room_type),
                             reward_outcome_for(outcome,
                                                have_monsters_escaped(rc.combat)),
                             rc.rewards, stolen_return,
                             static_cast<RoomType>(rc.room_type) ==
-                                RoomType::Event);
+                                RoomType::Event,
+                            on_emerald_elite_node(rc));
 
     const float combat_reward = res.reward;
     res = StepResult{};  // reward screens have no combat observation view.
@@ -1197,9 +1202,7 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     //     Deviation, unreachable in S1: an elite whose encounter PARKED above
     //     (unimplemented member) returns before this roll, while the game rolls
     //     regardless; every Act-1 elite encounter is implemented.
-    if (room == RoomType::Elite && rc.emerald_x != kNoEmeraldNode &&
-        rc.cur_x == rc.emerald_x &&
-        run_cur_row(rc) == static_cast<int>(rc.emerald_y)) {
+    if (room == RoomType::Elite && on_emerald_elite_node(rc)) {
         const int32_t act = static_cast<int32_t>(rc.run.act);
         switch (random(rc.run.map_rng, 0, 3)) {
             case 0:  // StrengthPower(actNum + 1)     (MonsterRoomElite.java:42-46)
@@ -1960,9 +1963,17 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     //      RunState.map is single-act storage: the game throws the old
     //      DungeonMap away with the old dungeon object, so overwriting in place
     //      is the faithful model, not a shortcut.
+    //      setEmeraldElite's guard also reads `!Settings.hasEmeraldKey`
+    //      (AbstractDungeon.java:543), and THIS is the site where that second
+    //      conjunct becomes observable: a run that claimed the emerald key in an
+    //      earlier act generates this act with the draw SKIPPED, so its
+    //      end-of-generateMap mapRng and its whole room grid differ from the
+    //      same seed without the key (s3-design §5 trap 1). Act 1 cannot see it
+    //      -- no key can be held before the first map exists.
     const GeneratedMap g = generate_map(rs.run_seed, static_cast<int>(next_act));
     const RoomAssignment ra =
-        assign_room_types(g, static_cast<int>(rs.ascension));
+        assign_room_types(g, static_cast<int>(rs.ascension),
+                          (rs.keys & kKeyEmerald) != 0u);
     encode_paths_into_run_state(g, rs);
     encode_rooms_into_run_state(ra, rs);
     rc.emerald_x = ra.emerald_x < 0 ? kNoEmeraldNode
@@ -2111,7 +2122,13 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     //     Random(seed + actNum) internally; encode both edges and room types plus
     //     the end-of-generateMap mapRng state into RunState.map.
     GeneratedMap g = generate_map(seed, /*act_num=*/1);
-    const RoomAssignment ra = assign_room_types(g, static_cast<int>(ascension));
+    // `!Settings.hasEmeraldKey` is vacuously true at run start
+    // (CardCrawlGame.java:471-473 clears all three flags at dungeon reset), so
+    // Act 1's draw always fires. Spelled from rs.keys rather than passed as a
+    // literal false so the guard reads the same at both generation sites.
+    const RoomAssignment ra =
+        assign_room_types(g, static_cast<int>(ascension),
+                          (rs.keys & kKeyEmerald) != 0u);
     encode_paths_into_run_state(g, rs);   // edges (+ post-path mapRng)
     encode_rooms_into_run_state(ra, rs);  // room types (+ end-of-generateMap mapRng)
     // The burning-elite node the setEmeraldElite draw chose (map_rooms.hpp step

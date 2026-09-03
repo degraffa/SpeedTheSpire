@@ -57,13 +57,12 @@ enum class RestOptionKind : uint8_t {
     RECALL = 5,
 };
 
-// Settings.isFinalActAvailable (Settings.java:642): the AND of all three
-// characters' profile _WIN prefs -- PROFILE-derived and constant for a whole
-// run. The frozen capture profile has it TRUE (every captured rest site lists
-// the Recall button third), so the engine carries it as a profile constant on
-// the same footing as the skeleton's fixed A20 (kMonsterAscension). A profile
-// without the final act simply never appends the button.
-inline constexpr bool kFinalActAvailable = true;
+// `kFinalActAvailable` (Settings.isFinalActAvailable) MOVED to run_state.hpp at
+// S3.11, beside the kKey* bits: the campfire Recall button stopped being its
+// only gate once the emerald map draw, the burning elite's reward row and the
+// chest's key append became live, and those three modules cannot include this
+// header. run_state.hpp is included here, so the name is still in scope for
+// every existing reader.
 
 // Rest + Smith + at most one option from each owned relic, + Recall.
 inline constexpr int kRestOptionCap = 2 + kRelicCap + 1;

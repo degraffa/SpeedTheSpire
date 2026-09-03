@@ -961,6 +961,23 @@ void sync_live_gold(RunController& rc) noexcept;
     return row < 0 ? -1 : row;
 }
 
+// `AbstractDungeon.getCurrMapNode().hasEmeraldKey` -- is the controller standing
+// on the burning elite setEmeraldElite marked (map_rooms.hpp step 5,
+// AbstractDungeon.java:542-556)?
+//
+// TWO CONSUMERS, ONE PREDICATE, and they are not the same gate: the ENTRY buff
+// (MonsterRoomElite.applyEmeraldEliteBuff, :39-68, via AbstractPlayer
+// .preBattlePrep :1602-1605) reads only `isFinalActAvailable && node flag`,
+// while the REWARD ROW (addEmeraldKey, :94-98) adds `!Settings.hasEmeraldKey`
+// and `!rewards.isEmpty()` on top. So this names the NODE only; each caller
+// applies the rest of its own guard. It was inlined at the entry-roll site until
+// S3.11 gave it a second reader.
+[[nodiscard]] constexpr bool on_emerald_elite_node(
+    const RunController& rc) noexcept {
+    return rc.emerald_x != kNoEmeraldNode && rc.cur_x == rc.emerald_x &&
+           run_cur_row(rc) == static_cast<int>(rc.emerald_y);
+}
+
 // Whether a terminal controller is the VICTORY rather than a death.
 //
 // IT MOVED WITH ITS PRODUCER, TWICE, and that coupling is the point. In S1 the

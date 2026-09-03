@@ -287,13 +287,17 @@ void neutralize_incomparable(RunState& s) noexcept {
     // translator writes from `act_boss`, so the old neutralization here is
     // gone (it existed only while the run layer had no writer for the field).
     // `keys` -- the OPPOSITE gap: the SIM writes the Ruby bit when a capture's
-    // recall press is replayed (RestOptionKind::RECALL), but neither
-    // CommunicationMod's game_state nor the fork's oracle block exposes the
-    // run's key booleans, so the translator has nothing to write and the
-    // capture side is structurally 0. The recall itself IS still validated --
-    // the sim must walk past the spent campfire exactly as the capture does,
-    // or every later record diverges. The field comes back if the fork ever
-    // emits the three Settings.has*Key booleans.
+    // recall press is replayed (RestOptionKind::RECALL) and, from S3.11, the
+    // Emerald and Sapphire bits when a capture's key-row claim is replayed
+    // (RewardItem.java:317-332); but neither CommunicationMod's game_state nor
+    // the fork's oracle block exposes the run's key booleans, so the translator
+    // has nothing to write and the capture side is structurally 0. The claims
+    // themselves ARE still validated, and by the strongest available proxy:
+    // the recall spends the campfire, the sapphire claim ABANDONS its linked
+    // relic (which stays popped from `relic_pool_*`), and holding the emerald
+    // key removes a `map_rng` draw from every later act's generateMap. All
+    // three are compared fields. The field itself comes back when the fork
+    // emits the three Settings.has*Key booleans -- s3-tasks.md S3.21 (a).
     s.keys = 0;
 }
 
@@ -325,6 +329,17 @@ void neutralize_unattested_boss_chest(RunState& expected,
 void neutralize_presentation_only(RunState& s) noexcept {
     for (auto& c : s.master_deck) c.cost_now = 0;
     for (auto& n : s.map) n = MapNode{};
+    // `keys`, for exactly the reason neutralize_incomparable gives: the SIM has
+    // three writers now (the campfire Recall, and from S3.11 the EMERALD_KEY
+    // and SAPPHIRE_KEY reward-row claims) while neither CommunicationMod's
+    // game_state nor the fork's oracle block exposes Settings.has*Key, so the
+    // capture side is structurally 0 and a replayed key claim would read as a
+    // one-field divergence on every later record. It comes back the moment the
+    // fork emits the three booleans -- S3.21 (a). The CONSEQUENCES of holding a
+    // key are still fully compared meanwhile: the relic the sapphire claim
+    // abandons stays popped from `relic_pool_*`, and the emerald key's skipped
+    // setEmeraldElite draw moves `map_rng`.
+    s.keys = 0;
 }
 
 // DURING a combat the run layer deliberately does not write the live sheet back
@@ -1338,6 +1353,8 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
         case RewardItemKind::RELIC: return "RELIC";
         case RewardItemKind::CARDS: return "CARD";
         case RewardItemKind::STOLEN_GOLD: return "STOLEN_GOLD";
+        case RewardItemKind::EMERALD_KEY: return "EMERALD_KEY";
+        case RewardItemKind::SAPPHIRE_KEY: return "SAPPHIRE_KEY";
     }
     return "?";
 }
@@ -1385,6 +1402,26 @@ struct SpotVerdict {
     for (const CaptureRewardRow& r : rows)
         if (r.type == "STOLEN_GOLD") total += r.gold;
     return total;
+}
+
+// The second such input, and it is seeded for exactly the same reason: whether
+// this elite was the BURNING one is `MapRoomNode.hasEmeraldKey`, a map field
+// this mode never builds because it seeds a RunState and re-drives nothing.
+// (The fork does not emit it either until S3.21 (a).)
+//
+// What the seed buys, and what it does NOT: the row's PRESENCE is taken from
+// the capture, so this mode cannot catch a spuriously emitted key row -- that
+// is `--treasure`'s and `--replay`'s job, both of which drive the real gate.
+// What stays proved is everything downstream: the row's POSITION (after the
+// relic and after Black Star's second relic, MonsterRoomElite.java:90), and the
+// four-item potion suppression it makes reachable for the first time
+// (AbstractRoom.java:597-599 -- s3-design §5 trap 6), whose chance-0 branch
+// still has to leave the +/-10 ratchet moving in step with the capture.
+[[nodiscard]] bool captured_emerald_key_row(
+    const std::vector<CaptureRewardRow>& rows) {
+    for (const CaptureRewardRow& r : rows)
+        if (r.type == "EMERALD_KEY") return true;
+    return false;
 }
 
 // Compare only the fields the reward ASSEMBLY moves. Everything else on the
@@ -1448,7 +1485,9 @@ void diff_assembly_fields(const RunState& expected, const RunState& actual,
         const int32_t stolen = captured_stolen_gold(open.reward_rows);
         if (stolen > 0) ++v.theft_seeded;
         assemble_combat_rewards(rs, misc, room_type_from_capture(open.room_type),
-                                RewardOutcome::KILLED, screen, stolen);
+                                RewardOutcome::KILLED, screen, stolen,
+                                /*preserve_existing=*/false,
+                                captured_emerald_key_row(open.reward_rows));
 
         std::vector<std::string> afail;
         diff_assembly_fields(run.records[k].run, rs, afail);
@@ -2280,21 +2319,6 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
     return "?";
 }
 
-// The engine models no key row, so when a capture claims the KEY the linked
-// base relic is abandoned (RewardItem.java:317-322) and BOTH rows leave the
-// captured screen. The simulator's screen has only the relic row, and the run
-// layer has no verb for "abandon this one item" -- proceed abandons the whole
-// screen. Dropping the row here keeps the two index spaces aligned for any
-// later claim on the same screen, and it is the tool's job rather than the
-// engine's precisely because the key is what caused it.
-void drop_reward_row(RewardScreen& s, uint8_t index) noexcept {
-    if (index >= s.count) return;
-    for (uint8_t i = index; i + 1 < s.count; ++i) s.items[i] = s.items[i + 1];
-    s.items[s.count - 1] = RunRewardItem{};
-    --s.count;
-    s.open_card_item = kNoOpenCardReward;
-}
-
 // Does the run hold a N'loth's Mask with a live charge? That is the one thing
 // that legitimately deletes the base relic row and its linked key row
 // (NlothsMask.java:23-32 -> AbstractRoom.java:549-559). `counter > 0` is the
@@ -2562,32 +2586,44 @@ struct TreasureVerdict {
                 } else if (!kv.ok) {
                     ofail.push_back("SAPPHIRE_KEY shape: " + kv.problem);
                 } else {
+                    // S3.11: the engine assembles the key row itself, so the
+                    // comparison is against the capture's FULL row list, not
+                    // `kv.rows` (which still has the row elided). What
+                    // strip_sapphire_key_row is used for here is now only its
+                    // VERDICT -- the shape rules it encodes (at most one key
+                    // row, only on a chest open, trailing, linked to the RELIC
+                    // it follows, absent exactly when the run already holds a
+                    // key or N'loth's Mask fired) are still the rules, and they
+                    // are checked against the capture before the sim is asked
+                    // to agree with it.
                     key_index = kv.key_index;
+                    const std::vector<CaptureRewardRow>& rows =
+                        screens[rj].reward_rows;
                     std::vector<std::string> sim_kinds;
                     for (uint8_t i = 0; i < screen.count; ++i)
                         sim_kinds.emplace_back(reward_kind_name(screen.items[i].kind));
                     std::vector<std::string> game_kinds;
-                    for (const auto& r : kv.rows) game_kinds.push_back(r.type);
+                    for (const auto& r : rows) game_kinds.push_back(r.type);
                     if (sim_kinds != game_kinds) {
                         std::string ge, se;
                         for (const auto& x : game_kinds) ge += (ge.empty() ? "" : ",") + x;
                         for (const auto& x : sim_kinds) se += (se.empty() ? "" : ",") + x;
                         ofail.push_back("reward rows: [" + ge + "] -> [" + se + "]");
                     } else {
-                        for (std::size_t i = 0; i < kv.rows.size(); ++i) {
+                        for (std::size_t i = 0; i < rows.size(); ++i) {
                             const RunRewardItem& it = screen.items[i];
-                            if (kv.rows[i].type == "GOLD" &&
-                                kv.rows[i].gold != it.gold + it.bonus_gold) {
+                            if (rows[i].type == "GOLD" &&
+                                rows[i].gold != it.gold + it.bonus_gold) {
                                 ofail.push_back("chest gold: " +
-                                                std::to_string(kv.rows[i].gold) + " -> " +
+                                                std::to_string(rows[i].gold) + " -> " +
                                                 std::to_string(it.gold + it.bonus_gold));
                             }
-                            if (kv.rows[i].type == "RELIC") {
+                            if (rows[i].type == "RELIC") {
                                 const std::string sim_id(sts::registry::relic_game_id(
                                     static_cast<RelicId>(it.id)));
-                                if (kv.rows[i].relic_id != sim_id)
+                                if (rows[i].relic_id != sim_id)
                                     ofail.push_back("chest relic: " +
-                                                    kv.rows[i].relic_id + " -> " + sim_id);
+                                                    rows[i].relic_id + " -> " + sim_id);
                             }
                         }
                     }
@@ -2603,7 +2639,7 @@ struct TreasureVerdict {
                     std::printf("] treasureRng %u->%u%s\n", cur.treasure_rng.counter,
                                 post.treasure_rng.counter,
                                 key_index >= 0
-                                    ? "; capture carries the expected trailing "
+                                    ? "; both sides carry the expected trailing "
                                       "SAPPHIRE_KEY row"
                                     : "");
                 } else {
@@ -2618,44 +2654,31 @@ struct TreasureVerdict {
 
             if (screens[j].screen_type == "COMBAT_REWARD") {
                 if (c[0] != "choose") continue;  // proceed bounces; see above
-                // Re-derive the key row from THIS record's own screen: the
-                // capture's list shrinks as rows are claimed, so the index space
-                // the command uses is the live one.
-                KeyRowContext ctx;
-                ctx.chest_open = true;
-                ctx.already_has_key = has_key;
-                ctx.nloths_mask_fired = nloths_mask_armed(cur);
-                const KeyRowVerdict kv =
-                    strip_sapphire_key_row(screens[j].reward_rows, ctx);
-                const int live_key = kv.ok ? kv.key_index : -1;
+                // S3.11: the SIM's screen carries the key row too, so the
+                // capture's ordinal is passed straight through (`key_index` -1
+                // is the identity mapping, which leaves only the bounds check)
+                // and a claim of the key row is driven into the engine like any
+                // other row. The engine's own claim arm applies
+                // RewardItem.java:317-326 -- the key is obtained AND the linked
+                // base relic is dropped unrewarded -- which is what this walk
+                // used to have to spell for itself, because the row it was
+                // claiming did not exist sim-side.
+                //
+                // The SHAPE rule is deliberately NOT re-run per claim record.
+                // strip_sapphire_key_row answers a question about a chest's
+                // FRESHLY OPENED list (it is asked once, at the OPEN above, on
+                // the first in-room COMBAT_REWARD screen); a mid-claim screen
+                // has already lost rows, so "0 RELIC rows and no key row" is
+                // the normal shape of a list whose relic has been taken, not a
+                // finding. Asking it here reported exactly that as a divergence.
                 const ClaimMapping cm = map_reward_claim(
-                    screens[j].reward_rows, live_key,
+                    screens[j].reward_rows, /*key_index=*/-1,
                     c.size() >= 2 ? std::stoi(c[1]) : -1);
-                if (cm.what == ClaimTarget::OUT_OF_RANGE) {
+                if (cm.what != ClaimTarget::SIM_ROW) {
                     stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
                            run.records[j].action_command +
                            "' names no captured reward row";
                     break;
-                }
-                if (cm.what == ClaimTarget::ABANDONS_RELIC) {
-                    // The capture took the KEY. RewardItem.java:317-322 marks
-                    // the linked base relic isDone/ignoreReward, so the run
-                    // never obtains it and neither does the sim; the relic
-                    // stays popped from its pool, which the RunState comparison
-                    // on the next record proves.
-                    has_key = true;
-                    for (uint8_t i = 0; i < screen.count; ++i) {
-                        if (screen.items[i].kind !=
-                            static_cast<uint8_t>(RewardItemKind::RELIC))
-                            continue;
-                        drop_reward_row(screen, i);
-                        break;
-                    }
-                    std::printf("CLAIM    KEY  %s floor=%d seq=%d: the capture "
-                                "claimed the SAPPHIRE_KEY row, abandoning the "
-                                "linked base relic (RewardItem.java:317-322)\n",
-                                run.seed_string.c_str(), floor, run.records[j].seq);
-                    continue;
                 }
                 RunController rc{};
                 rc.run = cur;
@@ -2668,6 +2691,13 @@ struct TreasureVerdict {
                                      static_cast<uint8_t>(cm.sim_index)));
                 cur = rc.run;
                 screen = rc.rewards;
+                // `Settings.hasSapphireKey` is read straight off the simulator
+                // now, rather than inferred from which ordinal the capture
+                // pressed: the engine sets the bit in claim_reward's
+                // SAPPHIRE_KEY arm, and it is that bit that shuts
+                // AbstractChest.java:95's gate on every later chest -- which is
+                // the only thing this walk uses it for.
+                has_key = (cur.keys & sts::engine::kKeySapphire) != 0u;
                 continue;
             }
 

@@ -52,6 +52,9 @@ const char* reward_kind_name(int k) noexcept {
         case 2: return "potion";
         case 3: return "relic";
         case 4: return "cards";
+        case 5: return "stolen_gold";
+        case 6: return "emerald_key";
+        case 7: return "sapphire_key";
         default: return "?";
     }
 }

@@ -391,4 +391,21 @@ inline constexpr uint8_t kKeyEmerald = 1u << 0;
 inline constexpr uint8_t kKeyRuby = 1u << 1;
 inline constexpr uint8_t kKeySapphire = 1u << 2;
 
+// Settings.isFinalActAvailable (Settings.java:64, computed at Settings.java:642):
+// the AND of all three characters' profile _WIN prefs -- PROFILE-derived and
+// constant for a whole run. The frozen capture profile has it TRUE (every
+// captured rest site lists the Recall button third), so the engine carries it as
+// a profile constant on the same footing as the skeleton's fixed A20. A profile
+// without the final act simply never appends any of the three key doors.
+//
+// It lives HERE, beside the key bits, because all four of its gates read it and
+// they sit in four different modules that cannot include one another:
+// `setEmeraldElite`'s map draw (map_rooms.hpp, AbstractDungeon.java:543), the
+// burning elite's reward row (combat_rewards.cpp, MonsterRoomElite.java:95), the
+// chest's key append (treasure_rooms.cpp, AbstractChest.java:95) and the
+// campfire Recall button (rest_sites.cpp, CampfireUI.java:94). It was declared
+// in rest_sites.hpp while the campfire was the only gate; relic_pools.hpp
+// includes map_rooms.hpp, so map generation can never reach rest_sites.hpp.
+inline constexpr bool kFinalActAvailable = true;
+
 }  // namespace sts::engine

@@ -111,18 +111,25 @@
 // getColorlessRewardCards(boolean), NeowReward.java:309 -- a different method
 // on a different stream.)
 //
+// THE TWO KEY ROWS ARE MODELLED FROM S3.11 (they were the first two entries of
+// the "deliberately not modelled" list below, and the reasons that justified
+// their omission -- no RNG, no relic, an out-of-scope node flag -- were reasons
+// the OMISSION was cheap, never reasons it was right):
+//   * EMERALD_KEY, appended by MonsterRoomElite.addEmeraldKey (:94-98) from
+//     dropReward (:90) AFTER the relic and after Black Star's second relic,
+//     under `isFinalActAvailable && !hasEmeraldKey && !rewards.isEmpty() &&
+//     getCurrMapNode().hasEmeraldKey`. The node flag was always stored
+//     (map_rooms.hpp emerald_x/emerald_y); assemble_combat_rewards now takes it.
+//   * SAPPHIRE_KEY, appended by AbstractChest.open (:95-97) ->
+//     AbstractRoom.addSapphireKey (:545-547) under `isFinalActAvailable &&
+//     !hasSapphireKey`, LINKED both ways to the relic row it follows. Its two
+//     claim branches are mutually destructive (RewardItem.java:298-301 vs
+//     :317-326) and `removeOneRelicFromRewards` takes the pair (:549-559).
+//     The S1 model -- "an ignored linked row that costs no RNG or state
+//     parity" -- stayed exactly correct for a run that claims the RELIC, which
+//     is why it was safe; that behaviour is now one of the two branches.
+//
 // Deliberately NOT modelled here, each with the reason:
-//   * The EMERALD_KEY reward item -- the emerald-elite node flag itself is out
-//     of S1 scope (map_rooms.hpp's setEmeraldElite note: the mapRng DRAW is
-//     modelled, the chosen node's key flag is not stored), so the reward layer
-//     cannot know which elite carries it. Follows that documented scoping.
-//   * SAPPHIRE_KEY (chest-linked). The key is S2 content, but the branch that
-//     appends its reward row DOES fire on every Act-1 chest open (design §1.1
-//     / §11 v0.1.6, correcting the earlier "never fires in S1" reading). It
-//     consumes no RNG and adds no relic, so omitting the row costs no stream
-//     or state parity; an oracle capture just carries one extra trailing row
-//     and must claim the linked base RELIC, never the key
-//     (RewardItem.java:298-300 vs :317-322).
 //   * Prismatic Shard's any-color draw (AbstractDungeon.java:1455) -- Prismatic
 //     Shard is a documented deliberate no-op with a live pool slot (see its
 //     registry/relics.yaml row);
@@ -150,7 +157,15 @@ namespace sts::engine {
 
 inline constexpr int kRewardItemCap = 8;  // S1 max is 6: gold + elite relic +
                                           // Black Star relic + potion + cards +
-                                          // Prayer Wheel cards.
+                                          // Prayer Wheel cards. S3.11's two key
+                                          // rows do not raise it: the burning
+                                          // elite's worst case is gold + relic +
+                                          // Black Star relic + EMERALD_KEY +
+                                          // potion + cards == 6 (and the potion
+                                          // is then forced off by the >= 4 gate,
+                                          // AbstractRoom.java:597-599), and a
+                                          // chest's is gold + Matryoshka relic +
+                                          // base relic + SAPPHIRE_KEY == 4.
 inline constexpr int kRewardCardCap = 4;  // 3 base + Question Card's +1.
 
 enum class RewardItemKind : uint8_t {
@@ -161,7 +176,37 @@ enum class RewardItemKind : uint8_t {
     CARDS = 4,        // RewardType.CARD (the 3-card pick screen)
     STOLEN_GOLD = 5,  // RewardType.STOLEN_GOLD (a killed thief's return; no
                       // Golden Idol bonus -- the applyGoldBonus theft branch)
+    // S3.11. The two key rows. Both claim arms of RewardItem.claimReward return
+    // true unconditionally (:317-332), so neither can bounce on capacity.
+    EMERALD_KEY = 6,   // RewardType.EMERALD_KEY -- FREE-STANDING. The EMERALD
+                       // arm of RewardItem(RewardItem, RewardType) assigns no
+                       // relicLink (RewardItem.java:91-95), so the constructor's
+                       // linked argument is discarded and nothing else moves
+                       // when it is claimed (case 7, :327-332).
+    SAPPHIRE_KEY = 7,  // RewardType.SAPPHIRE_KEY -- LINKED, both ways
+                       // (RewardItem.java:85-90). See the link invariant below.
 };
+
+// The count of RewardItemKind values, INCLUDING NONE. Append-only: a new kind
+// takes the next value and bumps this (S3 ledger, "Registry id blocks granted").
+inline constexpr int kRewardKindCount = 8;
+static_assert(static_cast<int>(RewardItemKind::SAPPHIRE_KEY) + 1 ==
+                  kRewardKindCount,
+              "kRewardKindCount must name the last RewardItemKind value + 1");
+
+// THE SAPPHIRE LINK IS ADJACENCY, and that is a property of the producer, not a
+// shortcut. `AbstractChest.open` calls `addSapphireKey(rewards.get(rewards.size()
+// - 1))` (AbstractChest.java:95-97) and `addSapphireKey` immediately appends the
+// new row (AbstractRoom.java:545-547), so the key is ALWAYS created directly
+// after the row it links to, and nothing in the game ever inserts a row into the
+// middle of a reward list -- every producer appends. Removal compacts (the
+// engine's remove_item; the Java's `isDone` sweep), which preserves relative
+// order, so the pair stays adjacent for as long as both rows live. The Java
+// itself relies on exactly this in `removeOneRelicFromRewards`, which tests
+// `rewardItem.relicLink != i.next()` -- the *next* element -- rather than
+// searching (AbstractRoom.java:549-559). So: a RELIC row is linked iff the row
+// after it is SAPPHIRE_KEY, and a SAPPHIRE_KEY row's partner is the row before
+// it. No link field is stored, and RunRewardItem keeps its 24-byte layout.
 
 struct RunRewardItem {
     int32_t gold;                            // base amount (GOLD / STOLEN_GOLD)
@@ -379,10 +424,18 @@ enum class RewardOutcome : uint8_t {
 // (die() ran during combat, so its item is first in the game's list and
 // counts toward the >= 4 potion-suppression threshold). 0 means no dead thief
 // stole anything -- die() adds nothing for a zero accrual (Looter.java:170).
+//
+// `node_has_emerald_key` is `AbstractDungeon.getCurrMapNode().hasEmeraldKey`
+// for the node this combat is being fought on -- the burning elite
+// setEmeraldElite chose (map_rooms.hpp emerald_x/emerald_y). It is the ONLY
+// input addEmeraldKey needs that this layer cannot derive; the other three
+// conjuncts of its guard (kFinalActAvailable, `!(rs.keys & kKeyEmerald)`,
+// `!rewards.isEmpty()`) are read here. False on every non-elite room.
 void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
                              RewardOutcome outcome, RewardScreen& out,
                              int32_t stolen_gold_return = 0,
-                             bool preserve_existing = false) noexcept;
+                             bool preserve_existing = false,
+                             bool node_has_emerald_key = false) noexcept;
 
 // AbstractRoom's event bodies can pre-seed gold/relic rows before enterCombat.
 // These doors preserve list order and RewardItem.incrementGold's merge +
@@ -489,6 +542,19 @@ void roll_setup_item_card_reward(RunState& rs, RoomType room,
 // NeowReward.java:275-283. Returns false when the screen holds no CARDS row
 // (the Java's `remove == -1` break).
 [[nodiscard]] bool remove_first_card_reward_item(RewardScreen& s) noexcept;
+
+// AbstractRoom.addSapphireKey (AbstractRoom.java:545-547): append the linked key
+// row after `s.items[s.count - 1]`, which AbstractChest.open has just made the
+// base relic. Returns false (nothing appended) when the screen is empty or full;
+// the caller's chest-open transaction treats that as an abort, exactly as it
+// does a failed relic push. The link itself is adjacency -- see the invariant
+// beside RewardItemKind.
+[[nodiscard]] bool add_sapphire_key_reward(RewardScreen& s) noexcept;
+
+// Is row `index` a RELIC whose linked SAPPHIRE_KEY row sits immediately after
+// it? (`RewardItem.relicLink != null` on a RELIC row, RewardItem.java:298.)
+[[nodiscard]] bool reward_relic_row_is_key_linked(const RewardScreen& s,
+                                                  uint8_t index) noexcept;
 
 // --- Claim -----------------------------------------------------------------
 

@@ -70,7 +70,17 @@ inline constexpr int kRoomTypeCount = engine::kRoomTypeCount;
 static_assert(
     kRoomTypeCount == static_cast<int>(engine::RoomType::TreasureBoss) + 1,
     "kRoomTypeCount must cover every RoomType enumerator");
-inline constexpr int kRewardKindCount = 5;    // combat_rewards.hpp RewardItemKind
+// Same discipline as kRoomTypeCount above, and for the same reason: this was a
+// hand-written 5 with nothing checking it, so it had ALREADY silently
+// under-covered the enum -- `STOLEN_GOLD` (kind 5) was outside the array and
+// `reward_kind_name` had no case for it. S3.11 added EMERALD_KEY (6) and
+// SAPPHIRE_KEY (7), which would have been dropped the same way. It is now the
+// engine's own count, which carries its own static_assert against the last
+// enumerator, so the guard exists at both ends of the dependency.
+inline constexpr int kRewardKindCount = engine::kRewardKindCount;
+static_assert(kRewardKindCount ==
+                  static_cast<int>(engine::RewardItemKind::SAPPHIRE_KEY) + 1,
+              "kRewardKindCount must cover every RewardItemKind enumerator");
 inline constexpr int kTurnBuckets = 8;        // 1,2,3,4,5-6,7-9,10-19,20+
 inline constexpr int kFloorBuckets = 16;      // floor 0..14, then 15+
 

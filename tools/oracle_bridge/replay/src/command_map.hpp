@@ -1520,37 +1520,25 @@ struct ShopTarget {
             }
             const CaptureRewardRow& chosen =
                 s.reward_rows[static_cast<std::size_t>(capture_index)];
-            // Both key rows are capture-only in S1. Claiming an Emerald Key
-            // mutates only a field the fork cannot emit; claiming a Sapphire
-            // Key abandons its linked relic, which the simulator likewise
-            // leaves unclaimed. In either case no run-layer action is the
-            // faithful mapping. The eventual Proceed discards the simulator's
-            // still-visible linked relic.
-            if (chosen.type == "EMERALD_KEY" ||
-                chosen.type == "SAPPHIRE_KEY") {
-                m.kind = MapKind::NOOP;
-                return m;
-            }
-
-            // CommunicationMod deletes a claimed reward row immediately. The
-            // run layer does the same, but deliberately never assembled the
-            // capture-only key rows. Translate the CURRENT visible ordinal by
-            // removing those rows from the capture's index space.
-            int sim_index = 0;
-            for (int i = 0; i < capture_index; ++i) {
-                const std::string& type =
-                    s.reward_rows[static_cast<std::size_t>(i)].type;
-                if (type != "EMERALD_KEY" && type != "SAPPHIRE_KEY") {
-                    ++sim_index;
-                }
-            }
-            if (sim_index < 0 || sim_index >= rc.rewards.count) {
+            // THE TWO INDEX SPACES ARE NOW THE SAME ONE. Until S3.11 the engine
+            // assembled neither key row, so this walked the capture's list
+            // eliding them and mapped a key claim to NOOP. Both rows are real
+            // engine rows now -- assembled where the Java appends them
+            // (MonsterRoomElite.java:94-98, AbstractChest.java:95-97) and
+            // claimed with their real semantics (RewardItem.java:317-332,
+            // including the sapphire pair's mutual destruction) -- so the
+            // capture's ordinal IS the simulator's ordinal and a `choose` of a
+            // key row is an ordinary CHOOSE. Eliding here now would shift every
+            // row a key precedes: at a burning elite the EMERALD_KEY row sits
+            // AHEAD of the potion and card rows, because dropReward runs before
+            // addPotionToRewards (AbstractRoom.java:329-330).
+            const int sim_index = capture_index;
+            if (sim_index >= rc.rewards.count) {
                 const std::string owner = deferred_reward_screen_owner(rc);
                 m.reason =
                     owner.empty()
                         ? "combat-reward row '" + chosen.type +
-                              "' has no corresponding sim row after key "
-                              "elision"
+                              "' has no corresponding sim row"
                         : "combat-reward row '" + chosen.type +
                               "' has no sim counterpart: the most recently "
                               "acquired relic is " +
@@ -1570,7 +1558,11 @@ struct ShopTarget {
                 (chosen.type == "RELIC" &&
                  sim_kind == RewardItemKind::RELIC) ||
                 (chosen.type == "CARD" &&
-                 sim_kind == RewardItemKind::CARDS);
+                 sim_kind == RewardItemKind::CARDS) ||
+                (chosen.type == "EMERALD_KEY" &&
+                 sim_kind == RewardItemKind::EMERALD_KEY) ||
+                (chosen.type == "SAPPHIRE_KEY" &&
+                 sim_kind == RewardItemKind::SAPPHIRE_KEY);
             if (!kind_matches) {
                 m.reason = "combat-reward row '" + chosen.type +
                            "' does not match sim row " +

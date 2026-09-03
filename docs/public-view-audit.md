@@ -284,8 +284,9 @@ Gate: `phase == COMBAT_REWARD`, or `phase == NEOW && neow.screen == ITEM_REWARD`
 | `RunRewardItem.id` | public | → `id` | RelicId / PotionId of the row. |
 | `RunRewardItem.card_ids[4]` | public | → `card_ids[4]` | The card offer; revealed with the screen. |
 | `RunRewardItem.card_upgrades[4]` | public | → `card_upgrades[4]` | |
-| `RunRewardItem.kind` | public | → `kind` | RewardItemKind. |
+| `RunRewardItem.kind` | public | → `kind` | RewardItemKind, INCLUDING S3.11's `EMERALD_KEY` (6) and `SAPPHIRE_KEY` (7). Both are ordinary rows here and deliberately so: a key row is on the screen the player is looking at, and every conjunct that decided whether it exists was public before it — the burning-elite node flag is drawn at map generation and shown on the map, `Settings.has*Key` are the player's own claims, and the chest's gate is `!hasSapphireKey`. The SAPPHIRE link is not a field (it is adjacency, combat_rewards.hpp), so nothing about it is carried or withheld. No layout change: the two values ride the existing `kind` byte and `kRewardItemCap` is unmoved. |
 | `RunRewardItem.card_count` | public | → `card_count` | |
+| *(mask)* `can_claim_reward[i]` | public | → the mask channel (§9) | Named here because S3.11 added the rows it indexes. `reward_claim_legal` returns true unconditionally for both key kinds — `RewardItem.claimReward` cases 6 and 7 have no precondition — so the bit is a function of the row's existence and nothing else. A key row's claim bit therefore leaks nothing the `kind` above does not already publish. |
 
 ### 8.2 RestSiteState → `rest_screen`
 
@@ -642,3 +643,11 @@ lifecycle rule; no in-place reinterpretation exists):
     Dead-Adventurer-shaped hidden realization and stays masked (0x01 — the
     bet itself is the player's own displayed choice).
   - `twins_v1.bin` regenerated with its checked-in generator, as at v4/v5.
+- S3.11 — the two key reward rows (`RewardItemKind::EMERALD_KEY` /
+  `SAPPHIRE_KEY`, `kRewardKindCount` → 8). **Not a version change: no field
+  moved, no cap moved, nothing new is carried.** The values ride
+  `PvRewardItem.kind`, which was already carried whole, and the rows they
+  describe were already inside `kRewardItemCap`. `PUBLIC_VIEW_VERSION` stays 6
+  (its 6 → 7 bump has exactly one owner, s3-tasks.md S3.51). The audit rows for
+  `RunRewardItem.kind` and for the reward screen's `can_claim_reward` mask bits
+  are extended in §8.1 with the classification argument.

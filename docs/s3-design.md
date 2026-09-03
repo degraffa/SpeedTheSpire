@@ -969,7 +969,10 @@ scan**, in three sanctioned steps with a pre-registered escalation:
 - **`SCHEMA_VERSION` 8 → 9 is planned, once, in S3** (`schema.hpp:187`). Its
   contents: the run-outcome kind (§4.5), the Act-4 floor base (§4.3), and the
   reward-row key kinds plus the sapphire link (§3.3, `RewardItemKind` gains
-  `EMERALD_KEY` and `SAPPHIRE_KEY`, so `kRewardKindCount` moves 5 → 7). A
+  `EMERALD_KEY` and `SAPPHIRE_KEY`, so `kRewardKindCount` moves 5 → **8**; the
+  "→ 7" this paragraph carried is corrected in §9's S3.11 entry, and the
+  sapphire link turned out to need **no stored field at all**, so neither the
+  kinds nor the link is a schema cost). A
   pad-carve is preferred where one exists and a tail append is the fallback,
   on the S2.47 precedent; the ledger names the single owning task so no other
   task bumps it, and the 20 Stage-A fixtures regenerate exactly once there via
@@ -980,7 +983,11 @@ scan**, in three sanctioned steps with a pre-registered escalation:
   nothing new — S3 spends only the run-outcome kind, the Act-4 map shape and
   the reward-row key rows. The legal-action mask is an observation channel
   (training-plan §2.1), so the key reward rows and the Act-4 map choice enter
-  the hashed public serialization and sit under the same twin tests.
+  the hashed public serialization and sit under the same twin tests. **The key
+  reward rows cost the public view nothing** (S3.11): they ride
+  `PvRewardItem.kind`, which was already carried whole, and the rows sit inside
+  the existing `kRewardItemCap`, so S3.51's bump spends only the run-outcome
+  kind and the Act-4 map shape.
 - `resample_hidden`'s contract (training-plan §2.4, training-contract §5a) is
   extended by exactly one fact — Act 4's content is **public and constant**, so
   a fake Act-4 future is deterministic. That *narrows* the posterior rather
@@ -1037,6 +1044,25 @@ scan**, in three sanctioned steps with a pre-registered escalation:
   the key-aware driver and the Act-4-aware fork redeploy move **ahead of** the
   Act-4 content, because nothing in Act 4 can be witnessed before a keyed
   three-act win exists.
+- 2026-09-03 — **§7 corrections from S3.11's implementation** (conventions §4:
+  a document conflict is fixed in the change that finds it). (i)
+  `kRewardKindCount` moves 5 → **8**, not 5 → 7. The constant did not exist in
+  the engine at all: it was a hand-written `5` in the fuzz coverage table
+  (`tools/fuzz/include/sts/fuzz/coverage.hpp`) sizing `reward_claimed[]`, and it
+  had already under-covered the enum — `STOLEN_GOLD` (5) was outside the array
+  and `reward_kind_name` had no case for it — so 7 would have dropped
+  `SAPPHIRE_KEY` (7) exactly the same way. It is now published by the engine as
+  last-enumerator + 1 with a `static_assert`, and the fuzz constant aliases it,
+  which is the pattern `kRoomTypeCount` already uses beside it. (ii) The
+  sapphire link needs **no stored field**: `addSapphireKey` always appends the
+  key directly after the row it links to, nothing is ever inserted mid-list,
+  removal compacts, and `removeOneRelicFromRewards` itself tests the *next*
+  element (AbstractRoom.java:549-559) — so the link is adjacency, `RunRewardItem`
+  keeps its 24-byte layout, and neither `SCHEMA_VERSION` nor
+  `PUBLIC_VIEW_VERSION` pays anything for the keys. (iii) `kFinalActAvailable`
+  moved from `rest_sites.hpp` to `run_state.hpp` beside the `kKey*` bits: four
+  gates in four modules read it now, and `relic_pools.hpp` includes
+  `map_rooms.hpp`, so map generation could never have reached `rest_sites.hpp`.
 - 2026-09-03 — **scoping correction recorded against the S2 deferred-obligations
   row for keys** (s2-tasks.md, "Keys as obtainable content"): its premise that
   "only the node flag is missing" is stale. `setEmeraldElite`'s chosen node

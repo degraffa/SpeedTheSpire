@@ -47,13 +47,25 @@ namespace sts::replay {
 // (CardCrawlGame.java:473), so **every Act-1 chest open in a capture carries
 // that extra trailing row** until the run actually takes a key.
 //
-// The row consumes no RNG and grants no relic, so the engine models no key row
-// at all (combat_rewards.hpp's "Deliberately NOT modelled" block). A read-out
-// that compared reward rows literally would therefore report a divergence on
-// every single chest. Eliding it blindly would be worse: a key row on a screen
-// that is NOT a chest open, a key row that is not trailing or not linked, or a
-// MISSING key row on a chest open, are each a real finding. This function is
-// the one place that distinction is made, so it is the one place to test.
+// The row consumed no RNG and granted no relic, so until S3.11 the engine
+// modelled no key row at all and a read-out that compared reward rows literally
+// would have reported a divergence on every single chest. Eliding it blindly
+// would have been worse: a key row on a screen that is NOT a chest open, a key
+// row that is not trailing or not linked, or a MISSING key row on a chest open,
+// are each a real finding. This function is the one place that distinction is
+// made, so it is the one place to test.
+//
+// S3.11 MADE THE ENGINE ASSEMBLE THE ROW (AbstractChest.java:95-97 ->
+// AbstractRoom.java:545-547, with the real two-way claim semantics). What
+// survives that is the SHAPE RULE -- everything this function decides about
+// whether the capture's own list is well formed, which is still exactly the
+// question a read-out must answer before it asks the simulator to agree. What
+// no longer has a consumer is the ELISION: `KeyRowVerdict::rows` is the capture
+// with the key row taken out, and `main.cpp` now compares against the full
+// list. `rows` and `map_reward_claim`'s key-index argument are kept because
+// they are the definition of the rule the tests pin (a rule that is checked and
+// then not applied is still the rule), and because the identity call
+// `map_reward_claim(rows, -1, choice)` is the bounds check the walk needs.
 //
 // THE ONE LEGITIMATE ABSENCE is N'loth's Mask: its `onChestOpenAfter`
 // (NlothsMask.java:23-32) calls `AbstractRoom.removeOneRelicFromRewards`
@@ -188,13 +200,19 @@ struct KeyRowVerdict {
 }
 
 // Which reward row a captured COMBAT_REWARD `choose i` names, translated into
-// the SIM's row index -- i.e. with the elided key row taken out of the index
-// space. A `choose` that names the key row itself has NO sim index: per
+// the SIM's row index -- i.e. with an elided key row taken out of the index
+// space. A `choose` that names the key row itself then has NO sim index: per
 // RewardItem.java:317-322 claiming the key sets the linked base relic's
 // `isDone`/`ignoreReward`, so the relic is ABANDONED rather than acquired, and
-// the run-layer analogue of that is claiming nothing at all. (The mirror case,
-// RewardItem.java:298-300, is why claiming the relic is safe: it marks the KEY
-// done and the run keeps the relic.)
+// with no key row sim-side the analogue of that was claiming nothing at all.
+// (The mirror case, RewardItem.java:298-300, is why claiming the relic was
+// safe: it marks the KEY done and the run keeps the relic.)
+//
+// FROM S3.11 the caller passes `key_index = -1`, because the simulator now has
+// the key row and both index spaces are the same one: the mapping is the
+// identity plus a bounds check, and the engine's own claim arm applies the two
+// mutually destructive branches. The `key_index >= 0` behaviour is retained
+// as the definition of the elided-index-space rule.
 enum class ClaimTarget : uint8_t {
     SIM_ROW,        // claim `sim_index` on the simulator's screen
     ABANDONS_RELIC, // the capture claimed the key: nothing is claimed sim-side
