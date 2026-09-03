@@ -406,6 +406,54 @@ void step(RunController& rc, Action a) {
 // needed the same spelling (see its comment). It is used unqualified below via
 // `using namespace sts::replay`.
 
+// --- semantic pile read-out (the --combat diagnosis aid's useful half) --------
+//
+// `diff_states` compares card_pool BY SLOT, and the capture's translator
+// allocates slots in dump order while the engine allocates them in deck order,
+// so every in-combat record shows dozens of card_pool[i] / hand[i] index
+// differences that mean nothing. What a divergence hunt actually needs is the
+// piles BY CONTENT -- "Name+@cost" in pile order (draw: bottom..top, the
+// CardGroup.group order on both sides) -- and the cardRandomRng counter,
+// printed only when they disagree. The STS228756 Dead Branch hunt (2026-09-02)
+// found its first differing record with exactly this print and nothing else.
+[[nodiscard]] std::string pile_text(const CombatState& cs, const CardPoolIndex* pile,
+                                    uint8_t count) {
+    std::string out;
+    for (uint8_t i = 0; i < count; ++i) {
+        const CardInstance& ci = cs.card_pool[pile[i]];
+        if (i != 0) out += ' ';
+        out += std::string(sts::registry::card_game_id(static_cast<CardId>(ci.card_id)));
+        if (ci.upgrade != 0) out += '+';
+        out += '@';
+        out += std::to_string(static_cast<int>(ci.cost_now));
+    }
+    return out;
+}
+
+void print_semantic_pile_diff(int seq, const CombatState& cap, const CombatState& sim) {
+    struct Row { const char* name; std::string a; std::string b; };
+    const Row rows[] = {
+        {"hand", pile_text(cap, cap.hand, cap.hand_count),
+         pile_text(sim, sim.hand, sim.hand_count)},
+        {"draw", pile_text(cap, cap.draw, cap.draw_count),
+         pile_text(sim, sim.draw, sim.draw_count)},
+        {"discard", pile_text(cap, cap.discard, cap.discard_count),
+         pile_text(sim, sim.discard, sim.discard_count)},
+        {"exhaust", pile_text(cap, cap.exhaust, cap.exhaust_count),
+         pile_text(sim, sim.exhaust, sim.exhaust_count)},
+    };
+    bool any = cap.card_random_rng.counter != sim.card_random_rng.counter;
+    for (const Row& r : rows) any = any || r.a != r.b;
+    if (!any) return;
+    std::printf("  piles seq=%d: cardRandomRng.counter capture=%d sim=%d\n", seq,
+                cap.card_random_rng.counter, sim.card_random_rng.counter);
+    for (const Row& r : rows) {
+        if (r.a == r.b) continue;
+        std::printf("    %-7s capture: %s\n    %-7s sim:     %s\n", r.name, r.a.c_str(),
+                    r.name, r.b.c_str());
+    }
+}
+
 struct Options {
     bool verbose = false;
     bool pool_evidence = false;
@@ -1088,6 +1136,7 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
             if (!crep.empty())
                 std::printf("  combat seq=%d: %zu field(s)\n%s\n", rec.seq, crep.size(),
                             crep.to_string().c_str());
+            print_semantic_pile_diff(rec.seq, rec.combat, rc.combat);
         }
 
         // Triage print (the S2.V3 Time Eater stops): the monster power lists,

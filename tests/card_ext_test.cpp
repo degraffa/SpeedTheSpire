@@ -14,8 +14,10 @@
 //                                UNPLAYABLE bars it from legal_actions.
 //   * MAKE_CARD               -- card creation into hand/discard/draw, incl. the
 //                                hand-full -> discard spill
-//                                (MakeTempCardInHandAction.update:71-77) and the
-//                                random draw-pile spot (CardGroup.addToRandomSpot).
+//                                (MakeTempCardInHandAction.update:71-77), the
+//                                random draw-pile spot (CardGroup.addToRandomSpot)
+//                                and ShowCardAndAddToHandEffect's Corruption
+//                                sweep (AbstractPlayer.onCardDrawOrDiscard).
 //   * SET_COST                -- the cost_now write primitive (clamped to u8).
 //   * upgrade plumbing        -- card_effect_steps/card_cost/card_flags select
 //                                base vs. upgraded by the CardInstance.upgrade bit.
@@ -30,6 +32,7 @@
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
+#include "sts/engine/piles.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
 
@@ -215,6 +218,144 @@ TEST(CardExtMakeCard, IntoHandWhenRoom) {
         EXPECT_EQ(s.card_pool[idx].card_id, static_cast<uint16_t>(CardId::STRIKE));
         EXPECT_EQ(s.card_pool[idx].cost_now, 1);   // Strike base cost
     }
+}
+
+// A card created INTO THE HAND goes through ShowCardAndAddToHandEffect
+// (ShowCardAndAddToHandEffect.java:26-51 / :53-73): hand.addToHand(card) (:43 /
+// :65) and then AbstractPlayer.onCardDrawOrDiscard() (:47 / :69), whose
+// Corruption branch (AbstractPlayer.java:1348-1352) calls modifyCostForCombat(-9)
+// on every SKILL in hand whose costForTurn != 0. On a costForTurn > 0 card that
+// takes modifyCostForCombat's FIRST arm (AbstractCard.java:2013-2022), which
+// ends `this.cost = this.costForTurn` -- so BOTH fields land on 0 and the
+// created skill is 0-cost for the COMBAT, not for this turn. The constructor's
+// own trailing `setCostForTurn(-9)` (:48-50 / :70-72) then finds costForTurn
+// already 0 and changes nothing.
+//
+// Witness: capture s2v3_wave1_STS239327_ps13, floor 50, the Act-3 double boss --
+// pre-fix the sim's hand carried Armaments@1 and Ghostly Armor@1 where the
+// capture had @0, on every record from seq 598 to 635.
+TEST(CardExtMakeCard, IntoHandUnderCorruptionZeroesASkillForTheCombat) {
+    CombatState s{};
+    s.player_powers[0].power_id = static_cast<uint16_t>(PowerId::CORRUPTION);
+    s.player_powers[0].amount = -1;  // CorruptionPower.java:27 -- presence, not amount
+    s.player_power_count = 1;
+
+    // The witness card itself (SKILL, registry cost 2), then an ATTACK and a
+    // POWER of nonzero cost as the type negatives (:1350's `type != SKILL`),
+    // then the same SKILL created straight into the DISCARD.
+    execute_opcode(s, MakeItem(Opcode::MAKE_CARD, kActorPlayer, 1,
+                               static_cast<uint8_t>(CardPile::HAND),
+                               make_make_card_flags(
+                                   static_cast<uint16_t>(CardId::FLAME_BARRIER))));
+    execute_opcode(s, MakeItem(Opcode::MAKE_CARD, kActorPlayer, 1,
+                               static_cast<uint8_t>(CardPile::HAND),
+                               make_make_card_flags(
+                                   static_cast<uint16_t>(CardId::BASH))));
+    execute_opcode(s, MakeItem(Opcode::MAKE_CARD, kActorPlayer, 1,
+                               static_cast<uint8_t>(CardPile::HAND),
+                               make_make_card_flags(
+                                   static_cast<uint16_t>(CardId::INFLAME))));
+    execute_opcode(s, MakeItem(Opcode::MAKE_CARD, kActorPlayer, 1,
+                               static_cast<uint8_t>(CardPile::DISCARD),
+                               make_make_card_flags(
+                                   static_cast<uint16_t>(CardId::FLAME_BARRIER))));
+
+    ASSERT_EQ(s.hand_count, 3);
+    const CardPoolIndex skill = s.hand[0];
+    EXPECT_EQ(s.card_pool[skill].card_id,
+              static_cast<uint16_t>(CardId::FLAME_BARRIER));
+    ASSERT_EQ(card_cost(*card_def(CardId::FLAME_BARRIER), 0), 2)
+        << "the sweep is only observable on a nonzero-cost skill";
+    EXPECT_EQ(s.card_pool[skill].cost_now, 0)
+        << "modifyCostForCombat(-9): costForTurn = cost = 0";
+    EXPECT_FALSE(has_card_flag(s.card_pool[skill].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN))
+        << "permanent for the combat, not a this-turn discount";
+
+    // The end-of-turn sweep restores AbstractCard.cost (resetAttributes,
+    // AbstractCard.java:2043) -- which modifyCostForCombat also set to 0, so the
+    // discount SURVIVES the turn boundary. This is the assertion that separates
+    // this fix from a setCostForTurn(0)-shaped one.
+    reset_cost_for_turn(s, skill);
+    EXPECT_EQ(s.card_pool[skill].cost_now, 0)
+        << "cost, not just costForTurn, was written -- nothing to restore";
+
+    EXPECT_EQ(s.card_pool[s.hand[1]].cost_now,
+              card_cost(*card_def(CardId::BASH), 0))
+        << "only SKILLs are swept (:1350) -- the ATTACK keeps cost 2";
+    EXPECT_EQ(s.card_pool[s.hand[2]].cost_now,
+              card_cost(*card_def(CardId::INFLAME), 0))
+        << "only SKILLs are swept (:1350) -- the POWER keeps cost 1";
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.card_pool[s.discard[0]].cost_now,
+              card_cost(*card_def(CardId::FLAME_BARRIER), 0))
+        << "a discard-pile creation is ShowCardAndAddToDiscardEffect, which "
+           "never calls onCardDrawOrDiscard";
+
+    // The hand-cap spill is the same discard-side effect: a created skill that
+    // lands in the discard because the hand is full keeps its cost
+    // (MakeTempCardInHandAction.update:71-77 -> addToDiscard, :132-140).
+    CombatState full{};
+    full.player_powers[0].power_id = static_cast<uint16_t>(PowerId::CORRUPTION);
+    full.player_powers[0].amount = -1;
+    full.player_power_count = 1;
+    for (int i = 0; i < kHandCap; ++i) {
+        full.card_pool[i].card_id = static_cast<uint16_t>(CardId::STRIKE);
+        full.card_pool[i].cost_now = 1;
+        full.hand[i] = static_cast<CardPoolIndex>(i);
+    }
+    full.hand_count = kHandCap;
+    execute_opcode(full, MakeItem(Opcode::MAKE_CARD, kActorPlayer, 1,
+                                  static_cast<uint8_t>(CardPile::HAND),
+                                  make_make_card_flags(
+                                      static_cast<uint16_t>(CardId::FLAME_BARRIER))));
+    ASSERT_EQ(full.discard_count, 1);
+    EXPECT_EQ(full.card_pool[full.discard[0]].cost_now,
+              card_cost(*card_def(CardId::FLAME_BARRIER), 0))
+        << "the spill arm has no hand sweep";
+
+    // Without Corruption the created skill keeps its registry cost.
+    CombatState plain{};
+    execute_opcode(plain, MakeItem(Opcode::MAKE_CARD, kActorPlayer, 1,
+                                   static_cast<uint8_t>(CardPile::HAND),
+                                   make_make_card_flags(
+                                       static_cast<uint16_t>(CardId::FLAME_BARRIER))));
+    ASSERT_EQ(plain.hand_count, 1);
+    EXPECT_EQ(plain.card_pool[plain.hand[0]].cost_now,
+              card_cost(*card_def(CardId::FLAME_BARRIER), 0));
+}
+
+// The sweep is over the WHOLE hand, not just the newcomer (:1349 iterates
+// hand.group), and it fires from every engine site that models
+// ShowCardAndAddToHandEffect. Dual Wield is the shape where the newcomer itself
+// can never move -- DualWieldAction only clones an ATTACK or a POWER
+// (DualWieldAction.java:38-45) -- so the only thing the sweep can do there is
+// reach a SKILL already sitting in hand with a live cost.
+TEST(CardExtMakeCard, HandSweepUnderCorruptionReachesTheWholeHand) {
+    CombatState s{};
+    s.player_powers[0].power_id = static_cast<uint16_t>(PowerId::CORRUPTION);
+    s.player_powers[0].amount = -1;
+    s.player_power_count = 1;
+    // A SKILL parked in hand at a live cost -- the state Snecko Eye's Confusion
+    // roll leaves behind when it lands after Corruption's own onCardDraw.
+    s.card_pool[0].card_id = static_cast<uint16_t>(CardId::FLAME_BARRIER);
+    s.card_pool[0].cost_now = 2;
+    s.card_pool[0].flags = card_flags(*card_def(CardId::FLAME_BARRIER), 0);
+    s.hand[0] = 0;
+    s.hand_count = 1;
+
+    execute_opcode(s, MakeItem(Opcode::MAKE_CARD, kActorPlayer, 1,
+                               static_cast<uint8_t>(CardPile::HAND),
+                               make_make_card_flags(
+                                   static_cast<uint16_t>(CardId::BASH))));
+
+    ASSERT_EQ(s.hand_count, 2);
+    EXPECT_EQ(s.card_pool[0].cost_now, 0)
+        << "the resident skill is swept even though the newcomer is an ATTACK";
+    EXPECT_FALSE(has_card_flag(s.card_pool[0].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+    EXPECT_EQ(s.card_pool[s.hand[1]].cost_now,
+              card_cost(*card_def(CardId::BASH), 0));
 }
 
 TEST(CardExtMakeCard, IntoHandSpillsToDiscardWhenHandFull) {

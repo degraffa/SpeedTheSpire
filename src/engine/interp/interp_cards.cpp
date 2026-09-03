@@ -270,6 +270,85 @@ void set_cost_for_turn(CombatState& s, CardPoolIndex pi, int amount) noexcept {
     return static_cast<int>(c.cost_now);
 }
 
+// AbstractPlayer.onCardDrawOrDiscard's Corruption branch (AbstractPlayer.java:
+// 1341-1356, the branch at :1348-1352):
+//
+//     if (this.hasPower("Corruption")) {
+//         for (AbstractCard c : this.hand.group) {
+//             if (c.type != CardType.SKILL || c.costForTurn == 0) continue;
+//             c.modifyCostForCombat(-9);
+//         }
+//     }
+//
+// ShowCardAndAddToHandEffect's two constructors run it (:47 / :69) right after
+// `hand.addToHand(card)` (:43 / :65), so a SKILL created into the hand while
+// Corruption is up is swept HERE, before the constructor's own trailing
+// `setCostForTurn(-9)` (:48-50 / :70-72) -- which then finds costForTurn already
+// 0 and, per setCostForTurn's body, changes nothing.
+//
+// The distinction that matters is which of the two cost fields moves.
+// modifyCostForCombat(-9) on a costForTurn > 0 card takes the FIRST arm
+// (AbstractCard.java:2013-2022): costForTurn += -9, clamped to 0, and then
+// `this.cost = this.costForTurn`. BOTH fields land on 0 and the card is 0-cost
+// for the whole COMBAT, not for this turn -- so no end-of-turn sweep restores
+// it. CorruptionPower.onCardDraw (CorruptionPower.java:37-42) is the other,
+// weaker shape (setCostForTurn(-9), this turn only) and does NOT reach a created
+// card: onCardDraw fires only on the draw path (AbstractPlayer.java:1645-1650).
+//
+// In the engine's encoding, AbstractCard.cost is reconstructed by
+// instance_base_cost, so "cost = costForTurn = 0" is cost_now 0 with NEITHER
+// COST_MODIFIED_FOR_TURN nor SAVED_BASE_COST set -- clearing them is what makes
+// the write permanent rather than a this-turn discount.
+//
+// The sweep is over the WHOLE hand, as in the Java (:1349 walks hand.group), not
+// just the newcomer -- and the live witness is a case where the newcomer is not
+// the card that moves at all. Capture s2v3_wave1_STS239327_ps13
+// (run_STS239327_a20_ironclad.jsonl), floor 50, the Act-3 double boss: the
+// player holds Corruption and a Necronomicurse, so every skill played is
+// exhausted and every exhaust of the curse re-creates it in hand through
+// MakeTempCardInHandAction (Necronomicurse.java:43-49). The newcomer is a CURSE
+// and is never swept; the resident skills are. Pre-fix,
+// `replay_run_diff --replay --combat` reported at seq 598
+//
+//     hand capture: Bite@1 Blood for Blood+@0 Juggernaut@2 ... Armaments@0 ...
+//     hand sim:     Bite@1 Blood for Blood+@0 Juggernaut@2 ... Armaments@1 ...
+//
+// the same for Ghostly Armor at seq 600, and the by-slot
+// `card_pool[29].cost_now: 0 -> 1` / `card_pool[30].cost_now: 0 -> 1` field diffs
+// on every record from seq 598 to 635 -- the wrong cost then rode into the
+// exhaust pile, because exhaust/end-of-turn resetAttributes restores
+// AbstractCard.cost (:2043) and the engine's was still the registry 1.
+//
+// XCOST rows carry cost_now 0 and are skipped here, which is what
+// `costForTurn == 0` does for the Java's -1 sentinel -- and correctly so:
+// modifyCostForCombat's second arm would need cost >= 0, and an X-cost card's is
+// -1.
+//
+// NOT COVERED HERE. The Java reaches this same branch from two more places the
+// engine does not model: CardGroup.moveToDiscardPile (:836-842) and
+// moveToExhaustPile (:850-862) call onCardDrawOrDiscard after every such move,
+// and AbstractPlayer.draw() (:1657-1665) calls it after a single-card draw. The
+// residual `Defend_R@0` (capture) vs `@1` (sim) in that same fight's exhaust pile
+// is the shape those would explain; it is left alone rather than guessed at.
+void corruption_hand_cost_sweep(CombatState& s) noexcept {
+    if (!player_carries_power(s, PowerId::CORRUPTION)) {
+        return;
+    }
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        CardInstance& c = s.card_pool[s.hand[i]];
+        const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+        if (def == nullptr || def->type != CardType::SKILL || c.cost_now == 0) {
+            continue;
+        }
+        // modifyCostForCombat(-9), the costForTurn > 0 arm (:2014-2022): both
+        // fields to 0, permanently -- so every this-turn marker is cleared.
+        c.cost_now = 0;
+        c.flags = static_cast<uint16_t>(
+            c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+            ~card_flag_bit(CardFlag::SAVED_BASE_COST) & ~kSavedBaseCostMask);
+    }
+}
+
 // Allocate a fresh library copy and add it to the hand, spilling to discard at
 // the hand cap. Discovery optionally applies setCostForTurn(0); Jack of All
 // Trades leaves the registry cost unchanged.
@@ -315,7 +394,15 @@ void add_library_copy_to_hand(CombatState& s, CardId id, bool free_this_turn,
     const CardPoolIndex pi = static_cast<CardPoolIndex>(slot);
     if (s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = pi;
+        // ShowCardAndAddToHandEffect:47 / :69 -- the Corruption sweep. A
+        // free_this_turn copy is already at cost_now 0 and the sweep skips it
+        // (DiscoveryAction's own setCostForTurn(0) at :61-62 runs BEFORE the
+        // effect, exactly as here); a Jack of All Trades colorless SKILL added
+        // at its registry cost is the arm that actually moves.
+        corruption_hand_cost_sweep(s);
     } else if (s.discard_count < kDiscardCap) {
+        // ShowCardAndAddToDiscardEffect (DiscoveryAction.java:69 / :77 / :79-80)
+        // has no onCardDrawOrDiscard step at all.
         s.discard[s.discard_count++] = pi;
     }
 }
@@ -564,6 +651,10 @@ void clone_card_to_hand(CombatState& s, CardPoolIndex src_pi) noexcept {
     const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
     if (s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = idx;
+        // ShowCardAndAddToHandEffect:47 / :69 (MakeTempCardInHandAction.addToHand
+        // :84-130). Dual Wield only ever clones an ATTACK or a POWER, so the
+        // newcomer itself is never swept; the sweep is over the whole hand.
+        corruption_hand_cost_sweep(s);
     } else if (s.discard_count < kDiscardCap) {
         s.discard[s.discard_count++] = idx;
     }
@@ -780,6 +871,12 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
                 // discard pile (the "hand is full" branch, :71-77).
                 if (s.hand_count < kHandCap) {
                     s.hand[s.hand_count++] = idx;
+                    // ShowCardAndAddToHandEffect (:43-50 / :65-72): addToHand,
+                    // then onCardDrawOrDiscard's Corruption sweep -- a created
+                    // SKILL is 0-cost for the combat. The discard spill goes
+                    // through ShowCardAndAddToDiscardEffect, which has no such
+                    // step, hence inside this branch only.
+                    corruption_hand_cost_sweep(s);
                 } else if (s.discard_count < kDiscardCap) {
                     s.discard[s.discard_count++] = idx;
                 }
@@ -1328,6 +1425,9 @@ void op_random_attack_to_hand(CombatState& s, uint32_t flags) noexcept {
     const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
     if (s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = idx;
+        // ShowCardAndAddToHandEffect:47 / :69. Both pools here are ATTACK /
+        // POWER, so the newcomer is never the card the sweep moves.
+        corruption_hand_cost_sweep(s);
     } else if (s.discard_count < kDiscardCap) {
         s.discard[s.discard_count++] = idx;
     }
@@ -2503,6 +2603,12 @@ void op_stasis_return(CombatState& s, const ActionQueueItem& item) noexcept {
     }
     if (stasis_return_to_hand(item.flags) && s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = pi;
+        // ShowCardAndAddToHandEffect:47 / :69 -- the stolen card comes back
+        // through MakeTempCardInHandAction (StasisPower.java:40), so a returned
+        // SKILL with a live cost is zeroed for the combat under Corruption. The
+        // MakeTempCardInDiscardAction arm (:42) and the resolve-time spill below
+        // are ShowCardAndAddToDiscardEffect, which has no such step.
+        corruption_hand_cost_sweep(s);
     } else if (s.discard_count < kDiscardCap) {
         s.discard[s.discard_count++] = pi;
     }
