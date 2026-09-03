@@ -271,9 +271,41 @@ jobs:
       # ninja-build has no first-party Windows package here; the pip wheel is
       # a prebuilt ninja.exe, the same approach the local Windows dev flow
       # would use if it didn't already assume Ninja is installed globally.
-      - name: Install Ninja
+      #
+      # PyYAML is installed here too -- found missing entirely on this job's
+      # first two real runs (both failed at Configure, nothing after it ran).
+      # tools/registry_gen/CMakeLists.txt requires PyYAML on whichever Python3
+      # interpreter CMake selects (`import yaml`, checked at configure time,
+      # FATAL_ERROR if it fails); the Linux leg gets it from
+      # `apt-get install ... python3-yaml`, but no equivalent line ever
+      # existed for Windows -- `actions/setup-python` provisions a bare
+      # interpreter, and the job installed ninja into it but never PyYAML.
+      # Reproduced locally (fresh venv standing in for setup-python's fresh
+      # 3.12, same as the runner: `python -m venv`, no PyYAML installed) by
+      # running this job's exact `cmake --preset win-debug` under a
+      # vcvars64+pinned-LLVM shell: configure fails at
+      # tools/registry_gen/CMakeLists.txt:46 with the FATAL_ERROR quoted
+      # below, which is this job's Configure failure end to end.
+      #
+      # `-DPython3_EXECUTABLE` on the Configure step below closes a second,
+      # compounding gap the same repro exposed: CMake's FindPython3 module
+      # defaults to `Python3_FIND_REGISTRY=FIRST` on Windows, so it can
+      # resolve to a *different*, registry-discovered interpreter than the
+      # one `python` names on PATH here -- confirmed locally, where an
+      # unpinned `cmake --preset win-debug` silently picked up an unrelated
+      # registry-registered Python3.9 install instead of the one on PATH.
+      # windows-latest images are documented to ship several pre-installed,
+      # registered Python versions for exactly this reason. Installing
+      # PyYAML into "whatever `python` resolves to" would therefore not
+      # reliably reach the interpreter CMake goes on to use; pinning
+      # Python3_EXECUTABLE to that same resolved path removes the ambiguity
+      # instead of hoping the two searches agree.
+      - name: Install Python build deps (ninja, PyYAML)
         shell: bash
-        run: python -m pip install --upgrade ninja
+        run: |
+          set -e
+          python -m pip install --upgrade ninja pyyaml
+          python -c "import yaml; print('PyYAML', yaml.__version__, 'importable on', __import__('sys').executable)"
 
       # Same two cache scopes and key shape as the Linux matrix's step (see
       # the rationale there); a separate namespace (win-debug, Windows) so it
@@ -289,13 +321,85 @@ jobs:
           restore-keys: |
             sts-deps-${{ runner.os }}-win-debug-
 
+      # Not evidence toward the gate, just a fast, cheap way to make the next
+      # failure (of this or any future kind) self-explanatory in the log
+      # instead of requiring another round of "we cannot read the log, so
+      # reproduce it locally first" -- exactly what finding the PyYAML gap
+      # above required. `env` is dumped in full and unredacted on purpose:
+      # this is a public open-source runner with no secrets material in its
+      # environment (conventions §6 already treats this box as such).
+      - name: Diagnostics -- toolchain resolution before Configure
+        shell: bash
+        run: |
+          echo "=== where ==="
+          where clang-cl ninja cmake python python3 || true
+          echo "=== clang-cl --version ==="
+          clang-cl --version || true
+          echo "=== cmake --version ==="
+          cmake --version || true
+          echo "=== python --version / python3 --version ==="
+          python --version || true
+          python3 --version || true
+          echo "=== env | sort ==="
+          env | sort
+
       # STS_BUILD_BENCHMARKS stays OFF here too -- see the Linux leg's
       # Configure step for why (a real, pre-existing bench_throughput
       # link defect the ON flag currently walks into on every non-LTO
       # build, win-debug included).
+      #
+      # Python3_EXECUTABLE is pinned to the interpreter `python` names on
+      # PATH right now -- the same one the previous step just installed
+      # ninja/PyYAML into -- rather than letting CMake's own (registry-first,
+      # see above) search pick independently. On failure this re-runs once
+      # with --debug-find so the log shows exactly which candidates CMake
+      # considered and why each was rejected, then surfaces
+      # CMakeConfigureLog.yaml's tail (the structured record of every
+      # compiler/package check CMake ran) before failing the step for real.
       - name: Configure
         shell: bash
-        run: cmake --preset win-debug
+        run: |
+          set -e
+          # Forward-slashed, not `sys.executable` verbatim: CMake's own
+          # find_package(Python3) always normalizes to forward slashes (the
+          # "Found Python3: C:/Python39/python.exe" style seen in a normal
+          # log), and tests/CMakeLists.txt bakes this value straight into a
+          # C string literal (STS_PYTHON_EXECUTABLE, oracle_corpus_replay_test
+          # and friends) with no escaping of its own. A raw backslash path
+          # here compiles to invalid escapes (`\U`, `\S`, ...) and fails the
+          # Build step later with `\U used with no following hex digits` --
+          # reproduced locally by pinning the unnormalized path once this fix
+          # was in place, so the forward-slash conversion stays even though
+          # nothing upstream of this line needs it.
+          py="$(python -c 'import sys; print(sys.executable.replace(chr(92), "/"))')"
+          echo "Pinning Python3_EXECUTABLE=$py"
+          if ! cmake --preset win-debug -DPython3_EXECUTABLE="$py"; then
+            echo "::group::Configure failed -- re-running with --debug-find"
+            cmake --preset win-debug -DPython3_EXECUTABLE="$py" --debug-find \
+              >configure-debug-find.log 2>&1 || true
+            tail -n 300 configure-debug-find.log
+            echo "::endgroup::"
+            log="build/win-debug/CMakeFiles/CMakeConfigureLog.yaml"
+            if [ -f "$log" ]; then
+              echo "::group::CMakeConfigureLog.yaml (tail)"
+              tail -n 200 "$log"
+              echo "::endgroup::"
+            else
+              echo "No $log -- configure failed before CMake wrote one."
+            fi
+            exit 1
+          fi
+
+      - name: Upload CMake configure log (Configure failure only)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-debug-configure-log
+          path: |
+            build/win-debug/CMakeFiles/CMakeConfigureLog.yaml
+            configure-debug-find.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Build
         shell: bash

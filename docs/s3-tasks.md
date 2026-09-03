@@ -3022,6 +3022,90 @@ this tree, not a Log carried forward.
   once this commit lands and pushes. Until that confirmation lands, treat
   the on-push half as open evidence, not as closed by this Log.
 
+  **2026-09-03 (later the same day), worktree `ciwin` off `dbe4446`:** the
+  on-push half above landed and reported back, and it was not what the note
+  hoped for. The first two real runs on `master`
+  (`33796654801`/`job/100785886174` and the run before it) both showed the
+  **Linux matrix green** (debug/asan/release, unchanged from this task's
+  local mirrors) and the **Windows job red at Configure** — every setup step
+  through "Verify clang-cl resolves to the pinned 22.1.8" passed, then
+  Configure failed and Build/everything after was skipped. `gh` is not
+  installed and the logs endpoint needs a token neither this task nor the
+  orchestrator has, so the log itself could not be read; the cause had to be
+  found by reproducing runner conditions locally instead. **Root cause,
+  reproduced and confirmed, not guessed:** the `windows` job never installs
+  **PyYAML** anywhere. The Linux leg's Configure gets it from `apt-get
+  install ... python3-yaml`; the Windows leg's only Python-side step was
+  `python -m pip install --upgrade ninja` — nothing ever put PyYAML on any
+  interpreter, and `tools/registry_gen/CMakeLists.txt`'s own configure-time
+  check (`import yaml`, `FATAL_ERROR` on failure, added earlier for the
+  WindowsApps-stub case) fails exactly this way regardless of which Python3
+  interpreter CMake selects. Reproduced locally with a fresh `python -m venv`
+  (standing in for `actions/setup-python`'s bare 3.12 install — no PyYAML, no
+  ninja, matching a first-run runner exactly) run through a vcvars64 +
+  pinned-`C:\LLVM-22.1.8` shell via Git-for-Windows bash: the unmodified
+  job's exact `cmake --preset win-debug` fails at
+  `tools/registry_gen/CMakeLists.txt:46` with the same message a real run
+  would show. A second, compounding gap surfaced in the same repro: CMake's
+  `FindPython3` defaults to `Python3_FIND_REGISTRY=FIRST` on Windows, so an
+  unpinned configure can silently resolve to a *different*, registry-known
+  interpreter than the one `python` names on PATH (confirmed locally — an
+  unrelated registry-registered Python 3.9 outranked the PATH-first venv);
+  `windows-latest` images are documented to carry several such pre-installed,
+  registered interpreters, so installing PyYAML into "whatever `python`
+  resolves to" would not reliably reach the interpreter CMake goes on to use.
+  **Fix, in `ci.yml` only** (no CMake file needed a change — the ambiguity is
+  fully closable from the workflow side): the old "Install Ninja" step is now
+  "Install Python build deps (ninja, PyYAML)" — installs both and asserts
+  `import yaml` succeeds before Configure runs; the Configure step now pins
+  `-DPython3_EXECUTABLE` to that same interpreter's path explicitly
+  (`python -c 'import sys; print(sys.executable...)'`), removing the
+  registry-search ambiguity rather than hoping the two searches agree.
+  **A third defect, found only because the first two were fixed and Configure
+  finally got far enough to hit it:** passing `sys.executable` verbatim
+  (Windows backslashes) into `-DPython3_EXECUTABLE` breaks the **Build**
+  step — `tests/CMakeLists.txt` bakes that cache variable straight into a C
+  string literal (`STS_PYTHON_EXECUTABLE`, consumed by
+  `oracle_corpus_replay_test.cpp` and others) with no escaping of its own,
+  and raw backslashes there compile to invalid escapes (`\U used with no
+  following hex digits`, etc.) — unpinned resolutions never hit this because
+  CMake's own `find_package(Python3)` normalizes to forward slashes
+  internally, but a value handed in raw on the command line is stored
+  verbatim. Fixed in the same Configure step by converting backslashes to
+  forward slashes before the `-D` is added, matching the style CMake's own
+  search already produces. **Hardening added** so the next failure (of this
+  or any future kind) is self-explanatory from the log alone: a "Diagnostics"
+  step immediately before Configure (`where clang-cl ninja cmake python
+  python3`, each tool's `--version`, full `env | sort`, unredacted per
+  conventions §6's read of this box); Configure itself now retries once with
+  `--debug-find` and tails both that output and
+  `build/win-debug/CMakeFiles/CMakeConfigureLog.yaml` before failing for
+  real; and an `actions/upload-artifact@v4` step (`if: failure()`) uploads
+  both logs as a job artifact. **Local validation, this worktree, fully
+  clean:** `.github/workflows/ci.yml` parses under `yaml.safe_load`
+  (`C:\Python39\python.exe`, has PyYAML); a from-scratch `build/win-debug`
+  (deleted between every attempt below) run through the exact fixed step
+  sequence — fresh `python -m venv` with neither ninja nor PyYAML installed,
+  vcvars64 (VS2019 Community, the only VS on this box; the runner's VS2022
+  Enterprise is architecturally the same `ilammy/msvc-dev-cmd`-driven path
+  and was not itself in question) + a `C:\LLVM-22.1.8` junction ahead of
+  `PATH`, Git-for-Windows bash — **Configure succeeds** (`Found Python3:
+  .../Scripts/python.exe`, forward-slashed) and **Build completes
+  431/431** with zero `FAILED`/`CMake Error` lines (only ordinary `-Wshadow`/
+  `-Wunused-function`/`-Wswitch` warnings and the routed-around
+  `STS_BUILD_BENCHMARKS` non-issue, which stays OFF here as S3.66 already
+  set it); `fixture_oracle_test`/`twin_test`/`tripwire_test` run directly
+  from `build/win-debug/bin` and **PASS** in full, every case in each binary.
+  Before the fix was in place, the unmodified job's exact commands were
+  confirmed to fail identically (Configure: the PyYAML `FATAL_ERROR`, quoted
+  above; Build, once PyYAML was fixed but the interpreter still pinned raw:
+  the `\U`/backslash escape error) — both negative controls line up with the
+  fix that resolves them. **Not run here, by the same Actions-cannot-run-
+  locally premise as the first Log entry:** the next real push. Confirm via
+  the GitHub Actions API once this lands; until then the Windows leg of
+  S3.66's own acceptance bar stays open evidence, now with a concrete,
+  reproduced cause behind it rather than an unread red X.
+
 - **S3.67** `[ ]` **Verification report + CI corpus + proactive audit.** The
   S2.46 analogue. Answer the design §6 S3-G2 bar item by item with linked
   evidence; extend the committed CI corpus with a curated **four-act** archive
