@@ -3418,3 +3418,286 @@
                # puts the pair permanently OUT OF PHASE: Deca opens on BEAM, Donu
                # opens on CIRCLE, and they swap every turn thereafter. The per-turn
                # aiRng.random(99) is still spent by both.
+
+# --- S3.41: the three Act-4 (TheEnding) classes ------------------------------
+# MonsterId 67-69 are this task's grant; 70 is the reserve and is RELEASED
+# UNSPENT (s3-tasks.md). MonsterId 48 and 66 are the unspent tail of S2's
+# granted windows and gap permanently. `monsters/ending/` holds exactly these
+# three classes and nothing else.
+#
+# WHAT THESE ROWS ARE AND ARE NOT. They are the STATS, the MOVE IDS, the
+# INTENTS and the takeTurn EFFECT PROGRAMS, read from source in full. They are
+# NOT the move-selection bodies, the pre-battle bodies, the die() bodies or the
+# native fan-outs: those are S3.42's (SpireShield, SpireSpear) and S3.43's
+# (CorruptHeart), and every place where a step below is a TEMPLATE rather than
+# the whole truth says so at the step.
+#
+# THE ONE CORRECTED NEGATIVE. s3-design section 2.2 and section 5 trap 4 assert
+# that "Act 4 consumes no monsterHpRng at all" because all three classes call
+# setHp(int). READ IN FULL, THE JAVA SAYS OTHERWISE: setHp(int) is literally
+# `this.setHp(hp, hp)` (AbstractMonster.java:777-779) and the two-arg body's
+# first statement is `currentHealth = AbstractDungeon.monsterHpRng.random(minHp,
+# maxHp)` (:765-766), unconditional -- and Random.random(int, int) increments
+# `counter` and calls nextInt(end - start + 1), which consumes an XS128 nextLong
+# even when the range is 1 (Random.java:58-61). So EACH of the three spends
+# EXACTLY ONE monsterHpRng draw whose OUTCOME is fixed; the Nemesis row (id 56,
+# S2.28) already records the same reading for the same overload, and the Maw
+# (id 55) is the contrasting shape -- no setHp call at all, hence zero draws.
+# The design doc's sentences are corrected in this commit (s3-design section 9);
+# what survives unchanged is the `rolls:` negative below.
+#
+# NO `rolls:` COLUMN ANYWHERE, and that is a separate fact from the one above:
+# `rolls:` records EXTRA native per-instance draws (a super(...)-argument draw
+# thrown away by the setHp under it, a pre-battle roll). None of the three has
+# one -- every super(...) HP argument is a LITERAL (SpireShield.java:49,
+# SpireSpear.java:50, CorruptHeart.java:66), not a monsterHpRng call -- so the
+# setHp draw each row's hp columns describe is the whole of its HP RNG cost.
+#
+# NO NEW MonsterIntent VALUE. The six telegraphs these three use --
+# ATTACK (1), ATTACK_DEFEND (3), BUFF (4), ATTACK_DEBUFF (6),
+# STRONG_DEBUFF (8), DEFEND (11) -- are all already in the generated enum
+# (vocab.py MONSTER_INTENTS); 14 remains B3.15's unissued reserve.
+#
+# ALL THREE ARE `ai: native`, and all three for the same reason: getMove is a
+# `moveCount % 3` cycle over PER-INSTANCE state no table carries, plus (the
+# Heart) an isFirstMove latch that RETURNS EARLY WITHOUT INCREMENTING. All three
+# also ignore `num`, and all three still spend the one aiRng.random(99) that
+# AbstractMonster.rollMove draws before calling getMove
+# (AbstractMonster.java:465-467) -- the easy draw to lose.
+#
+# UNVERIFIED-until-captured, witness S3.62: TWO captures cover all three rows --
+# one Shield-and-Spear fight (67, 68) and one Heart fight (69).
+
+- id: 67
+  name: SPIRE_SHIELD
+  game_id: "SpireShield"
+  provenance: "SpireShield (SpireShield.java, 177 lines, read in full). ID \"SpireShield\" (:36) -- the oracle join key. type = ELITE (:50). ctor (:48-67): the super(...) HP argument is the LITERAL 110 (:49) -- no draw -- then setHp(125) at ascension >= 8 else setHp(110) (:55-59), which is ONE monsterHpRng draw either way (AbstractMonster.java:777-779 -> :765-766; see the block comment above). The ascension >= 3 branch (:60-66) adds DamageInfo 14 then 38, else 12 then 34, so damage.get(0) is BASH's and damage.get(1) is SMASH's. Constants BASH_DEBUFF -1 (:45) and FORTIFY_BLOCK 30 (:46); move ids BASH=1, FORTIFY=2, SMASH=3 (:42-44). usePreBattleAction (:69-77) queues TWO items in this addToBottom order: ApplyPowerAction(PLAYER, this, new SurroundedPower(player)) (:71 -- the Shield is the ONLY Surrounded source in the fight) then ArtifactPower(this, 2) at ascension >= 18 else (this, 1) (:72-76). takeTurn (:79-111) ends with a trailing RollMoveAction OUTSIDE the switch (:110), so every move body reaches it and this class DOES need a monster_roll_move_fn entry (S3.42's). getMove (:113-137) ignores `num` and cycles moveCount % 3: case 0 is an aiRng.randomBoolean() between FORTIFY and BASH (:116-123), case 1 is `!lastMove(1) ? BASH : FORTIFY` (:124-131), the default is SMASH unconditionally (:132-134), and ++moveCount is at :136 -- so an EXTRA aiRng draw lands on one arm in three, on top of rollMove's random(99). changeState (:139-153) is animation. damage(DamageInfo) (:155-162) overrides, but its whole post-super body is the \"Hit\" spine animation behind `info.owner != null && info.type != THORNS && info.output > 0` -- presentation only, the Sentry precedent, so no on_monster_damaged entry. die() (:164-176) is super.die() FIRST and then content: for every still-living group member, remove \"Surrounded\" from the PLAYER (and flip player.flipHorizontal) and remove \"BackAttack\" from that member -- so it belongs in monster_die_after_fn, not monster_die_fn, and it is byte-identical to SpireSpear.die (s3-design section 5 trap 7: kill order is observable). Body, selection, the pre-battle pair, the FORTIFY fan-out and the die() half are S3.42's. UNVERIFIED-until-captured -- S3.62's Shield-and-Spear capture."
+  enemy_type: ELITE   # SpireShield.java:50
+  hp:
+    # ONE monsterHpRng draw over a one-wide range (see the block comment). The
+    # super(...) argument at :49 is the literal 110 and is overwritten by the
+    # setHp below it, so it is NOT a second draw and gets no `rolls:` entry.
+    base: {min: 110, max: 110}   # SpireShield.java:58 (ascension < 8)
+    a8:   {min: 125, max: 125}   # SpireShield.java:56 (ascension >= 8)
+  rolls: []
+  moves:
+    - name: BASH
+      move_id: 1               # SpireShield.java:42
+      intent: ATTACK_DEBUFF    # setMove(1, ATTACK_DEBUFF, damage.get(0).base) (:121,:126)
+      effects:
+        # damage.get(0): 12 (:64), 14 from A3 (:61). ChangeStateAction("ATTACK")
+        # and WaitAction(0.35f) (:83-84) are presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 12, a3: 14}}
+        # THE ORB BRANCH IS SHORT-CIRCUITED, AND THE SHORT CIRCUIT IS THE MODEL
+        # (not just its outcome). The Java is
+        #   if (!AbstractDungeon.player.orbs.isEmpty() && aiRng.randomBoolean())
+        #       FocusPower(player, -1); else StrengthPower(player, -1);
+        # (:86-91). Java's && evaluates left to right and stops on the first
+        # false, so an Ironclad -- who has no orb slots at all, orbs being the
+        # Defect's -- NEVER REACHES the randomBoolean(), spends NO extra aiRng
+        # draw here, and always takes the Strength arm (:90). Authoring the
+        # Strength step is therefore exact for this engine, and FocusPower stays
+        # deliberately unregistered (powers.yaml, S4 with the Defect). If a
+        # character with orbs is ever simulated, this step becomes a native
+        # branch and the draw appears -- that is the shape to change, not these
+        # numbers.
+        - {op: APPLY_POWER, target: PLAYER, amount: -1, power: STRENGTH}
+    - name: FORTIFY
+      move_id: 2               # SpireShield.java:43
+      intent: DEFEND           # setMove(2, DEFEND) (:118,:129) -- a pure block gain
+      effects:
+        # ONE AUTHORED TEMPLATE, FANNED OUT NATIVELY -- the Maw / Healer
+        # precedent and the same schema limitation. The Java queues one
+        # GainBlockAction(m, this, 30) for EVERY monster in the group, ITSELF
+        # INCLUDED (:94-96), and a step's target vocabulary is SELF or PLAYER,
+        # so an all-allies fan-out is not expressible. S3.42's take-turn body
+        # emits this step once per live group member through the per-step helper
+        # queue_monster_move_effect. FORTIFY_BLOCK is the field constant 30
+        # (:46) and is NEVER ascension-branched, so there is no tier column.
+        - {op: BLOCK, target: SELF, amount: 30}
+    - name: SMASH
+      move_id: 3               # SpireShield.java:44
+      intent: ATTACK_DEFEND    # setMove(3, ATTACK_DEFEND, damage.get(1).base) (:133)
+      effects:
+        # damage.get(1): 34 (:65), 38 from A3 (:62). ChangeStateAction
+        # ("OLD_ATTACK") and WaitAction(0.5f) (:100-101) are presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 34, a3: 38}}
+        # A18+ IS A FLAT 99 (:103-105); BELOW A18 THE BLOCK IS
+        # `damage.get(1).output` (:107) -- the POST-POWER output, i.e. after the
+        # Shield's own Strength and the back-attack 1.5x have been applied to
+        # the DamageInfo, NOT damage.get(1).base. No tier column can carry a
+        # runtime read, so the base column is 0 and is a DELIBERATE SCHEMA NULL,
+        # not the game's sub-A18 number. The engine resolves every tier at
+        # kMonsterAscension 20 (monster_dispatch.hpp:72), where the a18 column is
+        # the live one and this row is exact. IF a real ascension is ever
+        # threaded through combat_begin, S3.42's take-turn body must queue the
+        # post-power output below A18 instead of reading this column -- the Byrd
+        # PECK row records the same class of limitation for a step COUNT.
+        - {op: BLOCK, target: SELF, amount: {base: 0, a18: 99}}
+  ai: native   # getMove (:113-137) is a moveCount % 3 cycle over per-instance
+               # state, with an aiRng.randomBoolean() on case 0 and a lastMove(1)
+               # read on case 1 -- so the per-turn ai_rng cost is 1 or 2 draws
+               # depending on the arm. moveCount lives in the MonsterState.flags
+               # block S3.42 claims. See the S3.42 module.
+
+- id: 68
+  name: SPIRE_SPEAR
+  game_id: "SpireSpear"
+  provenance: "SpireSpear (SpireSpear.java, 184 lines, read in full). ID \"SpireSpear\" (:37) -- the oracle join key. type = ELITE (:51). ctor (:49-71): the super(...) HP argument is the LITERAL 160 (:50) -- no draw -- then setHp(180) at ascension >= 8 else setHp(160) (:57-61), ONE monsterHpRng draw either way. The ascension >= 3 branch (:62-70) sets skewerCount 4 and adds DamageInfo 6 then 10, else skewerCount 3 and 5 then 10; so damage.get(0) is BURN_STRIKE's and damage.get(1) is SKEWER's, and 10 is FLAT on both arms. Constants BURN_STRIKE_COUNT 2 (:46); move ids BURN_STRIKE=1, PIERCER=2, SKEWER=3 (:43-45). usePreBattleAction (:73-80) is ARTIFACT ONLY -- ArtifactPower(this, 2) at ascension >= 18 else (this, 1) -- and applies NO Surrounded; the Shield is the only source of that. takeTurn (:82-114) ends with a trailing RollMoveAction OUTSIDE the switch (:113), so this class needs a monster_roll_move_fn entry (S3.42's). getMove (:116-140) ignores `num` and cycles moveCount % 3: case 0 is `!lastMove(1) ? BURN_STRIKE : PIERCER` (:119-126), case 1 is SKEWER unconditionally (:127-130), the default is an aiRng.randomBoolean() between PIERCER and BURN_STRIKE (:131-137), and ++moveCount is at :139 -- the MIRROR of the Shield's cycle (its coin flip is on case 2, the Shield's on case 0), which is why the pair's telegraphs interleave the way they do. changeState (:142-159) is animation. damage(DamageInfo) (:161-169) overrides, but its whole post-super body is the \"Hit\" spine animation behind the same non-THORNS output > 0 gate -- presentation only, so no on_monster_damaged entry. die() (:171-183) is BYTE-IDENTICAL to SpireShield.die (:164-176): super.die() first, then for every still-living group member remove \"Surrounded\" from the PLAYER and \"BackAttack\" from that member -- monster_die_after_fn, and s3-design section 5 trap 7's observable kill order. Body, selection, the SKEWER and PIERCER fan-outs and the die() half are S3.42's. UNVERIFIED-until-captured -- S3.62's Shield-and-Spear capture."
+  enemy_type: ELITE   # SpireSpear.java:51
+  hp:
+    base: {min: 160, max: 160}   # SpireSpear.java:60 (ascension < 8)
+    a8:   {min: 180, max: 180}   # SpireSpear.java:58 (ascension >= 8)
+  rolls: []
+  moves:
+    - name: BURN_STRIKE
+      move_id: 1               # SpireSpear.java:43
+      intent: ATTACK_DEBUFF    # setMove(1, ATTACK_DEBUFF, damage.get(0).base, 2, true) (:121,:136)
+      effects:
+        # TWO SEPARATE DamageActions on damage.get(0) (:86-90) -- not one doubled
+        # hit -- so block, a halving power and a lethal clamp all apply per hit.
+        # BURN_STRIKE_COUNT is the field constant 2 (:46) and is FLAT at every
+        # ascension, which is why these are two literal steps rather than a
+        # counted template (the Gremlin Leader STAB precedent). damage.get(0):
+        # 5 (:68), 6 from A3 (:64). ChangeStateAction("ATTACK") and
+        # WaitAction(0.15f) inside the loop are presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 5, a3: 6}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 5, a3: 6}}
+        # TWO BURNS, AND THE PILE IS THE ASCENSION BRANCH, NOT THE COUNT: at
+        # A18+ it is MakeTempCardInDrawPileAction(new Burn(), 2, false, true)
+        # (:92) -- the 4-arg overload, so randomSpot = FALSE and toBottom
+        # defaults false (MakeTempCardInDrawPileAction.java:44-46), i.e.
+        # ShowCardAndAddToDrawPileEffect adds each copy to the TOP of the draw
+        # pile with NO cardRandomRng draw, which is exactly CardPile::DRAW;
+        # below A18 it is MakeTempCardInDiscardAction(new Burn(), 2) (:95), i.e.
+        # CardPile::DISCARD. THE PILE RIDES IN `extra`, WHICH HAS NO TIER
+        # COLUMN, so only one of the two can be authored: this row authors the
+        # A18+ arm, which is the live one at kMonsterAscension 20. The count 2
+        # is the same on both arms. If a real ascension is ever threaded
+        # through combat_begin, this step becomes a native branch -- the Byrd
+        # PECK and the SMASH block above are the same class of limitation.
+        - {op: MAKE_CARD, target: PLAYER, amount: 2, card: BURN, pile: DRAW}
+    - name: PIERCER
+      move_id: 2               # SpireSpear.java:44
+      intent: BUFF             # setMove(2, BUFF) (:124,:133)
+      effects:
+        # ONE AUTHORED TEMPLATE, FANNED OUT NATIVELY. The Java queues one
+        # ApplyPowerAction(m, this, new StrengthPower(m, 2), 2) for EVERY monster
+        # in the group, ITSELF INCLUDED (:99-101) -- so at full strength the
+        # Shield gains +2 as well, and the Spear's own copy is why a lone
+        # surviving Spear still ramps. The 2 is a literal in the loop, with no
+        # ascension branch anywhere in the class, hence no tier column. Same
+        # schema limitation and same resolution as the Shield's FORTIFY:
+        # S3.42's take-turn body emits this step once per live group member.
+        - {op: APPLY_POWER, target: SELF, amount: 2, power: STRENGTH}
+    - name: SKEWER
+      move_id: 3               # SpireSpear.java:45
+      intent: ATTACK           # setMove(3, ATTACK, damage.get(1).base, skewerCount, true) (:128)
+      effects:
+        # ONE AUTHORED TEMPLATE, FANNED OUT NATIVELY -- skewerCount SEPARATE
+        # 4-arg DamageActions on damage.get(1) (:105-109), so block and every
+        # per-hit power apply per hit. skewerCount is ASCENSION-VARYING (3, 4
+        # from A3 -- :63,:67) and an effect list expresses per-tier AMOUNTS, not
+        # per-tier COUNTS, so the count cannot be authored as repeated steps the
+        # way BURN_STRIKE's flat 2 is: S3.42's body reads the count. THE COUNT IS
+        # THE ONE NUMBER NOT IN THIS TABLE, and this comment is the record of
+        # where it lives. damage.get(1) is 10 on BOTH arms of the A3 branch
+        # (:65,:69) -- a deliberate non-difference, so no tier column.
+        - {op: DAMAGE, target: PLAYER, amount: 10}
+  ai: native   # getMove (:116-140) is the Shield's cycle mirrored: lastMove(1)
+               # on case 0, unconditional SKEWER on case 1, an
+               # aiRng.randomBoolean() on case 2. Per-turn ai_rng cost is 1 or 2
+               # draws depending on the arm. moveCount lives in the
+               # MonsterState.flags block S3.42 claims.
+
+- id: 69
+  name: CORRUPT_HEART
+  game_id: "CorruptHeart"
+  provenance: "CorruptHeart (CorruptHeart.java, 212 lines, read in full). ID \"CorruptHeart\" (:49) -- the oracle join key. type = BOSS (:71), which is what Pantograph's monster-group scan reads. ctor (:65-86): the super(...) HP argument is the LITERAL 750 (:66) -- no draw -- then setHp(800) at ascension >= 9 else setHp(750) (:72-76), ONE monsterHpRng draw either way. The ascension >= 4 branch (:77-85) adds DamageInfo 45 then 2 with bloodHitCount 15, else 40 then 2 with bloodHitCount 12; so damage.get(0) is ECHO_ATTACK's and damage.get(1) is BLOOD_SHOTS' PER-HIT damage, and that 2 is FLAT on both arms. Move ids BLOOD_SHOTS=1, ECHO_ATTACK=2, DEBILITATE=3, GAIN_ONE_STRENGTH=4 (:55-58). usePreBattleAction (:88-103) is TWO items and NO ARTIFACT: InvinciblePower(this, invincibleAmt) then BeatOfDeathPower(this, beatAmount), where invincibleAmt starts at 300 and SUBTRACTS 100 at ascension >= 19 (:93-96) and beatAmount starts at 1 and is pre-incremented at >= 19 (:97-100) -- so A19+ is Invincible 200 / Beat of Death 2. The first three lines of the method (:90-92) are music. takeTurn (:105-169) ends with a trailing RollMoveAction OUTSIDE the switch (:168), so this class needs a monster_roll_move_fn entry (S3.43's). getMove (:171-200) is the ONE selection in the roster with an EARLY RETURN: `if (isFirstMove) { setMove(3, STRONG_DEBUFF); isFirstMove = false; return; }` (:173-177) -- so THE OPENING DEBILITATE DOES NOT INCREMENT moveCount, and a body that increments unconditionally puts the whole cycle one step out for the rest of the fight. After that it is moveCount % 3: case 0 an aiRng.randomBoolean() between BLOOD_SHOTS and ECHO_ATTACK (:179-186), case 1 `!lastMove(2) ? ECHO_ATTACK : BLOOD_SHOTS` (:187-194), default the buff move unconditionally (:195-197), ++moveCount at :199. die() (:202-211) is wrapped in `if (!getCurrRoom().cannotLose)` and, inside it, super.die() FIRST and then removeListener / onBossVictoryLogic / onFinalBossVictoryLogic / CardCrawlGame.stopClock = true -- so the sim-visible half is post-super (monster_die_after_fn) and is the run's TRUE VICTORY edge, not a combat effect. NO damage() override at all, so no on_monster_damaged entry. Body, selection, the buffCount ladder, the Strength negation and the victory edge are S3.43's. UNVERIFIED-until-captured -- S3.62's Heart capture."
+  enemy_type: BOSS   # CorruptHeart.java:71
+  hp:
+    base: {min: 750, max: 750}   # CorruptHeart.java:75 (ascension < 9)
+    a9:   {min: 800, max: 800}   # CorruptHeart.java:73 (ascension >= 9)
+  rolls: []
+  moves:
+    - name: BLOOD_SHOTS
+      move_id: 1               # CorruptHeart.java:55
+      intent: ATTACK           # setMove(1, ATTACK, damage.get(1).base, bloodHitCount, true) (:181,:192)
+      effects:
+        # ONE AUTHORED TEMPLATE, FANNED OUT NATIVELY -- bloodHitCount SEPARATE
+        # 4-arg DamageActions on damage.get(1) (:158-160). The count is
+        # ASCENSION-VARYING (12, 15 from A4 -- :80,:84) and an effect list
+        # carries per-tier AMOUNTS, not per-tier COUNTS, so S3.43's body reads
+        # it; the SpireSpear SKEWER row above is the same shape. SEPARATE HITS
+        # MATTER HERE MORE THAN ANYWHERE: at 2 damage a hit, block, Vulnerable,
+        # the Heart's Strength ramp and -- once the buff ladder has reached its
+        # buffCount == 2 rung -- Painful Stabs' one Wound PER LANDED HIT all
+        # apply twelve or fifteen times. damage.get(1) is 2 on BOTH arms of the
+        # A4 branch (:79,:83), a deliberate non-difference, so no tier column.
+        - {op: DAMAGE, target: PLAYER, amount: 2}
+    - name: ECHO_ATTACK
+      move_id: 2               # CorruptHeart.java:56
+      intent: ATTACK           # setMove(2, ATTACK, damage.get(0).base) (:184,:189)
+      effects:
+        # ONE DamageAction on damage.get(0) (:165): 40 (:82), 45 from A4 (:78).
+        # The ViceCrushEffect VFXAction (:164) is presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 40, a4: 45}}
+    - name: DEBILITATE
+      move_id: 3               # CorruptHeart.java:57
+      intent: STRONG_DEBUFF    # setMove(3, STRONG_DEBUFF) (:174) -- the opener, and only there
+      effects:
+        # EIGHT ITEMS IN EXACTLY THIS addToBottom ORDER (:109-117); the leading
+        # HeartMegaDebuffEffect VFXAction (:109) is presentation. The three
+        # debuffs are each `new XPower(player, 2, true)` -- the third argument is
+        # isSourceMonster, which every monster-applied debuff in this registry
+        # passes and which the engine handles at the APPLY_POWER site, so it is
+        # not a column here.
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: VULNERABLE}   # :110
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}         # :111
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: FRAIL}        # :112
+        # FIVE STATUS CARDS, EACH ITS OWN MakeTempCardInDrawPileAction WITH
+        # amount 1 (:113-117), in this order -- Dazed, Slimed, Wound, Burn,
+        # Void. All five use the 7-arg overload with randomSpot = TRUE
+        # (MakeTempCardInDrawPileAction.java:27-38), which is CardPile::
+        # DRAW_RANDOM: op_make_card's DRAW_RANDOM arm reproduces
+        # CardGroup.addToRandomSpot's ONE cardRandomRng random(size-1) PER COPY,
+        # and ZERO when the draw pile is empty. FIVE SEPARATE STEPS, NOT ONE
+        # STEP OF FIVE: each action makes a DIFFERENT card, and each copy's
+        # random position is drawn against the pile size AS IT THEN IS, so the
+        # five draws see four different sizes -- collapsing them would be a
+        # stream divergence, not a tidy-up. The two float arguments are screen
+        # x/y and are presentation.
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: DAZED,  pile: DRAW_RANDOM}   # :113
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: SLIMED, pile: DRAW_RANDOM}   # :114
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: WOUND,  pile: DRAW_RANDOM}   # :115
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: BURN,   pile: DRAW_RANDOM}   # :116
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: VOID,   pile: DRAW_RANDOM}   # :117
+    - name: GAIN_ONE_STRENGTH
+      move_id: 4               # CorruptHeart.java:58
+      intent: BUFF             # setMove(4, BUFF) (:196)
+      effects:
+        # ONE AUTHORED STEP OUT OF TWO, AND THE OTHER IS A LADDER. The Java
+        # (:120-151) does three things in order: (a) computes
+        # `additionalAmount = -getPower("Strength").amount` when the Heart's own
+        # Strength is NEGATIVE (:121-124), i.e. it NEGATES any Strength debuff
+        # the player has landed, so a Shockwave/Piercing Wail is undone rather
+        # than merely out-paced; (b) queues ApplyPowerAction(this, this,
+        # StrengthPower(this, additionalAmount + 2)) (:127) -- the ALWAYS +2,
+        # which is the step authored below; (c) switches on `buffCount`
+        # (:128-148) for a SECOND queued item -- 0 -> ArtifactPower(this, 2),
+        # 1 -> BeatOfDeathPower(this, 1), 2 -> PainfulStabsPower(this),
+        # 3 -> StrengthPower(this, 10), default -> StrengthPower(this, 50)
+        # FOREVER -- then ++buffCount (:149). Neither (a) nor (c) is expressible
+        # as data: (a) reads the acting monster's own live power amount and (c)
+        # is a per-instance rung counter, so both are S3.43's native body, with
+        # buffCount in the MonsterState.flags block that task claims. The two
+        # VFXActions (:125-126) are presentation. No ascension branch anywhere
+        # in the move.
+        - {op: APPLY_POWER, target: SELF, amount: 2, power: STRENGTH}
+  ai: native   # getMove (:171-200) carries the isFirstMove EARLY RETURN that
+               # skips ++moveCount (:173-177) -- the roster's only one -- plus a
+               # moveCount % 3 cycle with an aiRng.randomBoolean() on case 0 and
+               # a lastMove(2) read on case 1. Per-turn ai_rng cost is 1 or 2
+               # draws depending on the arm, and the opening DEBILITATE costs the
+               # init rollMove's random(99) and nothing more. See the S3.43
+               # module.

@@ -86,6 +86,13 @@ const std::vector<EventName>& event_name_table() {
         {EventId::TOMB_OF_LORD_RED_MASK, "TOMB_OF_LORD_RED_MASK",
          "Tomb of Lord Red Mask"},
         {EventId::WINDING_HALLS, "WINDING_HALLS", "Winding Halls"},
+        // S3.41 -- id 52, and the ONLY row in this table that belongs to no
+        // act's draw list. `Spire Heart` is constructed by VictoryRoom
+        // (VictoryRoom.java:26-34), never drawn, so `generate_event` can never
+        // return it and no seed scan can ever report it as fired. It is listed
+        // anyway because this table's contract is the yaml's game_id column,
+        // not the drawable subset -- the static_assert below counts ROWS.
+        {EventId::SPIRE_HEART, "SPIRE_HEART", "Spire Heart"},
     };
     return kNames;
 }
@@ -93,7 +100,7 @@ const std::vector<EventName>& event_name_table() {
 // The guard that makes the hand copy above honest: adding a row to
 // registry/events.yaml grows the GENERATED table, and this stops compiling.
 // (kEventTable is generated from the same yaml -- sts/registry/event_table.hpp.)
-constexpr std::size_t kNameTableSize = 51;
+constexpr std::size_t kNameTableSize = 52;
 static_assert(registry::kEventTable.size() == kNameTableSize,
               "registry/events.yaml gained or lost an event row: add the matching "
               "{EventId, symbol, game_id} entry to event_name_table() in "

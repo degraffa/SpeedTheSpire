@@ -867,3 +867,67 @@
     - {emit: "Orb Walker"}
     - {emit: "Orb Walker"}
   provenance: "MysteriousSphere.onEnterRoom (MysteriousSphere.java:39) enters MonsterHelper.getEncounter(\"2 Orb Walkers\"); MonsterHelper.getEncounter (MonsterHelper.java:570-572) constructs two OrbWalker actors"
+
+# =============================================================================
+# ACT 4 -- TheEnding (S3.41). NOT A POOL, AND NOTHING IS ROLLED.
+#
+# TheEnding.generateMonsters (TheEnding.java:162-171) adds the literal key
+# "Shield and Spear" THREE times to monsterList and three times to
+# eliteMonsterList; initializeBoss (:191-195) adds "The Heart" three times and
+# does NOT shuffle. generateWeakEnemies / generateStrongEnemies / generateElites
+# are EMPTY bodies and generateExclusions returns an empty list (:174-188). So
+# Act-4 list construction consumes ZERO monsterRng -- s3-design section 5 trap 3,
+# and the reason run_advance.cpp's act-4 crossing writes the three lists directly
+# instead of calling generate_monster_lists.
+#
+# CONSEQUENCES FOR THE TWO ROWS BELOW, all of them recorded rather than implied:
+#   * `weight: 0.0` is not "a weight of zero", it is the schema's spelling of
+#     "never weight-rolled" -- the same thing it means on every BOSS row. The
+#     emitter now REQUIRES it on every act-4 row (emit/encounters.py), so a later
+#     hand cannot give Act 4 a weight band that no Java line would read.
+#   * no `excludes:` -- generateExclusions returns an empty list, and `excludes`
+#     is a WEAK-pool-only column anyway.
+#   * the ELITE row is ALSO the monsterList key. TheEnding puts the same string in
+#     both lists; getMonsterForRoomCreation / getEliteMonsterForRoomCreation
+#     (AbstractDungeon.java:1846-1862) read list.get(0) and never remove, so the
+#     lists never deplete. The Act-4 map has no MonsterRoom at all (s3-design
+#     section 4.4), so monsterList's three entries are DEAD STORAGE and this
+#     registry authors ONE row rather than a normal-pool duplicate -- the S1
+#     practice for unreachable keys ("4 Byrds", "Snecko and Mystics").
+#   * the codegen emits both rows as NAMED ACT-4 CONSTANTS beside the per-(act,
+#     pool) tables (kAct4EliteEncounter / kAct4MonsterEncounter /
+#     kAct4BossEncounter / kAct4FixedListLen), because a constant is what a
+#     consumer of a list that is never rolled actually wants. run_advance.cpp's
+#     kActEndingEncounter / kActEndingBoss now read those constants, so the two
+#     literals S3.32 had to hard-code before this row existed are gone.
+#
+# UNVERIFIED-until-captured, witness S3.62: ONE Shield-and-Spear fight and ONE
+# Heart fight witness both rows -- there is no third act-4 encounter to reach.
+# =============================================================================
+- id: 62
+  name: SHIELD_AND_SPEAR
+  game_id: "Shield and Spear"
+  act: 4
+  pool: ELITE
+  weight: 0.0
+  program:
+    # MonsterGroup(new SpireShield(), new SpireSpear()) -- the array order IS the
+    # spawn order and therefore the turn order, so the Shield is index 0 and the
+    # Spear index 1 (MonsterHelper.java:599-601). That order is observable twice
+    # over: BackAttack is applied to whichever guard the player is NOT facing, and
+    # the two die() bodies make the KILL ORDER observable (s3-design section 5
+    # trap 7).
+    - {emit: "SpireShield"}
+    - {emit: "SpireSpear"}
+  provenance: "TheEnding.generateMonsters (TheEnding.java:162-171) adds \"Shield and Spear\" three times to monsterList AND three times to eliteMonsterList; the four generateXxx overrides are empty bodies and generateExclusions returns an empty list (:174-188), so no weight band, no exclusion key and no monsterRng draw exists in Act 4. MonsterHelper.getEncounter \"Shield and Spear\" (MonsterHelper.java:599-601) constructs MonsterGroup(new SpireShield(), new SpireSpear()); the key constant is MonsterHelper.SHIELD_SPEAR_ENC (:159) and its display name is MIXED_COMBAT_NAMES[28] (:382-384). Actors are monsters.yaml 67 (SpireShield) and 68 (SpireSpear). UNVERIFIED-until-captured -- S3.62 owes the Shield-and-Spear fight capture."
+
+- id: 63
+  name: THE_HEART_ENC
+  game_id: "The Heart"
+  act: 4
+  pool: BOSS
+  weight: 0.0
+  program:
+    # MonsterGroup(new CorruptHeart()) -- a solo group (MonsterHelper.java:596-598).
+    - {emit: "CorruptHeart"}
+  provenance: "TheEnding.initializeBoss (TheEnding.java:191-195) adds \"The Heart\" three times with NO Collections.shuffle -- unlike Exordium/TheCity/TheBeyond, whose fully-unlocked else-branch shuffles with new Random(monsterRng.randomLong()); that missing shuffle is the whole of Act 4's zero-monsterRng claim on the boss side. MonsterHelper.getEncounter \"The Heart\" (MonsterHelper.java:596-598) constructs MonsterGroup(new CorruptHeart()); the key constant is MonsterHelper.THE_HEART_ENC (:158) and its display name is CorruptHeart.NAME (:379-381). Actor is monsters.yaml 69 (CorruptHeart). THE A20 DOUBLE BOSS DOES NOT FIRE HERE even though bossList.size() == 2 after the entry pop: ProceedButton.java:101-104 gates that branch on AbstractDungeon.id.equals(\"TheBeyond\") and the TheEnding arm at :107-109 is a plain else-if (s3-design section 5 trap 8; a20.yaml row 20 carries the same negative). UNVERIFIED-until-captured -- S3.62 owes the Heart fight capture."

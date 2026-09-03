@@ -2050,16 +2050,30 @@ namespace {
 // --- TheEnding's fixed content (S3.32) ---------------------------------------
 //
 // generateMonsters (TheEnding.java:162-172) and initializeBoss (:191-196) are
-// three literal adds each, with no RNG and no shuffle. The KEYS are the
-// encounter game_ids S3.41's registry rows will carry; until those land the
-// join in on_player_entry finds nothing and the room parks, which is the
-// honest answer and the reason the strings are spelled here rather than looked
-// up. Three is the Java's own count, not a cap: `monsterList` is popped once
-// per boss room left and `eliteMonsterList` once per elite room left, and Act 4
-// has exactly one of each.
-constexpr std::string_view kActEndingEncounter = "Shield and Spear";
-constexpr std::string_view kActEndingBoss = "The Heart";
-constexpr uint8_t kActEndingListLen = 3;
+// three literal adds each, with no RNG and no shuffle. Three is the Java's own
+// count, not a cap: `monsterList` is popped once per boss room left and
+// `eliteMonsterList` once per elite room left, and Act 4 has exactly one of
+// each.
+//
+// S3.41 LANDED THE ROWS, SO THE STRINGS ARE NO LONGER SPELLED HERE. S3.32 had
+// to hard-code them because encounters.yaml carried no act-4 row yet; it now
+// carries 62 (`Shield and Spear`, ELITE) and 63 (`The Heart`, BOSS), and the
+// codegen emits both as named constants beside the per-(act, pool) tables --
+// which is the right shape for an act whose lists are never rolled. Reading
+// them from the generated header is what keeps this branch and the registry
+// from drifting apart, and it is why the join in on_player_entry now resolves.
+constexpr std::string_view kActEndingEncounter =
+    sts::registry::kAct4EliteEncounter;
+constexpr std::string_view kActEndingBoss = sts::registry::kAct4BossEncounter;
+static_assert(kActEndingEncounter == sts::registry::kAct4MonsterEncounter,
+              "TheEnding puts the SAME key in monsterList and eliteMonsterList "
+              "(TheEnding.java:163-170); if the registry ever splits them this "
+              "branch needs two keys, not one");
+static_assert(sts::registry::kActEnding == kFinalAct,
+              "the registry's act-4 constants must name the same act as "
+              "engine::kFinalAct");
+constexpr uint8_t kActEndingListLen =
+    static_cast<uint8_t>(sts::registry::kAct4FixedListLen);
 static_assert(kActEndingListLen <= kMaxMonsterList &&
               kActEndingListLen <= kMaxEliteList &&
               kActEndingListLen <= kMaxBossList);
@@ -2259,10 +2273,12 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     }
 
     // setBoss(bossList.get(0)) (:290) mirrored into save-parity state, the same
-    // registry join run_begin uses for Act 1. At act 4 the key is "The Heart",
-    // whose encounters.yaml row is S3.41's grant and does not exist yet, so
-    // encounter_by_game_id returns nullptr and boss_ids[3] stays 0 until it
-    // lands -- an honest zero, not a fabricated id.
+    // registry join run_begin uses for Act 1. At act 4 the key is "The Heart";
+    // S3.32 recorded an honest boss_ids[3] == 0 here because its encounters.yaml
+    // row did not exist yet, and S3.41 landed that row (id 63), so the join now
+    // resolves and boss_ids[3] carries a real id from the crossing onward. That
+    // is an ACT-4-ONLY state change -- no Act-1/2/3 capture can reach this line
+    // with next_act == 4 -- and it is UNVERIFIED-until-captured under S3.62.
     if (rc.lists.boss_list_count > 0) {
         const sts::registry::EncounterDef* boss =
             sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);

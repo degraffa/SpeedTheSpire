@@ -946,8 +946,13 @@ const EventDialogImpl* event_dialog_impl(uint16_t event_id) noexcept {
         return &kSyntheticImpl;
     }
     // The Act-3 terminal's dialog, on the same reserved-id footing: it is
-    // constructed by VictoryRoom rather than drawn from a pool, so it has no
-    // events.yaml row to dispatch through (event_framework.hpp).
+    // constructed by VictoryRoom rather than drawn from a pool
+    // (event_framework.hpp). S3.41 gave it an events.yaml row (SPIRE_HEART, 52)
+    // for the translator join and the metadata, but that row is deliberately
+    // `conditions.pool: NONE` -- a member of no act's draw list -- and the
+    // codegen therefore leaves it OUT of STS_REGISTRY_NATIVE_EVENTS below. This
+    // check stays the one and only dispatch site, and it is what odr-uses the
+    // body, so the macro's link-error guard loses nothing by the omission.
     if (event_id == kSpireHeartEventId) {
         return event_spire_heart();
     }

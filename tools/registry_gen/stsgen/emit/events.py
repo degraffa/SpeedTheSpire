@@ -19,8 +19,23 @@ from ..vocab import BANNER, fail
 #              getShrine gate instead (AbstractDungeon.java:1886-1936).
 # In every case `acts` is the set of acts in which the row can be DRAWN, and
 # `draw` carries whatever is left of the gate once the act test is removed.
-EVENT_POOLS = ("EVENT", "SHRINE", "SPECIAL")
+#   NONE    -- S3.41. The row is in NO draw list at all: it is constructed by
+#              its room rather than drawn, so no act can produce it. Its `acts`
+#              is the literal string "NONE" and its act_mask is 0, which keeps
+#              it out of every membership bitset (event_membership /
+#              shrine_membership, run_state.hpp) and therefore out of
+#              event_flags / event_flags_hi -- byte-comparable across the
+#              Act-3 -> Act-4 crossing (s3-design §7). `Spire Heart` (id 52) is
+#              the only such row and the only such row Act 4 needs; the
+#              constructor is VictoryRoom.onPlayerEntry (VictoryRoom.java:26-34).
+EVENT_POOLS = ("NONE", "EVENT", "SHRINE", "SPECIAL")
 EVENT_ACTS = (1, 2, 3)
+
+# The exact spelling a member-of-no-act row must use for `conditions.acts`. It is
+# a LITERAL rather than an empty list on purpose: an empty list is what a
+# half-written row looks like, and this property has to be DECLARED, not inferred
+# from an absence (s3-tasks.md S3.41).
+EVENT_ACTS_NONE = "NONE"
 
 
 def _validate_conditions(event: dict) -> tuple[str, int]:
@@ -39,6 +54,29 @@ def _validate_conditions(event: dict) -> tuple[str, int]:
             f"events.yaml: event {name} has unknown conditions.pool {pool!r}; "
             f"expected one of {', '.join(EVENT_POOLS)}")
     acts = conditions.get("acts")
+
+    # The member-of-no-act case (S3.41), and the two directions are PAIRED so
+    # neither spelling can drift into the other: pool NONE demands exactly
+    # `acts: NONE`, and every other pool refuses it. Anything else -- an empty
+    # list, `acts: none` under a real pool, a pool NONE with an act list -- is a
+    # generation error naming the fix, never a silently empty mask.
+    if pool == "NONE":
+        if acts != EVENT_ACTS_NONE:
+            raise fail(
+                f"events.yaml: event {name} has conditions.pool NONE (it is in "
+                f"no act's draw list), so conditions.acts must be the literal "
+                f"{EVENT_ACTS_NONE!r}, got {acts!r}")
+        if not str(conditions.get("draw", "")).strip():
+            raise fail(
+                f"events.yaml: event {name} needs a conditions.draw gate string "
+                "(for a pool-NONE row, what constructs it instead)")
+        return pool, 0
+    if acts == EVENT_ACTS_NONE:
+        raise fail(
+            f"events.yaml: event {name} says conditions.acts {EVENT_ACTS_NONE!r} "
+            f"but its conditions.pool is {pool!r}; a row in no act's draw list "
+            f"must declare conditions.pool NONE as well")
+
     if not isinstance(acts, list) or not acts:
         raise fail(
             f"events.yaml: event {name} needs a non-empty conditions.acts list "
@@ -122,6 +160,15 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
         "//   SPECIAL specialOneTimeEventList (AbstractDungeon.java:1340-1358),",
         "//           built ONCE in Exordium and carried by reference across",
         "//           acts (CardCrawlGame.java:1102-1119).",
+        "//   NONE    NO draw list holds the key: the event is CONSTRUCTED by its",
+        "//           room rather than drawn (S3.41). act_mask is 0, so the row is",
+        "//           absent from every membership bitset and event_in_act is",
+        "//           false for every act -- which is what keeps event_flags /",
+        "//           event_flags_hi byte-comparable across the Act-3 -> Act-4",
+        "//           crossing. `Spire Heart` (VictoryRoom.java:26-34) is the one",
+        "//           such row; its body is dispatched by the reserved id",
+        "//           kSpireHeartEventId, not by the macro at the foot of this",
+        "//           file.",
         "enum class EventPool : uint8_t {",
         "    NONE = 0,",
         "    EVENT = 1,",
@@ -243,9 +290,17 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
         "}  // namespace sts::registry\n",
         "// Implemented native-body dispatch. Expanding this table odr-uses every",
         "// handler, so marking a row implemented without a body is a link error.",
+        "//",
+        "// A pool-NONE row (S3.41) is deliberately ABSENT: it is in no draw list,",
+        "// so nothing can hand event_dialog_impl its EventId, and its body is",
+        "// reached through that function's explicit reserved-id check instead",
+        "// (kSpireHeartEventId, event_framework.hpp). The link-error guard is not",
+        "// weakened by the omission -- event_dialog_impl odr-uses the body at that",
+        "// check unconditionally.",
         "#define STS_REGISTRY_NATIVE_EVENTS(X) \\",
     ])
-    implemented = [r for r in rows if r["implemented"]]
+    implemented = [r for r in rows
+                   if r["implemented"] and r["pool"] != "NONE"]
     if implemented:
         for i, row in enumerate(implemented):
             suffix = " \\" if i + 1 < len(implemented) else ""

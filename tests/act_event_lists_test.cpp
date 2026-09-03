@@ -250,7 +250,11 @@ static_assert(static_cast<int>(r::EventId::MYSTERIOUS_SPHERE) == 48);
 static_assert(static_cast<int>(r::EventId::SENSORY_STONE) == 49);
 static_assert(static_cast<int>(r::EventId::TOMB_OF_LORD_RED_MASK) == 50);
 static_assert(static_cast<int>(r::EventId::WINDING_HALLS) == 51);
-static_assert(r::kEventTable.size() == 51);
+// S3.41 appended SPIRE_HEART (52), the one row that belongs to no act's draw
+// list -- it is constructed by VictoryRoom, never drawn, so it is absent from
+// every eventList/shrineList this file pins and from every membership bitset.
+static_assert(static_cast<int>(r::EventId::SPIRE_HEART) == 52);
+static_assert(r::kEventTable.size() == 52);
 
 // --- 2. The two new eventLists, as ordered lists ------------------------------
 

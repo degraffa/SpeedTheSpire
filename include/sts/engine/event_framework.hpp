@@ -738,12 +738,17 @@ inline constexpr uint16_t kSyntheticEventId = 0xFFFF;
 // special_membership, run_state.hpp) index by POSITION IN AN ACT'S CANONICAL
 // INIT LIST, and this event is in none of them -- so it has no position to
 // occupy, and giving it one would put a non-pool entry into a bitset whose
-// whole meaning is "still drawable". That is the hazard s3-design §7 names,
-// and it is also why the registry emitter requires a non-empty
-// `conditions.acts` on every row. The events.yaml row s3-tasks.md grants for
-// `SPIRE_HEART` (52) is a BEHAVIOUR/metadata row and belongs to S3.41, along
-// with the loader change that lets a row say "no act"; this constant is the
-// join-free dispatch key, and the two do not conflict.
+// whole meaning is "still drawable". That is the hazard s3-design §7 names.
+//
+// S3.41 HAS SINCE LANDED THE ROW, AND IT DOES NOT CONFLICT WITH THIS CONSTANT.
+// `events.yaml` 52 `SPIRE_HEART` is a BEHAVIOUR/metadata row carrying
+// `conditions.pool: NONE` + `conditions.acts: NONE` -- the explicitly-declared
+// member-of-no-act property the emitter now pairs and enforces. Its emitted
+// `act_mask` is 0, so it occupies no bitset position and `event_flags` /
+// `event_flags_hi` stay byte-comparable across the crossing; and because the
+// row is pool-NONE the codegen omits it from `STS_REGISTRY_NATIVE_EVENTS`, so
+// the reserved id below remains the ONLY thing that can reach the body. The row
+// exists for the translator's game_id join and the differ, not for dispatch.
 //
 // The BODY is four screens (SpireHeart.buttonEffect, SpireHeart.java:118-188)
 // with exactly one always-enabled option each (:70-72 adds one dialog option

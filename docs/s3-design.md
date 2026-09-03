@@ -135,9 +135,22 @@ for unreachable keys — "4 Byrds", "Snecko and Mystics", encounters.yaml).
 | SpireSpear | `"SpireSpear"` | ELITE | 160, **180 at A8+** | SpireSpear.java:37,50-61 |
 | CorruptHeart | `"CorruptHeart"` | BOSS | 750, **800 at A9+** | CorruptHeart.java:49,66-76 |
 
-All three call `setHp(int)` with a **fixed** value — no `min,max` overload —
-so **Act 4 consumes no `monsterHpRng` at all** (§5 trap 4). None of the three
-has a `rolls:` column, and `MONSTER_ROLL_TIMINGS` needs no new value.
+All three call `setHp(int)` with a **fixed** value — no `min,max` overload.
+**CORRECTED 2026-09-03 by S3.41 (§9): that does NOT make the draw go away.**
+`setHp(int)` is literally `this.setHp(hp, hp)` (AbstractMonster.java:777-779)
+and the two-arg body's first statement is
+`currentHealth = AbstractDungeon.monsterHpRng.random(minHp, maxHp)` (:765-766),
+unconditional — and `Random.random(int, int)` increments `counter` and calls
+`nextInt(end - start + 1)`, which consumes an XS128 `nextLong` even when the
+range is 1 (Random.java:58-61). So **each of the three spends exactly one
+`monsterHpRng` draw whose *outcome* is fixed**, and the registry's HP columns
+are `min == max` — the Nemesis (monsters.yaml 56) shape, not the Maw's, which
+is the genuinely draw-free one because it has no `setHp` call at all. What
+survives unchanged is the `rolls:` negative: that column records *extra* native
+per-instance draws (a `super(...)`-argument draw thrown away by the `setHp`
+under it, a pre-battle roll), every Act-4 `super(...)` HP argument is a literal
+(SpireShield.java:49, SpireSpear.java:50, CorruptHeart.java:66), so **none of
+the three has a `rolls:` column** and `MONSTER_ROLL_TIMINGS` needs no new value.
 
 Per-move detail the batch tasks re-read in full:
 
@@ -726,11 +739,22 @@ capture yet exists is **UNVERIFIED-until-captured** and its row says so.
    and everything after it. **Witness:** the same Act-4 entry capture — the
    `mapRng`/`monsterRng` pair is emitted by the fork and compared by the
    differ on the first Act-4 record.
-4. **Act-4 monsters consume no `monsterHpRng`.** All three call `setHp(int)`
-   (SpireShield.java:55-59, SpireSpear.java:57-61, CorruptHeart.java:72-76).
-   The registry rows carry no `rolls:` column. **Witness:** the
-   Shield-and-Spear and Heart combats replayed with `--combat`, where a spent
-   `monsterHpRng` draw shows up both as an HP diff and as a stream diff.
+4. **Act-4 monsters spend exactly ONE `monsterHpRng` draw each — no more, and
+   not zero.** **REWRITTEN 2026-09-03 by S3.41 (§9); the original claimed
+   zero.** All three call `setHp(int)` (SpireShield.java:55-59,
+   SpireSpear.java:57-61, CorruptHeart.java:72-76), and that overload delegates
+   to `setHp(hp, hp)` whose body draws `monsterHpRng.random(min, max)`
+   unconditionally (AbstractMonster.java:765-779) — a draw the game's `Random`
+   counts and consumes even at range 1 (Random.java:58-61). The fixed HP is a
+   fixed *outcome*, not a skipped draw, so the trap is now the arithmetic one:
+   **two draws per Shield-and-Spear spawn, one per Heart spawn, and no others**
+   — the registry rows carry no `rolls:` column because no Act-4 class has a
+   `super(...)`-argument or pre-battle roll on top. A sim that "optimises away"
+   a one-wide range desynchronises `monsterHpRng` for the rest of the run.
+   **Witness:** the Shield-and-Spear and Heart combats replayed with
+   `--combat`, where a missing or extra `monsterHpRng` draw shows up as a
+   stream-counter diff (the HP itself is fixed and would NOT show it, which is
+   why the stream is the witness and the HP is not).
 5. **The Heart kill still spends one `miscRng.random(-5,5)`.**
    AbstractRoom.java:286-297's gold add is gated only on
    `this instanceof MonsterRoomBoss`; the `TheEnding` suppression at :327
@@ -1114,6 +1138,25 @@ scan**, in three sanctioned steps with a pre-registered escalation:
   `random(1)` where the other three acts do. (iii) §7's `kFinalAct` bullet is
   rewritten around the audit's finding that the constant was overloaded, and now
   records `engine::kActBeyond`.
+- 2026-09-03 — **§2.2 / §5 trap 4 corrected from S3.41's reading of the Java**
+  (conventions §4: the decompiled Java outranks the design docs, and the losing
+  document is fixed in the change that finds the conflict). Both said "Act 4
+  consumes no `monsterHpRng` at all", on the grounds that all three Act-4
+  classes call `setHp(int)` rather than the `min,max` overload. Read in full,
+  `setHp(int)` **is** `setHp(hp, hp)` (AbstractMonster.java:777-779) and the
+  two-arg body draws unconditionally (:765-766); `Random.random(int, int)`
+  increments its counter and consumes an XS128 `nextLong` even at range 1
+  (Random.java:58-61). The repo already carried the correct reading elsewhere —
+  monsters.yaml's Nemesis row (56, S2.28) records exactly this for exactly this
+  overload, and the Maw row (55) records the contrasting *no-`setHp`-call*
+  shape, which is the only genuinely draw-free one. So Act 4 spends **two**
+  `monsterHpRng` draws per Shield-and-Spear spawn and **one** per Heart spawn.
+  Nothing else moves: trap 3 (Act-4 *construction* consumes no `monsterRng`) is
+  a different stream and stands, the `rolls:` negative stands for its own
+  reason, and S3.32's landed crossing is untouched. The correction is carried
+  onto the S3.42 / S3.43 `**Inherited:**` lines, because it is their monster
+  init bodies that must make the draw, and onto a20.yaml rows 8 and 9.
+
 - 2026-09-03 — **scoping correction recorded against the S2 deferred-obligations
   row for keys** (s2-tasks.md, "Keys as obtainable content"): its premise that
   "only the node flag is missing" is stale. `setEmeraldElite`'s chosen node

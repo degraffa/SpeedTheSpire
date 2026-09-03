@@ -136,11 +136,25 @@ namespace {
     // a queued give-back of the stolen card, touching no damage number in
     // any pass, giving or receiving. All three of this file's counts move
     // again, caseless, and interp_block.cpp's with them.
-    static_assert(sts::registry::manifest::kPowersCount == 72,
+    static_assert(sts::registry::manifest::kPowersCount == 76,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
                   "still a pass-through because no power overrides it yet.");
+    // S3.41 (kPowersCount 72 -> 76): SURROUNDED, BACK_ATTACK, BEAT_OF_DEATH
+    // and INVINCIBLE, the four Act-4 rows. All four classes read in full, and
+    // all four are pure count moves. SurroundedPower and BackAttackPower are
+    // pure markers -- ctor + updateDescription and nothing else
+    // (SurroundedPower.java:16-28, BackAttackPower.java:22-39); the 1.5x they
+    // gate is hard-coded in AbstractMonster (:982-984, :998-1013), not in a
+    // damage pass. BeatOfDeathPower overrides only onAfterUseCard
+    // (BeatOfDeathPower.java:39-44). INVINCIBLE IS THE ONE THAT LOOKS LIKE AN
+    // EXCEPTION AND IS NOT: it overrides onAttackedToChangeDamage and
+    // atStartOfTurn (InvinciblePower.java:31-48), and
+    // onAttackedToChangeDamage is a DIFFERENT pass from all three atDamage*
+    // passes -- s3-design section 5 trap 9 puts it at the apply_buffer site,
+    // between decrementBlock and the onAttacked fan-out. So no case is added
+    // in any of the four guards; the bodies are S3.42's and S3.43's.
     // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
     // REACTIVE. Checked one at a time against BOTH count-guarded families,
     // and all four are pure count moves. ConstrictedPower overrides only
@@ -254,7 +268,7 @@ namespace {
     // a queued give-back of the stolen card, touching no damage number in
     // any pass, giving or receiving. All three of this file's counts move
     // again, caseless, and interp_block.cpp's with them.
-    static_assert(sts::registry::manifest::kPowersCount == 72,
+    static_assert(sts::registry::manifest::kPowersCount == 76,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable and Slow do)? Add a case here "
                   "if so. Check atDamageFinalReceive below in the same pass -- "
@@ -262,6 +276,20 @@ namespace {
                   "there (IntangiblePlayerPower.java:43-49, "
                   "IntangiblePower.java:42-47). Its twin atDamageFinalGive "
                   "still is one.");
+    // S3.41 (kPowersCount 72 -> 76): SURROUNDED, BACK_ATTACK, BEAT_OF_DEATH
+    // and INVINCIBLE, the four Act-4 rows. All four classes read in full, and
+    // all four are pure count moves. SurroundedPower and BackAttackPower are
+    // pure markers -- ctor + updateDescription and nothing else
+    // (SurroundedPower.java:16-28, BackAttackPower.java:22-39); the 1.5x they
+    // gate is hard-coded in AbstractMonster (:982-984, :998-1013), not in a
+    // damage pass. BeatOfDeathPower overrides only onAfterUseCard
+    // (BeatOfDeathPower.java:39-44). INVINCIBLE IS THE ONE THAT LOOKS LIKE AN
+    // EXCEPTION AND IS NOT: it overrides onAttackedToChangeDamage and
+    // atStartOfTurn (InvinciblePower.java:31-48), and
+    // onAttackedToChangeDamage is a DIFFERENT pass from all three atDamage*
+    // passes -- s3-design section 5 trap 9 puts it at the apply_buffer site,
+    // between decrementBlock and the onAttacked fan-out. So no case is added
+    // in any of the four guards; the bodies are S3.42's and S3.43's.
     // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
     // REACTIVE. Checked one at a time against BOTH count-guarded families,
     // and all four are pure count moves. ConstrictedPower overrides only
@@ -385,10 +413,24 @@ namespace {
     // a queued give-back of the stolen card, touching no damage number in
     // any pass, giving or receiving. All three of this file's counts move
     // again, caseless, and interp_block.cpp's with them.
-    static_assert(sts::registry::manifest::kPowersCount == 72,
+    static_assert(sts::registry::manifest::kPowersCount == 76,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as both Intangible rows and Flight do)? "
                   "Add a case here if so.");
+    // S3.41 (kPowersCount 72 -> 76): SURROUNDED, BACK_ATTACK, BEAT_OF_DEATH
+    // and INVINCIBLE, the four Act-4 rows. All four classes read in full, and
+    // all four are pure count moves. SurroundedPower and BackAttackPower are
+    // pure markers -- ctor + updateDescription and nothing else
+    // (SurroundedPower.java:16-28, BackAttackPower.java:22-39); the 1.5x they
+    // gate is hard-coded in AbstractMonster (:982-984, :998-1013), not in a
+    // damage pass. BeatOfDeathPower overrides only onAfterUseCard
+    // (BeatOfDeathPower.java:39-44). INVINCIBLE IS THE ONE THAT LOOKS LIKE AN
+    // EXCEPTION AND IS NOT: it overrides onAttackedToChangeDamage and
+    // atStartOfTurn (InvinciblePower.java:31-48), and
+    // onAttackedToChangeDamage is a DIFFERENT pass from all three atDamage*
+    // passes -- s3-design section 5 trap 9 puts it at the apply_buffer site,
+    // between decrementBlock and the onAttacked fan-out. So no case is added
+    // in any of the four guards; the bodies are S3.42's and S3.43's.
     // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
     // REACTIVE. Checked one at a time against BOTH count-guarded families,
     // and all four are pure count moves. ConstrictedPower overrides only

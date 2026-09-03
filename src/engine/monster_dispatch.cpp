@@ -440,9 +440,22 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 62,
+    static_assert(sts::registry::manifest::kMonstersCount == 65,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
+    // S3.41 (kMonstersCount 62 -> 65): ALL THREE ACT-4 CLASSES QUEUE ONE.
+    // SpireShield.takeTurn (SpireShield.java:110), SpireSpear.takeTurn
+    // (SpireSpear.java:113) and CorruptHeart.takeTurn (CorruptHeart.java:168)
+    // each end in `addToBottom(new RollMoveAction(this))` OUTSIDE the switch,
+    // so every move body reaches it and all three getMove overrides run once
+    // per turn -- each spending AbstractMonster.rollMove's aiRng.random(99)
+    // (AbstractMonster.java:465-467) even though all three ignore `num`, plus a
+    // second aiRng.randomBoolean() on one arm of each cycle. THEY ARE NOT
+    // REGISTERED BELOW YET, and their absence is not a reading: their
+    // selection bodies are S3.42's (Shield, Spear) and S3.43's (Heart), and
+    // neither monster can appear in a combat until those land, because nothing
+    // registers a MonsterTurnFn for them either. When those tasks land, all
+    // three take a case here.
     // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
     // Snecko, the Centurion and the Healer each end takeTurn in a RollMoveAction
     // that sits AFTER the switch, so every move body reaches it
@@ -691,10 +704,18 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 62,
+    static_assert(sts::registry::manifest::kMonstersCount == 65,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
+    // S3.41 (kMonstersCount 62 -> 65): NONE of the three Act-4 classes is
+    // mid-combat spawnable, and this is a completed reading rather than a
+    // deferral. Both act-4 groups are built whole at spawn time
+    // (MonsterHelper.getEncounter "Shield and Spear" :599-601 and "The Heart"
+    // :596-598); not one of the three declares a SpawnMonsterAction, a
+    // SplitPower or a summon list; and the Heart's buff ladder
+    // (CorruptHeart.java:128-148) queues powers only. The two guards LEAVE the
+    // fight -- by dying -- rather than adding to it.
     // Checked for S2.22's five city normals: NONE of them is mid-combat
     // spawnable. Every Act-2 group that fields one builds it at spawn time
     // (MonsterHelper.java's "2 Thieves" :462-464, "Snake Plant" :492-494,
@@ -1036,9 +1057,19 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 62,
+    static_assert(sts::registry::manifest::kMonstersCount == 65,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
+    // S3.41 (kMonstersCount 62 -> 65): TWO of the three override damage(), and
+    // BOTH are presentation -- the Sentry precedent, spelled out here rather
+    // than left to inference. SpireShield.damage (SpireShield.java:155-162) and
+    // SpireSpear.damage (:161-169) both call super.damage(info) and then, behind
+    // `info.owner != null && info.type != THORNS && info.output > 0`, set the
+    // "Hit" spine animation and queue the Idle that follows it; nothing there
+    // touches combat state or draws a seeded stream, so neither needs a case and
+    // hp_lost would be unread. CorruptHeart declares NO damage() override at all
+    // -- its class members are the ctor, usePreBattleAction, takeTurn, getMove
+    // and die (CorruptHeart.java:65-211). All three stay with the `default:`.
     // Checked for the Looter: NO damage() override at all -- Looter.java
     // declares usePreBattleAction, takeTurn, playSfx, playDeathSfx, die and
     // getMove, nothing else -- so it stays with the `default:`. Its die()
@@ -1310,10 +1341,20 @@ void monster_change_state(CombatState& state, uint8_t monster_index,
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 62,
+    static_assert(sts::registry::manifest::kMonstersCount == 65,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
+    // S3.41 (kMonstersCount 62 -> 65): ALL THREE Act-4 classes DO override
+    // usePreBattleAction, and each one is real state. SpireShield (:69-77)
+    // queues SurroundedPower on the PLAYER and then Artifact 1 (2 at A18+);
+    // SpireSpear (:73-80) queues Artifact only, at the same tiers, and NO
+    // Surrounded -- the Shield is the single source; CorruptHeart (:88-103)
+    // queues InvinciblePower(300, 200 at A19+) then BeatOfDeathPower(1, 2 at
+    // A19+) and NO Artifact. The bodies are S3.42's and S3.43's; until they
+    // land neither monster can enter a combat at all, so the absence of a case
+    // here is a pending registration and not a "needs no engine behaviour"
+    // finding.
     switch (id) {
         // S2.23. TWO of the three city elites declare usePreBattleAction; all
         // three are spelled out rather than left to the `default:`.
@@ -1622,13 +1663,24 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
 }
 
 MonsterDieFn monster_die_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 62,
+    static_assert(sts::registry::manifest::kMonstersCount == 65,
                   "new monster: does its Java class override die()? Read the "
                   "method. If everything before `super.die()` is presentation -- "
                   "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
                   "needs no entry. If ANY of it draws a seeded stream or writes "
                   "combat state, register it here; the Mugger's seeded "
                   "playDeathSfx is why this table exists.");
+    // S3.41 (kMonstersCount 62 -> 65): all three Act-4 classes override die(),
+    // and NONE of them belongs in THIS table, because every one of them calls
+    // super.die() FIRST and carries all its content after it. SpireShield
+    // (:164-176) and SpireSpear (:171-183) are byte-identical: super.die(), then
+    // a walk of the live group removing "Surrounded" from the PLAYER and
+    // "BackAttack" from each survivor. CorruptHeart (:202-211) wraps everything
+    // in `if (!getCurrRoom().cannotLose)` and then does super.die() followed by
+    // removeListener / onBossVictoryLogic / onFinalBossVictoryLogic /
+    // stopClock. The pre-super half of all three is empty (the Heart's is a room
+    // flag TEST, not a write), so all three register in monster_die_after_fn
+    // below instead -- S3.42's and S3.43's.
     // The full survey behind the single entry below, so the emptiness is a
     // recorded reading rather than an assumption. TEN monsters in the roster
     // override die(); every one of them except the Mugger is presentation only:
@@ -1797,13 +1849,26 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
 // three carry achievements and victory bookkeeping only. The slot exists because
 // the batches that need it run in parallel and must not each invent their own.
 MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 62,
+    static_assert(sts::registry::manifest::kMonstersCount == 65,
                   "new monster: does its Java die() override do anything AFTER "
                   "`super.die()`? Read the method. Content before super.die() "
                   "belongs in monster_die_fn; content after it belongs here, "
                   "and the difference is load-bearing -- Reptomancer's post-super "
                   "suicide sweep skips itself only because super.die() has "
                   "already set isDying.");
+    // S3.41 (kMonstersCount 62 -> 65): THIS is the table the three Act-4
+    // classes belong to, and the ordering argument this slot's header makes is
+    // exactly theirs. Both guards' die() bodies (SpireShield.java:164-176 ==
+    // SpireSpear.java:171-183, byte-identical) walk
+    // `getCurrRoom().monsters.monsters` skipping `m.isDead || m.isDying` -- with
+    // NO `m == this` term -- so the dying guard excludes ITSELF only because
+    // super.die() has already set isDying, the Reptomancer shape. Each survivor
+    // costs one RemoveSpecificPowerAction("Surrounded") on the PLAYER plus one
+    // RemoveSpecificPowerAction("BackAttack") on that survivor, which is why
+    // KILL ORDER is observable (s3-design section 5 trap 7). CorruptHeart's
+    // post-super half (:205-209) is the run's TRUE VICTORY edge, not a combat
+    // effect. All three entries are S3.42's and S3.43's; the rows land here
+    // first so the reading exists before the bodies do.
     switch (id) {
         case MonsterId::GREMLIN_LEADER:
             // `super.die()`, two presentation ShoutAction loops, then

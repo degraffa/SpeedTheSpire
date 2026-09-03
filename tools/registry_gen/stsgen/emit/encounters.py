@@ -5,6 +5,25 @@ from __future__ import annotations
 
 from ..vocab import BANNER, COMP_OPS, ENCOUNTER_POOLS, cpp_string, fail
 
+# --- Act 4 (TheEnding) is a FIXED LIST, not a pool (S3.41) -------------------
+# TheEnding.generateMonsters (TheEnding.java:162-171) adds ONE literal key three
+# times to monsterList and three times to eliteMonsterList; initializeBoss
+# (:191-195) adds ONE literal key three times and does NOT shuffle; and the four
+# generateXxx overrides plus generateExclusions are empty bodies (:174-188). So
+# act 4 has nothing to weight-roll, nothing to exclude and no monsterRng draw at
+# all (s3-design §5 trap 3).
+#
+# The act's rows therefore emit as NAMED CONSTANTS beside the per-(act, pool)
+# tables, which is what a consumer of a list that is never rolled wants, and the
+# rules below are enforced rather than trusted: a weight band or an exclusion on
+# an act-4 row would be a claim no Java line supports, and a second row in either
+# pool would make "the key" ambiguous.
+ACT_ENDING = 4
+# The literal add-count of both fixed lists (TheEnding.java:163-170, :192-194).
+# It lives here, next to its citation, so run_advance.cpp's act-4 crossing reads
+# it rather than re-typing a 3.
+ACT_ENDING_LIST_LEN = 3
+
 
 def parse_comp_node(owner: str, node) -> dict:
     """Parse one composition-program node into a flat CompStep dict:
@@ -100,6 +119,22 @@ def parse_encounter(entry: dict) -> dict:
     if excludes and pool != "WEAK":
         raise fail(f"{owner}: 'excludes' is only valid on WEAK encounters "
                    f"(Exordium.generateExclusions keys on the 3rd weak monster)")
+    if act == ACT_ENDING:
+        # See the ACT_ENDING note at the top of this file. These three are the
+        # act's whole shape, checked instead of assumed.
+        if pool not in ("ELITE", "BOSS"):
+            raise fail(f"{owner}: act {ACT_ENDING} has only ELITE and BOSS "
+                       f"rows -- TheEnding.generateWeakEnemies / "
+                       f"generateStrongEnemies are empty bodies and its map has "
+                       f"no event room -- got pool {pool!r}")
+        if float(weight) != 0.0:
+            raise fail(f"{owner}: act {ACT_ENDING} rows are never weight-rolled "
+                       f"(TheEnding adds literal keys and overrides every "
+                       f"generateXxx with an empty body), so 'weight' must be "
+                       f"0.0, got {weight!r}")
+        if excludes:
+            raise fail(f"{owner}: act {ACT_ENDING} has no exclusions "
+                       f"(TheEnding.generateExclusions returns an empty list)")
     raw_program = entry.get("program")
     if not isinstance(raw_program, list) or not raw_program:
         raise fail(f"{owner}: 'program' must be a non-empty list of nodes")
@@ -305,6 +340,51 @@ def emit_encounter_table(domains: dict[str, list[dict]]) -> str:
     out.append("    }")
     out.append("    return nullptr;")
     out.append("}\n")
+
+    # --- Act-4 fixed-list constants (S3.41) ---------------------------------
+    # Emitted from the act-4 rows themselves, so the registry stays the single
+    # source of truth for the two keys the crossing writes. Act 4 rolls nothing,
+    # so there is no pool to draw from and a constant is the honest shape; the
+    # per-(act, pool) tables above still carry the rows, for completeness.
+    act4_elite = [e for e in encs
+                  if e["act"] == ACT_ENDING and e["pool"] == "ELITE"]
+    act4_boss = [e for e in encs
+                 if e["act"] == ACT_ENDING and e["pool"] == "BOSS"]
+    for label, rows_ in (("ELITE", act4_elite), ("BOSS", act4_boss)):
+        if len(rows_) != 1:
+            raise fail(
+                f"encounters.yaml: act {ACT_ENDING} must have EXACTLY ONE "
+                f"{label} row (TheEnding adds a single literal key to each "
+                f"list), found {len(rows_)}: "
+                f"{[r['game_id'] for r in rows_]}")
+    out.append(f"// --- Act {ACT_ENDING} (TheEnding): the fixed lists, as "
+               "CONSTANTS -------------------")
+    out.append("// TheEnding.generateMonsters (TheEnding.java:162-171) adds ONE "
+               "key three times")
+    out.append("// to monsterList AND three times to eliteMonsterList; "
+               "initializeBoss (:191-195)")
+    out.append("// adds ONE key three times and does NOT shuffle. Every "
+               "generateXxx override is")
+    out.append("// an empty body and generateExclusions returns an empty list "
+               "(:174-188), so act")
+    out.append(f"// {ACT_ENDING} consumes ZERO monsterRng. These are the keys "
+               "the act-4 crossing writes")
+    out.append("// (run_advance.cpp) -- there is nothing to roll, so nothing "
+               "reads a pool table.")
+    out.append(f"inline constexpr int32_t kActEnding = {ACT_ENDING};")
+    out.append(f"inline constexpr int kAct{ACT_ENDING}FixedListLen = "
+               f"{ACT_ENDING_LIST_LEN};")
+    out.append(f"inline constexpr std::string_view kAct{ACT_ENDING}"
+               f"EliteEncounter{{{cpp_string(act4_elite[0]['game_id'])}}};")
+    out.append("// The SAME key TheEnding also puts in monsterList -- named "
+               "separately because")
+    out.append("// the two lists are separate in the Java, and dead storage "
+               "here either way (the")
+    out.append("// act-4 map has no MonsterRoom).")
+    out.append(f"inline constexpr std::string_view kAct{ACT_ENDING}"
+               f"MonsterEncounter{{{cpp_string(act4_elite[0]['game_id'])}}};")
+    out.append(f"inline constexpr std::string_view kAct{ACT_ENDING}"
+               f"BossEncounter{{{cpp_string(act4_boss[0]['game_id'])}}};\n")
 
     out.append("// Lookup an encounter by its game key (Exordium pool / getEncounter "
                "string).")

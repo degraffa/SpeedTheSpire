@@ -53,7 +53,7 @@
   scope: run-setup
   mechanic: "elite room quota x1.6 during map room-type assignment"
   provenance: "AbstractDungeon.generateRoomTypes (AbstractDungeon.java:571-573): ascensionLevel >= 1 -> eliteCount = Math.round(availableRoomCount * eliteRoomChance * 1.6f), else Math.round(availableRoomCount * eliteRoomChance). Act-1 eliteRoomChance = 0.08f (Exordium.java:99)."
-  notes: "IMPLEMENTED (assign_room_types, map_rooms.hpp -- the ascension argument run_begin already passes through). Pinned by the elite-quota row test."
+  notes: "IMPLEMENTED (assign_room_types, map_rooms.hpp -- the ascension argument run_begin already passes through). Pinned by the elite-quota row test. S3 NOTE (S3.41) -- THE ACT-4 NEGATIVE, FROZEN: this modifier has NO Act-4 effect at all, and the reason is structural rather than a missing branch. eliteCount is computed inside AbstractDungeon.generateRoomTypes (:571-573), whose only caller is the ordinary generateMap path; TheEnding builds its map with generateSpecialMap (TheEnding.java:72-139), which calls no generator, no room-type assigner and no shuffle, so generateRoomTypes never runs in Act 4 and there is no availableRoomCount for the x1.6 to scale. The Act-4 map has exactly one elite node because the literal map says so. s3-design section 5 trap 8 pairs this with the a20.yaml row 20 negative; witnessed by the Act-4 entry capture (S3.62)."
 
 - id: 2
   level: 2
@@ -67,7 +67,7 @@
   scope: monster
   mechanic: "elite-monster damage and move parameters"
   provenance: "Per-elite constructor branches on ascensionLevel >= 3, e.g. GremlinNob.<init> (GremlinNob.java:72-74): bashDmg = 8, rushDmg = 16 (else the lower pair)."
-  notes: "IMPLEMENTED (per-monster columns in registry/monsters.yaml) for the elites that exist; elites not yet landed carry the branch with their own row."
+  notes: "IMPLEMENTED (per-monster columns in registry/monsters.yaml) for the elites that exist; elites not yet landed carry the branch with their own row. S3 NOTE (S3.41): Act 4 adds its ONE elite pair to this row. SpireShield damage 12/34 -> 14/38 (SpireShield.java:60-66) and SpireSpear damage 5/10 -> 6/10 (SpireSpear.java:62-70), which also raises skewerCount 3 -> 4 in the SAME branch (:63,:67) -- a per-tier STEP COUNT, which an effect list cannot express, so the SKEWER row authors one template and the count lives in S3.42's body; the monsters.yaml row says so at the step. The Spear's second damage number is 10 on both arms, a deliberate non-difference. Rows landed UNVERIFIED-until-captured (S3.62's Shield-and-Spear fight)."
 
 - id: 4
   level: 4
@@ -88,7 +88,7 @@
   # differ because they answer different questions; that is why this is a
   # comment and not an edit on either side.
   provenance: "Per-boss constructor branches on ascensionLevel >= 4, e.g. TheGuardian.<init> (TheGuardian.java:107-109): fierceBashDamage = 36, rollDamage = 10; SlimeBoss.<init> (SlimeBoss.java:94-96): tackleDmg = 10, slamDmg = 38 -- tackleDmg is damage.get(0), which SlimeBoss never reads (both takeTurn arms use damage.get(1), :137/:144), so that half of the A4 branch is dead in the game and is deliberately absent from monsters.yaml; see the comment above."
-  notes: "IMPLEMENTED (per-monster columns in registry/monsters.yaml) for the Act-1 bosses that exist."
+  notes: "IMPLEMENTED (per-monster columns in registry/monsters.yaml) for the Act-1 bosses that exist. S3 NOTE (S3.41): the Act-4 boss joins this row. CorruptHeart damage 40/2 -> 45/2 (CorruptHeart.java:77-85), and the SAME branch moves bloodHitCount 12 -> 15 (:80,:84) -- again a per-tier STEP COUNT rather than an amount, so BLOOD_SHOTS authors one 2-damage template and the count lives in S3.43's body. damage.get(1) is 2 on both arms, a deliberate non-difference. Row landed UNVERIFIED-until-captured (S3.62's Heart fight)."
 
 - id: 5
   level: 5
@@ -116,14 +116,14 @@
   scope: monster
   mechanic: "elite-monster HP roll range"
   provenance: "Per-elite constructor branches on ascensionLevel >= 8, e.g. GremlinNob.<init> (GremlinNob.java:67-71): setHp(85, 90) instead of setHp(82, 86)."
-  notes: "IMPLEMENTED (per-monster hp columns in registry/monsters.yaml) for the elites that exist."
+  notes: "IMPLEMENTED (per-monster hp columns in registry/monsters.yaml) for the elites that exist. S3 NOTE (S3.41): Act 4 adds SpireShield 110 -> 125 (SpireShield.java:55-59) and SpireSpear 160 -> 180 (SpireSpear.java:57-61). BOTH USE THE SINGLE-ARG setHp OVERLOAD, so both columns are min == max -- and that is a FIXED OUTCOME, NOT A SKIPPED DRAW: setHp(int) is literally setHp(hp, hp) (AbstractMonster.java:777-779) and the two-arg body draws monsterHpRng.random(min, max) unconditionally (:765-766), which Random.random(int,int) counts and consumes even at range 1 (Random.java:58-61). One draw per guard, two per Shield-and-Spear fight. s3-design section 2.2 / section 5 trap 4 asserted the opposite and are corrected in the same commit. Rows landed UNVERIFIED-until-captured (S3.62)."
 
 - id: 9
   level: 9
   scope: monster
   mechanic: "boss HP roll range"
   provenance: "Per-boss constructor branches on ascensionLevel >= 9, e.g. TheGuardian.<init> (TheGuardian.java:100-102): setHp(250) + dmgThreshold 35 instead of setHp(240) + 30; SlimeBoss.<init> (SlimeBoss.java:89-93): setHp(150) instead of setHp(140). Some bosses add a further >= 19 tier ahead of this one (TheGuardian.java:97-99 keeps 250 HP but raises dmgThreshold to 40)."
-  notes: "IMPLEMENTED (per-monster hp columns in registry/monsters.yaml) for the Act-1 bosses that exist."
+  notes: "IMPLEMENTED (per-monster hp columns in registry/monsters.yaml) for the Act-1 bosses that exist. S3 NOTE (S3.41): Act 4 adds CorruptHeart 750 -> 800 (CorruptHeart.java:72-76), the same single-arg setHp shape as the two guards -- min == max columns over ONE real monsterHpRng draw, not zero (see row 8's note for the AbstractMonster.java:765-779 reading). Row landed UNVERIFIED-until-captured (S3.62's Heart fight)."
 
 - id: 10
   level: 10
@@ -186,18 +186,18 @@
   scope: monster
   mechanic: "elite-monster special behavior"
   provenance: "Per-elite branches on ascensionLevel >= 18, e.g. GremlinNob.takeTurn (GremlinNob.java:92-95): AngerPower(this, 3) applied 3 instead of AngerPower(this, 2) applied 2."
-  notes: "IMPLEMENTED (per-monster) for the elites that exist."
+  notes: "IMPLEMENTED (per-monster) for the elites that exist. S3 NOTE (S3.41): Act 4 puts THREE separate changes on this row, and two of them change a move's SHAPE rather than a number. (a) Both guards' pre-battle Artifact goes 1 -> 2 (SpireShield.java:72-76, SpireSpear.java:75-78) -- pre-battle bodies, so S3.42's, not a monsters.yaml column. (b) SpireSpear's BURN_STRIKE Burns move PILE: MakeTempCardInDiscardAction(Burn, 2) below A18 (:95) becomes the 4-arg MakeTempCardInDrawPileAction(Burn, 2, false, true) at A18+ (:92), i.e. the top of the DRAW pile with no cardRandomRng draw. The pile rides in the step's `extra`, which has NO tier column, so monsters.yaml authors the A18+ arm -- exact at kMonsterAscension 20 -- and records the limitation. (c) SpireShield's SMASH block becomes a flat 99 (:103-105); below A18 it is damage.get(1).output, a POST-POWER runtime read (:107) no tier column can carry, so that column's base value is a declared schema null. Rows landed UNVERIFIED-until-captured (S3.62)."
 
 - id: 19
   level: 19
   scope: monster
   mechanic: "boss special behavior"
   provenance: "Per-boss branches on ascensionLevel >= 19, e.g. SlimeBoss.takeTurn case 4 (SlimeBoss.java:125-127): MakeTempCardInDiscardAction(new Slimed(), 5) instead of 3; TheGuardian.<init> (TheGuardian.java:97-99): dmgThreshold 40 instead of the >= 9 tier's 35."
-  notes: "IMPLEMENTED (per-monster) for the Act-1 bosses that exist."
+  notes: "IMPLEMENTED (per-monster) for the Act-1 bosses that exist. S3 NOTE (S3.41): Act 4 adds the Heart's pre-battle pair, and BOTH are pre-battle-body numbers rather than monsters.yaml columns (S3.43 owns them). InvinciblePower 300 -> 200 -- the branch SUBTRACTS 100 from a local (CorruptHeart.java:93-96), so A19 is the SMALLER number, which is the one easy thing to get backwards here -- and BeatOfDeathPower 1 -> 2 (:97-100), applied in that addToBottom order (:101-102) with NO Artifact at battle start. Both powers landed as identity rows (powers.yaml 139, 138) UNVERIFIED-until-captured (S3.62's Heart fight)."
 
 - id: 20
   level: 20
   scope: monster
   mechanic: "double boss on the final act"
   provenance: "ProceedButton.update (ProceedButton.java:100-104): ascensionLevel >= 20 && bossList.size() == 2 -> goToDoubleBoss(), gated on AbstractDungeon.id.equals(\"TheBeyond\"). AbstractMonster.onFinalBossVictoryLogic (AbstractMonster.java:1058-1060) reads the same pair."
-  notes: "IMPLEMENTED (S2.28: finish_combat_after_action's double-boss branch, run_advance.cpp -- the gate reads `ascension >= 20 && boss_list_count - (boss_cursor + 1) == 2`, which is the Java's post-entry-pop bossList.size() == 2 spelled against a cursor that advances on room EXIT; the crossing is a full next_room_transition, so the trap-7 reseed and relic room-entry fan-outs run, no reward screen opens at either Act-3 boss, and the second kill is the run's only terminal). Ownership history: originally assigned S2.12, which landed without it; REASSIGNED to S2.28 in the Wave-3 allocation note (stage-b-tasks.md). The S1 frozen negative stands unchanged: the route is Act-3-only (the TheBeyond gate above), so A20 still adds NOTHING to an Act-1 run beyond the union of levels 1..19, and the Act-2 negative is pinned by a named test (run_advance_test.cpp BossVictory)."
+  notes: "IMPLEMENTED (S2.28: finish_combat_after_action's double-boss branch, run_advance.cpp -- the gate reads `ascension >= 20 && boss_list_count - (boss_cursor + 1) == 2`, which is the Java's post-entry-pop bossList.size() == 2 spelled against a cursor that advances on room EXIT; the crossing is a full next_room_transition, so the trap-7 reseed and relic room-entry fan-outs run, no reward screen opens at either Act-3 boss, and the second kill is the run's only terminal). Ownership history: originally assigned S2.12, which landed without it; REASSIGNED to S2.28 in the Wave-3 allocation note (stage-b-tasks.md). The S1 frozen negative stands unchanged: the route is Act-3-only (the TheBeyond gate above), so A20 still adds NOTHING to an Act-1 run beyond the union of levels 1..19, and the Act-2 negative is pinned by a named test (run_advance_test.cpp BossVictory). S3 NOTE (S3.41) -- THE ACT-4 NEGATIVE, FROZEN: the double boss does NOT fire in Act 4, even though bossList.size() == 2 after the entry pop, exactly as it is in Act 3. ProceedButton.java:101-104 gates the double-boss branch on AbstractDungeon.id.equals(\"TheBeyond\") and the TheEnding arm at :107-109 is a plain else-if, so the Heart room is the run's single terminal fight however many keys were carried. THE ENGINE ALREADY HONOURS THIS and it is worth saying where: S3.32 split the overloaded kFinalAct into kActBeyond (3) and kFinalAct (4) precisely so this gate could stay on kActBeyond -- moving the constant without splitting it is how an Act-4 boss silently becomes a second Act-3 double boss. s3-design section 5 trap 8 pairs this with the row 1 negative; witnessed by the Act-4 entry capture (S3.62)."

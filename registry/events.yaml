@@ -802,3 +802,68 @@
     changes:
       - {field: DAMAGE_MAX_HP_PERCENT, base: 0.125, a15: 0.18}
       - {field: HEAL_MAX_HP_PERCENT, base: 0.25, a15: 0.2}
+
+# =============================================================================
+# ACT 4 -- TheEnding (S3.41). ONE ROW, AND IT BELONGS TO NO DRAW LIST.
+#
+# TheEnding.initializeEventList (TheEnding.java:198-199) and
+# initializeShrineList (:211-212) are EMPTY BODIES; dungeonTransitionSetup has
+# already cleared both lists (AbstractDungeon.java:2576-2577) and the Act-4 map
+# has no `?` room at all (s3-design section 4.4), so getEvent / getShrine are
+# unreachable in Act 4 and specialOneTimeEventList -- carried by reference across
+# the crossing -- is simply never drawn from again. Act 4 therefore adds no
+# drawable event.
+#
+# `Spire Heart` still needs a row, and the row is METADATA, NOT A POOL ENTRY.
+# The event is CONSTRUCTED BY ITS ROOM -- VictoryRoom.onPlayerEntry does
+# `this.event = new SpireHeart()` (VictoryRoom.java:26-34) -- and appears in no
+# eventList, no shrineList and no specialOneTimeEventList. It is the Neow shape.
+#
+# THE NEW PROPERTY, and why it is spelled this way. `conditions.pool: NONE` with
+# `conditions.acts: NONE` is the explicit declaration "this key is in no act's
+# draw list". The emitter (tools/registry_gen/stsgen/emit/events.py) pairs the
+# two: pool NONE demands the literal `acts: NONE` and every other pool demands
+# the ascending act LIST, so neither spelling can drift into the other and a
+# typo is a generation error rather than a silently empty mask. The emitted
+# act_mask is 0, so `event_in_act` is false for every act and the row is absent
+# from every membership bitset -- which is what keeps RunState::event_membership
+# / shrine_membership and the PublicView's event_flags / event_flags_hi
+# byte-comparable across the Act-3 -> Act-4 crossing (s3-design section 7). A
+# pool EventId would have been actively wrong: those bitsets index by POSITION IN
+# AN ACT'S CANONICAL INIT LIST and this event has no position to occupy.
+#
+# WHAT DISPATCHES THE BODY. Not this row. The dialog is reached through
+# event_dialog_impl's explicit `kSpireHeartEventId` (0xFFFE) check
+# (event_framework.hpp / event_framework.cpp) -- a reserved non-pool id on the
+# kSyntheticEventId model, landed by S3.31 -- because generate_event can no more
+# return this key than it can return Neow. A pool-NONE row is therefore excluded
+# from the generated STS_REGISTRY_NATIVE_EVENTS dispatch macro; the link-error
+# guard that macro exists for is not weakened, because event_dialog_impl
+# odr-uses event_spire_heart() unconditionally at that check.
+#
+# WHAT THE ROW IS FOR, all three already-observed facts: the translator ABORTS on
+# the id today (translate.cpp's unknown-content-id path; one S2 CI-corpus entry
+# carries no trace for exactly that reason), the replay differ SKIPS its records
+# as a named post-victory exception (tools/oracle_bridge/replay/src/main.cpp),
+# and the game_id join is what lets both stop special-casing the string.
+#
+# UNVERIFIED-until-captured, witness S3.62: the Heart-fight capture crosses this
+# dialog on its way to Act 4, so the same capture that witnesses encounters.yaml
+# 63 witnesses this row.
+# =============================================================================
+- id: 52
+  name: SPIRE_HEART
+  game_id: "Spire Heart"
+  provenance: "SpireHeart (events/beyond/SpireHeart.java:43-208, read in full). ID \"Spire Heart\" (:46) -- the oracle join key, WITH the space, and NOT the class name. MEMBER OF NO DRAW LIST: grep across the tree finds no eventList / shrineList / specialOneTimeEventList add of this key, and its ONE construction site is VictoryRoom.onPlayerEntry (VictoryRoom.java:26-34), reached from ProceedButton.goToVictoryRoomOrTheDoor (:199-208). THE CONSTRUCTOR CHANGES NO RUN STATE (:64-92 is publisher stats, the win-streak counter, a leaderboard upload and GameOverScreen.calcScore -- score bookkeeping s3-design section 8 deliberately leaves out), draws no RNG and touches no HP/gold/deck/pool. FIVE SCREENS, FOUR PRESSES: the ctor adds exactly ONE dialog option (:70-72) and every buttonEffect arm calls updateDialogOption(0, ...), rewriting the LABEL and never the count or the enabled-ness (:118-188). CUR_SCREEN ordinals INTRO 0 / MIDDLE 1 / MIDDLE_2 2 / DEATH 3 / GO_TO_ENDING 4 were recovered mechanically from the shipped jar's SpireHeart$1 switch-map class rather than inferred -- the derivation is recorded at src/engine/events/spire_heart.cpp. The MIDDLE_2 arm carries the run's whole branch: `Settings.isFinalActAvailable && Settings.hasRubyKey && Settings.hasEmeraldKey && Settings.hasSapphireKey` (:151) -- all four conjuncts, in that order -- goes to GO_TO_ENDING, whose press calls goToFinalAct (:94-98, the DoorUnlockScreen); otherwise DEATH (:170-177), whose press sets isDying/isDead and opens a DeathScreen, ending the run as a VICTORY that is not a trueVictor (Metrics.java:82 vs :107). NO ASCENSION BRANCH ANYWHERE IN THE CLASS, hence a15.changes: []. The BODY is native and landed at S3.31 (src/engine/events/spire_heart.cpp), dispatched by the reserved id kSpireHeartEventId 0xFFFE and not by this row -- see the block comment above. TheEnding adds no other event: initializeEventList (TheEnding.java:198-199) and initializeShrineList (:211-212) are empty bodies. UNVERIFIED-until-captured -- S3.62 owes the capture, which is the same Heart-fight capture that witnesses encounters.yaml 63."
+  native: true
+  implemented: true
+  conditions: {pool: NONE, acts: NONE, draw: "NEVER DRAWN -- constructed by VictoryRoom.onPlayerEntry (VictoryRoom.java:26-34); in no eventList, shrineList or specialOneTimeEventList"}
+  options:
+    # One always-enabled option per screen, in CUR_SCREEN ordinal order. The
+    # labels differ (OPTIONS[0..3]); the COUNT never does.
+    - [CONTINUE]                    # INTRO (0)        -> MIDDLE
+    - [CONTINUE]                    # MIDDLE (1)       -> MIDDLE_2
+    - [CONTINUE_TO_THE_KEY_GATE]    # MIDDLE_2 (2)     -> GO_TO_ENDING or DEATH (:151)
+    - [END_THE_RUN]                 # DEATH (3)        -> DeathScreen, victory, not trueVictor
+    - [ENTER_THE_DOOR]              # GO_TO_ENDING (4) -> goToFinalAct (:94-98)
+  a15: {changes: []}

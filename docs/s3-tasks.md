@@ -95,13 +95,13 @@ granted windows (`monsters` 48 and 66, `powers` 112–135, `cards` 133,
 
 | Domain / namespace | Block | Holder |
 |---|---|---|
-| `encounters.yaml` | **62–63** (Shield and Spear, The Heart); 64 reserve | S3.41 |
-| `events.yaml` | **52** (`SPIRE_HEART`, member of no act list); 53 reserve | S3.41 |
-| `powers.yaml` | **136–139** (Surrounded, Back Attack, Beat of Death, Invincible); 140 reserve | S3.41 (rows), S3.42/S3.43 (bodies) |
-| `monsters.yaml` | **67–69** (SpireShield, SpireSpear, CorruptHeart); 70 reserve | S3.41 |
+| `encounters.yaml` | **62–63** (Shield and Spear, The Heart); 64 reserve | S3.41 — **SPENT 62 + 63, 2026-09-03; 64 RELEASED UNSPENT** (gaps permanently). Both rows are act 4, `weight: 0.0`, no `excludes:`, and the emitter now REJECTS an act-4 row that carries a weight band, an exclusion or a non-ELITE/BOSS pool |
+| `events.yaml` | **52** (`SPIRE_HEART`, member of no act list); 53 reserve | S3.41 — **SPENT 52, 2026-09-03; 53 RELEASED UNSPENT.** The member-of-no-act property is spelled `conditions.pool: NONE` + `conditions.acts: NONE` (a literal, not an empty list), the two paired and fail-loud in both directions; `act_mask` 0, and the row is omitted from `STS_REGISTRY_NATIVE_EVENTS` because its body is dispatched by the reserved id `kSpireHeartEventId` |
+| `powers.yaml` | **136–139** (Surrounded, Back Attack, Beat of Death, Invincible); 140 reserve | S3.41 (rows) — **SPENT 136–139, 2026-09-03; 140 RELEASED UNSPENT.** All four landed as IDENTITY rows with no `hooks:` and no `native: true`: the flag emits an `X(...)` entry that `power_hooks.cpp` odr-uses, so setting it before the handler exists is a link error, not a label. S3.42/S3.43 add the flag WITH the body |
+| `monsters.yaml` | **67–69** (SpireShield, SpireSpear, CorruptHeart); 70 reserve | S3.41 — **SPENT 67–69, 2026-09-03; 70 RELEASED UNSPENT.** `kMonstersCount` 62 → 65, all six `monster_dispatch.cpp` guards answered in place |
 | `cards.yaml` | **134–135** contingency — design §2.5 predicts **zero** | S3.4x, release unspent |
 | `relics.yaml` | **155–156** contingency — design §2.5 predicts **zero** | S3.4x, release unspent |
-| `a20.yaml` | no new rows; six existing rows' notes refreshed | S3.41 |
+| `a20.yaml` | no new rows; six existing rows' notes refreshed | S3.41 — **DONE 2026-09-03, and it was EIGHT rows, not six:** the design-§4.6 six (3, 4, 8, 9, 18, 19) plus the two Act-4 negatives, which live on rows **1** (no elite quota — `generateRoomTypes` never runs) and **20** (no double boss — `ProceedButton.java:101-104` gates on `TheBeyond`) |
 | `RunPhase` (`run_advance.hpp`) | **12** contingency — the preferred model rides `EVENT_DIALOG` (design §4.1); release unspent | S3.31 — **RELEASED UNSPENT 2026-09-03.** The `Spire Heart` dialog rides `EVENT_DIALOG` exactly as predicted, and the Act-3 boss's proceed needed no phase either (it is run inline off the kill, the goToDoubleBoss precedent), so no new run phase exists. 12 gaps permanently; `RunPhase::BOSS_TREASURE` (11) remains the last enumerator and `legal_actions`' `static_assert` on it is unmoved |
 | `RoomType` (`map_rooms.hpp`) | **9** `Victory`, **10** `TrueVictory`; `kRoomTypeCount` 9 → 11 with its `static_assert` | **BOTH SPENT.** S3.31 spent 9 `Victory` (`kRoomTypeCount` 9 → 10); S3.33 spent 10 `TrueVictory` (10 → 11), with the `static_assert`, `room_symbol` and the fuzz coverage mirror (`coverage.hpp`'s own `static_assert` + the `default:`-less `room_name` switch) re-pinned on it. The block is exhausted |
 | fuzz `MoveCat` (`tools/fuzz/.../policy.hpp`) | **32–35** (`REWARD_CLAIM_KEY`, the Act-4 map choice, the Spire-Heart dialog, one reserve); `COUNT` → 36 | S3.52 |
@@ -1633,7 +1633,7 @@ are S3's own.
 
 ## Phase S3.4 — Act-4 content
 
-- **S3.41** `[ ]` ∥ **Registry rows for Act 4.** The whole content
+- **S3.41** `[x]` ∥ **Registry rows for Act 4.** The whole content
   denominator, in one small task because it is ten rows: `encounters.yaml`
   62–63 (`Shield and Spear` ELITE, `The Heart` BOSS — act 4, **no weights and
   no pool draw**, the codegen emitting act-4 tables as constants);
@@ -1646,8 +1646,11 @@ are S3's own.
   read from source in full; `a20.yaml` notes refreshed on the six rows of
   design §4.6 plus the two Act-4 negatives. Records the negatives that keep
   the inventory honest: no new `MonsterIntent` (all six telegraphs exist), no
-  new card or relic row, no `rolls:` column anywhere (Act 4 spends no
-  `monsterHpRng`), and `FocusPower` deliberately unregistered (orb-gated,
+  new card or relic row, no `rolls:` column anywhere (**parenthetical corrected
+  at landing: Act 4 spends ONE `monsterHpRng` draw per monster, not none --
+  `setHp(int)` is `setHp(hp, hp)` and the two-arg body draws unconditionally.
+  The `rolls:` negative itself stands, for its own separate reason; see the
+  Log**), and `FocusPower` deliberately unregistered (orb-gated,
   Ironclad-unreachable, S4).
   **Inherited from S3.33:** **the last Act-4 park is this task's, and it is
   not act-shaped.** S3.33 deleted the blanket act-4 arm from
@@ -1677,7 +1680,160 @@ are S3's own.
   which for ten Act-4 rows is two captures, not ten (one Shield-and-Spear
   fight, one Heart fight), and the Log says so explicitly rather than
   implying a per-row capture debt.
-  **Log:** —
+  **Log:** 2026-09-03 — landed. Ten rows in four domains, one loader property,
+  one emitter rule, and **one correction to the design doc that the reading
+  forced**.
+
+  **THE TWO CAPTURES, SAID OUT LOUD.** Every one of the ten rows lands
+  `UNVERIFIED-until-captured` and every one names **S3.62**, but the debt is
+  **two captures, not ten**: one **Shield-and-Spear** fight witnesses
+  `encounters.yaml` 62, `monsters.yaml` 67 + 68 and `powers.yaml` 136 + 137,
+  and one **Heart** fight witnesses `encounters.yaml` 63, `monsters.yaml` 69,
+  `powers.yaml` 138 + 139 and — because the Heart fight is only reachable
+  through the Act-3 terminal dialog — `events.yaml` 52. There is no third
+  Act-4 encounter and no Act-4 event pool, so nothing else can be reached to
+  witness. Per-row capture debt would be a miscount, and this sentence exists
+  so nobody schedules ten directed captures.
+
+  **THE FINDING, and it is a document conflict resolved the conventions §4
+  way.** s3-design §2.2 and §5 trap 4 both assert "Act 4 consumes no
+  `monsterHpRng` at all", on the grounds that all three classes call
+  `setHp(int)` rather than the `min,max` overload. Read in full, the Java says
+  otherwise: `setHp(int)` **is** `setHp(hp, hp)`
+  (AbstractMonster.java:777-779), the two-arg body's first statement is
+  `currentHealth = monsterHpRng.random(minHp, maxHp)` (:765-766) with no
+  guard, and `Random.random(int, int)` increments its counter and consumes an
+  XS128 `nextLong` even at range 1 (Random.java:58-61). **Act 4 therefore
+  spends two `monsterHpRng` draws per Shield-and-Spear spawn and one per Heart
+  spawn.** The repo already carried the correct reading in two places nobody
+  had joined up — monsters.yaml's Nemesis row (56, S2.28) records exactly this
+  for exactly this overload, and the Maw row (55) records the contrasting
+  *no-`setHp`-call* shape, which is the only genuinely draw-free one. Fixed in
+  the same commit: s3-design §2.2 and §5 trap 4 rewritten (trap 4's *witness*
+  changes too — the HP is fixed, so a missing draw shows up as a **stream
+  counter** diff and not as an HP diff), a §9 change-log entry, a20.yaml rows 8
+  and 9, the `monsters.yaml` block comment, and the S3.42 / S3.43
+  `**Inherited:**` lines, because it is their init bodies that must make the
+  draw. Nothing else moves: trap 3 (Act-4 *construction* consumes no
+  `monsterRng`) is a different stream and stands, S3.32's landed crossing is
+  untouched, and the `rolls:` negative below stands for its own separate
+  reason.
+
+  **What landed.** `encounters.yaml` **62** `Shield and Spear` (ELITE, act 4,
+  spawn order SpireShield then SpireSpear — the array order is the turn order)
+  and **63** `The Heart` (BOSS, act 4, solo). Both `weight: 0.0`, no
+  `excludes:`, and the emitter now *enforces* that shape: an act-4 row outside
+  {ELITE, BOSS}, or carrying a weight band or an exclusion, is a generation
+  error naming the Java that forbids it. The codegen emits the act's lists as
+  **constants** rather than leaving them as a pool nobody rolls —
+  `kActEnding`, `kAct4FixedListLen`, `kAct4EliteEncounter`,
+  `kAct4MonsterEncounter`, `kAct4BossEncounter`, derived from the rows and
+  guarded by an exactly-one-row-per-pool check — and `run_advance.cpp`'s act-4
+  crossing now reads them, so the two string literals S3.32 had to hard-code
+  are gone and `boss_ids[3]` resolves to 63 instead of the honest 0 that
+  task's Log tabulated. `events.yaml` **52** `SPIRE_HEART`. `powers.yaml`
+  **136-139** Surrounded / Back Attack / Beat of Death / Invincible, all four
+  identity rows. `monsters.yaml` **67-69** SpireShield / SpireSpear /
+  CorruptHeart, with HP bands and full move + `getMove` programs.
+  `a20.yaml` notes refreshed on **eight** rows, not six: §4.6's 3/4/8/9/18/19
+  plus the two negatives, which turn out to live on rows **1** and **20**.
+
+  **The member-of-no-act property, and why it is a literal.**
+  `conditions.pool: NONE` with `conditions.acts: NONE` — a declared string,
+  not an empty list, because an empty list is what a half-written row looks
+  like and this property has to be *stated*. The loader pairs them in both
+  directions and fails loud: pool `NONE` demands exactly `acts: NONE`, and
+  every other pool refuses `acts: NONE`, so neither spelling can drift into
+  the other. `act_mask` emits 0, `event_in_act` is false for every act, the
+  row occupies no position in `event_membership` / `shrine_membership`, and
+  `event_flags` / `event_flags_hi` stay byte-comparable across the crossing —
+  which was the whole hazard. The row does **not** double-register the dialog:
+  a pool-`NONE` row is excluded from `STS_REGISTRY_NATIVE_EVENTS`, so S3.31's
+  reserved `kSpireHeartEventId` (0xFFFE) check in `event_dialog_impl` remains
+  the one and only dispatch site — and the macro's link-error guard loses
+  nothing, because that check odr-uses the body unconditionally. The row's job
+  is the translator's `game_id` join and the differ, not dispatch.
+
+  **Why the four power rows bind no hooks.** `native: true` is not a label: it
+  emits one `X(<NAME>, power_native_<name>)` entry that `power_hooks.cpp`
+  odr-uses, so a native row whose handler nobody has written yet is an
+  undefined reference. The bodies are S3.42's and S3.43's; each row names the
+  hook its batch must bind and the handler it must define, so the flag arrives
+  *with* the body rather than before it. `INVINCIBLE` carries `priority: 99`
+  (InvinciblePower.java:28), the only column any of the four needs.
+
+  **Three schema limitations, recorded at the step rather than worked around**
+  (the Byrd `PECK` precedent, and all three are exact at
+  `kMonsterAscension` 20). (1) **Per-tier step COUNTS** — SpireSpear's
+  `skewerCount` 3→4 and the Heart's `bloodHitCount` 12→15 are counts, not
+  amounts, so `SKEWER` and `BLOOD_SHOTS` each author ONE template step that
+  the batch's body emits N times (the Maw / Healer fan-out shape). The same
+  device carries the two **all-allies fan-outs** an effect target cannot
+  express: the Shield's `FORTIFY` (30 block to every monster including itself)
+  and the Spear's `PIERCER` (+2 Strength to every monster including itself).
+  (2) **A per-tier PILE** — the Spear's two Burns go to the discard below A18
+  and to the **top** of the draw pile at A18+ (the 4-arg
+  `MakeTempCardInDrawPileAction`, `randomSpot = false`), and the pile rides in
+  the step's `extra`, which has no tier column; the row authors the A18+ arm.
+  (3) **A POST-POWER runtime read** — the Shield's `SMASH` block is a flat 99
+  at A18+ but `damage.get(1).output` below it, which no tier column can carry,
+  so that column is `{base: 0, a18: 99}` with the `0` declared as a schema
+  null rather than a number from the game.
+
+  **The negatives, recorded so the inventory stays honest.** No new
+  `MonsterIntent` — the six telegraphs (ATTACK 1, ATTACK_DEFEND 3, BUFF 4,
+  ATTACK_DEBUFF 6, STRONG_DEBUFF 8, DEFEND 11) are all already in the vocab,
+  and 14 stays B3.15's unissued reserve. No new card row (Burn, Dazed, Slimed,
+  Wound, Void are all registered) and no new relic row. **No `rolls:` column
+  anywhere** — that column records *extra* per-instance draws, and every
+  Act-4 `super(...)` HP argument is a literal, so the corrected `setHp` draw
+  above is the whole of each class's HP RNG cost. `FocusPower` deliberately
+  unregistered: its only Act-4 site (SpireShield.java:87) sits behind
+  `!player.orbs.isEmpty()`, which no Ironclad can satisfy — S4, with the
+  Defect. The A1 elite quota has no Act-4 effect (`generateRoomTypes` never
+  runs there) and the A20 double boss does not fire in Act 4
+  (`ProceedButton.java:101-104` gates on `TheBeyond`, and the `TheEnding` arm
+  is a plain `else if`).
+
+  **Guards answered rather than bumped.** `kMonstersCount` 62 → 65 moved six
+  `static_assert`s in `monster_dispatch.cpp`, and each one's question is
+  answered in place for all three classes: all three DO queue a trailing
+  `RollMoveAction` (so all three take a `monster_roll_move_fn` case when their
+  selection bodies land); none is mid-combat spawnable; two override
+  `damage()` and both are presentation (the Sentry precedent) while the Heart
+  overrides it not at all; all three override `usePreBattleAction`; and all
+  three `die()` bodies are **post-`super.die()`**, so they belong to
+  `monster_die_after_fn` and not `monster_die_fn`. `kPowersCount` 72 → 76
+  moved four `static_assert`s across `interp_block.cpp` / `interp_damage.cpp`,
+  and all four are pure count moves — `INVINCIBLE` is the one that looks like
+  an exception and is not, because `onAttackedToChangeDamage` is a different
+  pass from all three `atDamage*` ones (§5 trap 9's `apply_buffer` site). Two
+  further fail-loud hand copies fired and were fed: `seed_scan.cpp`'s event
+  name table (51 → 52 rows) and `act_event_lists_test.cpp`'s
+  `kEventTable.size()` pin.
+
+  **Evidence.** Codegen deterministic and byte-stable across two runs —
+  `encounter_table.hpp` `63b424af32d9b186c0e40eb82fb1d8ed80071701f295113933c9c21b8e26c817`,
+  `event_table.hpp` `19c41482274d533dc8f04184907fe9fc9ae557965e0b71048e4b5be18bfd9cda`,
+  `monster_table.hpp` `435171c847a277e8480aac3a40d12fd3f057fe4078df5ae35689802280e15152`,
+  `power_table.hpp` `035944247caed9e6cb4703a9584c0a23d0393b7b7e7a02ac80ffd2474c7a878b`,
+  `ids.hpp` `ff40eb3f3036297c4d73dbc2f4a50983fbc1ff1658af88490ec572d5ff3cadd0`,
+  `manifest.hpp` `c007e02208a5f54afd2c9e1572b6e8e266c73d2589a5e654868a3efd8a613f34`,
+  `game_ids.hpp` `c90113b110362fef42511553333e774da54735f5200b1e17dd739342dfa10bae`,
+  identical on both runs; `card_table.hpp`, `potion_table.hpp` and
+  `relic_table.hpp` are **byte-identical to the pre-change tree**, and the
+  only removed lines anywhere in the diff against it are four widened budget
+  constants (`kEncounterCount` 61→63, `kEncounterMaxAct` 3→4,
+  `kEncounterPoolTableCount` 15→17, `kMaxMoveEffects` 6→8) — additive, not
+  destructive. All six presets **build**: `debug`, `asan`, `release` through
+  `wsl_run.sh --script tools/build_presets.sh`, and `win-debug`, `win-asan`,
+  `win-release` through a vcvars64 + LLVM wrapper. `tools/corpus_replay.sh`:
+  `act1_a20_50 --replay` ZERO-DIFF, `three_act_a20_5 --replay` ZERO-DIFF, both
+  injected-divergence controls failing loud. `--replay --vitals` clean on all
+  five three-act corpus entries. `check_stale_counts.sh` clean;
+  `check_doc_links.sh` clean. The generated act-4 constants and the three HP
+  bands were printed from the **built tables** by a throwaway program and are
+  quoted in the commit body.
 
 - **S3.42** `[ ]` **Shield and Spear.** The Act-4 elite, both actors and the
   two flag powers. **SpireShield** (SpireShield.java:36-176): fixed HP
@@ -1705,6 +1861,40 @@ are S3's own.
   `AbstractMonster`** at :982-984 (intent) and :998-1013 (real hit), not in
   either power. Resolves the facing question (deferred row) against the three
   cited methods read in full.
+  **Inherited:** S3.41's rows, and three things they hand over rather than
+  solve. (a) **Ids:** `encounters.yaml` **62** `Shield and Spear` (ELITE, act
+  4; spawn order SpireShield then SpireSpear, which is the turn order),
+  `monsters.yaml` **67** SPIRE_SHIELD and **68** SPIRE_SPEAR (HP bands, move
+  ids, intents and effect programs already landed), `powers.yaml` **136**
+  SURROUNDED and **137** BACK_ATTACK. Both power rows are IDENTITY rows with
+  no `hooks:` and no `native: true`: this task adds the flag together with
+  `power_native_surrounded` / `power_native_back_attack`, because the flag
+  alone is a link error. (b) **The corrected `monsterHpRng` reading** (S3.41's
+  Log, s3-design §9): `setHp(int)` is `setHp(hp, hp)` and the two-arg body
+  draws unconditionally, so **each guard's init must spend exactly one
+  `monster_hp_rng` draw over its `min == max` column** — two per
+  Shield-and-Spear spawn — exactly as `monster_nemesis.cpp` does. Skipping the
+  draw because the range is one wide desynchronises the stream for the rest of
+  the run. (c) **What the rows deliberately do not carry**, each recorded at
+  its step in `monsters.yaml`: `SKEWER`'s `skewerCount` (3, 4 at A3) is a
+  per-tier step COUNT, so the row authors one template and this body emits it
+  N times; `FORTIFY`'s 30 block and `PIERCER`'s +2 Strength are all-allies
+  fan-outs (every monster in the group, **itself included**) that a step
+  target cannot express, so each is one template this body fans out over the
+  live group; `BURN_STRIKE`'s Burn PILE is ascension-branched (discard below
+  A18, draw-pile TOP at A18+ — the 4-arg overload, `randomSpot = false`, so no
+  `cardRandomRng` draw) and the pile has no tier column, so the row authors
+  the A18+ arm; and `SMASH`'s block column is `{base: 0, a18: 99}` where the
+  `0` is a declared schema NULL, because the sub-A18 value is
+  `damage.get(1).output`, a post-power runtime read. Also inherited from the
+  six `monster_dispatch.cpp` guards S3.41 answered: both classes queue a
+  trailing `RollMoveAction` (so both take a `monster_roll_move_fn` case),
+  neither is mid-combat spawnable, both `damage()` overrides are presentation
+  only (no `on_monster_damaged` entry), both override `usePreBattleAction`,
+  and both `die()` bodies are **post-`super.die()`** — they belong in
+  `monster_die_after_fn`, not `monster_die_fn`, and the dying guard excludes
+  itself only because `super.die()` has already set `isDying` (the Reptomancer
+  ordering).
   **Deps:** S3.41 **Acceptance:** six presets **build**; committed corpora
   zero-diff (no Act-1/2/3 encounter contains either actor, so this must be a
   no-op there); fixtures byte-identical. `UNVERIFIED-until-captured` until
@@ -1737,6 +1927,39 @@ are S3's own.
   turns on: Beat of Death is THORNS-typed, so it does **not** trigger Painful
   Stabs (PainfulStabsPower.java:40-44 excludes THORNS) — Blood Shots does, one
   Wound per landed hit.
+  **Inherited:** S3.41's rows, and three things they hand over rather than
+  solve. (a) **Ids:** `encounters.yaml` **63** `The Heart` (BOSS, act 4, solo
+  group), `monsters.yaml` **69** CORRUPT_HEART, `powers.yaml` **138**
+  BEAT_OF_DEATH and **139** INVINCIBLE (the latter carrying `priority: 99`,
+  InvinciblePower.java:28). Both power rows are IDENTITY rows with no `hooks:`
+  and no `native: true`: this task adds the flag together with
+  `power_native_beat_of_death` (binding the existing `on_after_use_card` hook,
+  16) and `power_native_invincible`, because the flag alone is a link error;
+  Invincible's `maxAmt` has no POD home of its own and rides
+  `PowerSlot.counter` through the `APPLY_POWER` counter operand (the Flight /
+  Panache / Malleable / Constricted precedent). (b) **The corrected
+  `monsterHpRng` reading** (S3.41's Log, s3-design §9): `setHp(int)` is
+  `setHp(hp, hp)` and the two-arg body draws unconditionally, so **the Heart's
+  init must spend exactly one `monster_hp_rng` draw** over its `min == max`
+  column, as `monster_nemesis.cpp` does. (c) **What the row deliberately does
+  not carry**, recorded at its step in `monsters.yaml`: `BLOOD_SHOTS`'
+  `bloodHitCount` (12, 15 at A4) is a per-tier step COUNT, so the row authors
+  one 2-damage template this body emits N times; and `GAIN_ONE_STRENGTH`
+  authors only the always-`+2` Strength, because both of its neighbours are
+  native — the **negation of a negative Strength** read off the Heart's own
+  live power (:121-124) and the **`buffCount` ladder** (0 Artifact 2, 1 Beat
+  of Death +1, 2 Painful Stabs, 3 Strength 10, **≥ 4 Strength 50 forever**),
+  whose counter belongs to the `MonsterState.flags` block this task claims.
+  `DEBILITATE`'s eight steps ARE fully authored, including the five
+  `DRAW_RANDOM` status cards as five separate steps — each spends its own
+  `cardRandomRng` draw against the pile size as it then is, so collapsing them
+  would be a stream divergence. Also inherited from the six
+  `monster_dispatch.cpp` guards S3.41 answered: the Heart queues a trailing
+  `RollMoveAction` (so it takes a `monster_roll_move_fn` case), is not
+  mid-combat spawnable, has **no `damage()` override at all**, overrides
+  `usePreBattleAction`, and its `die()` content is entirely
+  **post-`super.die()`** inside the `!cannotLose` gate — `monster_die_after_fn`,
+  and it is the run's true-victory edge rather than a combat effect.
   **Deps:** S3.41 **Acceptance:** six presets **build**; committed corpora
   zero-diff; fixtures byte-identical. `UNVERIFIED-until-captured` until
   **S3.62** delivers the Heart capture, replayed `--combat` zero-diff, in

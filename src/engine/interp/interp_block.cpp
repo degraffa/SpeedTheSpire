@@ -107,12 +107,26 @@ namespace {
     // Checked for S2.24's one power, STASIS (id 98): it overrides ONLY
     // updateDescription and onDeath (StasisPower.java:32-44, read in full) --
     // neither block pass gains a case.
-    static_assert(sts::registry::manifest::kPowersCount == 72,
+    static_assert(sts::registry::manifest::kPowersCount == 76,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "
                   "modify_block_last just below in the same pass; No Block is "
                   "the game's only overrider of it.");
+    // S3.41 (kPowersCount 72 -> 76): SURROUNDED, BACK_ATTACK, BEAT_OF_DEATH
+    // and INVINCIBLE, the four Act-4 rows. All four classes read in full, and
+    // all four are pure count moves. SurroundedPower and BackAttackPower are
+    // pure markers -- ctor + updateDescription and nothing else
+    // (SurroundedPower.java:16-28, BackAttackPower.java:22-39); the 1.5x they
+    // gate is hard-coded in AbstractMonster (:982-984, :998-1013), not in a
+    // damage pass. BeatOfDeathPower overrides only onAfterUseCard
+    // (BeatOfDeathPower.java:39-44). INVINCIBLE IS THE ONE THAT LOOKS LIKE AN
+    // EXCEPTION AND IS NOT: it overrides onAttackedToChangeDamage and
+    // atStartOfTurn (InvinciblePower.java:31-48), and
+    // onAttackedToChangeDamage is a DIFFERENT pass from all three atDamage*
+    // passes -- s3-design section 5 trap 9 puts it at the apply_buffer site,
+    // between decrementBlock and the onAttacked fan-out. So no case is added
+    // in any of the four guards; the bodies are S3.42's and S3.43's.
     // S2.26 (kPowersCount 56 -> 60): CONSTRICTED, FADING, SHIFTING and
     // REACTIVE. Checked one at a time against BOTH count-guarded families,
     // and all four are pure count moves. ConstrictedPower overrides only
