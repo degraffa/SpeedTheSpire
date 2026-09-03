@@ -59,10 +59,15 @@ one exists, mirroring the Stage B convention.
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
 | Stored records carry `outcome_kind = kOpen` and zeroed outcome/value/aux targets — an append-only writer cannot go back once a run ends | T1.2 | T2.3 (**narrowed 2026-09-03 by T1.4s**) | Filling them is a read-old-shard / write-new-shard pass, which is exactly the shape of T2.3's **reanalyze** operation, so T1.2 deliberately did not half-build it. `RecordedRunStats::outcome_kind` carries the answer for a caller that wants it immediately. A loader must never read `outcome_return` from a `kOpen` record as if it were a target. **T1.4s discharges this for OFFLINE producers** (`floor_rollout.hpp`): a run's rows are held in memory until the run terminates, stamped with the outcome block and `value_target` there, and only then appended — nothing on disk is rewritten and the buffer is bounded by one run's floor count. What remains for T2.3 is the ONLINE case, an actor that must publish rows before its run ends, which is the only one that genuinely needs a rewrite pass. `outcome_return` is still 0 in T1.4s's shards, and correctly so: `weights_version` is `none`, i.e. no currency is named. |
 | Quarantine has no **committed** `CommitOrder` — the ordered list of sim commits this repo has ever pinned | T1.2 | T2.3 | Git shas are unordered, so "the range from A to B" is only evaluable against a declared order (`quarantine.hpp`). T1.2 demonstrated the filter with an order built in the tool; the lifecycle operation needs one in the repo, appended by the same reviewed change that moves the pin (conventions, "Moving the engine pin"). Until it exists, every real shard is `kUnknownCommit` to any policy but a hand-built one. |
-| The keyframe interval (default 64) is unswept, and `SidecarReader::reconstruct` linear-scans both sidecar streams | T1.2 | T2.1 | The interval trades bytes/run against replayed steps; T1.2 measured both at 64 (see `SpireTrainer/docs/verification/t1-2-storage-numbers.md` (training repo)) but the bank is what should choose it. The linear scan is deliberate — an index built inside the reader would be a cache with a lifetime nobody asked for; the bank harvester wants one **on disk**. |
+| The keyframe interval (default 64) is unswept, and `SidecarReader::reconstruct` linear-scans both sidecar streams | T1.2 | **DISCHARGED 2026-09-03 (T2.1)** | Both halves. *Interval:* `bank_check` sweeps 8/16/32/64/128/256/512 over real SIM_SEARCH runs and measures sidecar bytes/run against actions replayed per reconstruction (`SpireTrainer/docs/verification/t2-1-snapshot-bank.md` (training repo) §4); the decision is to KEEP 64, and the measurement is the point -- the byte curve does NOT flatten past 64 (64 -> 128 saves ~39 %, 128 -> 256 another ~34 %), so it was a real trade. It goes to 64 because T2.1 gave the program a bank, which is now the durable random-access surface, leaving the sidecar's latency to matter more than its bytes; 256 is recorded as the measured sweet spot if volume ever binds. `sidecar.hpp` carries the argument at the constant. *Index:* `include/sts/training/stream_index.hpp` -- `RecordKind::kStreamIndex`, ONE entry per (run, stream) rather than one per record (a per-record index would be 32 B against a 16 B action record). `SidecarWriter::finish` writes one per stream, `SidecarReader` uses them when present and scans when absent, and §4 measures both paths reconstructing identical states (12.7x, then 6.0x on a larger timed set). |
 | The value-artifact registry has no CHECKER that a registered `sha256` still matches the file it names | T1.4s | T2.3 | `artifacts/value-artifacts.json` records each artifact's digest, and `v0s_fit.py` writes it — but nothing re-verifies it on the way in. A registry whose hashes are never checked is a comment. T2.3 owns the registry's lifecycle (promote / retire / reanalyze against a champion), so the guard belongs in the same change as the first operation that reads an entry it did not write. Until then, `python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())"` is the manual check. |
 | `v0s.1` has only ever seen FLOOR-BOUNDARY states, so a search that queries it at a mid-combat leaf is extrapolating | T1.4s | T1.7 | The corpus is one row per floor, by construction (it is what makes the label per-act-boss and the volume tractable). The tracer-bullet loop is the first consumer that will call a value function from inside a search, so it is the first thing that can measure how bad the extrapolation is — and, if it is bad, the first place a combat-state corpus becomes worth generating. The generator already supports it: recording at every decision instead of every floor is a one-line change to the boundary test in `roll_floor_rows`. |
 | The V0s → V0h comparison is PRE-REGISTERED but not run | T1.4s | T1.4 | The protocol — features, target re-labelling, split, the paired-bootstrap statistic, and the four registered deltas with what each triggers — is section 9 of `SpireTrainer/docs/verification/t1-4s-v0s.md` (training repo), written before the human dump exists so the comparison cannot be designed around its result. T1.4 runs it. If the dump cannot support the bootstrapped-horizon re-labelling, the protocol says to declare the comparison impossible and record that, not to weaken it. |
+| `engine::RunController` is not portable between PROCESSES: `RunController::lists` holds three `std::array<std::string_view, N>` into the registry's static strings, so a state memcpy'd to disk carries pointers | T2.1 | engine repo (**surfaced to the orchestrator**) | T2.1's bank is the first artifact this program writes in one process and reads in another, and the first `bank_check` against a real bank SEGFAULTED in `encode_public_view` -> `encode_prefix` dereferencing a stored view; it is also a determinism defect, since ASLR would make a shard's bytes a function of where the generator was loaded. T2.1 fixed it CONSUMER-SIDE: a bank record stores the three lists as registry `EncounterDef` ids, zeroes the views in the stored state, and `bank_restore_state` rebinds them on the way in (`bank_capture_lists` refuses, naming the key, if an entry is not a registry encounter). **T1.2's `SidecarKeyframe` has the same flaw and is NOT fixed** -- nothing reconstructs a sidecar across processes today, so it is latent rather than live. The durable fix is in the engine (ids in `MonsterLists`, resolved at use) rather than a second copy of the workaround, which makes it an engine-repo change and therefore stop-and-surface under conventions §6. Full write-up: `SpireTrainer/docs/verification/t2-1-snapshot-bank.md` (training repo) §8. |
+| The v0 observation tensorization is COMBAT-ONLY and capped: no map DAG, no per-phase screen sections, no run trunk, and every entity group truncates (measured 120 dropped entities over the 256-snapshot bank) | T1.3 | T2.2 | `pv_encode.hpp` is a v0 whose job was to make `t_enc` a measured number and give the spike a real entity-set input, not to be the Phase-T2 token layout. Plan §3.1's run trunk (deck/relic/potion tokens, a map-DAG encoder, current-screen tokens) has no encoder at all yet, and the spike could not need one because it searches inside combat. `EncodedObs::tokens_dropped` / `actions_dropped` are counted and reported so the truncation is a number rather than a suspicion; the policy head's 64-action cap dropped NOTHING on this bank (mean root fanout 7.15) but `sts::fuzz::kMoveCap` is 163, so a run-layer action set will exceed it. |
+| The search is combat-scoped: potions and every run-layer decision are outside the searched action set | T1.3 | T2.2 | `Search` steps `rc.combat` with the COMBAT-level `advance` (the overload that takes the mask, advance.hpp:319-323). `USE_POTION` legality lives on `RunActionMask` and that overload does not dispatch it at all, so potions are simply not searchable at this layer. Plan §3.2's run level is structured expectimax over the act map, which is a different search and a later phase; what T2.2 inherits is the combat one plus the knowledge that adding potions means either a run-level mask-supplied overload (an ENGINE change) or a hybrid step. |
+| The GPU inference path runs on the DEFAULT CUDA stream: no two-stream copy/compute overlap, because there is no CUDA toolkit | T1.3 | T2.2 | `<c10/cuda/CUDAStream.h>` and `<ATen/cuda/CUDAEvent.h>` include `cuda_runtime_api.h`, a CUDA TOOLKIT header; the box has the driver and LibTorch's bundled runtime DLLs and no toolkit, and T1.3's download allowlist does not cover NVIDIA's site. `nn.cpp` therefore double-buffers host STAGING against device execution and waits with `torch::cuda::synchronize()`. Measured, that costs little today — 3.55 ms in `begin_batch` against 0.02 ms in `end_batch`, i.e. the host side is ~170x the device wait — but the same measurement is what makes the actor LAUNCH-BOUND, and the fix for that (CUDA graphs, or TensorRT) needs the toolkit too. |
+| The Phase-T2 default search config was selected STRUCTURALLY, not on decision quality | T1.3 | T2.2 | The spike's weights are random, so no row of its sweep says anything about which configuration plays better; T1.3 says so in the doc and picks on the plan's own commitments plus measured root fanout. The axes ARE swept and their COSTS measured (16/48/128 evals, 4/8/16 candidates, Gumbel-SH vs PUCT at the root, reveal coarsening on/off, per-simulation vs 8/32-world banks), so T2.2 re-runs the same grid against a trained net and changes `STS_TRAIN_SEARCH_CONFIG_ID` if the quality ordering disagrees. |
 
 ---
 
@@ -494,7 +499,7 @@ force run 1 with `workflow_dispatch` after this lands).
   `t1-2-storage-numbers.md` and a byte-identical `actor_smoke_v1.txt`.
   `tools/training/check_omniscient_boundary.sh` clean.
 
-- **T1.3** `[ ]` ∥ **Actor throughput spike.** Tiny net + real Gumbel
+- **T1.3** `[x]` ∥ **Actor throughput spike.** Tiny net + real Gumbel
   root / PUCT in-tree search + `resample_hidden` particles + GPU batching
   (fp16, pinned, double-buffered), on Act-1 combat snapshots. Sole job:
   **measure R** (achieved NN evals/s at production batch) and **t_enc**,
@@ -509,6 +514,8 @@ force run 1 with `workflow_dispatch` after this lands).
   widths, t_enc, batch-fill and queue-wait histograms, and the plan §5
   budget numbers re-derived from measured values; sweep-selected search
   config recorded as the Phase T2 default.
+  **Inherited:** the selected search config becomes
+  `STS_TRAIN_SEARCH_CONFIG_ID`'s first real value.
   **Inherited (2026-09-03):** the box's Python environment cannot drive the
   GPU — Python 3.9.7 with a CPU-only torch 1.8.1, while the RTX 5070 Ti
   (Blackwell) needs CUDA ≥ 12.8 and a 2025+ PyTorch. A dedicated env (a
@@ -516,7 +523,100 @@ force run 1 with `workflow_dispatch` after this lands).
   deliverable of this task, and the C++ actor's inference path (LibTorch vs
   TensorRT vs ONNX Runtime — plan §5 names the first two) is a **recorded
   decision** in the numbers doc, with the env's exact versions pinned in a
-  requirements/lock file the training repo commits. **Log:** —
+  requirements/lock file the training repo commits.
+  **Log:** 2026-09-03 — landed. Numbers doc:
+  `SpireTrainer/docs/verification/t1-3-actor-spike.md` (training repo);
+  environment: `SpireTrainer/docs/environment.md` (training repo) + `requirements.lock`.
+
+  *The environment* (deliverable 1): `D:\STS_BG_Mod\_train_env\` — uv 0.12.9,
+  a uv-managed CPython **3.12.14**, **torch 2.11.0+cu128** (cuDNN 91900) and
+  LibTorch 2.11.0+cu128 (build hash `70d99e99`), all from
+  `download.pytorch.org` / `astral.sh` with every URL, size and sha256 in
+  `environment.md`. Verified by a real run, not an import:
+  `torch.cuda.is_available()` true, device `NVIDIA GeForce RTX 5070 Ti`,
+  **capability (12, 0)** — the line that proves the wheel carries Blackwell
+  kernels rather than JIT-ing PTX — and a 4096-cubed fp16 matmul at
+  **1.344 ms = 102.3 TFLOP/s**. Nothing is committed but the lock file and the
+  doc; the tree is 8 GB.
+
+  *The inference-path decision* (recorded, as the block requires):
+  **LibTorch + TorchScript + fp16 + CUDA. The ONNX Runtime fallback was not
+  reached.** LibTorch's headers build clean under clang-cl 22 and the whole
+  path worked the day it was downloaded. Three things had to be discovered:
+  (i) `find_package(Torch)` is unusable here — it reaches
+  `find_package(CUDAToolkit REQUIRED)` and this box has the driver and
+  LibTorch's bundled runtime DLLs and no toolkit, so
+  `cmake/StsTrainLibtorch.cmake` hand-rolls two include dirs, five import
+  libraries and one linker flag; (ii) that flag,
+  `-INCLUDE:?warp_size@cuda@at@@YAHXZ`, is load-bearing — without it nothing
+  names a torch_cuda symbol, torch_cuda.dll is never loaded, and
+  `torch::cuda::is_available()` returns **false on a working GPU** (two probes
+  did exactly that); (iii) LibTorch's Windows build is release-CRT, so a
+  `/MDd` build crosses two heaps and **segfaults with an unflushed stdout** —
+  the build now forces `/MD` and strips `/RTC1` whenever LibTorch is
+  configured, the same remedy the engine's sanitizer wiring uses.
+
+  *The spike* (deliverable 2): `src/training/{pv_encode,search,nn}.cpp` +
+  `main_actor_spike.cpp`,
+  `include/sts/training/{pv_encode,search,nn,leaf_queue}.hpp`,
+  `tools/training/export_tiny_net.py`. A v0 tensorization of `PublicView`
+  (96 entity tokens x 8 features + 64 enumerated actions x 4 categorical
+  columns, one shared embedding table with ~2,048 rows per content domain per
+  plan §3.1); a public-belief tree keyed by `public_hash` with a
+  `resample_hidden` particle per simulation, exact engine transitions through
+  the **mask-supplied `advance` overload**, Gumbel sequential halving at the
+  root, PUCT in-tree and reveal afterstates coarsened per plan §3.2; a
+  lock-free (Vyukov) leaf queue feeding one batched fp16 inference server with
+  pinned host staging and two slots. Nets exported from the pinned env:
+  1.20M (d=64), 2.61M (d=128) and 17.6M (d=384, 6 layers — inside plan §5's
+  10-25M bracket, so the budget table rests on a MEASURED number at the plan's
+  own model size instead of an extrapolation).
+
+  **Acceptance — real runs.** Snapshot bank: **256** real A20 combat decisions,
+  floors 1-16, mean root fanout 7.15, reached by stepping real seeds under the
+  engine's `SIM_SEARCH` driver. **`t_enc` = 1.43 us** per observation over the
+  full view, as a per-observation MINIMUM over 40 repetitions (0.57
+  encode_public_view incl. the embedded mask + 0.40 public_hash + 0.46 our
+  tokenizer). **R** at four batch sizes x three widths:
+  w64 20.2k/75.5k/158.2k/292.4k, w128 25.7k/99.2k/198.1k/208.1k, plan384
+  13.7k/24.4k/24.4k/25.0k evals/s at batch 64/256/512/1024 (best of 12). Per-decision
+  breakdown (us): encode 249, step 147, copy 30, sample 140, tree 83, with NN
+  wait 479k us of *suspended* time that overlaps other searches. End to end:
+  1,536 concurrent searches on 12 worker threads gives **3,188 decisions/s and
+  145,600 evals/s** (73 % of the same net's raw ceiling at the same batch),
+  batch-fill mean **512.0 of a 512 cap**, with queue-wait and batch-fill
+  histograms in the doc. Budget
+  re-derived from measured R: at the plan's own D = 1,500 and 48
+  evals/decision, `plan384` gives **2.95 GPU-s per run and ~29k runs/GPU-day**,
+  i.e. the PESSIMISTIC end of plan §5's 30k-100k bracket and below its floor.
+  A search result was written into a real `DecisionRecord` (fanout 5 of the
+  mask-derived 610) as the container check.
+
+  **Chosen Phase-T2 default: `e48-c8-gsh-rc-w0`**, and
+  `STS_TRAIN_SEARCH_CONFIG_ID`'s CMake default moved from `none` to it. The
+  rule is stated in the doc and is STRUCTURAL, deliberately: the spike's
+  weights are random, so no sweep row carries information about decision
+  quality, and a default picked on a quality figure derived from random weights
+  would be invented. It keeps the plan's own commitments (Gumbel SH at the root
+  — §3.2 makes PUCT-at-root the ablation — reveal coarsening, the 48-eval
+  budget), takes a fresh particle per simulation, and takes the smallest
+  candidate count that covers the measured mean root fanout (7.15 gives 8).
+
+  **Two findings worth carrying forward.** (1) The inference path is
+  **launch-bound, not FLOP-bound**: staging + enqueue costs 3.52 ms of host
+  time per batch against 0.03 ms of device wait, so plan §5's "batches >= 512"
+  is not a preference on this hardware and the first optimization to reach for
+  is CUDA graphs or TensorRT, not a smaller net. (2) Throughput noise on this
+  box is severe and ONE-SIDED — a second CPU-saturating job (T1.4s's generator)
+  ran throughout — so R and the sweep report the BEST of N repetitions and the
+  sweep prints each row's full spread; rows whose spreads overlap are ties, and
+  the doc says so rather than reading a winner out of noise.
+
+  **Presets.** `win-release` builds AND RUNS the spike on the GPU (that is the
+  real run). All six configure + build; the five without
+  `-DSTS_TRAIN_LIBTORCH_DIR` build the same sources with the reference
+  evaluator and publish no R. `tools/training/check_omniscient_boundary.sh`
+  clean; `tools/check_submodule_pin.sh` clean.
 
 - **T1.4** `[ ]` ∥ **Dataset ingestion + tabular V0h (human data).** Acquire the public
   run dataset; verify `seed_played` and player-identifier availability
@@ -701,7 +801,22 @@ force run 1 with `workflow_dispatch` after this lands).
   belief-marginal predictor), wired as a promotion gate not CI.
   **Deps:** GT0, T1.3 **Acceptance:** invariance tests green on the spike
   net; probe harness demonstrably detects a deliberately-leaked
-  observation (negative control) and passes on the clean encoder. **Log:** —
+  observation (negative control) and passes on the clean encoder.
+  **Inherited:** the twin fixture container and its refusal rules are
+  specified in the engine's `tests/golden/twin_fixtures/README.md`; the one
+  recorded, *open* mask leak (draw-sourced choices) is contract §4a — a probe
+  that recovers draw-slot types while such a screen is open is finding THAT,
+  not a new defect.
+  **Inherited (from T1.3):** "the spike net" in the Acceptance above is now a
+  real artifact — `tools/training/export_tiny_net.py` exports it and
+  `Evaluator` (`nn.hpp`) runs it — and the encoder whose invariance is being
+  tested is `encode_observation` (`pv_encode.hpp`). Two properties of that
+  encoder matter here and are not obvious: the enumerated ACTION ORDER is part
+  of the observation (a policy logit vector is indexed by position, so
+  invariance means the same order too), and the draw pile enters as the view's
+  CANONICALLY SORTED multiset plus its order-constraint annotations, which is
+  the only channel any order knowledge legitimately reaches a token through.
+  **Log:** —
 
 - **T1.7** `[ ]` **Tracer-bullet expert-iteration loop (non-durable).** One
   end-to-end cycle of the T2.2 shape, run BEFORE GT1 and deliberately
@@ -719,19 +834,59 @@ force run 1 with `workflow_dispatch` after this lands).
   histograms, steps-per-run per weights version, learner ingest vs actor
   production).
   **Deps:** T1.2, T1.3 (T1.4s is an accelerant, not a dep)
+  **Inherited (from T1.3):** the actor and the net-export path exist and are
+  the ones to use, not ones to rebuild. `actor_spike`
+  (`src/training/main_actor_spike.cpp`) already runs the whole graph this task
+  needs except the learner step and the hot swap: snapshot bank — concurrent
+  `Search` objects — lock-free leaf queue — batched fp16 `InferenceServer` — a
+  `DecisionRecord` (T1.3 asserts one real search result fits one). The net is
+  defined and exported by `tools/training/export_tiny_net.py`, and `Evaluator`
+  (`nn.hpp`) is the seam a HOT SWAP plugs into — it is already an interface
+  with two implementations, and swapping weights is swapping the
+  `torch::jit::script::Module` behind it. **Every plan §5 day-one counter this
+  task's acceptance names is already live and printed** (per-decision
+  encode/step/copy/sample/tree/NN-wait, batch-fill and queue-wait histograms);
+  what T1.7 adds is steps-per-run per weights version and learner-ingest vs
+  actor-production. Read T1.3's numbers doc before sizing a generation: on
+  this box the inference path is LAUNCH-bound, and throughput noise is
+  one-sided and large enough that a per-generation report must say how many
+  repetitions it is the best of.
   **Acceptance:** three generations complete unattended; a per-generation
   report (throughput, batch-fill, ingest-vs-production, wall-clock per
   generation) committed under the training repo's `docs/verification/`;
   every artifact the loop produced is deleted or labelled non-durable and
   nothing from it is registered as a value artifact or checkpoint; the
-  list of integration defects found and fixed is in the Log. **Log:** —
+  list of integration defects found and fixed is in the Log.
+  **Inherited (2026-09-03, from T1.4s):** the snapshot source exists —
+  `rollout_floor_rows` (`src/training/main_rollout_floor_rows.cpp`) plays A20
+  runs under the engine's scripted `PolicyKind`s and writes T1.2 decision shards
+  with outcome labels, deterministically and at any thread count; its
+  floor-boundary states advanced into their next combat are exactly this task's
+  "≥ 1k Act-1 combat snapshots". The leaf currency exists too: `v0s.1`
+  (`artifacts/value-artifacts.json`), so the graph's value head is a real
+  currency and not the constant the block allows for. Two things come with it:
+  V0s has never seen a mid-combat state (deferred-obligation row above — this
+  task is the first that can measure the extrapolation), and V0s is
+  POLICY-CONDITIONAL, measured out-of-cohort in the report's §7, so the loop's
+  snapshots must be generated by the policy whose currency it is using.
+  **Inherited (2026-09-03, from T2.1):** the block's "or the T2.1 bank if it
+  exists" is now the first option, not the fallback — 120,004 snapshots with
+  22,009 already IN `RunPhase::COMBAT`, so this task's ">= 1k Act-1 combat
+  snapshots" needs no advancing step at all. Use `BankReader` +
+  `bank_restore_state`; the bank is restricted on the sidecar's terms and a raw
+  memcpy of `record.state` is wrong (its encounter lists are zeroed). Note the
+  bank's policy mix is seven scripted kinds, which matters for the
+  V0s-is-policy-conditional obligation above: filter to `sim_search` /
+  `sim_search_skip` (the `policy` field, 24.9 % each) when the loop's value
+  head is `v0s.1`.
+  **Log:** —
 
 ### GT1 `[ ]` **Gate: trainer contract live (completes InitialPlan M6) — no durable training before this**
 **Deps:** T1.1–T1.6
 (M7 deliberately maps to no gate: E1 is demoted from gate to accelerant per
 plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
 - [ ] Leak gates green (T0.5, T0.6, T1.6).
-- [ ] R and t_enc measured; budget table re-derived (T1.3).
+- [x] R and t_enc measured; budget table re-derived (T1.3 — 2026-09-03).
 - [ ] V0 shipped with calibration report — V0s (T1.4s), or V0h (T1.4) if
       the dump landed first.
 - [ ] Eval harness + seed populations frozen (T1.5).
@@ -743,7 +898,7 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
 
 ## Phase T2 — Act-1 combat expert iteration (Gate GT2; ∥ with S2 engine work)
 
-- **T2.1** `[ ]` ∥ **Snapshot bank.** Reachable-state harvesting from
+- **T2.1** `[x]` ∥ **Snapshot bank.** Reachable-state harvesting from
   survival-biased policies (the four landed B5.1 E0 heuristics suffice for
   the first bank; TE.1's campaign drivers and, later, agent checkpoints
   improve it — TE.1 is deliberately not a dep; deep strata additionally
@@ -762,7 +917,109 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   RunPhase represented (vs the random-policy baseline's 97.6 % floor-1–7
   mass), with a provenance breakdown (survival-biased vs handicap-assisted)
   whenever TE.3 states are included; reload + twin-test spot check green
-  on ≥ 1,000 sampled snapshots. **Log:** —
+  on ≥ 1,000 sampled snapshots.
+  **Inherited:** the bank format is the T1.2 shard container — `RecordKind` is
+  append-only and never renumbered, and a bank stream is a fourth kind rather
+  than a new file format. Two T1.2 obligations land here (table above): the
+  keyframe interval is unswept, and the sidecar reader linear-scans, so the
+  harvester is what should build an **on-disk** index. The deep-run harness in
+  `storage_numbers` already shows the shape — the engine's `SIM_SEARCH`
+  scripted driver, reachable because the engine is embedded, driving
+  `record_run` through a `RunPolicy`.
+  **Log:** 2026-09-03 — landed on engine pin `6c50a0b`. Report:
+  `SpireTrainer/docs/verification/t2-1-snapshot-bank.md` (training repo).
+  Bank (uncommitted, 1.31 GiB): `D:\STS_BG_Mod\_train_data\bank\main`.
+
+  **What landed.** `BankSnapshotRecord` + `StreamIndexEntry` as `RecordKind`
+  4 and 5 in the T1.2 container (append-only, never renumbered — the bank is a
+  new *kind*, not a new file format, exactly as this block's `**Inherited:**`
+  line required); `include/sts/training/{snapshot_bank,stream_index}.hpp` +
+  bodies; and two tools, `bank_harvest` (generation) and `bank_check`
+  (verification + the report). They are a SIBLING of `rollout_floor_rows`
+  rather than a mode of it, because one `--mode` flag between a public
+  artifact and a restricted one is the seam that should be a separate program.
+
+  **The bank.** 120,004 snapshots over 13 shards from 12,938 A20 runs
+  (10,567 of them contributing), seeds `[1, 1850)` x seven policies —
+  `sim_search`, `sim_search_skip`, `random`, `greedy_damage`, `greedy_block`,
+  `hoard_gold`, `always_event` — policy seed 20260903, 4,853,004 decisions
+  stepped, 372,552 candidates offered, 651 s at 16 threads.
+  `sizeof(BankSnapshotRecord)` = 11,704 B, of which 11,600 is the
+  `RunController`. Stratification (report §1): **floors 8+ = 58,001 =
+  48.33 %** (bar: >= 20 %); every reachable `RunPhase` present — NEOW 1.77 %,
+  MAP_CHOICE 20.42 %, COMBAT 18.34 %, COMBAT_REWARD 18.42 %, RUN_OVER 4.01 %,
+  REST_SITE 9.71 %, TREASURE_ROOM 4.14 %, EVENT_DIALOG 13.56 %, SHOP 7.43 %,
+  **BOSS_TREASURE 2.20 %**; five HP bands all between 15.8 % and 23.5 %; deck
+  buckets 2.5/56.2/38.1/3.2 %; acts 1/2/3 at 83.15/16.76/0.09 %; the two
+  SIM_SEARCH policies 24.9 % each and the five E0 kinds 7–16 % each.
+  Provenance is **100 % `scripted` at assist level 0, TE.3 = 0** — the field
+  exists and is measured rather than assumed, which is what the plan asks for.
+  Two `RunPhase` values cannot appear and the report says so: `NONE` is the
+  pre-`run_begin` value, and `ROOM_UNIMPLEMENTED` offers no legal action and is
+  unreachable at this pin — 0 in the bank and 0 of 2,000 freshly-played
+  `random` runs, corroborating S2-G1's zero-parks result. That is a CHECK, not
+  a footnote: it fails the day a park becomes reachable.
+
+  **The baseline, measured rather than quoted.** 2,000 `random` A20 runs,
+  90,388 decisions: **98.55 %** of them on floors 0–7 (the block quotes
+  97.6 %). The bank's own policy mix, unstratified, is 22.98 % there; the
+  stratified bank is 51.7 %. The quota is what moves it.
+
+  **Reload + twin spot check (real run, `win-debug`).** 1,000 snapshots on a
+  fixed stride over the whole bank: 1000/1000 stored `public_hash` re-derived
+  from the reloaded state; 1000/1000 found byte-identically again through the
+  on-disk index by (run_id, step); 946/946 non-terminal recorded actions still
+  mask-legal and 946/946 still moved the state under `advance()`; and
+  **1000/1000 byte-identical `encode_public_view` between the state and
+  `engine::make_hidden_twin(state, seed)`** — the engine's own twin utility,
+  not a reimplementation.
+
+  **Branch-K memcpy resets.** 120 branch points, 368 branches, 287 distinct
+  post-step run hashes. 120/120: the base state byte-unchanged after the
+  fan-out; every branch advanced; stepping branch 0 further left branches
+  1..K-1 byte-identical (the independence claim, checked rather than assumed);
+  the common-random-number fan-out byte-reproducible; all branches sharing one
+  pre-step world under CRN; and the branches' worlds differing under
+  independent sampling — the unpaired baseline T2.4's variance report is made
+  against.
+
+  **Determinism, asserted.** The same configuration swept twice more and
+  compared digest by digest: Windows/clang-cl at 12 threads / chunk 1400, and
+  **WSL/GCC release at 16 threads / chunk 700**. All 13 shard digests plus
+  `runs.csv`, `visits.csv` and `bank.index` identical in both — 16 files
+  compared, 0 differing, across thread count, chunk size, host and compiler.
+  First shard `ddaae7e075fdf7f8a1…`, last `c5aa00df08c3565be8…`, `runs.csv`
+  `8a4e4f6b570f55fc1e…`. The verification sweeps' shards were deleted and their
+  manifests kept, which is all a re-check needs (`bank_check
+  --verify-manifest`).
+
+  **Defect found and worked around: a `RunController` is not portable between
+  PROCESSES** (report §8, and a new deferred obligation above).
+  `RunController::lists` holds three `std::array<std::string_view, N>` into the
+  registry's static strings, so a memcpy'd state carries POINTERS. Invisible
+  inside one process — which is why T1.2's sidecar, which writes and replays in
+  the same invocation, never saw it — and a segfault the first time
+  `bank_check` loaded a bank another process wrote. A bank record therefore
+  stores the three lists as registry ids, zeroes the views in the stored state,
+  and `bank_restore_state` rebinds them; `bank_capture_lists` refuses by name
+  rather than storing a 0 for a key it cannot resolve. It is also what makes
+  the bank deterministic at all: a stored pointer would move with ASLR.
+
+  **Both T1.2 obligations discharged** (table above, report §4/§7): the
+  keyframe interval is swept at 8/16/32/64/128/256/512 and KEPT at 64 on the
+  numbers, and `stream_index.hpp` puts the index ON DISK as a fifth record
+  kind, one entry per (run, stream), used by the bank and by both sidecar
+  streams with the scan as fallback.
+
+  **Acceptance (real runs; no gtest cases written, per the owner's 2026-09-03
+  direction).** All six presets configure + build green — `win-debug` /
+  `win-asan` / `win-release` through a vcvars+LLVM wrapper, `debug` / `asan` /
+  `release` through `tools/wsl_run.sh --script`. `bank_check` runs green under
+  all six against the same bank: **33/33 checks pass** under win-debug,
+  win-release, win-asan, and WSL debug/release/asan (the committed report is
+  the `win-debug` run, NDEBUG undefined). `tools/training/
+  check_omniscient_boundary.sh` clean (34 files); `tools/check_submodule_pin.sh`
+  clean.
 
 - **T2.2** `[ ]` **Combat ExIt loop v1.** From-scratch expert iteration on
   the bank: teacher search at high budget → distill policy + value —
@@ -778,6 +1035,32 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   bars below stay unmet after the declared exploration kit is exhausted,
   the next lever is assist-*annealed* generation via the TE.3 knob —
   adopted only with a plan change-log entry, never silently.
+  **Inherited (2026-09-03, from T2.1):** the bank exists —
+  `D:\STS_BG_Mod\_train_data\bank\main`, 120,004 snapshots, regenerable
+  byte-for-byte by `bank_harvest` from the parameters in its `manifest.json`.
+  Read it through `BankReader` and turn a record into a live controller ONLY
+  through `bank_restore_state`: the payload's `lists` views are zeroed and a
+  raw memcpy of `record.state` gives a controller whose encounter lists are
+  empty — a wrong answer rather than a crash, which is the worse failure. The
+  bank is a RESTRICTED artifact on the sidecar's terms (snapshot_bank.hpp): a
+  bank state is an input to the ENGINE, never to an encoder or a network, and
+  every key a consumer stratifies or weights on is a public quantity in the
+  record's own header, so sampling never touches the payload. Provenance is
+  100 % `scripted` at assist level 0 today; the fields to stratify on are
+  there for the day TE.3 lands.
+  **Inherited (from T1.3):** `STS_TRAIN_SEARCH_CONFIG_ID` now defaults to
+  **`e48-c8-gsh-rc-w0`** — 48 leaf evaluations per decision, Gumbel top-8 at
+  the root with sequential halving, PUCT in-tree, reveal-afterstate coarsening
+  on, a fresh `resample_hidden` particle per simulation. **That default was
+  chosen structurally, not on quality** (T1.3's weights were random; see the
+  deferred-obligations table), so re-running T1.3's sweep grid against this
+  task's trained net and either confirming or moving the id is T2.2's work,
+  and a move is a `SearchConfig::id()` change plus the CMake default plus a
+  note here. Three more T1.3 obligations land here (table above): the v0
+  tensorization is combat-only and capped, potions and run-layer actions are
+  outside the searched action set, and the inference path is single-stream
+  and launch-bound — which is the constraint the plan §5 production-loop
+  plumbing half of this task runs into first.
   **Deps:** T2.1, T1.3 **Acceptance:** on the frozen combat suite, paired:
   search > direct policy > scripted baselines at p < 0.01, and the
   distilled student retains ≥ 60 % of the paired search gain (thresholds
@@ -977,6 +1260,11 @@ desired.
   assist-annealing fallback sentence. T2.x edits mirrored verbatim into
   `SpireTrainer/docs/training-tasks.md` per its tracked-in-both-places
   rule.
+- 2026-09-03 (evening) — T2.1 (`806fadd`) and T1.3 (`7c18297`) landed in
+  SpireTrainer; blocks, Inherited lines and deferred rows mirrored verbatim.
+  One row is ENGINE-owned and new: `engine::RunController` is not portable
+  between processes (`RunController::lists` holds `std::string_view`s into
+  registry statics) — the durable fix is ids in `MonsterLists`, an engine task.
 - 2026-09-03 (later still) — T1.4s landed in SpireTrainer (`0d5484e`): 1.26M
   floor-boundary rows under SIM_SEARCH/SIM_SEARCH_SKIP, value artifact
   `v0s.1`; block + rows mirrored verbatim.
