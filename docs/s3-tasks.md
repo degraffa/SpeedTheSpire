@@ -151,10 +151,11 @@ are S3's own.
 | **Back-attack facing: model it, or collapse it?** | s3-design §2.3 | **S3.42** | `applyBackAttack` (AbstractMonster.java:1015-1017) reads the player's `flipHorizontal`, which changes when a target is hovered (AbstractPlayer.java:1291-1293) and is re-evaluated on every hand layout (CardGroup.java:204-223). The proposed collapse — "with exactly two guards, the one the player is not facing takes 1.5×" — must be proven exact or rejected, against those three methods read in full **and** against a live Shield-and-Spear capture where the player attacks each guard in turn |
 | **Act-4 first-row map choice width** | s3-design §4.4 | **DISCHARGED 2026-09-03 by S3.32 — the width is ONE, and the boss edge is `MAP_BOSS` exclusively.** Answered from the fork's source rather than from a capture, which the row allowed and which is stronger: `ChoiceScreenUtils.getMapScreenNodeChoices`' `!firstRoomChosen` arm iterates `map.get(0)` and adds a node **only if `node.hasEdges()`**, and Act 4's six empty row-0 nodes have none — so the first-row choice list is the single entry `x=3`, and `MapRoomNode.update`'s live hitboxes are a rendering fact with no choice-list consequence. For the second half, `bossNodeAvailable()` repeats DungeonMap.java:68's disjunction verbatim and `getMapScreenChoices` **returns early** with the single choice `"boss"` whenever it holds — the node list is never reached, so the explicit elite→boss `MapEdge` (:88) produces no `x=3` alternative, and `makeMapChoice` throws on any index but 0. The engine encodes the elite node's onward edge as `kEdgeBoss` ALONE for exactly this reason; its mask, probed at every Act-4 row, reads `x=3` / `x=3` / `x=3` / boss / nothing. s3-design §4.4 carries both resolutions | `MapRoomNode.update`'s first-room arm gates only on `y == 0` and hover (:254-279), and Act 4's row 0 has six roomless nodes beside the rest room. Whether the game offers 1 or 7 candidates decides the legal-action mask; an over-wide mask is a leak-gate problem, not a cosmetic one. Answer from the fork's own `ChoiceScreenUtils` output on the first Act-4 capture, and pin the same source for the elite→boss action kind (`MAP_BOSS` vs `MAP_NODE`, DungeonMap.java:68) |
 | **The Act-4 floor pair is A20-dependent** | s3-design §4.3 | **LANDED 2026-09-03 by S3.32; the CAPTURE half stays open on S3.62.** `RunState::act4_floor_base` is written by `act4_crossing` from the unchanged Door floor before `rs.act` moves, and `run_cur_row` reads it through the new `act_floor_base_of(rs)` (`event_map_row`'s independent restatement takes the same branch). **Both halves are witnessed on ONE seed at BOTH bands** — STS103509 / `sim_search` / ps347, the row's own "separate witnesses" demand: A19 gives Door floor 51 and `act4_floor_base` 51, A20 gives 52 and 52, and the per-row mask probe reproduces design §4.3's whole column (rest 52/53, shop 53/54, elite 54/55, boss 55/56). The witness forces the three keys at the dialog because no keyed sim victory exists (S3.22), so the numbers are engine-attested and not yet oracle-attested; the two discharging captures (an Act-4 entry at A20 and one below) are named in S3.32's Log and are **S3.62's** | Act 4's floor base is 51 below A20 and 52 at A20, because the A20 second Act-3 boss room is a real floor. That breaks `act_floor_base(act) = (act-1) * kActFloorSpan`, so the base must be run state written at the crossing and `run_cur_row` must read it. Both halves need **separate** witnesses at **both** ascension bands — a single matching number on one band hides the pair, which is the mistake s2-design §4.2's row existed to prevent |
-| **The emerald key's CLAIM, and with it §5 trap 1, has no capture** | S3.11 | **S3.23** | The engine assembles the `EMERALD_KEY` row, skips `setEmeraldElite`'s `mapRng` draw once the key is held, and both are corpus-clean — but no committed capture ever *presses* the key row, and none takes a key and then crosses an act. So the highest-risk change in S3 is landed on a source read plus a zero-diff that cannot see it. The discharging capture is a PAIR on one seed: emerald claimed → next act generated, and emerald skipped → next act generated, with the two acts' maps **differing**. A single matching run is not evidence, because a sim that kept drawing would still match a capture that never took the key |
+| **The emerald key's CLAIM, and with it §5 trap 1, has no capture** | S3.11 | **DISCHARGED 2026-09-03 by S3.23** — captured, and the row's expectation is CORRECTED. Seven same-seed PAIRS were captured and all replay zero-diff (`_oracle_data/s3/s323_capture_ledger.tsv`); the exemplar is `s323_STS507768_keys` (EMERALD_KEY claimed at the floor-8 burning elite, SAPPHIRE_KEY at the floor-9 chest, a Recall campfire, Act 2 entered) beside `s323_STS507768_ctrl` on the same seed. **The two acts' maps differ in exactly the burning-elite MARK, not in layout** — the keys line's Act-2 map carries no `has_emerald_key` node, the control's carries one at `(3,6)`, and every other node of the 15-row map is identical. That is not a weaker result, it is the correct one: `mapRng` is RE-SEEDED at each act's construction (`Exordium.java:56`, `TheCity.java:46`, `TheBeyond.java:44`, `TheEnding.java:49` — `Settings.seed + actNum*K`), and `setEmeraldElite` is the LAST consumer of that act's stream (AbstractDungeon.java:538, after `distributeRoomsAcrossMap`), so the skipped draw cannot shift any later layout. What the gate changes is that no act generated while the key is held places a burning elite at all. Both halves of each pair replay zero-diff against the differ's map comparison, so a sim that kept drawing would RED on the keys line. `s323_STS508459_keys` is the independent positive control from the other side: it claims the emerald key in ACT 2, so its Act-2 map DOES carry the mark. The pair is promoted into the committed `keys_a20_4` corpus | The engine assembles the `EMERALD_KEY` row, skips `setEmeraldElite`'s `mapRng` draw once the key is held, and both are corpus-clean — but no committed capture ever *presses* the key row, and none takes a key and then crosses an act. So the highest-risk change in S3 is landed on a source read plus a zero-diff that cannot see it. The discharging capture is a PAIR on one seed: emerald claimed → next act generated, and emerald skipped → next act generated, with the two acts' maps **differing**. A single matching run is not evidence, because a sim that kept drawing would still match a capture that never took the key |
 | **`RunState.keys` is neutralized on both sides of every replay comparison** | S3.11 (inherited shape from the ruby bit) | **S3.21** | `neutralize_incomparable` and `neutralize_presentation_only` both zero `keys`: the sim has three writers now (Recall, and S3.11's two key-row claims) while neither CommunicationMod's `game_state` nor the fork's oracle block exposes `Settings.hasRubyKey/hasEmeraldKey/hasSapphireKey`, so the capture side is structurally 0. Until S3.21 (a) emits the three booleans, every key claim is proved only through its CONSEQUENCES — the spent campfire, the abandoned relic still popped from `relic_pool_*`, the moved `map_rng`. Remove both zeroings in the same change that lands the emit, or the new field is emitted and still not compared. **DISCHARGED 2026-09-03 by S3.21** — both zeroings are gone. The field is compared as a **pair**, not unconditionally (`neutralize_unattested_keys`, gated on `TranslatedRecord::has_keys`): deleting the zeroing and stopping there REDs `act1_a20_50/STS71037`, whose seq 83 claims the `SAPPHIRE_KEY` row so the sim rightly holds `kKeySapphire` while the pre-redeploy capture has no key block and translates to a structural 0 (`keys: 0 -> 4`). Every capture from the new jar on is compared; only unattested pre-redeploy records are neutralized |
 | **`Spire Heart` clicks 1–2: collapse or model?** | s3-design §4.1 | **DISCHARGED 2026-09-03 by S3.31 — MODEL, all four.** The decision was made on the differ's record counts, exactly as the row demanded, and it is now witnessed rather than argued: every three-act victory capture carries a five-record post-victory tail (four `Spire Heart` `choose 0` action records plus `__terminal_observed__`), and the engine answers each of the four with its own `CHOOSE 0` on `EventDialogState::screen`. Collapsing clicks 1–2 would have left the sim with no press for records 2 and 3, which the follower's glue rule 3 cannot repair on the DIFFER side. The corpus reads **5 of 5 compared, zero-diff** on both double-boss victories (0 of 5 before). The collapse convention itself is untouched: the clicks really do change nothing, and the whole dialog is presentation — the only STATE is the room transition ahead of it and the terminal that ends it | Clicks 1 and 2 change no run state and are exactly the shape the engine already collapses (shrines.cpp / beyond_events.cpp, accepted at G7), and the follower's glue rule 3 answers collapsed one-click dialogs either way. But the differ compares **record counts**, so the choice must be made once, recorded, and reflected in the follower — not discovered during scoring |
-| **The Black Star burning-elite claim is unproducible under `sim_search_keys`** | S3.22 | **S3.23** | S3.11's sixth needed capture (§5 trap 6's four-item potion suppression) needs a burning-elite claim on a run that already owns **Black Star**. S3.22 measured the conjunction and it is ordered apart **by construction**, not by luck: over a dedicated 8,640-row tracked wave, 436 rows acquired Black Star and 380 of those also carried the emerald key — and **all 380 emitted scripts claim the emerald key in Act 1**, while Black Star cannot be owned before the Act-1 boss chest and a held emerald key stops `setEmeraldElite` placing a burning elite in any later act (S3.11 (c)'s own gate). Two constructive routes, and S3.23 owns the choice: a fifth `PolicyKind` differing from `SIM_SEARCH_KEYS` in one rule — refuse the emerald row while `act == 1` — on the standing "separate kind, never a change to `SIM_SEARCH`" precedent; or a hand-written STS-SCRIPT line on a seed whose Act-1 burning elite is unreachable. Evidence: [verification/s3-22-key-reach.md](verification/s3-22-key-reach.md) §6 |
+| **The Black Star burning-elite claim is unproducible under `sim_search_keys`** | S3.22 | **STILL OWED — carried forward from S3.23 to S3.62** (S3.23 took neither constructive route: both are policy/instrument work of their own size, and the wave's budget went to the four root causes its captures found). The choice is unchanged and now better informed: `s323_STS508459_keys` proves an ACT-2 emerald claim is reachable under the existing `sim_search_keys` when the Act-1 burning elite is not taken, so the fifth `PolicyKind` needs only the one rule the row names (refuse the emerald row while `act == 1`) and the Black Star + Act-2 burning-elite conjunction becomes a scan, not a construction | S3.11's sixth needed capture (§5 trap 6's four-item potion suppression) needs a burning-elite claim on a run that already owns **Black Star**. S3.22 measured the conjunction and it is ordered apart **by construction**, not by luck: over a dedicated 8,640-row tracked wave, 436 rows acquired Black Star and 380 of those also carried the emerald key — and **all 380 emitted scripts claim the emerald key in Act 1**, while Black Star cannot be owned before the Act-1 boss chest and a held emerald key stops `setEmeraldElite` placing a burning elite in any later act (S3.11 (c)'s own gate). Two constructive routes, and S3.23 owns the choice: a fifth `PolicyKind` differing from `SIM_SEARCH_KEYS` in one rule — refuse the emerald row while `act == 1` — on the standing "separate kind, never a change to `SIM_SEARCH`" precedent; or a hand-written STS-SCRIPT line on a seed whose Act-1 burning elite is unreachable. Evidence: [verification/s3-22-key-reach.md](verification/s3-22-key-reach.md) §6 |
+| **A multi-pick combat grid applies its picks per-CHOOSE in the engine and at the CONFIRM in the game** | S3.23 | **UNASSIGNED** (surface it when a rule reads the screen mid-selection) | `GridCardSelectScreen` keeps every row listed and moves the selection only when the confirm fires (`DiscardPileToHandAction`'s own update walks `gridSelectScreen.selectedCards`), while the engine's `CHOOSE_CARD` applies each pick as it is made. Nothing rules-level can observe the difference — only another pick can happen inside the window, and the end state and pile ORDER agree — so this is recorded, not fixed. It is nevertheless real and now witnessed: `s323_STS502962_ctrl` seq 400 (Liquid Memories+ over a 10-card discard, floor 30) is `--vitals`-divergent on exactly one record (`hand[Clothesline]: 1 -> 2`, `discard[Clothesline]: 1 -> 0`) and reconverges at the next. S3.23 fixed the *replay* consequence (the two index spaces, `command_map.hpp`); the engine-side deferral is this row. Fix it only with a witness that makes the difference observable |
 | **No keyed A20 double-boss victory exists, so no Act-4 line can be scheduled yet** | S3.22 | **S3.61** (re-measure), then **S3.62** (capture) | s3-design §6.1's "brutal precondition" is unmet on the sim side: 39,296 key-policy rows produced **417 Act-3 boss fights, every one carrying all three keys**, **14 lines that killed the first Act-3 boss carrying all three keys** (`double_boss`, 3 distinct seeds) and **zero victories**. The pre-registered escalation ladder's **first lever is spent** — 1,024 policy seeds on the six deepest seeds (16,128 rows, 6,018,290 actions) moved `double_boss` 0 → 14 without a victory — so **the next lever is the deeper boss-floor ply**, and it must again be a separate `PolicyKind` or it moves `SIM_SEARCH`. Explicitly NOT admissible under design §6.1 step 3: rule handicaps, difficulty reduction, a weakened bar. A T4-era trained checkpoint behind the external-policy seam remains a sanctioned accelerant and never a precondition |
 
 ---
@@ -269,7 +270,11 @@ are S3's own.
   a key and then crosses an act, so the skipped `setEmeraldElite` draw has no
   witness. `RunState.keys` itself is still neutralized on both sides by the
   replay differ (the fork emits no `Settings.has*Key`; S3.21 (a) returns it), so
-  the key BITS are proved only through their consequences.
+  the key BITS are proved only through their consequences. **DISCHARGED
+  2026-09-03 by S3.23** — the bits are compared directly on every record of
+  every capture from the S3.21 jar on, and the claim, the crossing and the
+  same-seed pair are all captured; see the deferred-obligations row and
+  S3.23's Log.
   **S3.23 needs exactly these captures:** (1) an emerald claim at a burning
   elite **and the run continuing into the next act's map generation**, with (2)
   its paired key-NOT-taken control on the same seed, the two acts' maps
@@ -280,6 +285,8 @@ are S3's own.
   whose four assembled rows force the potion chance to 0 while the ±10 ratchet
   still moves. A directed capture of (6) is the only way that branch is ever
   seen: gold + relic + EMERALD_KEY is three rows, not four.
+  **S3.23 captured (1)-(5); (6) is STILL OWED and is now S3.62's** — see the
+  deferred-obligations row and S3.23's Log.
 
 ## Phase S3.2 — Reach instruments and the oracle contract (∥ where marked)
 
@@ -492,7 +499,21 @@ are S3's own.
   emitting the new block. It disappears when this commit lands on master. Every
   verdict quoted above is from this branch's binaries.
 
-  *Owed — `UNVERIFIED-until-captured`, one item.* The `misc_field` tag is
+  *Owed — `UNVERIFIED-until-captured`, one item. **DISCHARGED 2026-09-03 by
+  S3.23**, four of the five members live-witnessed: `Combust`/`hpLoss` on the
+  player (`s323_STS507768_keys` seq 59, act 1), `Flight`/`storedAmount` on a
+  **Byrd** (`s323_STS507768_ctrl` seq 159, act 2 — the exact witness this row
+  predicted), and `Malleable`/`basePower` on a **Snake Plant**
+  (`s323_STS502962_ctrl` seq 390, act 2) and a **Writhing Mass**
+  (`s323_STS506383_keys` seq 519, act 3). The Byrd record reads
+  `{"amount": 1, "id": "Flight", "misc": 3, "misc_field": "storedAmount",
+  "name": "Flight"}` and the Snake Plant's
+  `{"amount": 3, "id": "Malleable", "misc": 3, "misc_field": "basePower",
+  "name": "Malleable"}`; 337 tagged power records across the wave, every one
+  translating without the abort the verifier arms. `Invincible`/`maxAmt`
+  (S3.43's Heart capture) and `EchoForm`/`cardsDoubledThisTurn` remain
+  unwitnessed — no Ironclad run reaches either.* The original text follows.
+  The `misc_field` tag was
   **not yet live-witnessed**, and the reason is structural rather than
   incidental: exactly five classes in the 12-18-2022 tree declare the union's
   five members — `MalleablePower` (`basePower`), `InvinciblePower` (`maxAmt`),
@@ -681,7 +702,7 @@ are S3's own.
   matrix, the script-verification table and the follower check:
   `D:\STS_BG_Mod\_oracle_data\s3\s322\`.
 
-- **S3.23** `[ ]` **Keys capture wave** (the S3-G2 item-2 evidence, and the
+- **S3.23** `[~]` **Keys capture wave** (the S3-G2 item-2 evidence, and the
   first live exercise of the new jar). Directed captures through
   `script_policy_cmd.py` scheduled off S3.22's triples: an emerald claim at a
   burning elite **and the run continuing into the next act's map generation**
@@ -749,7 +770,191 @@ are S3's own.
   **differing** (the positive control that the gate is being modelled, not
   accidentally matched); S3.11's `UNVERIFIED-until-captured` marker
   discharged **in this task's commit**; zero untriaged findings.
-  **Log:** —
+  **Log:** 2026-09-03 — **the wave ran; every capture replays zero-diff; six
+  root causes landed. `[~]` for exactly one reason: the Black Star capture
+  (S3.11's sixth) was not produced.**
+
+  *The wave.* 20 live captures, one campaign per (seed, line), sequential,
+  `--instances 1`, against the S3.21 jar (SHA-256 verified
+  `49b5eeef1f7ec04eb3eef7c0ed41e3e79865564d1cd3c3ec6930d69c48c460f0` before
+  the first launch; a stale `oracle_game.lock` from `s321_preflight_b`, pid
+  491296 not alive, was removed and is recorded here). The ledger table —
+  campaign id, seed, line, exit, outcome, floor, actions, campaign
+  classification, this task's replay verdict, key-race count, first
+  divergence, disposition — is
+  `D:\STS_BG_Mod\_oracle_data\s3\s323_capture_ledger.tsv`. **20 of 20 CLEAN**
+  through `replay_run_diff --replay --vitals` on this branch, vitals-clean on
+  19 of 20 (the exception is named below). As captured, 9 were
+  `state_divergence`, 2 stopped the follower, 1 was a replay-harness stop and
+  8 were clean; every non-clean one is a root cause below, not a tolerance.
+
+  *Root cause 1 — ENGINE. Heavy Blade's damage is fixed at useCard, not at
+  resolve.* `HeavyBlade.calculateCardDamage` (HeavyBlade.java:47-56) multiplies
+  `strength.amount` by `magicNumber` only for the duration of
+  `calculateCardDamage`, which `AbstractPlayer.useCard` runs at :1362 BEFORE
+  `c.use()` at :1369; after that the card is an ordinary DamageAction carrying
+  a fixed number (:39-44, DamageAction.java:88). The engine kept the multiplier
+  on the queued item and re-ran the pipeline at execute, so Strength granted
+  between the press and the hit reached the card's own number — the exact
+  mis-timing `e5e790d` fixed for plain `DAMAGE` and could not cover here,
+  because `DAMAGE_STR_MULT` spends its whole `flags` word on the multiplier
+  and has no room for `kDamageOwnerLocked`. Fix: `queue_effect_step` turns the
+  step into a play-time-locked plain `DAMAGE` (the `DAMAGE_PER_STRIKE` /
+  `DAMAGE_UPGRADE_SCALE` precedent) whose owner stage is baked with the
+  multiplier. Witness `s323_STS502962_keys` seq 754-755, floor 50, Deca and
+  Donu: Heavy Blade+ (magic 5) with Pain in hand and Rupture 2 — Pain's
+  addToTop'd LoseHPAction (Pain.java:34-36) resolves first and takes Strength
+  9 → 11, so the game dealt 14 + 5×9 = 59 (Deca 259 → 209 through 9 block)
+  and the sim 14 + 5×11 = 69 (→ 199). Before: first vitals divergence
+  seq 755, run-level `hp: 12 -> 36` from seq 767 (the 10 HP compounded into a
+  different Fire Breathing kill order and a 24 HP gap that decided the fight);
+  after: `CLEAN … 773 records compared … first divergence: none`,
+  vitals-clean over 556 in-combat records. This is a real behaviour change and
+  it moves scanned trajectories: re-emitting S3.22's 18-line cohort on this
+  branch moves 4 lines against the same re-emit on base `34e04a3`
+  (`_oracle_data/s3/s323/reemit*`), which is what a corrected damage number
+  should do.
+
+  *Root cause 2 — REPLAY. The ObtainKeyEffect settlement race.* A key CLAIM
+  does not write `Settings.has*Key`: `RewardItem.claimReward` pushes an
+  `ObtainKeyEffect` onto `topLevelEffects` (RewardItem.java:317-333) and the
+  boolean is set 0.33 wall-clock SECONDS later inside that effect's update
+  (ObtainKeyEffect.java:40-41, :56-73), while everything rules-level — the row
+  leaving the screen, a SAPPHIRE_KEY's linked relic row dying with it —
+  happens at the press, which is where the engine writes `RunState::keys`.
+  Every dump inside that window therefore shows a key bit the sim already
+  holds; the wave measured 1 to 4 consecutive such records per claim (6 on
+  `s323_STS503370_keys`). `replay_run_diff` now recognises that one shape as
+  `key-race`: `keys` the only differing field, the capture's bits a strict
+  SUBSET of the sim's, and a later record inside a bounded window attesting
+  exactly the missing bits with no attested record in between claiming a bit
+  the sim lacks. The pipeline needed no change — its strict accounting
+  already scrapes every named `N <name>-race` field.
+
+  *Root cause 3 — REPLAY HARNESS. Two index spaces on a multi-pick combat
+  grid.* `GridCardSelectScreen` keeps every row on screen and applies the picks
+  at the confirm, while the engine applies each CHOOSE as it is made, so from
+  the second pick on the sim's source pile is one shorter than the capture's
+  row list and the live ordinal over-counts. Witness `s323_STS502962_ctrl`
+  seq 400, floor 30: Liquid Memories+ over a 10-card discard, `choose 7` then
+  `choose 9`, stopping with "combat discard grid index 9 is off the sim's
+  9-row filtered source pile" after 401 zero-diff records. `command_map.hpp`
+  now aligns the sim's remaining pile against the capture's full row list as a
+  left-to-left identity subsequence, only when the lengths differ (an
+  equal-length grid keeps its identity mapping bit for bit) and only when the
+  alignment consumes the whole pile. After: `CLEAN … 451 records compared`.
+  The engine's own per-pick application is a MODELLING difference that
+  survives: `--vitals` reports one transient record on that screen
+  (`hand[Clothesline]: 1 -> 2`, `discard[Clothesline]: 1 -> 0`) which
+  reconverges at the very next record, because nothing but another pick can
+  happen in between. Recorded as a deferred obligation rather than changed.
+
+  *Root cause 4 — DRIVER. The no-op escape pressed a real decision.* When a
+  command leaves `ready_for_command` unrestored, `campaign_driver.py` escapes
+  by completing the pending screen, and its `choose` arm took row 0 blindly.
+  A Power Potion and a Colorless Potion drunk back to back stack two discovery
+  screens and the game does not re-arm readiness after the first pick, so the
+  escape consumed the SECOND discovery without advancing the follower's
+  cursor, which then stopped one step later on a combat state asking for a card
+  screen that was already gone. Reproduced twice (`s323_STS508459_ctrl`,
+  `s323_STS508459_ctrl_r2`, both stopping at floor 6 after 143 records with
+  "grid has no #0 copy of 'Finesse'+0"), so it is a defect and not the S2.43
+  escape-window race class. The escape now asks the policy, falling back to
+  row 0 only where there is no per-state policy (`--policy script`). After:
+  `s323_STS508459_ctrl_r3` exits 0, runs to its terminal at floor 31 over 471
+  records, and replays CLEAN.
+
+  *Root cause 5 — TRANSLATOR. The vitals power key must be the JOINED id.*
+  `parse_power` keyed the vitals multiset by the RAW capture id, but
+  `TheBombPower`'s live id is `"TheBomb"` plus an ever-increasing STATIC
+  counter (TheBombPower.java:22,27,31-32) while the sim side builds its key
+  from the registry game id, so a live fuse mismatched every record with equal
+  amounts on both sides. Witness `s323_STS508459_keys` floor 33, seq 485-506:
+  22 consecutive `TheBomb0: 3 -> (absent)` / `TheBomb: (absent) -> 3` rows.
+  A resolved power is now keyed by the normalised id and an unresolved one
+  still by the raw string, which is the half of the old comment that was
+  right. After: vitals-clean over 477 in-combat records.
+
+  *Root cause 6 — EMITTER (instrument). A surviving deselect is not
+  live-drivable.* `s323_STS500270_keys` stopped at floor 16 with "grid has no
+  #1 copy of 'Strike_R'+0": script steps 116-117 are a select and then a
+  DESELECT on Gambling Chip's optional hand-select (slot 4 with the split at
+  4 — `toggle_optional_choice_slot`), and a deselect has no live `choose`
+  index at all, because `HandCardSelectScreen` moves the pick out of `hand`
+  (:378-381) and CommunicationMod publishes only `hand`. The emitter already
+  DROPPED cancelling toggle runs, but only hash-returning ones; this pair
+  reorders the hand (`addToTop` puts the card back at the end of the
+  unselected run), so both lines survived. `script.cpp` now refuses the whole
+  SCRIPT when a deselect line survives the drop — checked when the toggle run
+  ends, since the drop can truncate it several steps later. Verified by
+  re-emitting the cohort: on base `34e04a3` all 18 lines are written; on this
+  branch **17 are written and STS500270/sim_search_keys/ps0 is refused**, which
+  is the one line that stopped live. The prior S2.V3 witness
+  (`s2v3_wave1_STS207337_ps255`) is named in the same comment. This capture is
+  therefore NOT recapturable and needs no recapture: its partial artifact
+  replays CLEAN over its 121 records.
+
+  *§5 trap 1, and a CORRECTION to its premise.* The emerald pair is captured
+  seven times over (every seed but STS500270, whose keys line is the refusal
+  above, and STS508459, whose keys line claims in act 2). On each pair the two
+  Act-2 maps differ in **exactly the burning-elite mark and nothing else** —
+  e.g. STS507768 row `y= 6` reads `0E 3E 4? 5R 6?` on the keys line and
+  `0E 3E* 4? 5R 6?` on the control, with the other 14 rows identical. That is
+  the correct result, not a weak one: `mapRng` is re-seeded at every act's
+  construction (`Exordium.java:56`, `TheCity.java:46`, `TheBeyond.java:44`,
+  `TheEnding.java:49`) and `setEmeraldElite` is the LAST consumer of that
+  act's stream (AbstractDungeon.java:538), so the skipped draw cannot shift a
+  later LAYOUT — what the gate changes is that no act generated while the key
+  is held places a burning elite at all. The deferred-obligations row is
+  corrected in this commit. `s323_STS508459_keys` is the independent control
+  from the other side: it claims the emerald key in ACT 2, and its Act-2 map
+  does carry the mark.
+
+  *S3.21's `misc_field` tag, discharged.* Four of the five union members are
+  live-witnessed across the wave (337 tagged power records): `Combust`/
+  `hpLoss` on the player, `Flight`/`storedAmount` on a **Byrd** (the witness
+  S3.21 predicted), and `Malleable`/`basePower` on a Snake Plant and a
+  Writhing Mass. Quoted records are in the S3.21 block. `Invincible`/`maxAmt`
+  (S3.43) and `EchoForm`/`cardsDoubledThisTurn` remain unwitnessed.
+
+  *Corpus promotion.* New committed corpus **`keys_a20_4`**
+  (`STS-ORACLE-CI-CORPUS v3`, 608 KB, sha256
+  `abd28cca3b1da284287c95ce2b5a87c391afa1b120a94f53826ba55cc9722018`), built
+  the way S2.46 built `three_act_a20_5` — a pinned `DEFAULT_KEYS_PICKS` list,
+  each pick re-replayed at build time. Four captures: the STS507768 emerald
+  PAIR (keys half + control half, which is also the sapphire RELIC branch),
+  `s323_STS506383_keys` (all three keys, Act-3 boss kill, A20 double-boss
+  handoff) and `s323_STS508459_keys` (the act-2 emerald claim). It is the one
+  corpus that admits a capture-race family, and only `key-race`: a capture
+  that claims a key necessarily contains those records. Its contract is
+  asserted at build AND in `ci_corpus_smoke.py` — an emerald claim that
+  crosses an act, both sapphire branches, an all-three-keys run, and a
+  same-seed keyed/control pair whose burning-elite marks differ.
+
+  *Acceptance.* Six presets **BUILD** (`debug`/`asan`/`release` via
+  `tools/wsl_run.sh --script tools/build_presets.sh`; `win-debug`/`win-asan`/
+  `win-release` via the vcvars64 + LLVM wrapper). `tools/corpus_replay.sh`:
+  `act1_a20_50 --replay: ZERO-DIFF (exit 0)`, `three_act_a20_5 --replay:
+  ZERO-DIFF (exit 0)`, `keys_a20_4 --replay: ZERO-DIFF (exit 0)`, all three
+  injected-divergence controls failing loud. All 20 wave captures CLEAN.
+  `check_doc_links.sh` and `check_stale_counts.sh` clean. No ctest was run and
+  no test was added, per the 2026-09-03 owner directive.
+
+  *Still owed (why this row is `[~]`).* The **Black Star burning-elite claim**,
+  S3.11's sixth capture and §5 trap 6's only reachable shape. S3.23 took
+  neither of S3.22's two constructive routes — both are policy/instrument work
+  of their own size and the wave's budget went to the six root causes its
+  captures found. The row is carried forward to **S3.62** with one fact it did
+  not have before: `s323_STS508459_keys` proves an ACT-2 emerald claim is
+  reachable under the existing `sim_search_keys` whenever the Act-1 burning
+  elite is not taken, so the fifth `PolicyKind` needs only the one rule the
+  deferred row names.
+
+  *Artifacts (uncommitted, design §7.3 data root).* Capture ledger:
+  `D:\STS_BG_Mod\_oracle_data\s3\s323_capture_ledger.tsv`. Runner, follower
+  configs, per-campaign logs, the map dumps, the cohort re-emit A/B and the
+  corpus build script: `D:\STS_BG_Mod\_oracle_data\s3\s323\`. Raw captures:
+  `D:\STS_BG_Mod\_oracle_data\campaigns\s323_*`.
 
 - **S3.24** `[x]` ∥ **The Courier, fully.** Both halves of the standing
   refusal, landing together (the row's own condition). Sim side: draw the

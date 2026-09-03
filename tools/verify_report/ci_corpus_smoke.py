@@ -15,6 +15,7 @@ from pathlib import Path
 
 FORMAT = "STS-ORACLE-CI-CORPUS v1"
 THREE_ACT_FORMAT = "STS-ORACLE-CI-CORPUS v2"
+KEYS_FORMAT = "STS-ORACLE-CI-CORPUS v3"
 PROVENANCE_KEYS = {
     "schema_version", "driver_version", "pipeline_version", "fork_jar_sha256",
 }
@@ -86,8 +87,50 @@ def validate_v1(manifest: dict, archive_path: Path,
     return members
 
 
-def validate_v2(manifest: dict, archive_path: Path,
+def validate_v3(manifest: dict, archive_path: Path,
                 expect_entries: int) -> dict[str, bytes]:
+    """The S3.23 curated KEY corpus.
+
+    Everything the v2 walk checks about members, hashes and provenance -- but
+    the act-3 requirement is dropped (a key run need not be deep) and the three
+    contract assertions are about KEYS instead: an EMERALD_KEY claim whose run
+    then crosses into the next act, BOTH sapphire branches, and a same-seed
+    keyed/control pair whose burning-elite marks differ. A corpus that
+    silently lost its control half would still replay clean and would stop
+    being evidence for AbstractDungeon.java:543.
+    """
+    members = validate_v2(manifest, archive_path, expect_entries,
+                          require_act3=False, require_double_boss=False)
+    entries = manifest["entries"]
+    keys = [entry.get("keys") or {} for entry in entries]
+    if not any(fact.get("emerald_claim_crossed_act") for fact in keys):
+        raise CorpusError(
+            "keys corpus carries no EMERALD_KEY claim that crosses an act")
+    branches = {fact.get("sapphire_branch") for fact in keys}
+    if not {"key", "relic"} <= branches:
+        raise CorpusError(
+            f"keys corpus carries only the "
+            f"{sorted(b for b in branches if b)} sapphire branch")
+    if not any(fact.get("all_three_keys") for fact in keys):
+        raise CorpusError("keys corpus carries no all-three-keys run")
+    by_seed: dict[str, list[dict]] = {}
+    for entry, fact in zip(entries, keys):
+        by_seed.setdefault(str(entry.get("seed")), []).append(fact)
+    paired = any(
+        any(f.get("emerald_claim_act") is not None for f in group)
+        and any(f.get("emerald_claim_act") is None for f in group)
+        and len({tuple(f.get("emerald_marked_acts") or []) for f in group}) > 1
+        for group in by_seed.values())
+    if not paired:
+        raise CorpusError(
+            "keys corpus carries no same-seed keyed/control pair whose "
+            "burning-elite marks differ")
+    return members
+
+
+def validate_v2(manifest: dict, archive_path: Path, expect_entries: int,
+                require_act3: bool = True,
+                require_double_boss: bool = True) -> dict[str, bytes]:
     """The S2.46 curated Acts 1-3 corpus.
 
     Everything v1 checks, plus the three things this corpus exists to freeze:
@@ -118,7 +161,7 @@ def validate_v2(manifest: dict, archive_path: Path,
         if provenance["pipeline_version"] in (None, "") and \
                 entry.get("campaign_status") == "complete":
             raise CorpusError(f"{label}: a complete campaign has no pipeline_version")
-        if entry.get("max_act") != 3:
+        if require_act3 and entry.get("max_act") != 3:
             raise CorpusError(f"{label}: not an act-3 capture")
         if entry.get("trace_member") is None and \
                 not str(entry.get("trace_absent_reason") or "").strip():
@@ -140,10 +183,11 @@ def validate_v2(manifest: dict, archive_path: Path,
             if sha256(trace) != entry["translated_trace_sha256"]:
                 raise CorpusError(f"{label}: translated trace SHA-256 mismatch")
             check_trace_header(label, trace, entry)
-    if not any(entry.get("completed_double_boss") for entry in entries):
+    if require_double_boss and not any(
+            entry.get("completed_double_boss") for entry in entries):
         raise CorpusError("corpus carries no completed A20 double-boss run")
     axes = {entry.get("policy_axis") for entry in entries}
-    if not {"take", "skip"} <= axes:
+    if require_double_boss and not {"take", "skip"} <= axes:
         raise CorpusError(
             f"corpus carries only the {sorted(a for a in axes if a)} "
             f"boss-relic axis")
@@ -161,11 +205,13 @@ def validate_archive(archive_path: Path, manifest_path: Path,
         return manifest, validate_v1(manifest, archive_path, expect_entries)
     if fmt == THREE_ACT_FORMAT:
         return manifest, validate_v2(manifest, archive_path, expect_entries)
+    if fmt == KEYS_FORMAT:
+        return manifest, validate_v3(manifest, archive_path, expect_entries)
     raise CorpusError("unsupported corpus manifest format")
 
 
 def raw_member_name(manifest: dict, entry: dict) -> str:
-    if manifest.get("format") == THREE_ACT_FORMAT:
+    if manifest.get("format") in (THREE_ACT_FORMAT, KEYS_FORMAT):
         return str(entry["member"])
     return f"raw/{entry['seed']}.jsonl"
 

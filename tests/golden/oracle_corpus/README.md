@@ -38,11 +38,39 @@ python3 tools/verify_report/build_ci_corpus.py --three-act \
   --manifest tests/golden/oracle_corpus/three_act_a20_5.manifest.json
 ```
 
-Both manifests are platform-independent (they carry content hashes, never
+The S3.23 corpus contains **four captures from the keys wave**, named one by
+one with their reasons in `build_ci_corpus.py`: an emerald PAIR on one seed
+(the line that claims the key at an Act-1 burning elite and crosses into an
+Act 2 whose map carries no burning elite, and the same seed's key-not-taken
+control, whose Act-2 map does), a three-act all-three-keys run through the
+A20 double-boss handoff, and a line that claims the emerald key in ACT 2. It
+is the only committed evidence that PRESSES a key row: the S2 corpora carry
+key rows on their reward screens but never claim the emerald one, so the
+`!Settings.hasEmeraldKey` gate (AbstractDungeon.java:543) had no witness.
+
+It is also the one corpus that admits a capture-race family. A key claim does
+not write `Settings.has*Key` -- `RewardItem.claimReward` queues an
+`ObtainKeyEffect` (RewardItem.java:317-333) that sets the flag 0.33 wall-clock
+seconds later (ObtainKeyEffect.java:40-41) -- so a capture that claims a key
+necessarily contains records where the sim holds a bit the dump does not.
+`replay_run_diff` recognises exactly that shape as `key-race`; every other
+family stays forbidden here as everywhere else.
+
+```bash
+tools/wsl_run.sh --script tools/build_presets.sh release
+python3 tools/verify_report/build_ci_corpus.py --keys   --artifact-root /mnt/d/STS_BG_Mod/_oracle_data/campaigns   --replay-bin build/release/tools/oracle_bridge/replay/replay_run_diff   --archive tests/golden/oracle_corpus/keys_a20_4.tar.gz   --manifest tests/golden/oracle_corpus/keys_a20_4.manifest.json
+```
+
+All three manifests are platform-independent (they carry content hashes, never
 paths), so either host regenerates them byte for byte.
 
-`OracleCorpusReplay.*` verifies archive integrity, the v2 corpus's own contract
-(every entry act-3, at least one completed double-boss run, both boss-relic
-axes) and whole-run zero-diff replay in CI, in every preset. Raw campaign
+`tools/corpus_replay.sh` replays all three corpora beside their injected
+divergence controls; it is the standing regression surface under the
+2026-09-03 evidence rule. `ci_corpus_smoke.py` verifies archive integrity, each
+corpus's own contract -- v2: every entry act-3, at least one completed
+double-boss run, both boss-relic axes; v3: an emerald claim that crosses an
+act, both sapphire branches, an all-three-keys run, and a same-seed
+keyed/control pair whose burning-elite marks differ -- and whole-run zero-diff
+replay. Raw campaign
 artifacts remain outside the repository; these compressed curated exceptions are
 the frozen smoke corpora required by the Stage B and S2 designs.

@@ -1,0 +1,265 @@
+{
+  "archive": "keys_a20_4.tar.gz",
+  "archive_sha256": "abd28cca3b1da284287c95ce2b5a87c391afa1b120a94f53826ba55cc9722018",
+  "emerald_pair_seeds": [
+    "STS507768"
+  ],
+  "entries": [
+    {
+      "act3_boss_identities": [],
+      "actions": 170,
+      "campaign_classification": "state_divergence",
+      "campaign_id": "s323_STS507768_keys.worker-001-of-001",
+      "campaign_status": "complete",
+      "cohort": "s323_STS507768_keys",
+      "completed_double_boss": false,
+      "double_boss": false,
+      "floor": 21,
+      "keys": {
+        "all_three_keys": true,
+        "emerald_claim_act": 1,
+        "emerald_claim_crossed_act": true,
+        "emerald_claim_floor": 8,
+        "emerald_marked_acts": [
+          1
+        ],
+        "keys_final": {
+          "emerald": true,
+          "ruby": true,
+          "sapphire": true
+        },
+        "sapphire_branch": "key"
+      },
+      "max_act": 2,
+      "member": "raw/s323_STS507768_keys__STS507768.jsonl",
+      "outcome": "death",
+      "policy": "external",
+      "policy_axis": "take",
+      "policy_config": "follower_keys.json",
+      "policy_config_sha256": "75737AE95FD0F7AB730763AE413958B1148223C38CFBF64389C606132D0F9595",
+      "policy_seed": 0,
+      "provenance": {
+        "driver_version": "b1.7.2",
+        "fork_jar_sha256": "49B5EEEF1F7EC04EB3EEF7C0ED41E3E79865564D1CD3C3EC6930D69C48C460F0",
+        "pipeline_version": "b5.4.0",
+        "schema_version": 1
+      },
+      "replay": {
+        "key_race_records": 2,
+        "library_order_only_records": 0,
+        "records_compared": 171,
+        "reward_screen_records": 42,
+        "stop": "run terminal",
+        "verdict": "CLEAN"
+      },
+      "role": "emerald-pair-keys",
+      "run_row_source": "campaign report",
+      "seed": "STS507768",
+      "seed_long": 62652031949543,
+      "source_artifact_sha256": "0ae1eb2dabcf82fbe4f2bc870f6a133ff3ef316405f4e2b1301014007193ee53",
+      "trace_absent_reason": null,
+      "trace_member": "traces/s323_STS507768_keys__STS507768.trace",
+      "trace_records": 80,
+      "trace_schema": 1,
+      "trace_state_size": 8088,
+      "translated_trace_sha256": "558ce4c562f6cc8990932da6ea32d5a237d1c793e4a3389aa5fac0734b8fc20a",
+      "victory": false,
+      "why": "The emerald pair's KEYS half: EMERALD_KEY claimed at the Act-1 burning elite (floor 8), SAPPHIRE_KEY claimed at the floor-9 chest, a Recall campfire, and the run crossing into Act 2 -- whose map carries NO burning elite, because the key is held (AbstractDungeon.java:543)."
+    },
+    {
+      "act3_boss_identities": [],
+      "actions": 170,
+      "campaign_classification": "clean",
+      "campaign_id": "s323_STS507768_ctrl.worker-001-of-001",
+      "campaign_status": "complete",
+      "cohort": "s323_STS507768_ctrl",
+      "completed_double_boss": false,
+      "double_boss": false,
+      "floor": 21,
+      "keys": {
+        "all_three_keys": false,
+        "emerald_claim_act": null,
+        "emerald_claim_crossed_act": false,
+        "emerald_claim_floor": null,
+        "emerald_marked_acts": [
+          1,
+          2
+        ],
+        "keys_final": {
+          "emerald": false,
+          "ruby": false,
+          "sapphire": false
+        },
+        "sapphire_branch": "relic"
+      },
+      "max_act": 2,
+      "member": "raw/s323_STS507768_ctrl__STS507768.jsonl",
+      "outcome": "death",
+      "policy": "external",
+      "policy_axis": "take",
+      "policy_config": "follower_ctrl.json",
+      "policy_config_sha256": "CA9EC5089AF1B9C4BCF7F471BEE3A0C45BFC309139AD92ACFE7387F8B1FEF87C",
+      "policy_seed": 0,
+      "provenance": {
+        "driver_version": "b1.7.2",
+        "fork_jar_sha256": "49B5EEEF1F7EC04EB3EEF7C0ED41E3E79865564D1CD3C3EC6930D69C48C460F0",
+        "pipeline_version": "b5.4.0",
+        "schema_version": 1
+      },
+      "replay": {
+        "key_race_records": 0,
+        "library_order_only_records": 0,
+        "records_compared": 171,
+        "reward_screen_records": 35,
+        "stop": "run terminal",
+        "verdict": "CLEAN"
+      },
+      "role": "emerald-pair-control",
+      "run_row_source": "campaign report",
+      "seed": "STS507768",
+      "seed_long": 62652031949543,
+      "source_artifact_sha256": "9c14405dfdd2a27a78ead39816fd290808cf5d1c0ea94ef58b6d4669547ae615",
+      "trace_absent_reason": null,
+      "trace_member": "traces/s323_STS507768_ctrl__STS507768.trace",
+      "trace_records": 89,
+      "trace_schema": 1,
+      "trace_state_size": 8088,
+      "translated_trace_sha256": "8927360d125488dd97a7dc7a4cad8cab6769766c8d444210a02b0f2a7c756717",
+      "victory": false,
+      "why": "The SAME SEED with no key taken: the same floor-9 chest claims the RELIC instead (the sapphire relic branch, whose linked key row must die with it), and its Act-2 map DOES carry the burning-elite mark. The pair is trap 1's whole live content; a single keyed run that happened to match proves nothing."
+    },
+    {
+      "act3_boss_identities": [
+        "Time Eater",
+        "Awakened One"
+      ],
+      "actions": 604,
+      "campaign_classification": "state_divergence",
+      "campaign_id": "s323_STS506383_keys.worker-001-of-001",
+      "campaign_status": "complete",
+      "cohort": "s323_STS506383_keys",
+      "completed_double_boss": false,
+      "double_boss": true,
+      "floor": 51,
+      "keys": {
+        "all_three_keys": true,
+        "emerald_claim_act": 1,
+        "emerald_claim_crossed_act": true,
+        "emerald_claim_floor": 11,
+        "emerald_marked_acts": [
+          1
+        ],
+        "keys_final": {
+          "emerald": true,
+          "ruby": true,
+          "sapphire": true
+        },
+        "sapphire_branch": "key"
+      },
+      "max_act": 3,
+      "member": "raw/s323_STS506383_keys__STS506383.jsonl",
+      "outcome": "death",
+      "policy": "external",
+      "policy_axis": "take",
+      "policy_config": "follower_keys.json",
+      "policy_config_sha256": "75737AE95FD0F7AB730763AE413958B1148223C38CFBF64389C606132D0F9595",
+      "policy_seed": 173,
+      "provenance": {
+        "driver_version": "b1.7.2",
+        "fork_jar_sha256": "49B5EEEF1F7EC04EB3EEF7C0ED41E3E79865564D1CD3C3EC6930D69C48C460F0",
+        "pipeline_version": "b5.4.0",
+        "schema_version": 1
+      },
+      "replay": {
+        "key_race_records": 2,
+        "library_order_only_records": 0,
+        "records_compared": 605,
+        "reward_screen_records": 96,
+        "stop": "run terminal",
+        "verdict": "CLEAN"
+      },
+      "role": "three-act-all-keys",
+      "run_row_source": "campaign report",
+      "seed": "STS506383",
+      "seed_long": 62652031901833,
+      "source_artifact_sha256": "56f843c91b25bc3d2028824c41b7e578d4cb281c079a810d1f24c93885f0428a",
+      "trace_absent_reason": null,
+      "trace_member": "traces/s323_STS506383_keys__STS506383.trace",
+      "trace_records": 391,
+      "trace_schema": 1,
+      "trace_state_size": 8088,
+      "translated_trace_sha256": "70c307ae908d791fc37c749379ae3ecafbed630881bba2e125f620305882d1ea",
+      "victory": false,
+      "why": "The deepest keyed line: all three keys, the Act-2 boss chest, the act-2->3 transition, an Act-3 boss killed and the A20 double-boss COMPLETE handoff -- the only committed capture that carries the key state through a whole three-act run."
+    },
+    {
+      "act3_boss_identities": [
+        "Time Eater",
+        "Donu and Deca"
+      ],
+      "actions": 699,
+      "campaign_classification": "state_divergence",
+      "campaign_id": "s323_STS508459_keys.worker-001-of-001",
+      "campaign_status": "complete",
+      "cohort": "s323_STS508459_keys",
+      "completed_double_boss": false,
+      "double_boss": true,
+      "floor": 51,
+      "keys": {
+        "all_three_keys": true,
+        "emerald_claim_act": 2,
+        "emerald_claim_crossed_act": true,
+        "emerald_claim_floor": 31,
+        "emerald_marked_acts": [
+          1,
+          2
+        ],
+        "keys_final": {
+          "emerald": true,
+          "ruby": true,
+          "sapphire": true
+        },
+        "sapphire_branch": "key"
+      },
+      "max_act": 3,
+      "member": "raw/s323_STS508459_keys__STS508459.jsonl",
+      "outcome": "death",
+      "policy": "external",
+      "policy_axis": "take",
+      "policy_config": "follower_keys.json",
+      "policy_config_sha256": "75737AE95FD0F7AB730763AE413958B1148223C38CFBF64389C606132D0F9595",
+      "policy_seed": 749,
+      "provenance": {
+        "driver_version": "b1.7.2",
+        "fork_jar_sha256": "49B5EEEF1F7EC04EB3EEF7C0ED41E3E79865564D1CD3C3EC6930D69C48C460F0",
+        "pipeline_version": "b5.4.0",
+        "schema_version": 1
+      },
+      "replay": {
+        "key_race_records": 2,
+        "library_order_only_records": 0,
+        "records_compared": 700,
+        "reward_screen_records": 104,
+        "stop": "run terminal",
+        "verdict": "CLEAN"
+      },
+      "role": "act2-emerald-claim",
+      "run_row_source": "campaign report",
+      "seed": "STS508459",
+      "seed_long": 62652031988709,
+      "source_artifact_sha256": "1e217e5d8841039aa82d4c882d9886e9ef2f399a1e231216a54bd99ca67b2366",
+      "trace_absent_reason": null,
+      "trace_member": "traces/s323_STS508459_keys__STS508459.trace",
+      "trace_records": 478,
+      "trace_schema": 1,
+      "trace_state_size": 8088,
+      "translated_trace_sha256": "63a17dd136bae42d44f6fde2ca3eaf0bfe5832181eaccd489411fa6b9117a66f",
+      "victory": false,
+      "why": "The other side of the gate's timing: this line claims the emerald key in ACT 2 (floor 31), so its Act-2 map was generated with the key UNHELD and does carry a burning elite. Without it the corpus would only ever witness an Act-1 claim, and 380 of 380 of S3.22's emitted Black-Star lines were exactly that."
+    }
+  ],
+  "entry_count": 4,
+  "format": "STS-ORACLE-CI-CORPUS v3",
+  "replay_verification": "replay_run_diff <capture> --replay --stop-on-diff",
+  "selection_policy": "curated: the pinned DEFAULT_KEYS_PICKS list in tools/verify_report/build_ci_corpus.py, in that order, each carrying its own reason; every pick is re-replayed at build time and must be zero-diff to its run terminal, with no capture-race records other than the ObtainKeyEffect key-race family"
+}

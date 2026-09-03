@@ -44,9 +44,17 @@ A1=(tests/golden/oracle_corpus/act1_a20_50.tar.gz
     tests/golden/oracle_corpus/act1_a20_50.manifest.json 50)
 A3=(tests/golden/oracle_corpus/three_act_a20_5.tar.gz
     tests/golden/oracle_corpus/three_act_a20_5.manifest.json 5)
+# S3.23: the key corpus (v3). Its members deliberately DO carry key-race
+# records -- an ObtainKeyEffect is the unavoidable shadow of the very claim the
+# corpus freezes -- so `CLEAN` here means zero-diff with that one narrow family
+# recognised, and nothing else.
+KEYS=(tests/golden/oracle_corpus/keys_a20_4.tar.gz
+    tests/golden/oracle_corpus/keys_a20_4.manifest.json 4)
 
-clean   "act1_a20_50 --replay"      "${A1[@]}" "$S/act1"      || rc=1
-clean   "three_act_a20_5 --replay"  "${A3[@]}" "$S/three"     || rc=1
-control "act1_a20_50 injected"      "${A1[@]}" "$S/act1_inj"  || rc=1
-control "three_act_a20_5 injected"  "${A3[@]}" "$S/three_inj" || rc=1
+clean   "act1_a20_50 --replay"      "${A1[@]}"   "$S/act1"      || rc=1
+clean   "three_act_a20_5 --replay"  "${A3[@]}"   "$S/three"     || rc=1
+clean   "keys_a20_4 --replay"       "${KEYS[@]}" "$S/keys"      || rc=1
+control "act1_a20_50 injected"      "${A1[@]}"   "$S/act1_inj"  || rc=1
+control "three_act_a20_5 injected"  "${A3[@]}"   "$S/three_inj" || rc=1
+control "keys_a20_4 injected"       "${KEYS[@]}" "$S/keys_inj"  || rc=1
 exit $rc
