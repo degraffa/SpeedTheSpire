@@ -1015,7 +1015,7 @@ plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
   direction).** All six presets configure + build green — `win-debug` /
   `win-asan` / `win-release` through a vcvars+LLVM wrapper, `debug` / `asan` /
   `release` through `tools/wsl_run.sh --script`. `bank_check` runs green under
-  all six against the same bank: **33/33 checks pass** under win-debug,
+  all six against the same bank: **every `bank_check` check passes** under win-debug,
   win-release, win-asan, and WSL debug/release/asan (the committed report is
   the `win-debug` run, NDEBUG undefined). `tools/training/
   check_omniscient_boundary.sh` clean (34 files); `tools/check_submodule_pin.sh`
