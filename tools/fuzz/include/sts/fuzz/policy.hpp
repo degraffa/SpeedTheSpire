@@ -148,7 +148,29 @@ enum class PolicyKind : uint8_t {
     // seeds is the measured information premium -- see
     // docs/verification/sim-search-blind.md.
     SIM_SEARCH_BLIND = 9,
-    COUNT = 10,
+    // S3.61's escalation lever (s3-design §6.1 step 3; the S3.22 report's §3
+    // pre-registered this as "the next lever" once the first one -- policy-seed
+    // re-seeding, up to 1,024 seeds on the deepest known lines -- moved
+    // `double_boss` 0 -> 14 without a single keyed A20 victory). Identical to
+    // SIM_SEARCH_KEYS -- K1-K4 apply unchanged, `kind_seeks_keys` returns true
+    // for this value too -- except at exactly one site in `sim_search_pick`:
+    // on a BOSS-room floor (any act, so this is what reaches the Act-4 Shield-
+    // and-Spear and Heart once a line gets there) the combat search runs a
+    // bounded THIRD ply instead of the generic two (`rollout_boss_deep_and_eval`,
+    // policy_search.cpp), and the search's turn window is widened from
+    // `kBossDeepTurns`/`kSearchTurns` (32) to `kDeepSearchTurns` on that same
+    // floor -- the Heart's Beat-of-Death/Invincible mechanics are built to run
+    // long, and a fight that outlives turn 32 must not degrade to the 1-ply
+    // static-rank fallback the way every other kind's does.
+    // IT IS A SEPARATE KIND, NOT A CHANGE TO SIM_SEARCH OR SIM_SEARCH_KEYS, on
+    // the SIM_SEARCH_HOLD/SIM_SEARCH_KEYS/SIM_SEARCH_BLIND precedent:
+    // SIM_SEARCH_KEYS's own scan output over a fixed range must stay
+    // byte-identical (the deepening is gated on `kind ==
+    // PolicyKind::SIM_SEARCH_KEYS_DEEP` at that one site), which this kind's
+    // acceptance proves by sha256 the same way its predecessors did. See
+    // docs/verification/s3-61-reach.md for the measured cost and result.
+    SIM_SEARCH_KEYS_DEEP = 10,
+    COUNT = 11,
 };
 
 [[nodiscard]] const char* policy_name(PolicyKind k) noexcept;

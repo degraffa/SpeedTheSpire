@@ -105,6 +105,7 @@ granted windows (`monsters` 48 and 66, `powers` 112–135, `cards` 133,
 | `RunPhase` (`run_advance.hpp`) | **12** contingency — the preferred model rides `EVENT_DIALOG` (design §4.1); release unspent | S3.31 — **RELEASED UNSPENT 2026-09-03.** The `Spire Heart` dialog rides `EVENT_DIALOG` exactly as predicted, and the Act-3 boss's proceed needed no phase either (it is run inline off the kill, the goToDoubleBoss precedent), so no new run phase exists. 12 gaps permanently; `RunPhase::BOSS_TREASURE` (11) remains the last enumerator and `legal_actions`' `static_assert` on it is unmoved |
 | `RoomType` (`map_rooms.hpp`) | **9** `Victory`, **10** `TrueVictory`; `kRoomTypeCount` 9 → 11 with its `static_assert` | **BOTH SPENT.** S3.31 spent 9 `Victory` (`kRoomTypeCount` 9 → 10); S3.33 spent 10 `TrueVictory` (10 → 11), with the `static_assert`, `room_symbol` and the fuzz coverage mirror (`coverage.hpp`'s own `static_assert` + the `default:`-less `room_name` switch) re-pinned on it. The block is exhausted |
 | fuzz `MoveCat` (`tools/fuzz/.../policy.hpp`) | **32–35** (`REWARD_CLAIM_KEY`, the Act-4 map choice, the Spire-Heart dialog, one reserve); `COUNT` → 36 | S3.52 — **SPENT 32–34 (`REWARD_CLAIM_KEY`, `ACT4_MAP_CHOICE`, `SPIRE_HEART_DIALOG`), 2026-09-03; 35 RELEASED UNSPENT.** The three spent values covered every new move shape the task found; `COUNT` stops at **35**, not the granted 36 — 35 gaps permanently (append-only) |
+| fuzz `PolicyKind` (`tools/fuzz/.../policy.hpp`) | **10** (`SIM_SEARCH_KEYS_DEEP`); `COUNT` 10 → 11 | S3.61 — **SPENT 10, 2026-09-03.** `SIM_SEARCH_KEYS` (K1-K4) plus a bounded 3rd searched ply and a widened turn window, boss floors only (docs/verification/s3-61-reach.md §4). The next free value is **11**, still owed to the Black-Star/Act-1-emerald-refusal kind S3.22 §6 left open (s3-tasks.md deferred-obligations table) |
 | Opcode (`interp.hpp`, `vocab.py`) | **75–77** contingency — design §2.3 expects the four powers to be native binders on existing opcodes; release unspent | S3.42 / **S3.43 — HALF RELEASED UNSPENT 2026-09-03.** Beat of Death is an ordinary `DAMAGE` item with `DamageType::THORNS` and Invincible queues nothing at all, so neither Act-4 boss power needed an opcode; the Heart's own moves are `DAMAGE` / `APPLY_POWER` / `MAKE_CARD`. S3.42 still holds the other half |
 | power `Hook` | **18** `on_attacked_to_change_damage` contingency (`kHookCount` → 19) — Invincible may instead ride the existing `apply_buffer` site natively, in which case release it | **S3.43 — RELEASED UNSPENT 2026-09-03.** The contingency's own escape was the right one: `onAttackedToChangeDamage` returns an INTEGER into the middle of the receive chain, which no queued hook program can express, so it is the bespoke `apply_invincible` site in `interp/interp_damage.cpp` beside Buffer's (powers.yaml 28 binds no hook either). `kHookCount` stays 18 and `ON_AFTER_USE_CARD` (16) remains the last-but-one enumerator. Invincible's row IS `native: true` — for its `at_start_of_turn` refill, which is a queued-phase hook and does have a body |
 | `RewardItemKind` (`combat_rewards.hpp`) | **two new values** `EMERALD_KEY` (6), `SAPPHIRE_KEY` (7); `kRewardKindCount` 5 → **8**, not 7 — see S3.11's Log for why the granted arithmetic was wrong (the constant lived only in the fuzz coverage table and already under-covered `STOLEN_GOLD`) | S3.11 `[x]` |
@@ -159,7 +160,7 @@ are S3's own.
 | **`Spire Heart` clicks 1–2: collapse or model?** | s3-design §4.1 | **DISCHARGED 2026-09-03 by S3.31 — MODEL, all four.** The decision was made on the differ's record counts, exactly as the row demanded, and it is now witnessed rather than argued: every three-act victory capture carries a five-record post-victory tail (four `Spire Heart` `choose 0` action records plus `__terminal_observed__`), and the engine answers each of the four with its own `CHOOSE 0` on `EventDialogState::screen`. Collapsing clicks 1–2 would have left the sim with no press for records 2 and 3, which the follower's glue rule 3 cannot repair on the DIFFER side. The corpus reads **5 of 5 compared, zero-diff** on both double-boss victories (0 of 5 before). The collapse convention itself is untouched: the clicks really do change nothing, and the whole dialog is presentation — the only STATE is the room transition ahead of it and the terminal that ends it | Clicks 1 and 2 change no run state and are exactly the shape the engine already collapses (shrines.cpp / beyond_events.cpp, accepted at G7), and the follower's glue rule 3 answers collapsed one-click dialogs either way. But the differ compares **record counts**, so the choice must be made once, recorded, and reflected in the follower — not discovered during scoring |
 | **The Black Star burning-elite claim is unproducible under `sim_search_keys`** | S3.22 | **STILL OWED — carried forward from S3.23 to S3.62** (S3.23 took neither constructive route: both are policy/instrument work of their own size, and the wave's budget went to the four root causes its captures found). The choice is unchanged and now better informed: `s323_STS508459_keys` proves an ACT-2 emerald claim is reachable under the existing `sim_search_keys` when the Act-1 burning elite is not taken, so the fifth `PolicyKind` needs only the one rule the row names (refuse the emerald row while `act == 1`) and the Black Star + Act-2 burning-elite conjunction becomes a scan, not a construction | S3.11's sixth needed capture (§5 trap 6's four-item potion suppression) needs a burning-elite claim on a run that already owns **Black Star**. S3.22 measured the conjunction and it is ordered apart **by construction**, not by luck: over a dedicated 8,640-row tracked wave, 436 rows acquired Black Star and 380 of those also carried the emerald key — and **all 380 emitted scripts claim the emerald key in Act 1**, while Black Star cannot be owned before the Act-1 boss chest and a held emerald key stops `setEmeraldElite` placing a burning elite in any later act (S3.11 (c)'s own gate). Two constructive routes, and S3.23 owns the choice: a fifth `PolicyKind` differing from `SIM_SEARCH_KEYS` in one rule — refuse the emerald row while `act == 1` — on the standing "separate kind, never a change to `SIM_SEARCH`" precedent; or a hand-written STS-SCRIPT line on a seed whose Act-1 burning elite is unreachable. Evidence: [verification/s3-22-key-reach.md](verification/s3-22-key-reach.md) §6 |
 | **A multi-pick combat grid applies its picks per-CHOOSE in the engine and at the CONFIRM in the game** | S3.23 | **UNASSIGNED** (surface it when a rule reads the screen mid-selection) | `GridCardSelectScreen` keeps every row listed and moves the selection only when the confirm fires (`DiscardPileToHandAction`'s own update walks `gridSelectScreen.selectedCards`), while the engine's `CHOOSE_CARD` applies each pick as it is made. Nothing rules-level can observe the difference — only another pick can happen inside the window, and the end state and pile ORDER agree — so this is recorded, not fixed. It is nevertheless real and now witnessed: `s323_STS502962_ctrl` seq 400 (Liquid Memories+ over a 10-card discard, floor 30) is `--vitals`-divergent on exactly one record (`hand[Clothesline]: 1 -> 2`, `discard[Clothesline]: 1 -> 0`) and reconverges at the next. S3.23 fixed the *replay* consequence (the two index spaces, `command_map.hpp`); the engine-side deferral is this row. Fix it only with a witness that makes the difference observable |
-| **No keyed A20 double-boss victory exists, so no Act-4 line can be scheduled yet** | S3.22 | **S3.61** (re-measure), then **S3.62** (capture) | s3-design §6.1's "brutal precondition" is unmet on the sim side: 39,296 key-policy rows produced **417 Act-3 boss fights, every one carrying all three keys**, **14 lines that killed the first Act-3 boss carrying all three keys** (`double_boss`, 3 distinct seeds) and **zero victories**. The pre-registered escalation ladder's **first lever is spent** — 1,024 policy seeds on the six deepest seeds (16,128 rows, 6,018,290 actions) moved `double_boss` 0 → 14 without a victory — so **the next lever is the deeper boss-floor ply**, and it must again be a separate `PolicyKind` or it moves `SIM_SEARCH`. Explicitly NOT admissible under design §6.1 step 3: rule handicaps, difficulty reduction, a weakened bar. A T4-era trained checkpoint behind the external-policy seam remains a sanctioned accelerant and never a precondition |
+| **No keyed A20 double-boss victory exists, so no Act-4 line can be scheduled yet** | S3.22 | **S3.61 pulled the deeper-ply lever too — STILL owed to S3.62 (capture) and, for an actual keyed victory, to whatever picks up the next lever named below** | **RE-MEASURED by S3.61, 2026-09-03** (docs/verification/s3-61-reach.md): Act 4 now exists (`kFinalAct`=4, landed at S3-G1), and a plain `sim_search_keys` line (STS511413/ps76) crosses the Door into Act 4 for the first time — structurally impossible under S3.22's engine. The re-run still reproduced S3.22's zero: a 9,856-row funnel gave 6 `double_boss` hits over 2 seeds and 0 victories, meeting the precondition to pull **the next lever, `PolicyKind::SIM_SEARCH_KEYS_DEEP`** (value 10, a bounded 3rd ply + widened turn window on boss floors). ≥1,024 policy seeds on the 2 confirmed `double_boss` seeds (2,048 rows) raised the hit rate to 11/2,048 (0.54 % vs. the plain funnel's 0.061 %) and produced a second Act-4 Door entry, but still **zero victories**. The positive control (`SIM_SEARCH` killing the Awakened One 22/1,024 under a full, unspent HP budget, S2.V2) says the search body can clear an Act-3-class boss; what the double-boss room denies is exactly that budget, and this task's own STS513748 finding (a wide Act-2 board made the 3rd ply intractable, >5 min for 256 rows) argues the next step is NOT uniformly-deeper search but either a targeted (handoff-local) deepening or the standing sanctioned accelerant, a T4-era trained checkpoint behind the external-policy seam — never a precondition for S3-G2. Explicitly NOT admissible under design §6.1 step 3: rule handicaps, difficulty reduction, a weakened bar |
 
 ---
 
@@ -2774,7 +2775,7 @@ this tree, not a Log carried forward.
 
 ## Phase S3.6 — Verification campaigns + S3 exit
 
-- **S3.61** `[ ]` ∥ **Reach re-measurement on the landed engine.** S3.22's
+- **S3.61** `[x]` ∥ **Reach re-measurement on the landed engine.** S3.22's
   reach numbers were measured against an engine with no Act 4; re-run its
   commands verbatim on the gated tree so the depth wave schedules from real
   cohorts. Report the key-carry, Act-4-entry, Shield-and-Spear-kill and
@@ -2797,7 +2798,39 @@ this tree, not a Log carried forward.
   commands with the deltas explained rather than absorbed; determinism sweep
   zero mismatches; every emitted cohort script replaying to its recorded
   `final_hash`; six presets **build**.
-  **Log:** —
+  **Log:** 2026-09-03. Re-ran S3.22 verbatim on fresh STS510000–519999 (paired
+  `sim_search`/`sim_search_keys`, plus `sim_search_blind` as a third arm) —
+  every rate within ordinary fresh-seed variance of S3.22's, confirming the
+  intervening engine work didn't perturb Act 1–3 reach. Act 4 turned out to
+  already be reachable under *plain* `sim_search_keys`: STS511413/ps76 crosses
+  the Door with all three keys (impossible under S3.22's engine). The funnel
+  (9,856 rows) reproduced S3.22's zero keyed victory (6 `double_boss`/2 seeds),
+  meeting the precondition to pull the pre-registered next lever:
+  `PolicyKind::SIM_SEARCH_KEYS_DEEP` (value **10**, `COUNT` 10 → 11 — id-block
+  table above) adds a bounded 3rd searched ply and a widened turn window on
+  boss floors only, K1-K4 unchanged. Building it caught and fixed a real bug
+  on the first try: `policy.cpp`'s `policy_pick` dispatch is an explicit kind
+  list, not a `PolicyKind::COUNT` loop, and the new kind was left out of it —
+  every row ran, produced a well-formed TSV row and a real `final_hash`, and
+  silently used the generic argmax dispatcher instead of the search, dying far
+  too early on every seed including pre-boss. Fixed by adding the kind to the
+  list (§4 of the report has the full bisection). ≥1,024 policy seeds on the
+  two confirmed `double_boss` seeds (2,048 rows) raised the hit rate to
+  11/2,048 (0.54 %, vs. plain `SIM_SEARCH_KEYS`'s funnel rate of 0.061 %) and
+  produced a second Act-4 Door entry (STS511413/ps804) — still **zero keyed
+  victories**. `SIM_SEARCH`/`SIM_SEARCH_KEYS` invariance proven by sha256
+  before/after every edit (both unchanged). One seed (STS513748) made the
+  3rd ply intractable (a wide Act-2 board) and was capped rather than pushed
+  through — named as evidence the next lever should be targeted, not uniform,
+  deepening. 54,338 rows / 12,795,992 actions total across breadth, funnel,
+  determinism sweep (2,000 rows, 0 mismatches) and escalation. Emitted 6
+  scripts (`_oracle_data/s3/s361_scripts/`, one refused by the follower on a
+  known select/deselect limitation) and the triple list
+  (`_oracle_data/s3/s361_triples.tsv`) for S3.62. Six presets build; win-*
+  via `s361env.cmd`-style wrapper, WSL via `tools/build_presets.sh`.
+  `SIM_SEARCH`'s output byte-identical before/after (sha256, §5 of the
+  report). Full numbers, tables and commands:
+  [verification/s3-61-reach.md](verification/s3-61-reach.md).
 
 - **S3.62** `[ ]` **Oracle campaigns: breadth + Act-4 depth.** The design §6
   S3-G2 evidence. Breadth: ≥ 2,000 distinct mixed-policy A20 attempts, all
@@ -2813,7 +2846,19 @@ this tree, not a Log carried forward.
   converts it into an exact per-row disposition with a recorded reachability
   argument — no wildcards.
   **Inherited:** the S3.11 / S3.24 / S3.32 / S3.33 / S3.41 / S3.42 / S3.43
-  capture debts, each named in its own Log.
+  capture debts, each named in its own Log. **From S3.61:** the triple list
+  `D:\STS_BG_Mod\_oracle_data\s3\s361_triples.tsv` and its 6 scripts under
+  `D:\STS_BG_Mod\_oracle_data\s3\s361_scripts\` — two independent Act-4 Door
+  crossings on STS511413 (`sim_search_keys`/ps76 and the escalation kind
+  `sim_search_keys_deep`/ps804, both all-three-keys), a paired key-NOT-taken
+  Act-3-stop control on the same seed, a second seed's (STS517934)
+  double-boss/Act-3-stop line plus its own control, and a pre-escalation
+  double-boss line. None reaches the Shield-and-Spear or Heart combat itself
+  (docs/verification/s3-61-reach.md §5-6: zero keyed victories at S3.61's
+  scale) — S3.61 could not schedule those two captures, only the Act-4 Door
+  and Act-3-stop ones. Reach numbers and the escalation ladder's state (the
+  deeper-ply lever spent too, next is a targeted deepening or the T4-era
+  trained-checkpoint accelerant) are in that report, not repeated here.
   **Deps:** S3-G1, S3.61 **Acceptance:** every capture above replays
   **zero-diff** to its terminal through `replay_run_diff --replay` (with
   `--combat` on the two Act-4 fights) with zero capture-race records; a

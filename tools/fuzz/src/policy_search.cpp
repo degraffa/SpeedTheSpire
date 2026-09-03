@@ -208,10 +208,21 @@ constexpr int64_t kKeyMapRest = 10000;
 // the elite node needs a band, and it sits above kMapBoss (700).
 constexpr int kMapEmeraldSeek = 800;
 
-// Which kinds seek keys. SIM_SEARCH / _SKIP / _HOLD never do, so their
-// trajectories are bit-for-bit what they were before S3.22.
+// Which kinds seek keys. SIM_SEARCH / _SKIP / _HOLD / _BLIND never do, so
+// their trajectories are bit-for-bit what they were before S3.22.
+// SIM_SEARCH_KEYS_DEEP (S3.61) seeks keys identically to SIM_SEARCH_KEYS --
+// it differs only in the boss-floor ply depth, gated separately below.
 [[nodiscard]] constexpr bool kind_seeks_keys(PolicyKind kind) noexcept {
-    return kind == PolicyKind::SIM_SEARCH_KEYS;
+    return kind == PolicyKind::SIM_SEARCH_KEYS ||
+           kind == PolicyKind::SIM_SEARCH_KEYS_DEEP;
+}
+
+// S3.61: which kinds get the deepened (3-ply) boss-floor search and the
+// widened turn window. Gated separately from `kind_seeks_keys` so a future
+// non-key-seeking deep kind could reuse `rollout_boss_deep_and_eval` without
+// also picking up K1-K4.
+[[nodiscard]] constexpr bool kind_deepens_boss(PolicyKind kind) noexcept {
+    return kind == PolicyKind::SIM_SEARCH_KEYS_DEEP;
 }
 
 // --- evaluation weights (combat search) --------------------------------------
@@ -1256,6 +1267,90 @@ constexpr int kBossDeepMaxLiveMonsters = 4;
     return live;
 }
 
+// --- S3.61's boss-floor DEEPENING (SIM_SEARCH_KEYS_DEEP only) ---------------
+//
+// A bounded THIRD ply. `rollout_boss_deep_and_eval` mirrors
+// `rollout_boss_and_eval` exactly (same structure: enumerate, apply, score,
+// keep the best) except each of ITS candidates is finished by one more
+// searched decision instead of a single static `complete_combat` -- the
+// budgets shrink at each level so the product (n outer x kDeepInnerBreadth x
+// kDeepInner2Breadth x completion cost) stays a bounded multiple of the
+// existing 2-ply's cost rather than exploding. It is reached only through
+// `kind_deepens_boss`, so SIM_SEARCH_KEYS keeps calling
+// `rollout_boss_and_eval` unchanged and its own scan output stays
+// byte-identical (checked by sha256 in docs/verification/s3-61-reach.md, the
+// SIM_SEARCH_KEYS invariance precedent S3.22 §5 set for SIM_SEARCH).
+constexpr size_t kDeepInnerBreadth = 6;    // ply-2 breadth (vs 12, kBossInnerBreadth)
+constexpr size_t kDeepInner2Breadth = 3;   // ply-3 breadth
+constexpr int kDeepInnerRollout = 90;      // ply-2's own completion, if it ends combat
+constexpr int kDeepInner2Rollout = 60;     // ply-3's completion budget
+constexpr uint16_t kDeepInnerTurnCap = 6;
+constexpr uint16_t kDeepInner2TurnCap = 4;
+// The search's turn window on a boss floor for SIM_SEARCH_KEYS_DEEP, in place
+// of kBossDeepTurns/kSearchTurns (32 both). The Heart's kit (Beat of Death,
+// the Invincible HP-floor reset, buffCount stacking) is built to run long, so
+// a search that gives up its ply past turn 32 -- every other kind's fixed
+// behaviour -- would degrade to static rank for most of the fight that
+// matters. 60 is double the existing window, chosen as the cheapest widening
+// that still bounds worst-case cost to a small multiple of what a boss fight
+// already pays under the existing 2-ply.
+constexpr uint16_t kDeepSearchTurns = 60;
+
+[[nodiscard]] int64_t rollout_boss_deep_and_eval(PolicyKind kind, RunController& sim,
+                                                 const EvalWeights& w) noexcept {
+    if (sim.phase != static_cast<uint8_t>(RunPhase::COMBAT)) {
+        return eval_state(sim, w);
+    }
+    RunActionMask mask;
+    engine::legal_actions(sim, mask);
+    Move inner[kMoveCap];
+    size_t n = enumerate_moves(sim, mask, inner, kMoveCap);
+    if (n == 0) return eval_state(sim, w);
+    if (n > kDeepInnerBreadth) n = kDeepInnerBreadth;
+    int64_t best = kEvalDefeat;
+    for (size_t j = 0; j < n; ++j) {
+        RunController sim2 = sim;
+        apply_one(sim2, inner[j].action);
+        int64_t s2;
+        if (sim2.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+            // ply 3: one more searched decision, each candidate finished by a
+            // short static rollout -- this is the "deeper" the kind is named
+            // for, in place of ply 2's single static completion.
+            RunActionMask mask2;
+            engine::legal_actions(sim2, mask2);
+            Move inner2[kMoveCap];
+            size_t n2 = enumerate_moves(sim2, mask2, inner2, kMoveCap);
+            if (n2 == 0) {
+                s2 = eval_state(sim2, w);
+            } else {
+                if (n2 > kDeepInner2Breadth) n2 = kDeepInner2Breadth;
+                int64_t best2 = kEvalDefeat;
+                for (size_t k = 0; k < n2; ++k) {
+                    RunController sim3 = sim2;
+                    apply_one(sim3, inner2[k].action);
+                    (void)complete_combat(kind, sim3, kDeepInner2Rollout, kDeepInner2TurnCap);
+                    const int64_t s3 =
+                        eval_state(sim3, w) -
+                        (kind_holds_powers(kind)
+                             ? curiosity_penalty_for(sim2.combat, sim2, inner2[k])
+                             : 0);
+                    if (s3 > best2) best2 = s3;
+                }
+                s2 = best2;
+            }
+        } else {
+            (void)complete_combat(kind, sim2, kDeepInnerRollout, kDeepInnerTurnCap);
+            s2 = eval_state(sim2, w);
+        }
+        const int64_t s =
+            s2 - (kind_holds_powers(kind)
+                      ? curiosity_penalty_for(sim.combat, sim, inner[j])
+                      : 0);
+        if (s > best) best = s;
+    }
+    return best;
+}
+
 // --- the one-floor rollout (map / event 1-ply) -------------------------------
 //
 // Resolve the rest of THIS floor -- the fight the node turns into, the event
@@ -1364,6 +1459,17 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
     // every combat except an Awakened One's phase 1.
     const bool hold_powers =
         in_combat && kind_holds_powers(kind) && curiosity_tax(rc.combat) > 0;
+    // S3.61: SIM_SEARCH_KEYS_DEEP widens the search's turn window from
+    // kSearchTurns/kBossDeepTurns (32 both) to kDeepSearchTurns (60), but ONLY
+    // on a boss floor -- every other kind, and DEEP itself off a boss floor,
+    // keeps exactly the old window, which is what the SIM_SEARCH invariance
+    // check (docs/verification/s3-61-reach.md §5) and SIM_SEARCH_KEYS's own
+    // fixed-range sha256 both certify unmoved.
+    const bool boss_floor =
+        rc.room_type == static_cast<uint8_t>(engine::RoomType::Boss);
+    const bool deepens = kind_deepens_boss(kind) && boss_floor;
+    const uint16_t search_turn_window = deepens ? kDeepSearchTurns : kSearchTurns;
+    const uint16_t boss_ply_window = deepens ? kDeepSearchTurns : kBossDeepTurns;
     for (size_t i = 0; i < n; ++i) {
         if (in_combat) {
             // THE TURN RAMP -- a hard cost ceiling per fight, encoded in
@@ -1373,20 +1479,23 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             // cannot win however hard it looks -- the policy degrades to
             // the static completion rank there and lets the run reach its
             // action cap or its livelock detector cheaply instead of
-            // multiplying rollouts into a dead fight.
-            if (rc.combat.turn > kSearchTurns) {
+            // multiplying rollouts into a dead fight. SIM_SEARCH_KEYS_DEEP
+            // keeps the ply open longer on a boss floor (search_turn_window),
+            // because that is precisely where a long fight (the Heart) is
+            // still worth searching past turn 32.
+            if (rc.combat.turn > search_turn_window) {
                 scores[i] = completion_rank(rc, moves[i], false, hold_powers);
             } else {
                 RunController sim = rollout_world;  // trivially-copyable snapshot
                 apply_one(sim, moves[i].action);
                 scores[i] =
-                    rc.room_type ==
-                                static_cast<uint8_t>(engine::RoomType::Boss) &&
-                            rc.combat.turn <= kBossDeepTurns &&
+                    boss_floor && rc.combat.turn <= boss_ply_window &&
                             n <= kBossDeepMaxCandidates &&
                             live_monster_count(rc.combat) <=
                                 kBossDeepMaxLiveMonsters
-                        ? rollout_boss_and_eval(kind, sim, w)  // 2-ply
+                        ? (deepens
+                               ? rollout_boss_deep_and_eval(kind, sim, w)  // 3-ply
+                               : rollout_boss_and_eval(kind, sim, w))      // 2-ply
                         : rollout_and_eval(kind, sim, rollout_budget_for(n), w);
                 // Hand-select screens: CONFIRM breaks exact evaluation TIES
                 // (+1 is far below any real difference; one HP is worth

@@ -33,6 +33,7 @@ const char* policy_name(PolicyKind k) noexcept {
         case PolicyKind::SIM_SEARCH_HOLD: return "sim_search_hold";
         case PolicyKind::SIM_SEARCH_KEYS: return "sim_search_keys";
         case PolicyKind::SIM_SEARCH_BLIND: return "sim_search_blind";
+        case PolicyKind::SIM_SEARCH_KEYS_DEEP: return "sim_search_keys_deep";
         case PolicyKind::COUNT: break;
     }
     return "?";
@@ -865,14 +866,21 @@ size_t policy_pick(PolicyKind kind, const RunController& rc, const Move* moves, 
     if (kind == PolicyKind::SIM_SEARCH || kind == PolicyKind::SIM_SEARCH_SKIP ||
         kind == PolicyKind::SIM_SEARCH_HOLD ||
         kind == PolicyKind::SIM_SEARCH_KEYS ||
-        kind == PolicyKind::SIM_SEARCH_BLIND) {
+        kind == PolicyKind::SIM_SEARCH_BLIND ||
+        kind == PolicyKind::SIM_SEARCH_KEYS_DEEP) {
         // The sim-consulting policy (S2.V2) is a different class of generator
         // and lives in its own translation unit; see policy_search.cpp. All
-        // five kinds share that body -- _SKIP differs only in R4's boss-relic
+        // six kinds share that body -- _SKIP differs only in R4's boss-relic
         // answer, _HOLD only in the Curiosity hold, _KEYS only in the four
         // key-seeking rules K1-K4 (S3.22), _BLIND only in rolling out over a
         // resample_hidden twin instead of the true controller (the
-        // information-limited baseline, docs/verification/sim-search-blind.md).
+        // information-limited baseline, docs/verification/sim-search-blind.md),
+        // _KEYS_DEEP only in the boss-floor 3rd ply and widened turn window
+        // (S3.61, docs/verification/s3-61-reach.md). A kind left OUT of this
+        // list silently falls through to the plain argmax dispatcher below --
+        // the exact bug S3.61 hit adding _KEYS_DEEP the first time: every row
+        // ran, produced well-formed output, and died far too early, because it
+        // was running move_score's static heuristic instead of the search.
         return sim_search_pick(kind, rc, moves, n, rng);
     }
 
