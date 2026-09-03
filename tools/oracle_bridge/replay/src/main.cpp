@@ -647,6 +647,54 @@ struct Options {
     return saw_delayed_slot;
 }
 
+// --- The ObtainKeyEffect settlement race (S3.23) -----------------------------
+//
+// A key CLAIM does not write `Settings.has*Key`. RewardItem.claimReward's
+// SAPPHIRE_KEY and EMERALD_KEY arms push an ObtainKeyEffect onto
+// AbstractDungeon.topLevelEffects and return (RewardItem.java:317-326 case 6,
+// :327-333 case 7); the boolean is set 0.33 wall-clock SECONDS later, inside
+// that effect's own update(), together with the KEY_OBTAIN sound
+// (ObtainKeyEffect.java:40-41 `this.duration = 0.33f`, :56-73). Everything the
+// RULES care about happens at the press -- the row leaves the screen, a
+// SAPPHIRE_KEY's linked relic row dies with it -- and that is where the engine
+// sets RunState::keys. So every dump the driver takes inside that window shows
+// a key bit the sim already holds, and how many dumps that is depends only on
+// how fast commands were sent: S3.23's wave measured 1 record on most claims
+// and 4 on STS503370's emerald.
+//
+// Narrowness, so a wrong key cannot hide here: `keys` must be the ONLY field
+// that differs, the capture's bits must be a SUBSET of the sim's (a key the
+// capture holds and the sim does not is a real divergence, in either
+// direction), and a LATER capture record inside a bounded window must attest
+// exactly the missing bits, with no attested record in between claiming a bit
+// the sim does not hold. A claim on the wrong row would also change the reward
+// list and diverge on another field first.
+inline constexpr std::size_t kKeySettleWindow = 8;
+
+[[nodiscard]] bool is_key_obtain_settlement_race(
+    const sts::diff::DiffReport& rep,
+    const sts::translate::TranslatedRun& run,
+    std::size_t record_index,
+    const RunState& actual,
+    const RunState& expected) {
+    if (rep.size() != 1 || rep.diffs[0].field_name != "keys") return false;
+    const uint8_t sim = actual.keys;
+    const uint8_t cap = expected.keys;
+    if (sim == cap) return false;
+    if ((cap & static_cast<uint8_t>(~sim)) != 0u) return false;
+    const uint8_t missing = static_cast<uint8_t>(sim & static_cast<uint8_t>(~cap));
+    if (missing == 0u) return false;
+    const std::size_t last = std::min(run.records.size() - 1,
+                                      record_index + kKeySettleWindow);
+    for (std::size_t j = record_index + 1; j <= last; ++j) {
+        if (!run.records[j].has_keys) continue;
+        const uint8_t later = run.records[j].run.keys;
+        if ((later & static_cast<uint8_t>(~sim)) != 0u) return false;
+        if ((later & missing) == missing) return true;
+    }
+    return false;
+}
+
 // The ordinary Smoke-Bomb settlement shape deliberately rejects relic counters:
 // a generic counter change can be an unrelated combat defect.  This extension
 // admits one only when the capture itself proves the exact sequence whose Java
@@ -732,6 +780,7 @@ struct Verdict {
     int obtain_race_records = 0;    // ...whose only diff was an obtain animation
     int escape_race_records = 0;    // ...the Smoke-Bomb escape-settlement race
     int preview_race_records = 0;   // ...a curse transform-preview cardRng burn
+    int key_race_records = 0;       // ...an ObtainKeyEffect still animating
     int post_victory_ending_records = 0;      // ...in the artifact ending tail
     int post_victory_ending_compared = 0;     // ...of those, actually compared
     int double_boss_handoff_records = 0;  // ...compared against the NEXT record
@@ -1084,6 +1133,23 @@ void print_monster_power_trace(const sts::translate::TranslatedRecord& rec,
                 rec.seq, s.floor, s.screen_type.c_str(),
                 rec.action_command.c_str(), rep.size(),
                 rep.size() == 1 ? "" : "s");
+        } else if (is_key_obtain_settlement_race(rep, run, k, actual,
+                                                 expected)) {
+            // The claimed key's ObtainKeyEffect has not finished its 0.33 s
+            // animation, so this dump's `Settings.has*Key` is still false for a
+            // key the engine set at the press. A later record inside the window
+            // attests exactly the missing bits (see the classifier).
+            ++v.key_race_records;
+            capture_race = true;
+            std::printf("RACE  seq=%d floor=%d screen=%s cmd='%s': the sim holds key "
+                        "bit(s) 0x%x this dump does not -- ObtainKeyEffect is still "
+                        "animating capture-side (RewardItem.java:317-333 queues it, "
+                        "ObtainKeyEffect.java:40-41/:56-73 sets Settings.has*Key "
+                        "0.33s later); a later record attests exactly those bits\n",
+                        rec.seq, s.floor, s.screen_type.c_str(),
+                        rec.action_command.c_str(),
+                        static_cast<unsigned>(actual.keys &
+                                              static_cast<uint8_t>(~expected.keys)));
         } else if (curse_transform_preview_window &&
                    is_transform_preview_rng_advance(
                        diff_field_names(rep), actual.card_rng,
@@ -3648,12 +3714,12 @@ int main(int argc, char** argv) {
             const Verdict v = replay_one(f, opts);
             std::printf("%s %s: %d record%s compared (%d on reward screens), "
                         "%d library-order-only, %d obtain-race, %d escape-race, "
-                        "%d preview-race; stop: %s\n",
+                        "%d preview-race, %d key-race; stop: %s\n",
                         v.clean ? "CLEAN" : "PART ", f.c_str(), v.records_compared,
                         v.records_compared == 1 ? "" : "s",
                         v.reward_records_compared, v.deck_identity_records,
                         v.obtain_race_records, v.escape_race_records,
-                        v.preview_race_records,
+                        v.preview_race_records, v.key_race_records,
                         v.stop_reason.c_str());
             if (v.post_victory_ending_records > 0)
                 std::printf("      %d of %d post-victory ending record(s) "

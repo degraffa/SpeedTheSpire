@@ -859,10 +859,13 @@ def _capture_race_counts(diff_text: str) -> dict[str, int]:
     """Extract every named capture-race family from a replay summary.
 
     The replay executable currently reports obtain-race (card/potion obtain
-    animation, including Entropic Brew), escape-race (Smoke Bomb settlement)
-    and preview-race (Living Wall's wall-clock curse preview). Matching named
-    ``*-race`` fields keeps strict accounting conservative when the replay
-    classifier grows another narrowly reviewed capture-race family.
+    animation, including Entropic Brew), escape-race (Smoke Bomb settlement),
+    preview-race (Living Wall's wall-clock curse preview) and, since S3.23,
+    key-race (a claimed key's ObtainKeyEffect, which sets
+    ``Settings.has*Key`` 0.33 wall-clock seconds after the press). Matching
+    named ``*-race`` fields keeps strict accounting conservative when the
+    replay classifier grows another narrowly reviewed capture-race family --
+    this generic match is why key-race needed no change here.
     """
     summaries = [
         line for line in diff_text.splitlines()
