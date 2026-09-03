@@ -45,6 +45,15 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash tools/check_omniscient_boundary.sh
 
+  # S3.66, retooled under the 2026-09-03 owner directive (conventions.md 1):
+  # the project neither writes nor runs unit tests, so this job's job is no
+  # longer "ctest is green" -- it is "the six presets still BUILD, and the
+  # committed oracle corpora + Stage-A fixtures + leak-gate binaries still
+  # replay/pass, run directly so their own exit codes are what fails the job".
+  # The job id and the `${{ matrix.preset }}` job name are left alone on
+  # purpose, same reasoning as stale-numbers above: they are the status-check
+  # contexts ("CI / debug" etc.) branch protection may reference, and nothing
+  # about retooling the steps inside a leg needs to change that string.
   build-and-test:
     name: ${{ matrix.preset }}
     runs-on: ubuntu-latest
@@ -97,20 +106,223 @@ jobs:
           restore-keys: |
             sts-deps-${{ runner.os }}-${{ matrix.preset }}-
 
-      # STS_BUILD_BENCHMARKS defaults OFF (it costs configure time that no test
-      # run needs). CI passes it explicitly so the benchmark sources keep their
-      # compile coverage -- CI is the only thing that builds them. Removing this
-      # flag silently drops that coverage; see the option in CMakeLists.txt.
+      # STS_BUILD_BENCHMARKS defaults OFF and S3.66 leaves it off here.
+      # It used to be passed ON for compile coverage of the benchmark
+      # sources, but that flag is currently what was turning this exact job
+      # red on master (confirmed on the four most recent completed runs,
+      # https://github.com/degraffa/SpeedTheSpire/actions/workflows/ci.yml,
+      # each `debug`/`asan` failing at Build): benchmarks/CMakeLists.txt
+      # compiles tools/fuzz/src/policy.cpp directly into `bench_throughput`
+      # without also compiling or linking policy_search.cpp, which
+      # policy.cpp has called into (sim_search_pick, S2.V2's turn-local sim
+      # search) since before this task branched. A non-LTO link (debug/asan
+      # here; win-debug below) faithfully tries to resolve that call and
+      # gets `undefined reference to sts::fuzz::sim_search_pick`; the
+      # release leg's LTO happens to dead-strip the never-actually-called
+      # path before the linker is ever asked, which is why only debug/asan
+      # showed it. That is a real, pre-existing defect in
+      # benchmarks/CMakeLists.txt (docs/s3-tasks.md's S3.64 -- the A/B
+      # effort that already lives on `bench_throughput` -- is positioned to
+      # fix it), not something this task's surface (.github/workflows/,
+      # tools/check_*.sh, tools/corpus_replay.sh, docs) should carry a
+      # build-graph fix for. Benchmark compile coverage is not part of the
+      # 2026-09-03 evidence bar (build + real-run, not "everything that
+      # compiles"), so turning the flag back off is what makes this job's
+      # green mean what it now claims rather than masking the defect by
+      # leaving a step nobody reads (Build failing on debug/asan already
+      # was, for four runs) as this job's steady state.
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} -DSTS_BUILD_BENCHMARKS=ON
+        run: cmake --preset ${{ matrix.preset }}
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
-      # gtest_discover_tests registers one ctest entry per gtest CASE, so this is
-      # ~640 short-lived process launches -- launch-bound, not CPU-bound, which
-      # is why the job count is nproc rather than nproc-1. The test presets carry
-      # a conservative default (8) for a bare `ctest --preset`; this overrides it
-      # with what the runner actually has.
-      - name: Test
-        run: ctest --preset ${{ matrix.preset }} --parallel "$(nproc)"
+      # STS_BUILD_TESTS is ON by default, so the Build step above already
+      # compiled these three gtest binaries along with everything else; this
+      # step is the run half. Each binary is invoked directly rather than
+      # through `ctest --preset` -- ctest's `gtest_discover_tests` registers
+      # one ctest entry per gtest CASE (conventions §6's PRE_TEST note), which
+      # is a ctest-shaped acceptance surface the 2026-09-03 directive retired.
+      # Run whole, each binary's own process exit code is what fails this step:
+      #   fixture_oracle_test -- Stage-A oracle: the ~20 independently-generated
+      #     combat fixtures under tests/golden/combat_fixtures, replayed and
+      #     diffed field-by-field (M1 acceptance, design §5.2a).
+      #   twin_test -- the T0.5 hidden-twin leak gate: >=1,000 fuzz-harvested
+      #     states, twin PublicView + mask byte equality per reachable phase.
+      #   tripwire_test -- the T0.5 total-byte classification tripwire over
+      #     RunState/CombatState/RunController, plus its negative controls.
+      # All three are self-contained (STS_COMBAT_FIXTURE_DIR is an absolute
+      # path baked in at configure time; the other two need no fixture file),
+      # so they run correctly from the checkout root on every preset.
+      - name: Real runs -- fixture_oracle_test, twin_test, tripwire_test
+        run: |
+          set -e
+          for bin in fixture_oracle_test twin_test tripwire_test; do
+            echo "=== $bin (${{ matrix.preset }}) ==="
+            "build/${{ matrix.preset }}/tests/$bin"
+          done
+
+      # Only the release leg replays the committed oracle corpora.
+      # tools/corpus_replay.sh always targets one preset's replay_run_diff
+      # (default release; S3.66 added the optional preset argument for the
+      # Windows job below). Re-running the identical committed traces against
+      # the identical engine logic under debug or asan would not be
+      # independent evidence of anything the release leg didn't already show
+      # -- it would only be slower, so skipping it there is what "keep it
+      # fast" means for this matrix.
+      - name: Oracle corpus replay -- three corpora, three modes, injected controls (release only)
+        if: matrix.preset == 'release'
+        run: bash tools/corpus_replay.sh release
+
+  # S3.66's Windows leg. The stage-b row's whole open question was "an
+  # existing native win-* toolchain, an unverified proposed workflow" --
+  # docs/stage-b-tasks.md's build/toolchain effort row records the six
+  # presets as byte-identical (the 20 fixture traces hash the same under GCC,
+  # Clang and clang-cl, debug/asan/LTO-release alike), so this job's evidence
+  # is that the SAME engine, built by clang-cl + Ninja instead of GCC/Clang,
+  # still produces zero-diff replay and passing leak gates -- not a second
+  # independent engine verification.
+  #
+  # win-debug, not win-release: win-release is LTO across ~40 executables
+  # (the ubuntu release leg above already pays that once), and nothing about
+  # THIS job's evidence needs LTO -- corpus replay and the leak-gate binaries
+  # exercise engine correctness, which the byte-identical claim above says is
+  # optimization-level-independent. A per-push gate should stay cheap; a
+  # Windows *release* LTO leg is future nightly.yml scope, not this task's
+  # (conventions.md 1's "the [nightly] workflow ... keep it as is").
+  #
+  # LLVM PIN: 22.1.8, exactly. tests/CMakeLists.txt documents why this must be
+  # pinned rather than "whatever the runner image ships": googletest 1.15.2
+  # (and 1.17.0) fails to compile ITS OWN headers under clang-cl's /W4 /WX
+  # because clang 22 added -Wcharacter-conversion, worked around here with a
+  # scoped /WX- on third-party targets only -- a newer clang could add the
+  # next such warning at any time, silently turning a green Windows job red
+  # for a dependency's problem, not ours. Pinning to the exact version already
+  # verified locally (docs/stage-b-tasks.md: "clang-cl 22.1.8, presets
+  # win-debug / win-release / win-asan") means this job either matches the
+  # verified toolchain or fails on a version mismatch it can name -- never
+  # "whatever shipped on the runner today".
+  windows:
+    name: windows (win-debug)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cached by exact version string, so bumping the pin below is what
+      # invalidates the cache -- there is no restore-keys fallback to an
+      # unpinned install to accidentally fall back to.
+      - name: Cache pinned LLVM install
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: C:\LLVM-22.1.8
+          key: llvm-22.1.8-win64-installer
+
+      - name: Install LLVM 22.1.8 (pinned)
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-win64.exe"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\llvm-installer.exe"
+          # /S = silent NSIS install; /D=<path> must be the LAST argument and
+          # unquoted-in-content (no embedded spaces here, so this is safe).
+          Start-Process -FilePath "$env:RUNNER_TEMP\llvm-installer.exe" -ArgumentList "/S","/D=C:\LLVM-22.1.8" -Wait
+
+      # ilammy/msvc-dev-cmd is the vcvars64 + vswhere half conventions §6's
+      # local wrapper.cmd does by hand for an interactive shell; here it does
+      # the same job by exporting into $GITHUB_ENV/$GITHUB_PATH, which (unlike
+      # a local shell) already persists across every later step with no
+      # wrapper needed. This MUST come before the "put pinned LLVM ahead of
+      # PATH" step below: $GITHUB_PATH prepends, and the most recently
+      # appended entry wins, so putting our pin's append after this action's
+      # is what keeps windows-latest's occasional VS "C++ Clang tools"
+      # workload (which this action's PATH additions could otherwise expose)
+      # from shadowing the pinned copy.
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # A cache hit restores the install directory but not this run's PATH,
+      # so this step is unconditional (not gated on cache-llvm's outcome).
+      - name: Put pinned LLVM ahead of any bundled clang-cl on PATH
+        shell: pwsh
+        run: "'C:\\LLVM-22.1.8\\bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append"
+
+      # This step is the pin's teeth: a drifted or missing clang-cl fails the
+      # job by name instead of quietly building with whatever resolved first.
+      - name: Verify clang-cl resolves to the pinned 22.1.8
+        shell: bash
+        run: |
+          set -e
+          which clang-cl
+          ver="$(clang-cl --version | head -1)"
+          echo "$ver"
+          case "$ver" in
+            *"22.1.8"*) echo "clang-cl pin OK" ;;
+            *) echo "clang-cl did not resolve to the pinned 22.1.8 -- got: $ver"; exit 1 ;;
+          esac
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ninja-build has no first-party Windows package here; the pip wheel is
+      # a prebuilt ninja.exe, the same approach the local Windows dev flow
+      # would use if it didn't already assume Ninja is installed globally.
+      - name: Install Ninja
+        shell: bash
+        run: python -m pip install --upgrade ninja
+
+      # Same two cache scopes and key shape as the Linux matrix's step (see
+      # the rationale there); a separate namespace (win-debug, Windows) so it
+      # cannot collide with or be poisoned by a Linux leg's checkout.
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/deps
+            build/win-debug/_deps/*-src
+            build/win-debug/_deps/*-subbuild
+          key: sts-deps-${{ runner.os }}-win-debug-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'benchmarks/CMakeLists.txt', 'tools/oracle_bridge/translator/CMakeLists.txt') }}
+          restore-keys: |
+            sts-deps-${{ runner.os }}-win-debug-
+
+      # STS_BUILD_BENCHMARKS stays OFF here too -- see the Linux leg's
+      # Configure step for why (a real, pre-existing bench_throughput
+      # link defect the ON flag currently walks into on every non-LTO
+      # build, win-debug included).
+      - name: Configure
+        shell: bash
+        run: cmake --preset win-debug
+
+      - name: Build
+        shell: bash
+        run: cmake --build --preset win-debug
+
+      # Same three binaries and the same reasoning as the Linux leg's step,
+      # at their WIN32 RUNTIME_OUTPUT_DIRECTORY location (build/win-debug/bin,
+      # the CMakeLists.txt override googletest's shared-DLL layout requires --
+      # conventions §8). Run under Git-for-Windows' bash (the same shell
+      # tools/task_worktree.sh already assumes on this host), not WSL: nothing
+      # here needs WSL, and going through it would hit the §6 gitdir/DrvFs
+      # traps for no reason.
+      - name: Real runs -- fixture_oracle_test, twin_test, tripwire_test
+        shell: bash
+        run: |
+          set -e
+          for bin in fixture_oracle_test twin_test tripwire_test; do
+            echo "=== $bin (win-debug) ==="
+            "build/win-debug/bin/$bin.exe"
+          done
+
+      # PYTHON3=python: actions/setup-python does not reliably leave a
+      # `python3` shim on Windows PATH the way every apt/WSL install this repo
+      # otherwise assumes does; tools/corpus_replay.sh reads $PYTHON3 (default
+      # python3) for exactly this call site.
+      - name: Oracle corpus replay -- three corpora, three modes, injected controls
+        shell: bash
+        env:
+          PYTHON3: python
+        run: bash tools/corpus_replay.sh win-debug

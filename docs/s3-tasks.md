@@ -135,7 +135,7 @@ are S3's own.
 | **Per-step throughput attribution across S2** (×0.712 combat step / ×0.498 batch vs B5.5) | S2.45 | **S3.64** | **ACCEPTED INTO S3 SCOPE.** The named A/B is `d57e077` against `646bd18` on `bench_advance_mask` + `bench_throughput`, interleaved through `tools/bench_ab.sh` (never two sequential runs), with `RESULT: UNMEASURED` an acceptable answer. S3.64 also owns the *new* honest whole-run baseline: S2's "three-act runs/sec" was unquotable because no weight-free policy leaves Act 1 ([verification/s245-throughput.md](verification/s245-throughput.md)), and S3 is the first stage with a policy that finishes runs |
 | **Sharp Hide THORNS retaliation on the killing blow** | TE.1 (stage-b table: "UNASSIGNED — S1 pump semantics, owner-approved task") | **S3.44** | **ACCEPTED INTO S3 SCOPE.** Witness STS420252 (te1_survival_b160) already exists and is a promoted reproducer — under the 2026-09-03 evidence rule this row is unusually well placed, because the capture that proves the fix is already on disk. Act 4 sharpens the motive: `BeatOfDeathPower` fires a THORNS-typed hit after **every** card the player plays (BeatOfDeathPower.java:40-44), so terminal adjudication at the Heart is exactly this ordering question at its most consequential. **DISCHARGED by S3.44, 2026-09-03, and the "already on disk" premise did not hold.** The `te1_survival_b160` group and its promoted reproducer are gone from the §7.3 data root, and the row's own defect had already been closed by `86fc2be` (S2.43's four-arm survivor set, which names the Sharp Hide retaliation and seed STS431342) and `d57e077` (S2.49's THORNS exemption) — both later than TE.1's 2026-08-03 finding. S3.44 re-witnessed the family from a 21-instance same-shape cohort mined out of the 184 on-disk Sharp Hide captures and fixed the **residual**: the terminal resolver drained a snapshot, so an action a survivor queued while resolving was never popped — which is precisely the Heart's `BeatOfDeathPower` case. See the S3.44 Log |
 | **~60 out-of-yaml MIRROR sites carrying citations `wave3-citations` corrected in `registry/*.yaml`** | wave3-citations, 2026-07-28 (stage-b, UNASSIGNED) | **S3.65** | **ACCEPTED INTO S3 SCOPE**, together with the three sibling citation rows the same sweep left open (the nine repo-wide out-of-range `File.java:line`s, the eleven and fifteen `relics.yaml` +1000-class ones, the nine `cards.yaml` ones). Folded into one provenance task because S3 touches `src/`, `include/` and `tools/` broadly and a split-brain between the registry and its mirrors is precisely the thing that makes a re-read at task time untrustworthy. Comment/provenance only — a behaviour change discovered mid-sweep is stop-the-line, not a drive-by |
-| **Windows CI job** | build effort (stage-b, UNASSIGNED) | **S3.66** | **ACCEPTED INTO S3 SCOPE**, and promoted in importance by the evidence rule: with unit tests gone, CI's job is to prove the six presets still **build** and that the committed corpora still replay zero-diff, which is now the whole automated safety net. **Pin the LLVM version** (the googletest `/WX-` workaround exists because a clang release added a warning gtest trips over). The proposed workflow is unverified because Actions cannot run locally; S3.67 owes a green run on a real push, not a plausible YAML |
+| **Windows CI job** | build effort (stage-b, UNASSIGNED) | **S3.66** | **ACCEPTED INTO S3 SCOPE**, and promoted in importance by the evidence rule: with unit tests gone, CI's job is to prove the six presets still **build** and that the committed corpora still replay zero-diff, which is now the whole automated safety net. **Pin the LLVM version** (the googletest `/WX-` workaround exists because a clang release added a warning gtest trips over). The proposed workflow is unverified because Actions cannot run locally; S3.67 owes a green run on a real push, not a plausible YAML — **DISCHARGED by S3.66, 2026-09-03.** `ci.yml`'s `build-and-test` matrix drops `ctest` for a build + direct real-run step (`fixture_oracle_test`/`twin_test`/`tripwire_test`, plus `tools/corpus_replay.sh` on the release leg); a new `windows` job builds `win-debug` under a pinned **LLVM 22.1.8** (`ilammy/msvc-dev-cmd` for the MSVC environment, the exact tagged release installed and verified rather than trusted from the runner image) and runs the identical real-run set through Git-for-Windows' own bash, no WSL. See the S3.66 Log for the full step list, the LLVM-pin rationale, what the Windows job does not cover, and the `-DSTS_BUILD_BENCHMARKS=ON` finding it routed around (spawned as a separate suggestion rather than fixed in this task, since `benchmarks/CMakeLists.txt` is S3.64's surface, not this task's). The **green-run-on-a-real-push** half of this row's acceptance is confirmed on the landing push, not locally — see the Log |
 | **Translator: power `misc` fields other than player-owned Combust** (the five-way untagged union) | B3.7 (stage-b, UNASSIGNED; re-scoped by `wave2-harness` stage 3) | **S3.21** | **ACCEPTED INTO S3 SCOPE because Act 4 makes it live.** `GameStateConverter` emits whichever of `basePower`/`maxAmt`/`storedAmount`/`hpLoss`/`cardsDoubledThisTurn` is present first (PROTOCOL §3.14), with nothing telling a reader which. `InvinciblePower` carries a private **`maxAmt`** (InvinciblePower.java:18-29) — the union's *second* member — on a power the differ must compare every turn of the Heart fight. S3.21 owns the disambiguation as part of the redeploy (a tagged emission is the obvious fix and is a fork change, so it rides the same jar). **DISCHARGED 2026-09-03 by S3.21** — `power.misc_field` names the source field and is emitted only alongside `misc` (PROTOCOL §3.14, §5.6(c)); the translator keeps its inference on an untagged (pre-redeploy) capture and VERIFIES it against the tag on a new one, so a Combust whose tag is not `hpLoss` aborts. The tag's LIVE witness is `UNVERIFIED-until-captured` and is **S3.23**'s: exactly five classes declare the union's members (Malleable, Invincible, Flight, Combust, Echo Form) and none of them can appear in an Act-1 Ironclad run, so the preflight could not witness it and an Act-2 crossing witnesses it automatically |
 | **`--replay` compares `RunState`, not in-combat card COSTS** | S2.43 read-out ("worth its own row"); [verification/s2-verification.md](verification/s2-verification.md) §9 limit 2 | **DISCHARGED 2026-09-03 by S3.53** | **ACCEPTED INTO S3 SCOPE, and re-rated from "worth a row" to load-bearing.** A whole cost-state family reached the S2 depth wave undetected because no acceptance surface compared in-combat card costs against a capture. Under the evidence rule the replay differ *is* the acceptance surface, so a blind spot in it is a blind spot in the project's only marker of truth. S3.53 closes it and the event-grid-mask sibling below. **DISCHARGED 2026-09-03 by S3.53** — `replay_run_diff --costs` (`sts::translate::diff_combat_costs`, `combat_vitals.hpp`/`.cpp`) compares every in-combat card's live cost (`costForTurn`, XCOST/UNPLAYABLE sentinels included) per pile, grouped by the vitals compare's own (id, upgrades) key, as a sorted multiset — and UNLIKE `--vitals` a divergence reaches the exit code. Zero-diff on all three committed corpora under all three touched presets; the negative control (raising one in-HAND card's cost by 1) fails loud on every corpus (`tools/corpus_replay.sh`). What the dump cannot supply is named in the compare's own header rather than assumed away: `AbstractCard.cost`, `isCostModified`/`isCostModifiedForTurn` and `freeToPlayOnce` are never emitted, only `costForTurn`, so a mis-set persistent-cost bit is observable only through the number it later produces. A 90-capture real-run sweep outside the committed corpora (`_oracle_data/s3/s353_sweep.tsv`) found the compare has teeth: 5 of 90 captures show a real, reproducible cost divergence, every one traced to Snecko's Eye/Confusion or Blood for Blood (new Deferred rows below), none a false positive of the compare itself |
 | **Audit the event-grid legal-action masks against live captures** | raised as a background-task chip at the S2-G2 close (2026-08-27); **no ledger row was ever written for it**, which is why it is being written here | **DISCHARGED 2026-09-03 by S3.53** | **ACCEPTED INTO S3 SCOPE, with its provenance stated honestly:** this obligation exists as a one-line note in the S2 session hand-off and nowhere in the repository, so its exact original scope is not recoverable. S3.53 therefore defines it: for every screen that presents a card/relic grid (Neow, campfire Smith/Toke, event grids, the shop purge grid, the boss-relic screen), compare the **engine's legal-action mask** against the live `ChoiceScreenUtils` candidate list on a real capture, and make the comparison an acceptance surface rather than an inspection. Motivated by the same S2 findings the row above cites, plus The Library GRID identity and the Match-and-Keep index-space fixes. **DISCHARGED 2026-09-03 by S3.53** — `replay_run_diff --masks` (`tools/oracle_bridge/replay/src/grid_masks.hpp`, new file) compares the engine's legal-action mask against the live `ChoiceScreenUtils` candidate list on five screen kinds, each honouring its own index space: MASTER_DECK (positional, reusing `open_grid_session`'s ascending/pending-bottle-reversed order), CONFIRM (the display-only `isJustForConfirming` grid, discriminated from an ordinary mid-pick `confirmScreenUp` MASTER_DECK grid via the three `for_upgrade`/`for_transform`/`for_purge` flags — the first draft conflated the two and reported false 0-vs-16 divergences on every mid-selection Smith grid), COMBAT_PILE (multiset, containment for a multi-pick grid's shrinking sim list), LIBRARY_BOARD (positional, reverse roll order, the same mapping `command_map.hpp` uses to resolve a press) and BOSS_RELIC (positional against `RunState::boss_chest.relics[]`, schema v8). An unpaired screen is counted, never judged. Zero-diff on all three committed corpora; the negative control (bumping one grid row's `upgrades` by 1, skipping a `confirm_up` row) fails loud on every corpus. The 90-capture sweep found **zero** mask divergences anywhere — every compared grid record across 70 S2.V3 + 20 S3.23 captures agreed with the capture's candidate list |
@@ -2869,7 +2869,7 @@ this tree, not a Log carried forward.
   either is not comment-only); `check_doc_links.sh` clean.
   **Log:** —
 
-- **S3.66** `[ ]` ∥ **Windows CI job.** The stage-b row, promoted by the
+- **S3.66** `[x]` ∥ **Windows CI job.** The stage-b row, promoted by the
   evidence rule: with unit tests retired, CI's job is to prove the six presets
   **build** and that the committed Act-1 and three-act corpora still replay
   **zero-diff**, which is now the entire automated safety net. **Pin the LLVM
@@ -2881,7 +2881,114 @@ this tree, not a Log carried forward.
   plausible YAML; the job demonstrated to fail loudly on an injected corpus
   divergence and on a deliberately broken preset, so it is known to have
   teeth.
-  **Log:** —
+  **Log:** 2026-09-03, worktree `s366` off `dedac58` (tag `s3-g1-content`).
+  **What `ci.yml` runs now** (`.github/workflows/README.md` is the standing
+  reference; this Log is provenance for the change, not restated on every
+  future read): `stale-numbers` is untouched. `build-and-test`
+  (`[debug, asan, release]` on `ubuntu-latest`) drops its `ctest` step for
+  two real-run steps — `fixture_oracle_test`/`twin_test`/`tripwire_test`
+  invoked directly (whole-process exit code, not `gtest_discover_tests`'
+  per-CASE ctest entries) on every leg, and `tools/corpus_replay.sh release`
+  (all three corpora, all three `replay_run_diff` modes, all six injected
+  controls) on the release leg only — re-running the same committed traces
+  under debug/asan would not be independent evidence, only slower. A new
+  `windows` job builds **`win-debug`** (not `win-release`: that is LTO across
+  ~40 executables, and the six-preset byte-identical claim on record
+  — `stage-b-tasks.md`'s build/toolchain effort row — means a `win-debug`
+  zero-diff result is not weaker evidence of engine correctness, only a
+  faster one to get) under **LLVM 22.1.8, pinned exactly** — downloaded from
+  the tagged release `llvmorg-22.1.8`
+  (`https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-win64.exe`,
+  cached across runs by that exact key), installed to `C:\LLVM-22.1.8`, put
+  ahead of any VS-bundled clang-cl on `PATH`, and verified by `clang-cl
+  --version` before anything is configured. **Why pinned, and why this exact
+  version:** `tests/CMakeLists.txt`'s own long comment records that
+  googletest 1.15.2 *and* 1.17.0 fail to compile their own headers under
+  clang-cl's `/W4 /WX` once clang picked up `-Wcharacter-conversion`
+  (worked around there with a scoped `/WX-` on third-party targets only) —
+  a newer clang could add the next such warning on the runner's own
+  schedule, turning a green Windows job red for a dependency's problem, not
+  an engine regression. 22.1.8 is the exact version already verified locally
+  (same row: "clang-cl 22.1.8, presets win-debug / win-release / win-asan"),
+  so the job either matches the verified toolchain or names the mismatch
+  instead of silently drifting. `ilammy/msvc-dev-cmd@v1` supplies the
+  `cl.exe`/`link.exe`/`INCLUDE`/`LIB` half (the GitHub Actions equivalent of
+  conventions §6's local vcvars64+LLVM wrapper — persisted via
+  `$GITHUB_ENV`/`$GITHUB_PATH` instead of a per-shell wrapper, since GH
+  Actions steps already share environment). The Windows job then builds and
+  runs the identical real-run set (the three binaries directly, then
+  `tools/corpus_replay.sh win-debug` with `PYTHON3=python`) through
+  Git-for-Windows' own `bash` — the same shell `tools/task_worktree.sh`
+  already assumes exists on this host — needing **no WSL**: nothing here
+  touches the §6 WSL traps (the worktree gitdir path, `D:` DrvFs permission
+  bits), because a `windows-latest` runner has neither WSL nor a `D:` drive.
+  **`tools/corpus_replay.sh` gained an optional preset argument** (default
+  `release`, unchanged for every existing call site) so one script serves
+  both hosts — a `win-*` preset resolves its `replay_run_diff` at
+  `build/<preset>/bin/replay_run_diff.exe` (the WIN32-only
+  `CMAKE_RUNTIME_OUTPUT_DIRECTORY` override) instead of
+  `build/<preset>/tools/oracle_bridge/replay/replay_run_diff`, and a
+  `PYTHON3` env override (default `python3`) covers Windows not reliably
+  carrying a `python3` shim.
+  **A real, pre-existing defect found and routed around, not fixed here:**
+  building any non-LTO preset with `-DSTS_BUILD_BENCHMARKS=ON` fails to link
+  `bench_throughput` — `undefined reference to sts::fuzz::sim_search_pick`
+  (confirmed on Linux `debug` via GCC/ld and on `win-debug` via
+  clang-cl/lld-link) — because `benchmarks/CMakeLists.txt` compiles
+  `tools/fuzz/src/policy.cpp` directly without also compiling or linking
+  `policy_search.cpp` (S2.V2's `sim_search_pick`, which `policy.cpp` has
+  called since before this task branched); `release`'s LTO happens to
+  dead-strip the never-actually-called path before the linker needs to
+  resolve it, which is exactly why only the LTO leg was ever green. This is
+  live on `master` right now, not introduced by this task: the four most
+  recent completed GitHub Actions runs at this task's base commit
+  (`dedac58`, e.g. run `33791639895`) show `debug` and `asan` both failing
+  at **Build**, `release` failing at **Test** (the retired `ctest` step,
+  moot once this task lands). S3.66 therefore drops
+  `-DSTS_BUILD_BENCHMARKS=ON` from both jobs' Configure steps entirely —
+  benchmark compile coverage was never part of the build+real-run evidence
+  bar, and `benchmarks/CMakeLists.txt` is S3.64's surface (the throughput
+  A/B effort that already lives on `bench_throughput`), not this task's
+  (`.github/workflows/`, `tools/check_*.sh`, `tools/corpus_replay.sh`,
+  docs) — a fix was spawned as a separate suggestion
+  (`task_58a22626`) rather than made in place.
+  **Local mirrors, both hosts, exactly the commands each job runs:** WSL
+  `debug`/`asan`/`release` (`tools/wsl_run.sh --script
+  tools/build_presets.sh <preset>`) all **build** clean; `fixture_oracle_test`
+  / `twin_test` / `tripwire_test` run directly on `release` and all
+  **PASS**; `tools/corpus_replay.sh release` (WSL) exits 0, all three
+  corpora zero-diff in all three modes, all six injected controls fail
+  loud. `win-debug` (`s366env.cmd`, a scratch vcvars64+LLVM-22.1.8 wrapper,
+  not committed) **builds** clean with `-DSTS_BUILD_BENCHMARKS` left
+  unset/OFF; the same three binaries run directly from `build/win-debug/bin`
+  and all **PASS**; `PYTHON3=python bash tools/corpus_replay.sh win-debug`
+  (Git-for-Windows bash, no WSL) exits 0 with the identical zero-diff +
+  fail-loud-control result as the WSL release run, confirming the new
+  preset argument and `PYTHON3` override work end to end. `debug`/`asan`
+  WSL builds are otherwise untouched by this task's changes and served only
+  to confirm the base tree still builds before retooling. `check_stale_counts.sh`
+  and `check_doc_links.sh` both exit 0 (Git-Bash, Windows host, per their
+  own §8 requirement) against the full worktree including the new files.
+  Both workflow files parse under `yaml.safe_load`; every `tools/*.sh`/`*.py`
+  path either workflow references resolves on disk (checked
+  programmatically, not by eye).
+  **What the Windows job cannot / does not do**, named rather than assumed:
+  it verifies `win-debug` only, not `win-release`/`win-asan` — those stay a
+  hand-run bar item before landing build-adjacent work (conventions §6), as
+  they already were; it does not run the nightly sampler suite (unchanged,
+  stays in `nightly.yml`); it does not build with `STS_BUILD_BENCHMARKS`
+  (see the routed-around defect above).
+  **The ledger's own acceptance bar** ("a green run on a real push, linked
+  … demonstrated to fail loudly on an injected corpus divergence and on a
+  deliberately broken preset") is **only partly closed by this Log**: the
+  injected-corpus-divergence half is closed above (both hosts, both local
+  mirrors, all six controls). **The green-run-on-a-real-push half and the
+  deliberately-broken-preset demonstration are NOT run here** — Actions
+  cannot run locally, by the row's own premise — and are confirmed by the
+  orchestrator from the GitHub Actions API
+  (`https://api.github.com/repos/degraffa/SpeedTheSpire/actions/workflows`)
+  once this commit lands and pushes. Until that confirmation lands, treat
+  the on-push half as open evidence, not as closed by this Log.
 
 - **S3.67** `[ ]` **Verification report + CI corpus + proactive audit.** The
   S2.46 analogue. Answer the design §6 S3-G2 bar item by item with linked

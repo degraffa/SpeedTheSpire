@@ -12,13 +12,32 @@
 #   tools/wsl_run.sh --script tools/build_presets.sh release
 #   tools/wsl_run.sh --script tools/corpus_replay.sh
 #
+# An optional first argument names the preset whose replay_run_diff to use
+# (default: release, matching every call site above and every doc reference
+# that predates this flag). S3.66 needed this to point the same script at a
+# `win-*` preset from a Windows CI job without a second copy of the walk: a
+# `win-*` preset's binary lives under `bin/` with a `.exe` suffix (the
+# WIN32-only CMAKE_RUNTIME_OUTPUT_DIRECTORY override, conventions §8) rather
+# than beside its CMakeLists.txt.
+#
+#   tools/corpus_replay.sh win-release
+#
 # A RED here is a finding: fix the engine, never the corpus.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-BIN=build/release/tools/oracle_bridge/replay/replay_run_diff
-test -x "$BIN" || { echo "missing $BIN -- build the release preset first"; exit 2; }
+PRESET="${1:-release}"
+case "$PRESET" in
+    win-*) BIN="build/$PRESET/bin/replay_run_diff.exe" ;;
+    *)     BIN="build/$PRESET/tools/oracle_bridge/replay/replay_run_diff" ;;
+esac
+test -x "$BIN" || { echo "missing $BIN -- build the $PRESET preset first"; exit 2; }
 SMOKE=tools/verify_report/ci_corpus_smoke.py
-S=build/corpus_replay_scratch
+S="build/corpus_replay_scratch/$PRESET"
+# PYTHON3 override: a Windows CI runner's actions/setup-python does not
+# reliably put a `python3` shim on PATH the way every apt/WSL install here
+# does, so the Windows job can pass PYTHON3=python without a second copy of
+# either call site below.
+PYTHON3="${PYTHON3:-python3}"
 rc=0
 
 # <label> <archive> <manifest> <entries> <scratch> [extra replay flags...]
@@ -31,7 +50,7 @@ clean() {
     # to read as a divergence.
     for flag in "$@"; do extra+=("--extra-flag=$flag"); done
     echo "=== $label ==="
-    if python3 "$SMOKE" --archive "$archive" --manifest "$manifest" \
+    if "$PYTHON3" "$SMOKE" --archive "$archive" --manifest "$manifest" \
            --replay-bin "$BIN" --expect-entries "$entries" \
            --scratch "$scratch" "${extra[@]}"; then
         echo "$label: ZERO-DIFF (exit 0)"
@@ -55,7 +74,7 @@ control() {
     extra=()
     for flag in "$@"; do extra+=("--extra-flag=$flag"); done
     set +e
-    python3 "$SMOKE" --archive "$archive" --manifest "$manifest" \
+    "$PYTHON3" "$SMOKE" --archive "$archive" --manifest "$manifest" \
            --replay-bin "$BIN" --expect-entries "$entries" \
            --scratch "$scratch" --inject-divergence --inject-kind "$kind" \
            "${extra[@]}" >/dev/null 2>&1
