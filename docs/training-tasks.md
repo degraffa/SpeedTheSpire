@@ -56,7 +56,7 @@ one exists, mirroring the Stage B convention.
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
 | Distinguish capped unfinished combat from a true combat exit before assigning value targets | T2.2e | T2.2 | DISCHARGED 2026-09-07 by T2.2f for new actor output and the active generations 28–31 replay window: explicit termination provenance, default consumer refusal, exact simulator replay and whole-episode quarantine. Other historical data remains legacy/unqualified until separately replayed. The completed sharpening comparison remains historical diagnostic evidence. |
-| Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g completed versioned selected-suffix/CHOOSE encoding and exact clean-row reencoding, but both matched learners selected zero and the all-case comparison showed no robust improvement. General modal context remains incomplete. T2.2h next isolates non-policy shared-trunk gradients on the same qualified data; no increased collection, engine-pin move or promotion-gate relaxation. |
+| Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improves held-out policy CE with detached auxiliary gradients but fails playing and retention bars; auxiliary predictions worsen. T2.2i next measures the historical 192-evaluation GSH teacher configuration at fixed gen31 against the matched deployed reference; no increased collection, engine-pin move or promotion-gate relaxation. |
 | Complete the public-map planner's run-agent adapters | T3.3a | T3.3 | The bounded map primitive has explicit model callbacks and map-phase budgets only. Fitted public reveal/value adapters, shop/removal sequence search, imminent-fight combat invocation, other-phase budgets, special movement and multi-act adapters remain. Synthetic fixed-V acceptance is not evidence of stronger play; T3.4 dependencies are unchanged. |
 | Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Training side DISCHARGED 2026-09-03 (T1.1b, SpireTrainer `33a99a0`):** pin `bfd95a2` → `6c50a0b`, `ExternalProject_Add` replaced by `add_subdirectory`, `sts_engine` a real target, googletest fetched once |
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | **DISCHARGED 2026-09-04** (GT0 gate check closed by the orchestrator) | Three consecutive SCHEDULED nightly runs observed green on GitHub Actions, `.github/workflows/nightly.yml` (`event: schedule`, `conclusion: success`): 2026-09-01 https://github.com/degraffa/SpeedTheSpire/actions/runs/33507221021 (head 2e27366), 2026-09-02 https://github.com/degraffa/SpeedTheSpire/actions/runs/33627263656 (head 2e27366), 2026-09-03 https://github.com/degraffa/SpeedTheSpire/actions/runs/33752382637 (head 4366473); the workflow has 31 runs in total, every scheduled one green. `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
@@ -1725,6 +1725,30 @@ new training-quality result is claimed. Full evidence:
   `t2-2g-actor-integration.md`, `t2-2g-modal-experiment.md`, and
   `t2-2g-learning-diagnosis.md`.
 
+  **2026-09-07 (T2.2h gradient routing) — verified; quality bars unmet.**
+  Default-off training-only auxiliary detachment preserves head learning and
+  canonical inference. Real-row gradient/byte checks and debug/ASan native
+  compatibility pass. Matched encoding-2 learners preserve all settings and
+  qualified data: control selects zero after 481 updates; candidate selects
+  index 840 after running 1,200 updates, improving held-out policy CE from
+  1.505837 to 1.504774. Saved-held-row value, HP and death proper scores worsen;
+  these are historical teacher outcomes, not candidate closed-loop calibration.
+
+  Exact control/zero identity permits reuse of the bound reference evaluation;
+  one new complete 2,500-case candidate evaluation gives primary policy bounds
+  [-0.0070911024, +0.0013088976], lower 99% CI
+  [-0.01173821433, -0.00269158396], p=0.9999. This establishes no robust
+  improvement, not a proven regression under unknown unfinished outcomes.
+  Fair retention outer bounds are [-64.95%, +10.60%], below 60%; the original
+  bars remain unmet. Retain gen31 encoding 1, keep routing disabled by default,
+  and do not continue this unchanged learner recipe. T2.2 remains `[~]`.
+  T2.2i next directly measures the collection teacher's 192-evaluation GSH
+  configuration at fixed historical gen31/encoding 1, using the same suite,
+  pin, runtime and resolved-outcome rules. It is an algorithm-plus-budget
+  diagnosis, not a reproduction of all historical targets or a promotion.
+  Reports under `SpireTrainer/docs/verification/`:
+  `t2-2h-gradient-routing.md` and `t2-2h-matched-experiment.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -1952,6 +1976,11 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-07 — T2.2h isolates auxiliary gradients and improves held-out
+  imitation loss without meeting playing or retention requirements. Keep the
+  reference and original gates; T2.2i next measures the collection teacher
+  configuration directly before choosing another training change.
 
 - 2026-09-07 — T2.2g completes the optional-hand observation ablation on
   qualified data without demonstrating policy improvement. T2.2h separately
