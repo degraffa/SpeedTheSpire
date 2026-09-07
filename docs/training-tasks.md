@@ -57,6 +57,7 @@ one exists, mirroring the Stage B convention.
 |---|---|---|---|
 | Distinguish capped unfinished combat from a true combat exit before assigning value targets | T2.2e | T2.2 | DISCHARGED 2026-09-07 by T2.2f for new actor output and the active generations 28–31 replay window: explicit termination provenance, default consumer refusal, exact simulator replay and whole-episode quarantine. Other historical data remains legacy/unqualified until separately replayed. The completed sharpening comparison remains historical diagnostic evidence. |
 | Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improves held-out policy CE with detached auxiliary gradients but fails playing and retention bars; auxiliary predictions worsen. T2.2i next measures the historical 192-evaluation GSH teacher configuration at fixed gen31 against the matched deployed reference; no increased collection, engine-pin move or promotion-gate relaxation. |
+| Complete branch-advantage macro adapters and actor consumption | T2.4 | T2.4 | The bounded card-reward collector, versioned record and strict standalone CPU smoke consumer have real-run acceptance. Shop/Neow collection adapters and live combat-actor consumption remain unimplemented; the generic legal-pair API alone does not discharge them. Parent T2.4 remains in progress and no macro-policy or full-run quality claim follows. |
 | Complete the public-map planner's run-agent adapters | T3.3a | T3.3 | The bounded map primitive has explicit model callbacks and map-phase budgets only. Fitted public reveal/value adapters, shop/removal sequence search, imminent-fight combat invocation, other-phase budgets, special movement and multi-act adapters remain. Synthetic fixed-V acceptance is not evidence of stronger play; T3.4 dependencies are unchanged. |
 | Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Training side DISCHARGED 2026-09-03 (T1.1b, SpireTrainer `33a99a0`):** pin `bfd95a2` → `6c50a0b`, `ExternalProject_Add` replaced by `add_subdirectory`, `sts_engine` a real target, googletest fetched once |
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | **DISCHARGED 2026-09-04** (GT0 gate check closed by the orchestrator) | Three consecutive SCHEDULED nightly runs observed green on GitHub Actions, `.github/workflows/nightly.yml` (`event: schedule`, `conclusion: success`): 2026-09-01 https://github.com/degraffa/SpeedTheSpire/actions/runs/33507221021 (head 2e27366), 2026-09-02 https://github.com/degraffa/SpeedTheSpire/actions/runs/33627263656 (head 2e27366), 2026-09-03 https://github.com/degraffa/SpeedTheSpire/actions/runs/33752382637 (head 4366473); the workflow has 31 runs in total, every scheduled one green. `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
@@ -1758,7 +1759,7 @@ new training-quality result is claimed. Full evidence:
   set (reanalyzed targets refresh; quarantined range excluded from the
   next training run's manifest). **Log:** —
 
-- **T2.4** `[ ]` ∥ **Branch-K counterfactual tooling.** Common-random-
+- **T2.4** `[~]` ∥ **Branch-K counterfactual tooling.** Common-random-
   number paired branching at macro decisions (card reward take-vs-skip,
   shop buy-vs-pass, Neow options): identical sampled worlds across
   branches, per-decision advantage estimates into the trajectory schema
@@ -1768,7 +1769,24 @@ new training-quality result is claimed. Full evidence:
   **Deps:** T2.1 **Acceptance:** on ≥ 1k paired card-reward branches, the
   paired estimator's variance reduction vs unpaired is measured and
   reported; records land in the schema and are consumed by a smoke
-  training run. **Log:** —
+  training run.
+  **Bounded milestone (2026-09-07):** card-reward collection and standalone
+  schema-consumption acceptance are complete. Shop/Neow collection adapters
+  and live combat-actor consumption remain open; the parent stays `[~]`.
+  **Log:** Fixed take-versus-decline continuation on 1,024 distinct real reward
+  roots produced 989 fully resolved records and 3,956 paired comparisons.
+  Mean within-root variance was 0.00900801 with common random numbers versus
+  0.01905374 with independent worlds (52.7231% observed reduction), conditional
+  on the identical complete cohort. The 35 act-change roots receive no labels.
+  A new branch record kind/layout leaves DecisionRecord and container versions
+  unchanged. Strict PublicView-only CPU ridge consumption groups the split by
+  original source seed; its small held-out MSE change is tooling evidence only.
+  Targeted debug/ASan builds and full real collections passed: shard/roots are
+  byte-identical, all trial values/identities agree after parsing, with 12 CRT
+  decimal-format differences recorded. The first skip-reopening comparison is
+  preserved as rejected evidence. No tests, engine change or promotion.
+  Report: `SpireTrainer/docs/verification/t2-4-branch-advantage.md`.
+
 
 ### GT2 `[ ]` **Gate: combat agent (E2 / M8-equivalent)**
 **Deps:** T2.2, T2.3
