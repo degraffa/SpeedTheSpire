@@ -55,6 +55,7 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| Distinguish capped unfinished combat from a true combat exit before assigning value targets | T2.2e | T2.2 | The actor currently values every nondead finish with V0s, including decision-cap termination in active combat. Existing CSVs lack a termination reason; real cap-hit policy cases include zero-turn, zero-damage stalls. Add explicit exit/cap/failure provenance, refuse unqualified non-exit targets, audit affected saved data, and trace modal choice progress before another learner experiment or increased generation volume. Preserve the completed target-sharpening comparison as historical diagnostic evidence. |
 | Complete the public-map planner's run-agent adapters | T3.3a | T3.3 | The bounded map primitive has explicit model callbacks and map-phase budgets only. Fitted public reveal/value adapters, shop/removal sequence search, imminent-fight combat invocation, other-phase budgets, special movement and multi-act adapters remain. Synthetic fixed-V acceptance is not evidence of stronger play; T3.4 dependencies are unchanged. |
 | Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Training side DISCHARGED 2026-09-03 (T1.1b, SpireTrainer `33a99a0`):** pin `bfd95a2` → `6c50a0b`, `ExternalProject_Add` replaced by `add_subdirectory`, `sts_engine` a real target, googletest fetched once |
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | **DISCHARGED 2026-09-04** (GT0 gate check closed by the orchestrator) | Three consecutive SCHEDULED nightly runs observed green on GitHub Actions, `.github/workflows/nightly.yml` (`event: schedule`, `conclusion: success`): 2026-09-01 https://github.com/degraffa/SpeedTheSpire/actions/runs/33507221021 (head 2e27366), 2026-09-02 https://github.com/degraffa/SpeedTheSpire/actions/runs/33627263656 (head 2e27366), 2026-09-03 https://github.com/degraffa/SpeedTheSpire/actions/runs/33752382637 (head 4366473); the workflow has 31 runs in total, every scheduled one green. `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
@@ -1643,6 +1644,32 @@ new training-quality result is claimed. Full evidence:
   establish an untouched-population result. No new training or live capture
   is claimed. Report: `SpireTrainer/docs/verification/t2-2d-distillation-diagnosis.md`.
 
+  **2026-09-07 (T2.2e matched sharpening) — lever failed; retain gen31.**
+  Two learner arms used the prescribed gen31 input, generations 28–31,
+  1,200-step cap and unchanged architecture, other losses, engine pin and
+  actor settings. Squared targets improved their own held-out policy CE but
+  not the deployed policy: recorded V0s delta versus the fresh control is
+  -0.001248926, 99% CI [-0.004120206, +0.001615202], one-sided p=0.87045.
+  Fair search-gain retention is -6.58% versus control 6.31%, below 60%.
+  Search still beats policy; policy does not beat the original scripted
+  baselines or the fair blind baseline at the required significance.
+  All input hashes, row joins and complete suite identities were verified.
+  The reused suite is diagnostic, not a promotion population; no checkpoint
+  was promoted and no generation was collected.
+
+  The disagreement audit also found that cap-hit unfinished episodes receive
+  purported exit scores. Removing the union of policy cap-hit cases leaves
+  a post-hoc paired delta -0.000543372 (99% CI [-0.003355442, +0.002196495],
+  p=0.6982), still no demonstrated improvement. Neither analysis is a run
+  win-rate result. Saved rows distinguish real token truncation, omitted
+  public context, poor teacher-action fitting and worsened value/auxiliary
+  generalization; observed search losses do not alone prove bad teacher
+  decisions. Report: `SpireTrainer/docs/verification/t2-2e-target-sharpening.md`.
+  **Inherited (T2.2e):** fix and validate episode termination/target provenance,
+  audit cap-affected data, and trace stalled choices before another learner
+  lever or increased training volume, as assigned in the deferred table.
+  T2.2 remains `[~]`; T2.3 and downstream gates are not bypassed.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -1870,6 +1897,12 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-07 — T2.2e executes the single matched target-sharpening comparison,
+  retains gen31 after failed quality bars, and records a separate capped
+  episode scoring defect for T2.2. The original diagnostic statistic is
+  preserved with a clearly labeled cap-exclusion sensitivity; no acceptance
+  bar, engine pin or promotion gate changed.
 
 - 2026-09-07 — T3.3a starts the eligible GT1-dependent run planner as a
   bounded map primitive, with remaining adapters explicitly assigned to
