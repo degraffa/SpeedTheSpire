@@ -131,6 +131,7 @@ are S3's own.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| Terminal drain filters actions queued by non-damage survivors too early | S3.62 source-order audit, 2026-09-07 | **S3.62** | Scope a source-derived repair distinguishing actual `clearPostCombatActions` calls and their early returns, then obtain a live witness. A constructed Sentinel/Corruption/Panache lethal Heart play retains energy 3 instead of source-traced 5; HP/block agree. No engine repair or live observation is claimed. [Report](verification/s3-heart-terminal-order-audit.md). |
 | **Keys as obtainable content** — emerald-elite node flag + `EMERALD_KEY` reward row; `SAPPHIRE_KEY` linked-row claim semantics | stage-b design §1.1 "Out" / s2-design §1; owner-directed to S3 planning 2026-08-10 | **DISCHARGED 2026-09-03 by S3.11** (engine surface), with its behaviour evidence `UNVERIFIED-until-captured` under **S3.23** — see the two forward rows below the rule | **ACCEPTED INTO S3 SCOPE, and the row's premise is corrected.** The row says "the mapRng draw is already modelled — combat_rewards.hpp:107-112 records that only the node flag is missing". The node flag is **not** missing: `setEmeraldElite`'s chosen node has been stored as `emerald_x`/`emerald_y` since the S1 map work (map_rooms.hpp:226-243, :414-435) and the entry buff is applied (`run_advance.cpp` step (9)). What is actually owed is (a) the `EMERALD_KEY` reward row at the burning elite (MonsterRoomElite.java:90,94-98), (b) the sapphire chest's real two-way claim semantics (RewardItem.java:85-90, :298-301, :317-326), and (c) the item the row never mentions — the `!Settings.hasEmeraldKey` guard that **removes the `mapRng` draw from every act generated after the key is taken** (AbstractDungeon.java:543), which changes later maps and is S3's highest-risk trap (design §5 trap 1). Ruby is already live. The S2 row stays as written (it is history); s3-design §9 carries the correction |
 | **The Courier's restocked colored-card identity** (the one unseeded value in scope) | S1 shop model (`shop.hpp` `kShopRestockedUnknownCard`); owner-directed 2026-08-10 to a post-S2-G2 task | **S3.24** | **ACCEPTED INTO S3 SCOPE, sized to ride the one fork redeploy S3 is doing anyway** — which is exactly the condition the row set ("ride it with one that is happening anyway"). Both halves land together: sim-side a dedicated seeded stream reproducing retail's uniform draw over the eligible (rarity, type) pool, fork-side one patched call consuming the same stream under the patched-fork oracle-contract precedent. S3.21 carries the patch into the redeploy; S3.24 owns the sim half and the zero-diff shop capture that witnesses it. **DISCHARGED 2026-09-03 by S3.24** — both halves landed in one commit: `courier_restock_stream` (shop.hpp, a derived stream, no schema byte) and `patches/CourierRestockSeedPatch` (flag `oracleCourierRestockSeed`), with `kShopRestockedUnknownCard` and its buy-refusal deleted. Two live tails remain, each owned elsewhere and named in the S3.24 Log: the jar redeploy + `PROTOCOL.md` §5.5 are **S3.21**'s (hand-over in the fork tree), and the witnessing restock capture is **S3.62**'s, so the S3.24 row stands `UNVERIFIED-until-captured` |
 | **Per-step throughput attribution across S2** (×0.712 combat step / ×0.498 batch vs B5.5) | S2.45 | **S3.64** | **ACCEPTED INTO S3 SCOPE.** The named A/B is `d57e077` against `646bd18` on `bench_advance_mask` + `bench_throughput`, interleaved through `tools/bench_ab.sh` (never two sequential runs), with `RESULT: UNMEASURED` an acceptable answer. S3.64 also owns the *new* honest whole-run baseline: S2's "three-act runs/sec" was unquotable because no weight-free policy leaves Act 1 ([verification/s245-throughput.md](verification/s245-throughput.md)), and S3 is the first stage with a policy that finishes runs. **DISCHARGED 2026-09-03 by S3.64, and the ratios stay UNATTRIBUTED — that is the finding, not a shortfall.** The named A/B ran at n=5, 8 and 12 interleaved pairs on both benchmarks and answered `RESULT: UNMEASURED` every time: the A/B windows landed under host CPU 90-98% (a sibling WSL build under `vmmemWSL`, independently corroborated by a cross-worktree `ccache` hit against `_wt/s3g1` during S3.64's own `debug` rebuild), 4-8× this box's own ±2.8% calibration spread, and growing `-n` did not converge toward significance. The ×0.712/×0.498 ratios remain attributed only to S2.45's leading candidate (state size against the 96 MiB L3 — `sizeof(CombatState)` unmoved at 8,088 B), still unconfirmed. The whole-run baseline half re-measured S2.45's exact pair fresh on the S3 tree — corpus-conditional runs/sec 126,034 + length-independent run-steps/sec 5,929,760, all three floors HOLDING by ≥98× at the worst reading, `act2_runs=0 act3_runs=0` unchanged — and states plainly that this reruns the *existing* `PolicyKind::RANDOM` `bench_throughput` harness, not a new benchmark over a policy that actually finishes three-act runs (SIM_SEARCH does that live, in campaigns, already; wiring it into `benchmarks/` is future work, named rather than assumed done). A repo-hygiene finding rode along: `debug`/`asan` with `-DSTS_BUILD_BENCHMARKS=ON` could not link `bench_throughput` (`undefined reference to sts::fuzz::sim_search_pick`, only `release`'s LTO proved the call dead) — fixed by adding `policy_search.cpp` as a second source, the same reason CI had already dropped the flag (S3.66, `3d1906c`, same day). Full methodology, every round, and the new `encode_public_view`/`public_hash` per-state number (median 1.09 us on `PublicView` v7): [verification/s3-64-throughput.md](verification/s3-64-throughput.md) |
@@ -2846,7 +2847,11 @@ this tree, not a Log carried forward.
   converts it into an exact per-row disposition with a recorded reachability
   argument — no wildcards.
   **Inherited:** the S3.11 / S3.24 / S3.32 / S3.33 / S3.41 / S3.42 / S3.43
-  capture debts, each named in its own Log. **From S3.61:** the triple list
+  capture debts, each named in its own Log. **Source-order follow-up
+  (2026-09-07):** separately scope the terminal-drain clearing repair and
+  witness Sentinel exhaust energy before lethal Heart retaliation; the
+  [source-order report](verification/s3-heart-terminal-order-audit.md) and
+  deferred row retain this unverified obligation. **From S3.61:** the triple list
   `D:\STS_BG_Mod\_oracle_data\s3\s361_triples.tsv` and its 6 scripts under
   `D:\STS_BG_Mod\_oracle_data\s3\s361_scripts\` — two independent Act-4 Door
   crossings on STS511413 (`sim_search_keys`/ps76 and the escalation kind
@@ -2897,6 +2902,15 @@ this tree, not a Log carried forward.
   reachability claim. It identifies separate bridge input and simulator
   Smoke Bomb eligibility defects; their repair reports and outstanding live
   witnesses are linked there. No new live capture or S3-G2 closure is claimed.
+
+  **Log (2026-09-07, targeted terminal-order audit):** Complete source methods
+  and a constructed simulator play identify premature filtering of actions
+  queued by non-damage terminal survivors. Sentinel's energy is abandoned
+  before Beat of Death, although the source executes it first. The bounded
+  saved-capture scan supplies no matching live witness. Engine code is
+  unchanged; the separately scoped repair and witness remain in the deferred
+  table and Inherited line. The orchestrator independently reviewed the
+  relevant source methods and queue logic. [Evidence and exact limits](verification/s3-heart-terminal-order-audit.md).
 
 - **S3.63** `[x]` ∥ **Distributional (tier-4) additions.** Pre-registered
   hypotheses, Holm-corrected as one family with the B5.3/S2.44 α discipline
@@ -3325,6 +3339,10 @@ land as a debt, and S2's own experience is that the campaign is where the real
 findings are.
 
 ## Change log
+
+- 2026-09-07 — targeted terminal-order audit narrows the earlier source
+  consistency finding and assigns the premature survivor-filtering repair
+  and live-witness debt to S3.62. No frozen mechanic or gate changed.
 
 - 2026-09-07 — owner-directed source/manual audit establishes provisional
   confidence and identifies concrete repairs without waiting for full oracle
