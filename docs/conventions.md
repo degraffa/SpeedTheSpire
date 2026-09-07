@@ -387,32 +387,35 @@ where `clang-cl` is not resolvable (no vcvars, LLVM not on PATH) aborts at
 a fixed shell then succeeds but skips first-run flag initialization, so
 `CMAKE_CXX_FLAGS` stays empty instead of CMake's MSVC default
 `/DWIN32 /D_WINDOWS /EHsc` — nothing in this repo sets `/EHsc` itself. Two
-agents lost time to this on 2026-08-03 (rule of two). Rule: if a `win-*`
-configure ever fails on compiler detection, **delete that preset's build dir**
-before reconfiguring; a fresh configure restores the defaults. Verify with
-`grep CMAKE_CXX_FLAGS: build/<preset>/CMakeCache.txt` — it must contain
-`/EHsc`.
+agents lost time to this on 2026-08-03 (rule of two). It recurred on
+2026-09-07 when a bare build triggered implicit reconfiguration after a merge.
 
-Where the fixed shell comes from (three more agents re-derived this on
-2026-08-09, so it is now written down): `clang-cl` resolves only after **both**
-`"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"`
-has run **and** `C:\Program Files\LLVM\bin` is prepended to `PATH`. A plain
-PowerShell/cmd session has neither. The working pattern is a two-line wrapper
+**ELIMINATED 2026-09-07: always use `tools/win_build.cmd` for local Windows
+builds.** It initializes vcvars64 and puts LLVM ahead of PATH on every call,
+then configures and builds one preset. It announces its worktree/toolchain,
+never runs ctest, and refuses an existing cache without `/EHsc` before changing
+anything. Move aside exactly the named preset directory to an unused backup
+path and rerun for a fresh configure; the helper never deletes build output.
+The guard also rejects a partial cache with no `CMAKE_CXX_FLAGS` entry.
+A nonblocking `build/.win_build.lock` permits only one helper per worktree;
+a second invocation refuses instead of running another Ninja against it.
 
 ```bat
-@echo off
-call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
-set "PATH=C:\Program Files\LLVM\bin;%PATH%"
-cd /d <your worktree>
-%*
+tools\win_build.cmd win-debug
+tools\win_build.cmd win-asan
+tools\win_build.cmd win-release --target replay_run_diff --parallel 4
 ```
 
-invoked as `wrapper.cmd cmd /c "cmake --preset win-debug && ..."`. Note
-`cmake --build` on an already-configured tree does *not* need the wrapper
-(the cache pins the compiler path) — it is **configure** that does, and a
-`cmake --build` that triggers an implicit reconfigure (a `CMakeLists.txt`
-edit, a preset change) needs it for the same reason. That implicit-reconfigure
-case is exactly how the trap fires after a merge.
+Arguments after the preset pass to `cmake --build`. Run `--help` for usage.
+The defaults are Visual Studio 2019 Community's `vcvars64.bat` and
+`C:\Program Files\LLVM\bin`; if that Visual Studio path is absent, the helper
+uses the installed `vswhere.exe` to locate the latest C++ toolchain.
+`STS_VCVARS64` and `STS_LLVM_BIN` override those paths. CMake, Ninja and Python
+keep the usual PATH resolution; no dependency is installed by the helper.
+
+A previously configured tree is not a reason to bypass the helper: a
+`CMakeLists.txt` or preset change can make `cmake --build` reconfigure, which
+needs exactly the same environment as an explicit configure.
 
 #### Two build commands in one build tree corrupt each other's objects
 

@@ -11,9 +11,8 @@
 #   tools/wsl_run.sh --script tools/build_presets.sh            # debug asan release
 #   tools/wsl_run.sh --script tools/build_presets.sh release    # just one
 #
-# The Windows half is `cmake --preset win-X && cmake --build --preset win-X`
-# through a vcvars64 + LLVM wrapper (conventions 6); it needs no script because
-# it does not cross the WSL boundary.
+# The Windows half is `tools/win_build.cmd win-X` (conventions 6), which
+# initializes vcvars64 + LLVM before every configure and build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 presets=("$@")
