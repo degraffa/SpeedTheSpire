@@ -2873,9 +2873,15 @@ this tree, not a Log carried forward.
   [Map-fix verification](verification/s3-62-map-fix.md) records the original
   live map witness, source rereads, all six freshly re-emitted S3.61 triples
   with unchanged final hashes and actions, and the build/corpus evidence.
-  Fresh original-capture replay also exposed a separate translator omission:
-  `act4_floor_base` remains zero in translation and differs from the simulator's
-  52 at four Act-4 records. The orchestrator owns its fix and integrated replay.
+  Fresh original-capture replay also exposed a separate translator omission,
+  now corrected: `act4_floor_base` was left zero instead of derived from the
+  capture's act/ascension anchors. The [translator-fix report](verification/s3-62-translator-base.md)
+  records the four original mismatches and the corrected 780-record replay:
+  zero differences, two reported key-animation races, artifact exhausted.
+  It also corrects the S3-G1 report's ordinary-Ironclad Echo Form capture
+  premise: the card is BLUE and unsupported by the current cross-colour
+  reward model. S3.62 owns its exact reachability disposition; no capture
+  debt is silently discharged by that factual correction.
   The existing post-fix capture exhausts at floor 51 before Act 4; no complete
   live post-fix capture or terminal campaign acceptance is claimed. Breadth,
   both ascension-band floor pairs, all named combat/reward witnesses and the
@@ -3308,6 +3314,13 @@ land as a debt, and S2's own experience is that the campaign is where the real
 findings are.
 
 ## Change log
+
+- 2026-09-07 — S3.62 replay triage populated the translator's missing Act-4
+  floor-base byte from capture anchors. The losing S3-G1 verification report
+  also called Echo Form an Ironclad card; its BLUE constructor and the
+  existing Prismatic Shard model prove ordinary supported breadth cannot
+  witness it. Corrected that premise and explicitly assigned the unchanged
+  unverified debt's per-row disposition to S3.62. No frozen mechanic changed.
 
 - 2026-09-03 — ledger created as the S3 planning exercise the S2-G2 gate Log
   opened. Phases S3.1–S3.6, gates S3-G1/S3-G2, the Wave-1 id blocks, and the
