@@ -55,6 +55,7 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| Complete the public-map planner's run-agent adapters | T3.3a | T3.3 | The bounded map primitive has explicit model callbacks and map-phase budgets only. Fitted public reveal/value adapters, shop/removal sequence search, imminent-fight combat invocation, other-phase budgets, special movement and multi-act adapters remain. Synthetic fixed-V acceptance is not evidence of stronger play; T3.4 dependencies are unchanged. |
 | Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Training side DISCHARGED 2026-09-03 (T1.1b, SpireTrainer `33a99a0`):** pin `bfd95a2` → `6c50a0b`, `ExternalProject_Add` replaced by `add_subdirectory`, `sts_engine` a real target, googletest fetched once |
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | **DISCHARGED 2026-09-04** (GT0 gate check closed by the orchestrator) | Three consecutive SCHEDULED nightly runs observed green on GitHub Actions, `.github/workflows/nightly.yml` (`event: schedule`, `conclusion: success`): 2026-09-01 https://github.com/degraffa/SpeedTheSpire/actions/runs/33507221021 (head 2e27366), 2026-09-02 https://github.com/degraffa/SpeedTheSpire/actions/runs/33627263656 (head 2e27366), 2026-09-03 https://github.com/degraffa/SpeedTheSpire/actions/runs/33752382637 (head 4366473); the workflow has 31 runs in total, every scheduled one green. `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
 | Stored records carry `outcome_kind = kOpen` and zeroed outcome/value/aux targets — an append-only writer cannot go back once a run ends | T1.2 | T2.3 (**narrowed 2026-09-03 by T1.4s**) | Filling them is a read-old-shard / write-new-shard pass, which is exactly the shape of T2.3's **reanalyze** operation, so T1.2 deliberately did not half-build it. `RecordedRunStats::outcome_kind` carries the answer for a caller that wants it immediately. A loader must never read `outcome_return` from a `kOpen` record as if it were a target. **T1.4s discharges this for OFFLINE producers** (`floor_rollout.hpp`): a run's rows are held in memory until the run terminates, stamped with the outcome block and `value_target` there, and only then appended — nothing on disk is rewritten and the buffer is bounded by one run's floor count. What remains for T2.3 is the ONLINE case, an actor that must publish rows before its run ends, which is the only one that genuinely needs a rewrite pass. `outcome_return` is still 0 in T1.4s's shards, and correctly so: `weights_version` is `none`, i.e. no currency is named. |
@@ -1705,13 +1706,26 @@ See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
   per-encounter-mean baseline; sim-rollout validation report quantifies
   patch/skill bias on ≥ 20 reconstructed states. **Log:** —
 
-- **T3.3** `[ ]` ∥ **Run-level planner.** Sparse expectimax over the
+- **T3.3** `[~]` ∥ **Run-level planner.** Sparse expectimax over the
   visible act-map DAG using public reveal distributions with V at leaves;
   shop/removal small sequence search; combat-search invocation policy for
   imminent fights; adaptive budget rules (plan §3.2).
   **Deps:** GT1 **Acceptance:** on constructed map scenarios with known
   optimal routes under a fixed V, the planner recovers them; budget
-  telemetry (evals per decision by phase) emitted. **Log:** —
+  telemetry (evals per decision by phase) emitted.
+  **Inherited (T3.3a):** complete the fitted public model, shop/removal and
+  imminent-combat adapters, all-phase budget telemetry and special/multi-act
+  movement obligations in the deferred table before claiming integration.
+  **Log (2026-09-07, T3.3a):** Bounded public-DAG expectimax now backs up
+  explicit reveal distributions through fixed V, keeps root comparisons at
+  a common completed depth, and emits adaptive budget telemetry. Printed
+  external constructed scenarios agree with analytical route values. Real
+  A20 seeds [101,117) produced identical debug/ASan output with 98 map
+  decisions and no step caps. Values are synthetic; no stronger-play claim.
+  An initial assertion-based prototype was discarded under the owner's
+  no-unit-tests direction; accepted evidence and the corrected relative-edge
+  interpretation are recorded in the report. The parent task remains
+  incomplete and T3.4 stays gated. Report: `SpireTrainer/docs/verification/t3-3a-route-planner.md`.
 
 - **T3.4** `[ ]` **Act-1 full-run training loop.** Bootstrapped-horizon
   full-run generation (exit states valued by V1) integrating T3.1–T3.3 +
@@ -1856,6 +1870,11 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-07 — T3.3a starts the eligible GT1-dependent run planner as a
+  bounded map primitive, with remaining adapters explicitly assigned to
+  T3.3. Its synthetic acceptance value is not a learned policy or a gate
+  relaxation.
 
 - 2026-09-07 — T2.2d diagnosis records the simulator-only path forward and
   the saved-shard target audit. T2.2 remains `[~]`; target sharpening is a
