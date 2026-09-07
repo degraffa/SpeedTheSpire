@@ -2832,7 +2832,7 @@ this tree, not a Log carried forward.
   report). Full numbers, tables and commands:
   [verification/s3-61-reach.md](verification/s3-61-reach.md).
 
-- **S3.62** `[ ]` **Oracle campaigns: breadth + Act-4 depth.** The design §6
+- **S3.62** `[~]` **Oracle campaigns: breadth + Act-4 depth.** The design §6
   S3-G2 evidence. Breadth: ≥ 2,000 distinct mixed-policy A20 attempts, all
   triage per the Stage B process, zero untriaged, zero open. Depth, scheduled
   off S3.61's triples: the `Spire Heart` dialog on **both** branches (a key
@@ -2865,7 +2865,21 @@ this tree, not a Log carried forward.
   deterministic dashboard regenerating byte-identically over unchanged inputs
   and reopening every artifact; the `UNVERIFIED-until-captured` list from
   S3-G1 reduced to **zero**; the coverage join exact.
-  **Log:** —
+  **Log (2026-09-07, resumed; campaign acceptance remains open):** The existing
+  `c0e5212` planner/search map-floor correction was discovered committed on
+  `s362` without a ledger entry. Preserved that commit and repaired the missing
+  bookkeeping forward, rather than amending history; this is an explicit
+  exception to the usual one-task/one-commit shape for the inherited incident.
+  [Map-fix verification](verification/s3-62-map-fix.md) records the original
+  live map witness, source rereads, all six freshly re-emitted S3.61 triples
+  with unchanged final hashes and actions, and the build/corpus evidence.
+  Fresh original-capture replay also exposed a separate translator omission:
+  `act4_floor_base` remains zero in translation and differs from the simulator's
+  52 at four Act-4 records. The orchestrator owns its fix and integrated replay.
+  The existing post-fix capture exhausts at floor 51 before Act 4; no complete
+  live post-fix capture or terminal campaign acceptance is claimed. Breadth,
+  both ascension-band floor pairs, all named combat/reward witnesses and the
+  complete Heart kill remain owed under the unchanged Acceptance block.
 
 - **S3.63** `[x]` ∥ **Distributional (tier-4) additions.** Pre-registered
   hypotheses, Holm-corrected as one family with the B5.3/S2.44 α discipline
