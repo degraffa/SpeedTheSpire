@@ -2,6 +2,7 @@ package communicationmod;
 
 import basemod.ReflectionHacks;
 import com.badlogic.gdx.Gdx;
+import com.megacrit.cardcrawl.actions.utility.HandCheckAction;
 import com.megacrit.cardcrawl.cards.AbstractCard;
 import com.megacrit.cardcrawl.cards.CardQueueItem;
 import com.megacrit.cardcrawl.characters.AbstractPlayer;
@@ -233,6 +234,11 @@ public class CommandExecutor {
             if(target_monster == null) {
                 throw new InvalidCommandException("Selected card requires an enemy target.");
             }
+            // AbstractPlayer.playCard (AbstractPlayer.java:1289-1294): the
+            // direct queue path must preserve targeted play's facing change.
+            if (AbstractDungeon.player.hasPower("Surrounded")) {
+                AbstractDungeon.player.flipHorizontal = target_monster.drawX < AbstractDungeon.player.drawX;
+            }
             AbstractDungeon.actionManager.cardQueue.add(new CardQueueItem(card, target_monster));
         } else {
             AbstractDungeon.actionManager.cardQueue.add(new CardQueueItem(card, null));
@@ -300,7 +306,15 @@ public class CommandExecutor {
                 } else {
                     target_monster = AbstractDungeon.getCurrRoom().monsters.monsters.get(monster_index);
                 }
+                // PotionPopUp.updateTargetMode (PotionPopUp.java:197-204):
+                // face the target before use, then enqueue the combat hand check.
+                if (AbstractDungeon.player.hasPower("Surrounded")) {
+                    AbstractDungeon.player.flipHorizontal = target_monster.drawX < AbstractDungeon.player.drawX;
+                }
                 selectedPotion.use(target_monster);
+                if (AbstractDungeon.getCurrRoom().phase == AbstractRoom.RoomPhase.COMBAT) {
+                    AbstractDungeon.actionManager.addToBottom(new HandCheckAction());
+                }
             } else {
                 selectedPotion.use(AbstractDungeon.player);
             }

@@ -132,7 +132,7 @@ bool use_potion(CombatState& s, PotionId id, uint8_t target) noexcept {
         return false;
     }
     // S3.42 -- THE PLAYER'S FACING, the potion twin of AbstractPlayer.playCard.
-    // PotionPopUp.updateInput (:197-202), the targeted-potion arm:
+    // PotionPopUp.updateTargetMode (:197-202), the targeted-potion arm:
     //     if (this.hoveredMonster != null) {
     //         if (AbstractDungeon.player.hasPower("Surrounded"))
     //             player.flipHorizontal = hoveredMonster.drawX < player.drawX;
