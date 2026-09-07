@@ -213,7 +213,7 @@ the bar's literal wording.
 | S3.42's two kill-order captures + the facing derivation's live-capture half | S3.42 `[x]` | UNVERIFIED-until-captured — discharges trap 7; the derivation itself is proven from source + a scripted standalone-combat witness, so only the *capture* half is owed |
 | S3.43's one Heart capture (Invincible pool exceed + restore, `buffCount` ≥ 3) | S3.43 `[x]` | UNVERIFIED-until-captured — also the first witness of the `misc_field` tag's `Invincible`/`maxAmt` member |
 | S3.44's Beat of Death instance on a lethal turn | S3.44 `[x]` | UNVERIFIED-until-captured — the engine fix (the drain rebuild at `resolve_pending_post_combat_actions_at_terminal`) is proven correct on 21 on-disk Sharp Hide captures + the fixture replay; only the Act-4-specific consumer (Beat of Death THORNS on a killing card) has no capture |
-| `EchoForm`/`cardsDoubledThisTurn`, the fifth `misc_field` union member (S3.21) | **no ledger row currently owns this** | UNVERIFIED-until-captured — unlike the other four union members this is **not** Act-4-gated (Echo Form is an ordinary Ironclad rare power); it needs only an ordinary capture in which the player plays Echo Form and doubles a card. Flagged here as a gap: S3.62's breadth campaign (≥ 2,000 mixed-policy attempts) is the natural place to pick it up, but no task currently claims it as an explicit deliverable |
+| `EchoForm`/`cardsDoubledThisTurn`, the fifth `misc_field` union member (S3.21) | **S3.62 — exact reachability disposition** | UNVERIFIED-until-captured. **Correction 2026-09-07:** Echo Form is a BLUE rare power (`cards/blue/EchoForm.java:25-27`), not an Ironclad card. The simulator's Prismatic Shard row explicitly leaves cross-colour rewards inert (`registry/relics.yaml`, `game_id: PrismaticShard`), so ordinary supported Ironclad breadth cannot witness this field. S3.62 must record an exact scope/reachability disposition under its existing per-row rule; this correction does not claim a capture or silently discharge the debt |
 
 **Table size: 10 registry rows + 11 traps (1 discharged, 1 partially) + 8
 a20.yaml rows + 11 task-level debt rows = 40 rows tracked, 38 outstanding
@@ -224,7 +224,8 @@ captures S3.62 must take: **one Shield-and-Spear fight** (both kill orders),
 exceed + restore, `buffCount` ≥ 3), **two Act-4 entry captures** (A20 +
 below A20), **an Act-4 shop purchase**, **an Act-4 rest**, **a `Spire Heart`
 capture holding Maw Bank**, **a Black Star burning-elite claim**, **a
-Courier restock**, and **an ordinary Echo Form capture**. Reach (a keyed
+Courier restock**, and **an exact disposition for the unsupported Echo Form
+field** (corrected above). Reach (a keyed
 double-boss A20 victory) is the shared precondition for every Act-4-gated row
 among them; S3.61 re-measures it and S3.62 schedules the captures once it
 does.

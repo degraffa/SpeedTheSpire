@@ -558,8 +558,17 @@ constexpr int kMapEliteAvoid = 200;
                                              const Move& m) noexcept {
     if (m.cat == MoveCat::MAP_BOSS) return engine::RoomType::Boss;
     const int col = engine::action_arg0(m.action);
+    // act_floor_base_of, NOT act_floor_base(act) -- Act 4's base is the
+    // A20-dependent byte the crossing wrote (52 at A20, 51 below it), so the
+    // int overload's flat 51 reads the Act-4 map one row too deep at A20.
+    // Behaviourally inert on the lines measured so far (every Act-4 row this
+    // engine builds offers exactly ONE map node, so the valuation cannot
+    // change the pick -- proved by re-emitting S3.61's two Act-4 lines across
+    // this change: identical final_hash, identical action list), but it is the
+    // same off-by-one S3.62 caught in the script emitter and it is wrong here
+    // for the same reason.
     const int row = static_cast<int>(rc.run.floor) -
-                    engine::act_floor_base(static_cast<int>(rc.run.act));
+                    engine::act_floor_base_of(rc.run);
     if (row < 0 || row >= engine::kMapRows || col < 0 ||
         col >= engine::kMapCols) {
         return engine::RoomType::None;
@@ -573,7 +582,7 @@ constexpr int kMapEliteAvoid = 200;
 // for the node the controller is STANDING on; a map choice is made one room
 // early, so the same comparison is made against the candidate's (col, row) in
 // the same coordinate space map_dest_room uses -- at MAP_CHOICE the destination
-// row is `floor - act_floor_base(act)`, which is exactly `run_cur_row + 1` once
+// row is `floor - act_floor_base_of(rs)`, which is exactly `run_cur_row + 1` once
 // the move is taken. kNoEmeraldNode means the act placed no burning elite (the
 // key is already held, or the act has no elites).
 [[nodiscard]] bool map_dest_is_emerald_node(const RunController& rc,
@@ -582,7 +591,7 @@ constexpr int kMapEliteAvoid = 200;
     if (rc.emerald_x == engine::kNoEmeraldNode) return false;
     const int col = engine::action_arg0(m.action);
     const int row = static_cast<int>(rc.run.floor) -
-                    engine::act_floor_base(static_cast<int>(rc.run.act));
+                    engine::act_floor_base_of(rc.run);
     return col == static_cast<int>(rc.emerald_x) &&
            row == static_cast<int>(rc.emerald_y);
 }
@@ -651,7 +660,7 @@ constexpr int kMapEliteAvoid = 200;
     if (want_emerald) {
         const int col = engine::action_arg0(m.action);
         const int row = static_cast<int>(rc.run.floor) -
-                        engine::act_floor_base(static_cast<int>(rc.run.act));
+                        engine::act_floor_base_of(rc.run);
         // The APPROACH band: this candidate keeps the burning elite reachable.
         // Much smaller than standing on it, because it only has to break a tie
         // between two otherwise comparable columns -- an approach that costs
@@ -873,9 +882,13 @@ enum class GridWants : uint8_t { WORST, BEST };
         case MoveCat::REST: {
             // The pre-boss campfire (the act's row-14 floor) heals unless the
             // run is already nearly full: the boss fight is where the HP goes.
+            // act_floor_base_of for the same reason as map_dest_room. Inert
+            // in Act 4 either way -- that act has four rows, no row-14
+            // campfire, so neither 51+15 nor 52+15 is a floor it can reach --
+            // but the file must not carry two spellings of the same base.
             const bool pre_boss =
                 static_cast<int>(rc.run.floor) ==
-                engine::act_floor_base(static_cast<int>(rc.run.act)) + 15;
+                engine::act_floor_base_of(rc.run) + 15;
             if (pre_boss && hp_at_or_below_pct(rc, 90)) return kRestPreferred;
             return hp_at_or_below_pct(rc, kRestHpPct) ? kRestPreferred
                                                       : kRestSecondary;

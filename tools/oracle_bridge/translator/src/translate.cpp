@@ -1758,6 +1758,17 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
     rs.act = static_cast<uint8_t>(stock_act); fr.mapped();
     int64_t stock_asc = as_i64(fr.require("ascension_level"), ctx, path + ".ascension_level");
     rs.ascension = static_cast<uint8_t>(stock_asc); fr.mapped();
+    // The Ending keeps the floor at which the Door opened: 51 below A20,
+    // 52 at A20. ProceedButton.update/goToDoubleBoss/goToVictoryRoomOrTheDoor
+    // (ProceedButton.java:101-106,199-220) adds the A20 second-boss room;
+    // DoorUnlockScreen.exit (DoorUnlockScreen.java:143-161) marks the dungeon
+    // beaten, so the subsequent act crossing adds no floor (s3-design 4.3).
+    // Derive this schema byte from the capture's act/ascension anchors, never
+    // from the replayed simulator. Leaving it value-initialized manufactured
+    // a 0-vs-52 divergence on every Act-4 record of STS511413/ps76.
+    if (stock_act == 4) {
+        rs.act4_floor_base = stock_asc >= 20 ? uint8_t{52} : uint8_t{51};
+    }
     rs.hp = static_cast<int16_t>(as_i64(fr.require("current_hp"), ctx, path + ".current_hp")); fr.mapped();
     rs.max_hp = static_cast<int16_t>(as_i64(fr.require("max_hp"), ctx, path + ".max_hp")); fr.mapped();
     rs.gold = static_cast<int32_t>(as_i64(fr.require("gold"), ctx, path + ".gold")); fr.mapped();

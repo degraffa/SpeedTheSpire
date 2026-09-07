@@ -580,9 +580,21 @@ std::string script_step_json(const RunController& rc, Action a, uint32_t index,
             } else {
                 j.kv("k", "map");
                 j.kv("x", static_cast<long long>(arg0));
+                // act_floor_base_of, NOT act_floor_base(act): Act 4's base
+                // is A20-dependent run state written at the crossing (52 at
+                // A20, 51 below it, run_advance.hpp / s3-design 4.3). The int
+                // overload reads 51 for act 4 unconditionally, so at A20 every
+                // Act-4 map step named the symbol ONE ROW TOO DEEP -- the live
+                // rest node came out as '$', the shop as 'E', the elite as 'B'.
+                // First live witness: S3.62's own
+                // s362_depth_STS511413_sim_search_keys_ps76, where the floor-52
+                // map step said sym '$' against the game's [(x=3, y=0, 'R')],
+                // the follower's (column, symbol) join missed, the sole-progress
+                // glue answered the one-node screen WITHOUT consuming the step,
+                // and the whole Act-4 tail ran one step behind until the floor-54
+                // SHOP met the pending floor-53 `rest` step and stopped.
                 const int row = static_cast<int>(rc.run.floor) -
-                                engine::act_floor_base(
-                                    static_cast<int>(rc.run.act));
+                                engine::act_floor_base_of(rc.run);
                 if (row >= 0 && row < engine::kMapRows &&
                     arg0 < engine::kMapCols) {
                     // engine::room_symbol is CommunicationMod's own node
