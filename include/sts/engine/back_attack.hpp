@@ -7,7 +7,8 @@
 // one live producer in the game (the Act-4 `Shield and Spear` elite, the only
 // encounter that applies `SurroundedPower`). It lives on its own so that the two
 // guard modules, the damage pipeline and the two facing-writing seams
-// (queue_card_play, use_potion) all read ONE copy of the predicate.
+// (queue_card_play, use_potion) all read ONE copy of the predicate. Smoke Bomb
+// legality separately reads marker presence, exactly as its Java canUse.
 //
 // -----------------------------------------------------------------------------
 // (1) THE PREDICATE, AND WHY IT IS GEOMETRY RATHER THAN A POWER
@@ -149,10 +150,12 @@
 //     queues both, addToTop, in group order -- the shape and the relative order
 //     of the two are the Java's; the queue POSITION is pinned to the play seam
 //     (AbstractPlayer.playCard, which is where the Java writes the facing) rather
-//     than to a hand-layout callback. NOTHING IN THE ENGINE READS THE MARKER --
-//     the multiplier reads the predicate (note 1) -- so this can only move the
-//     marker's arrival by a few queue slots WITHIN one card's resolution, never
-//     the damage. **S3.62's Shield-and-Spear capture is the named witness that
+//     than to a hand-layout callback. The multiplier reads the predicate (note
+//     1), while SmokeBomb.canUse reads marker presence for every monster in the
+//     group (SmokeBomb.java:51-63), irrespective of liveness or amount. Queue
+//     timing can therefore affect the potion mask within a card's resolution,
+//     though the direct back-attack damage multiplier does not read the marker.
+//     **S3.62's Shield-and-Spear capture is the named witness that
 //     must settle it**; until then this behaviour is UNVERIFIED-until-captured.
 
 #include <cstdint>
