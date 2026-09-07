@@ -1155,22 +1155,29 @@ force run 1 with `workflow_dispatch` after this lands).
   `tools/check_submodule_pin.sh` clean. No gtest cases were added and `ctest`
   was not used as acceptance (owner direction 2026-09-03; conventions §7).
 
-### GT1 `[ ]` **Gate: trainer contract live (completes InitialPlan M6) — no durable training before this**
+### GT1 `[x]` **Gate: trainer contract live (completes InitialPlan M6) — no durable training before this**
 **Deps:** T1.1–T1.6
 (M7 deliberately maps to no gate: E1 is demoted from gate to accelerant per
 plan §8 delta 2; its surviving pieces are T1.4/T3.1/T3.2.)
-- [x] Leak gates green (T0.5, T0.6, T1.6) — T0.5 at GT0; T0.6 three scheduled nightlies observed 2026-09-04 (Deferred table); T1.6 landed 2026-09-04 (SpireTrainer `a45f811`). T0.5 `[x]`; **T1.6 `[x]`
-      2026-09-03** (`docs/verification/t1-6-leak-gates.md`); T0.6 code/local
-      evidence is `[x]` but its ≥ 3 consecutive *scheduled* nightly runs
-      remain OPEN per the engine ledger (T0.6's own row, unchanged by this
-      task) — this line stays unticked on that one sub-item alone.
+- [x] Leak gates green (T0.5, T0.6, T1.6) — T0.5 at GT0; T0.6's three
+      consecutive scheduled nightlies are recorded with URLs in the Deferred
+      table; T1.6 landed 2026-09-03 (SpireTrainer `a45f811`,
+      `docs/verification/t1-6-leak-gates.md` there).
 - [x] R and t_enc measured; budget table re-derived (T1.3, 2026-09-03).
 - [x] V0 shipped with calibration report — V0s (T1.4s, 2026-09-03, `v0s.1`), or V0h (T1.4) if
       the dump landed first.
 - [x] Eval harness + seed populations frozen (T1.5, 2026-09-03).
 - [x] The tracer-bullet loop ran ≥ 3 generations and its report is
       committed (T1.7).
-**Log:** —
+**Log:** 2026-09-07 — taken in the training repo, with the coordinated gate
+record committed there and mirrored here. Every checklist item was reopened
+from its committed report; registered artifacts and frozen seed populations
+were revalidated; all six trainer presets configured and built from clean
+cached `master` trees without unit tests. This mirror corrects the stale
+continuation above: this ledger's own Deferred row had already discharged
+T0.6 with three consecutive scheduled nightly URLs. No engine pin moved and no
+new training-quality result is claimed. Full evidence:
+`SpireTrainer/docs/verification/gt1-trainer-contract.md`.
 
 ---
 
