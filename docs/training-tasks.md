@@ -56,7 +56,7 @@ one exists, mirroring the Stage B convention.
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
 | Distinguish capped unfinished combat from a true combat exit before assigning value targets | T2.2e | T2.2 | DISCHARGED 2026-09-07 by T2.2f for new actor output and the active generations 28–31 replay window: explicit termination provenance, default consumer refusal, exact simulator replay and whole-episode quarantine. Other historical data remains legacy/unqualified until separately replayed. The completed sharpening comparison remains historical diagnostic evidence. |
-| Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improved held-out policy CE with detached auxiliary gradients but failed playing and retention bars. T2.2i measured the historical 192-evaluation GSH collection-teacher configuration at fixed gen31: robustly weaker than deployed 48-PUCT and SIM_SEARCH, no established advantage over policy, blind or greedy. T2.2j next qualifies a matched 192-PUCT configuration against both before any collection-teacher change; no increased collection, engine-pin move or promotion-gate relaxation. |
+| Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improved held-out policy CE with detached auxiliary gradients but failed playing and retention bars. T2.2i measured the historical 192-evaluation GSH collection-teacher configuration at fixed gen31: robustly weaker than deployed 48-PUCT and SIM_SEARCH, no established advantage over policy, blind or greedy. T2.2j then qualified a matched 192-PUCT configuration: the algorithm contrast against 192-GSH at the same nominal budget is robustly positive, so GSH selection explains the T2.2i deficit, but the 48-to-192 budget contrast within PUCT is robust in neither direction and 192-PUCT still trails SIM_SEARCH. A collection-teacher algorithm change alone would therefore not lift target quality above deployed 48-PUCT, so the next lever is a bounded value/policy-head diagnosis at this same fixed checkpoint (value calibration against realized currency, policy agreement with the search-selected action), not a teacher rebuild; no increased collection, engine-pin move or promotion-gate relaxation. |
 | Complete branch-advantage macro adapters and actor consumption | T2.4 | T2.4 | The bounded card-reward collector, versioned record and strict standalone CPU smoke consumer have real-run acceptance. Shop/Neow collection adapters and live combat-actor consumption remain unimplemented; the generic legal-pair API alone does not discharge them. Parent T2.4 remains in progress and no macro-policy or full-run quality claim follows. |
 | Complete the public-map planner's run-agent adapters | T3.3a | T3.3 | The bounded map primitive has explicit model callbacks and map-phase budgets only. Fitted public reveal/value adapters, shop/removal sequence search, imminent-fight combat invocation, other-phase budgets, special movement and multi-act adapters remain. Synthetic fixed-V acceptance is not evidence of stronger play; T3.4 dependencies are unchanged. |
 | Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Training side DISCHARGED 2026-09-03 (T1.1b, SpireTrainer `33a99a0`):** pin `bfd95a2` → `6c50a0b`, `ExternalProject_Add` replaced by `add_subdirectory`, `sts_engine` a real target, googletest fetched once |
@@ -1776,6 +1776,35 @@ new training-quality result is claimed. Full evidence:
   algorithm change or new labels.
   Report under `SpireTrainer/docs/verification/`: `t2-2i-teacher-quality.md`.
 
+  **2026-09-07 (T2.2j matched 192-PUCT) — verified; the algorithm, not the
+  budget, explains the teacher deficit.** One new evaluation at the exact
+  gen31/encoding-1 checkpoint held the nominal budget at 192 and switched
+  selection from Gumbel sequential halving to PUCT, reusing both the bound
+  48-PUCT reference and the T2.2i 192-GSH result after a hash-checked
+  preflight; policy and all three scripted agents matched every CSV field
+  across all three evaluations, and the orchestrator's read-only review of
+  the frozen protocol, config and driver found no blocker before launch.
+  Contrast A (puct192 minus gsh192) is robustly positive: mean bounds
+  [+0.0118767264, +0.0154767264], lower-bound 99% CI
+  [+0.008871588130, +0.015086319434], p=0.00005. Contrast B (puct192 minus
+  puct48) is not: mean bounds [-0.0027602564, +0.0056397436], lower-bound
+  99% CI [-0.006971522340, +0.000787775700], p=0.96075 — and not robustly
+  negative either, so the sign of the 48-to-192 budget effect is
+  undetermined. The preregistered `A_robust_B_not` branch holds. 192-PUCT
+  is robustly above policy, blind and greedy but still below SIM_SEARCH,
+  and the original bars fail for all three configurations; its retention
+  ratio against `sim_search` is undefined (nonpositive gain) and both other
+  60% margins are negative. It capped 9 cases, a strict subset of the 12
+  capped by deployed search, with 327 deaths versus 330 and 393. Measured
+  20,592 searched decisions / 25,616 engine steps in 795.2 s, versus
+  18,952 / 23,495 in 91.5 s (GSH) and 21,580 / 26,610 in 248.5 s
+  (48-PUCT); 192/192/48 remain nominal budgets, not evaluator-call
+  counts. A teacher-algorithm change alone would therefore not lift
+  target quality above deployed 48-PUCT, so the diagnosis moves to the
+  value and policy heads. Retain gen31 encoding 1; no collection,
+  promotion, engine or actor change. T2.2 remains `[~]`.
+  Report under `SpireTrainer/docs/verification/`: `t2-2j-matched-puct.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2020,6 +2049,12 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-07 — T2.2j qualifies a matched 192-PUCT teacher at fixed gen31:
+  the algorithm contrast against 192-GSH is robustly positive, the
+  48-to-192 budget contrast is not, and 192-PUCT still trails SIM_SEARCH.
+  Keep the reference and original gates; diagnose the value and policy
+  heads next.
 
 - 2026-09-07 — T2.2i measures the historical 192-GSH collection teacher at
   fixed gen31 and finds it robustly weaker than deployed 48-PUCT on the
