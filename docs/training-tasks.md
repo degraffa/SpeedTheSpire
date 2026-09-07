@@ -1877,6 +1877,12 @@ desired.
   non-durable generations end to end, four integration defects found and
   fixed; block, T2.2's Inherited line and deferred rows mirrored; GT1's
   T1.7 item ticked.
+- 2026-09-07 (GT1) — trainer-contract gate taken in SpireTrainer and mirrored
+  here. Corrected the stale T1.6-era continuation that still called T0.6's
+  scheduled-nightly evidence open after this ledger's Deferred table had
+  recorded and discharged all three scheduled runs. The dedicated trainer
+  report reopens the preserved evidence and excludes later T2.2b quality work
+  from the gate claim; no engine pin moved.
 - 2026-09-03 (evening) — T2.1 (`806fadd`) and T1.3 (`7c18297`) landed in
   SpireTrainer; blocks, Inherited lines and deferred rows mirrored verbatim.
   One row is ENGINE-owned and new: `engine::RunController` is not portable
