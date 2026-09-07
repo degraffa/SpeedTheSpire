@@ -1629,6 +1629,19 @@ new training-quality result is claimed. Full evidence:
   `integrated_wsl_build.log`. The original interrupted-work stash and scratch
   files remain preserved; the landed recovery worktree was retired.
 
+  **2026-09-07 (T2.2d diagnosis) — progress without fresh oracle runs.**
+  Audited the real T2.2c generation-28–31 replay window: the selected action
+  agrees with the largest visit target on 99.9736% of non-exploratory rows,
+  ruling out a widespread winner/target mismatch in this data. The largest
+  target share averages 54.5076%; target softness is a hypothesis to ablate,
+  not a demonstrated defect. The next bounded comparison sharpens the saved
+  visit targets while holding data, initialization, and training budget fixed.
+  An exploratory paired reanalysis of the existing same-current-suite CSVs
+  also puts the gen31-minus-gen14 policy gain at +0.004523 exit V0s, with
+  99% CI [0.001168, 0.007884]. This does not pass the still-open T2.2 bars or
+  establish an untouched-population result. No new training or live capture
+  is claimed. Report: `SpireTrainer/docs/verification/t2-2d-distillation-diagnosis.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -1843,6 +1856,10 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-07 — T2.2d diagnosis records the simulator-only path forward and
+  the saved-shard target audit. T2.2 remains `[~]`; target sharpening is a
+  bounded experiment to run, not a promoted change or a waived oracle gate.
 
 - 2026-09-07 — mirrored T2.2c recovery and its still-open quality bars from
   the training repo. The preserved source image and same-suite checkpoint
