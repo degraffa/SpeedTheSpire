@@ -139,6 +139,13 @@ decision already made and evidenced elsewhere in the tree.
 
 ## 8. The `UNVERIFIED-until-captured` list (S3.62's work order)
 
+**Current-status note, 2026-09-07:** this inventory records the evidence at
+S3-G1. A later live prefix reached Act 4, and existing simulator scripts enter
+the guard fight. Their incomplete coverage does not close the listed capture
+debts. The [source audit](s3-source-audit.md) records the new provisional
+findings, repairs and partial capture opportunities; “no capture” statements
+below describe the gate-time state unless explicitly updated.
+
 Every row below is landed (code merged, all-preset-build + corpus-replay
 evidence passing) but has **no live-game capture witness yet**. The
 **reach precondition** for every Act-4 row is the same and is named once

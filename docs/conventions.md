@@ -38,6 +38,18 @@ don't infer.
 > that says "tests land with the code" / "tier-2 tests" / "ctest green" is
 > read through this directive.
 
+**Owner clarification, 2026-09-07 — source review can support provisional
+progress before full oracle runs.** Compare complete game-source methods with
+the simulator, inspect saved scripts, and use explicitly described simulator
+probes to establish likely behavior and identify concrete defects. Source-backed
+repairs may land with build and existing-corpus evidence while their new live
+witness remains pending. Record what was checked, any constructed probe inputs,
+and the remaining uncertainty; do not present a source audit as an oracle
+capture or a completed verification gate. Continue training work whose existing
+dependencies are satisfied, using stronger future policies to improve capture
+depth and build variety. This does not change the no-unit-tests direction or
+the final S3-G2 live-evidence bar.
+
 Respect `Deps:` exactly. Tasks marked ∥ with satisfied deps and disjoint
 deliverables may run in parallel — but never two agents whose deliverables
 touch the same files, and never more parallel work than can be verified and

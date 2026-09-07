@@ -2853,10 +2853,12 @@ this tree, not a Log carried forward.
   `sim_search_keys_deep`/ps804, both all-three-keys), a paired key-NOT-taken
   Act-3-stop control on the same seed, a second seed's (STS517934)
   double-boss/Act-3-stop line plus its own control, and a pre-escalation
-  double-boss line. None reaches the Shield-and-Spear or Heart combat itself
-  (docs/verification/s3-61-reach.md §5-6: zero keyed victories at S3.61's
-  scale) — S3.61 could not schedule those two captures, only the Act-4 Door
-  and Act-3-stop ones. Reach numbers and the escalation ladder's state (the
+  double-boss line. **Corrected 2026-09-07:** both Act-4 scripts enter the
+  Shield-and-Spear combat on floor 55; the plain line targets both guards.
+  They supply partial combat-capture candidates, but neither wins the fight
+  or reaches the Heart. The earlier no-guard-entry claim confused failure to
+  win with failure to enter; [source audit](verification/s3-source-audit.md)
+  records the actual script steps and hashes. Reach numbers and the escalation ladder's state (the
   deeper-ply lever spent too, next is a targeted deepening or the T4-era
   trained-checkpoint accelerant) are in that report, not repeated here.
   **Deps:** S3-G1, S3.61 **Acceptance:** every capture above replays
@@ -2886,6 +2888,15 @@ this tree, not a Log carried forward.
   live post-fix capture or terminal campaign acceptance is claimed. Breadth,
   both ascension-band floor pairs, all named combat/reward witnesses and the
   complete Heart kill remain owed under the unchanged Acceptance block.
+
+  **Log (2026-09-07, source/manual audit):** At the owner's direction,
+  provisional source evidence now supports progress before complete oracle
+  runs, with residual live uncertainty kept explicit. The
+  [source audit](verification/s3-source-audit.md) checks Heart mechanics,
+  guard behavior, transitions and rewards, and corrects the saved-route
+  reachability claim. It identifies separate bridge input and simulator
+  Smoke Bomb eligibility defects; their repair reports and outstanding live
+  witnesses are linked there. No new live capture or S3-G2 closure is claimed.
 
 - **S3.63** `[x]` ∥ **Distributional (tier-4) additions.** Pre-registered
   hypotheses, Holm-corrected as one family with the B5.3/S2.44 α discipline
@@ -3314,6 +3325,12 @@ land as a debt, and S2's own experience is that the campaign is where the real
 findings are.
 
 ## Change log
+
+- 2026-09-07 — owner-directed source/manual audit establishes provisional
+  confidence and identifies concrete repairs without waiting for full oracle
+  runs. Corrected S3.61's no-guard-entry claim from its actual saved scripts;
+  partial guard capture is already reachable. Final capture debts remain
+  explicit, and conventions now records the provisional-work clarification.
 
 - 2026-09-07 — S3.62 replay triage populated the translator's missing Act-4
   floor-base byte from capture anchors. The losing S3-G1 verification report

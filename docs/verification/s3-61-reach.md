@@ -373,14 +373,17 @@ select/deselect class). It is not in the cohort; the row is still counted in
 §5's `double_boss` total since that count is about the sim, not the
 follower.
 
-**None of the six lines reach the Shield-and-Spear or the Heart's own
-combat** — every emitted line dies in ordinary Act 1–4 combat before its boss
-room, which is exactly what §5's zero-victory result predicts. S3.62 has, for
-the first time, real Act-4-entry material to schedule a capture from (two
-independent Door-crossing lines on the same seed, one from each policy), plus
-a clean Act-3-stop control pair on a second seed — it does not yet have
-anything to schedule a Shield-and-Spear or Heart *combat* capture from; that
-remains gated on a future escalation (§6) producing one.
+**Correction, 2026-09-07: both Act-4 lines enter the Shield-and-Spear combat.**
+The saved plain-KEYS script has floor-55 COMBAT steps 765–768, including attacks
+that name `SpireSpear` and `SpireShield`; the deeper script has floor-55 COMBAT
+steps 837–839. Neither wins that fight or reaches the Heart. The earlier text
+incorrectly turned the absence of a victory into absence of combat entry.
+S3.62 can therefore schedule a partial guard-fight capture from existing
+material, including target switching on the plain line. A successful guard
+kill and a Heart-fight route still require further progress. This is script
+evidence, not a new live capture; see the
+[source audit](s3-source-audit.md) for hashes, the bridge-facing defect found
+at the same time, and the distinction between partial and gate-complete evidence.
 
 To regenerate any line:
 

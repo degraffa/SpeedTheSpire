@@ -411,11 +411,18 @@ bool combat_potion_legal(const RunController& rc, uint8_t slot,
     // (The general "anything left to fight" test below is AbstractPotion.canUse's
     // areMonstersBasicallyDead, a different clause.)
     //
-    // BackAttack is an Act-3 power (Snecko / Spiker ambush) with no S1 registry
-    // row, so that first clause is constant-false here. Named rather than
-    // invented as state; whoever registers BackAttack owns adding it.
     if (id == PotionId::SMOKE_BOMB) {
         for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+            // Presence, not a positive amount and not liveness: this marker's
+            // amount is -1, and Java walks every member of the monster group.
+            for (uint8_t p = 0;
+                 p < rc.combat.monsters[m].power_count && p < kPowerCap; ++p) {
+                if (static_cast<PowerId>(
+                        rc.combat.monsters[m].powers[p].power_id) ==
+                    PowerId::BACK_ATTACK) {
+                    return false;
+                }
+            }
             const auto* mdef = sts::registry::monster_def(
                 static_cast<MonsterId>(rc.combat.monsters[m].monster_id));
             if (mdef != nullptr && mdef->is_boss()) {
