@@ -101,7 +101,7 @@ simplify**: `bank_restore_state`'s rebinding, `bank_capture_lists`' refusal-by-n
 | A shard's `weights_version` is fixed at BUILD time, so an ONLINE actor that hot-swaps weights cannot label which generation produced a record — and if it did, its own build's reader would refuse the shard | T1.7 | T2.3 | `make_shard_header` fills all six stamp fields from `version_stamp()`, and `weights_version` is a CMake cache variable baked into a generated header at configure time; `ShardReader::open` then compares it **exactly** against the running build's stamp. T1.7 swapped the module three times inside one process, so three generations of shards produced by three demonstrably different nets (sha256 `102e35bb…`, `7b42a12d…`, `87de1213…`) all carry `weights_version = none`. Demonstrated rather than argued: a copy of generation 0's shard with that header field patched to `tracer.g1` is refused by name (`weights_version_mismatch: shard 'tracer.g1' != manifest 'none'`, exit 2) by the same reader that accepts the unpatched file. T1.7's workaround is to record the weights path + sha256 in the per-generation `manifest.json`, so the provenance sits beside the shard rather than inside it. The real fix — a runtime-settable weights identity in the header, and a loader that compares it against a POLICY rather than against its own build — is the versioned-artifact lifecycle T2.3 owns, and it is the same shape as quarantine's `CommitOrder` row above. **Narrowed 2026-09-03 (T2.2):** the ONLINE half now has a partial answer — `ObsRecord::weights_generation` (`obs_companion.hpp`) is a runtime-settable field in the companion, stamped per record by `Actor::worker`/`set_weights_generation`, so a reader of the companion CAN tell which generation produced a row even though the shard header still cannot. Still narrow: it is only in the companion (not the shard itself), still uncompared by any loader (nothing refuses a mismatch on it — it is provenance, not a stamp), and the shard-header fix T2.3 owns is unchanged. |
 | The trajectory shard carries no TENSORS, so an online actor and its learner must agree on a second file format out of band | T1.7 | **DISCHARGED 2026-09-03 (T2.2)** | Decided: a DECLARED companion format, not a fifth record kind. `include/sts/training/obs_companion.hpp` mirrors `shard.hpp`'s discipline field-for-field (a fixed 512-byte `ObsHeader`, a byte-order probe, all six `VersionStamp` fields compared individually, `kObsContainerVersion`/`kObsRecordLayoutVersion` independent of the shard's own versions) rather than being folded into `DecisionRecord`, because the tokenization (this repo's `pv_encode.hpp`) churns on a different clock than the shard container (versioned with the engine's `PublicView`). The join T1.7 flagged as worth keeping stays: `tools/training/learner_v1.py::build_policy_targets` asserts `(run_id, step_index)` equal record-for-record between the two streams and reports `policy_target_coverage`, which was 1.000000 across all 14 real generations T2.2 ran. |
 | **The T2.2 trained value function does not beat `sim_search`, and the bars are NOT met** | T2.2 | orchestrator (contingency decision), then whichever task resumes T2.2 | 15 real generations, plateauing from generation ~8 (deaths 30.9%→17.6%→flat, exit V0s 0.248→0.304→flat); `sim_search` beats both `search` and `policy` with p=1.0 in a 20,000-resample paired bootstrap on the frozen 2,500-entry suite, at both a 10-generation and a 14-generation checkpoint. Three undisambiguated hypotheses (report §"The verdict"): an information gap against the non-information-limited `sim_search`; a teacher search budget (192 evals/decision, 4x deployed) too weak relative to `sim_search`'s effective depth; `v0s.1` itself calibrated against the very cohort the loop is failing to beat. The plan §4.3 assist-annealed-generation contingency was deliberately NOT adopted — that decision belongs to the orchestrator. Full numbers: `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo). |
-| A learner subprocess launched via `std::system()` while the parent actor holds its own CUDA context can fail transiently with `0xC0000142` / `STATUS_DLL_INIT_FAILED` and no stderr | T2.2 | whichever task next hardens the production loop (T2.3 or later) | Hit once in 15 generation-launches (generation 2 of the T2.2 training run); the identical command line succeeded standalone seconds later, and it did not recur over the other 14 launches — the shape of a transient Windows/CUDA child-process resource race, not a code defect. Worked around by resuming the loop with `--gen-offset`/`--init-weights` at the last good checkpoint (the loop's per-generation-directory design makes this a clean resume point). Not fixed: a production loop should retry a failed learner launch a bounded number of times before surfacing the failure. |
+| A learner subprocess launched while the parent actor holds its CUDA context can fail with no stderr | T2.2 / T2.2b | **DISCHARGED 2026-09-07 by T2.2c** | The recovered raw logs record -1073740022 (0xC000070A), not the older reports' incorrect 0xC0000142 label; cause unknown. The trainer's combat_loop.py runs actor and learner as sibling processes, bounds retries, and does not retry cancellation (0xC000013A). Resume validates input lineage/configuration/stamps and output hashes; the learner atomically publishes the report before weights as the completion marker. The interrupted generation-31 learner was recovered on real shards. See SpireTrainer/docs/verification/t2-2c-recovery.md; no engine-side training code was introduced. |
 | The search-config sweep found `e48-c8-puct-rc-w0` (PUCT in-tree) measurably better than the deployed default on every quality axis, at 7.1x lower throughput | T2.2 | whichever task next tackles the T2.2 value-function gap | Sweep on 600 dev snapshots against the gen14 net: exit V0s 0.2976 vs the default's 0.2865, death 17.2% vs 20.3%, HP fraction 0.4538 vs 0.4186 — all at 38.0 vs 268.9 decisions/s. T2.2 CONFIRMED the existing default (`e48-c8-gsh-rc-w0`) rather than moving it, because the headline finding is that the value function underneath EITHER configuration does not beat `sim_search`, so this ~4% relative gain would not by itself close that gap, and a 7.1x production-throughput cost is a decision that deserves its own measurement against the loop's collect/learn balance, not a side effect of a sweep table. Candidate lever for a follow-up, to be re-evaluated PAIRED against the frozen suite rather than on the dev set's raw means. |
 | `ObsRecord::weights_generation` (T2.2's online per-record provenance, narrowing the row above) is written but never checked by any loader | T2.2 | T2.3 | It is provenance, not a stamp comparison — nothing refuses a companion whose per-record generation looks wrong. The versioned-artifact lifecycle T2.3 owns is the natural place for a policy that reads it. |
 | The versioned-label class (`label_suite.hpp`) has a container, a join and a trend gate, but no REAL search-labelled case — only a synthetic toy set (`label_suite_demo`) | T1.5 | T3.5 | The plan's split (§6) exists so a search-labelled suite can be gated on a TREND rather than fossilizing early-network strategy; T1.5 builds that machinery but has no champion to label with yet. `TrendGateConfig`'s defaults (`trailing_window=3`, `max_regression=0.10`, `min_joined_for_gate=30`) are untuned against any real agreement trend — chosen to make the toy demonstration exercise both a pass and a fail, nothing more. |
@@ -1606,6 +1606,29 @@ new training-quality result is claimed. Full evidence:
   learner-subprocess-crash trap (conventions §8, "the rule of two" — now a
   task, not another note).
 
+  **2026-09-07 (T2.2c recovery) — targeted bank and regularization improve
+  measured policy value, but bars remain NOT met.** Recovered the interrupted
+  uncommitted run without claiming a commit it predates; hardened its
+  resume/publication boundary and corrected the historical process-exit label.
+  On a same-current-suite rerun, mean combat-exit V0s rose from original
+  gen14's 0.303872 to 0.308396 for policy and from 0.314805 to 0.318129 for
+  search. Policy still fails the fair blind baseline at p=0.3423 and greedy
+  at p=0.0171 against the 0.01 threshold; fair retention is 6.31%, below 60%.
+  The later T2.2b suite's recorded hash no longer matches, so both checkpoints
+  were rerun on the same current suite; historical state identity is not
+  claimed. GT1's separate committed evaluation contract is unaffected.
+  T2.2 remains `[~]`; no checkpoint is promoted and further generations of
+  this recipe are not justified. Report in the training repo:
+  `SpireTrainer/docs/verification/t2-2c-recovery.md`.
+  Landed trainer commit `b93af4b` on its local master (no remote configured).
+  Orchestrator rechecked the four evaluation/report hashes, the unchanged
+  engine pin, and the omniscient boundary; integrated Windows builds of
+  `bank_harvest`/`combat_actor` and WSL full builds passed across all six
+  presets, without running unit tests. Build logs are external under
+  `_train_data/t22c/run1/integrated_windows_build.log` and
+  `integrated_wsl_build.log`. The original interrupted-work stash and scratch
+  files remain preserved; the landed recovery worktree was retired.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -1820,6 +1843,14 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-07 — mirrored T2.2c recovery and its still-open quality bars from
+  the training repo. The preserved source image and same-suite checkpoint
+  rerun are recorded there. The learner-launch obligation is discharged by
+  the sibling-process driver, bounded retry, cancellation handling and
+  validated atomic completion; raw `0xC000070A` replaces the older reports'
+  unsupported DLL-initialization diagnosis. No engine pin or frozen mechanic
+  changes in this mirror.
 
 - 2026-09-03 — **the ENGINE-owned deferred row is DISCHARGED IN THE ENGINE**
   (commit `engine: MonsterLists hold encounter ids, not string_views`).
