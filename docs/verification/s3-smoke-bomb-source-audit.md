@@ -48,7 +48,6 @@ and built through `tools/wsl_run.cmd --script tools/build_presets.sh release`.
 The committed oracle corpora were replayed with
 `PYTHON3=C:/Python39/python.exe bash tools/corpus_replay.sh win-debug`; all
 three archives ran in `--replay`, `--costs`, and `--masks` modes with zero
-diffs, and all nine injected controls failed with the required exit 1. Raw
-output is under the external source-audit directory above. No unit tests were
+diffs, and all nine injected controls failed with the required exit 1. The`ncorpus log is under the external source-audit directory above (SHA256`n`819af8fc43a2dcb462fce6e89b8147a83486cba4826e90a3e0382ab3334c1c1c`).`nBuilds completed interactively; no separate build log was retained. No unit tests were
 written or run. No schema, registry, facing, damage, trainer pin, live game, or
 jar changed.
