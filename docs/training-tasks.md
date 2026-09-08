@@ -1943,6 +1943,22 @@ new training-quality result is claimed. Full evidence:
   adoption or promotion occurred. T2.2 remains `[~]`. Report under
   `SpireTrainer/docs/verification/`: `t2-2r-registered-collection.md`.
 
+  **2026-09-08 (T2.2s optional hand-choice unblock) — simulator policy
+  progress repaired.** The two exact visible cap witnesses reproduce under
+  the historical pin and current engine base: Elixir's optional exhaust
+  selection oscillates without advancing the combat turn. SIM_SEARCH-family
+  actual optional choices now demote selected-suffix deselections while
+  preserving legal additions and CONFIRM. All 212 visible capped train/dev
+  seeds under both policies resolve within the original 20,000-advance cap:
+  106 observed Act-1 boss kills and 318 observed deaths, with no deselections.
+  Different dispatch/thread repeats are byte-identical; same-base non-optional
+  prefixes match for both named witnesses. Win-debug/release/asan target
+  builds and the byte-identical real-run sanitizer subset pass. No holdout
+  payload access, model fitting, registered-data edits or live-game execution
+  occurred. T2.2r remains `inconclusive_hold`; a reviewed trainer pin move and
+  fresh registered collection remain separate work. T2.2 remains `[~]`.
+  Report: [T2.2s hand-choice progress](verification/t2-2s-hand-choice-progress.md).
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2187,6 +2203,11 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2s repairs SIM_SEARCH-family optional hand-choice
+  oscillation at a new engine version. All previously capped visible T2.2r
+  train/dev seeds resolve in deterministic repeats; no registered conclusion
+  or training authorization changes.
 
 - 2026-09-08 — T2.2r verifies the frozen registered cohort with deterministic
   split repeats and opaque holdout handling. Train/dev cap censoring alone

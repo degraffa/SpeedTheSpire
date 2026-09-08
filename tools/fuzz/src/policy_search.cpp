@@ -69,6 +69,7 @@
 #include "sts/engine/combat_rewards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/event_framework.hpp"
+#include "sts/engine/interp.hpp"
 #include "sts/engine/map_gen.hpp"
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/neow.hpp"
@@ -1483,7 +1484,39 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
     const bool deepens = kind_deepens_boss(kind) && boss_floor;
     const uint16_t search_turn_window = deepens ? kDeepSearchTurns : kSearchTurns;
     const uint16_t boss_ply_window = deepens ? kDeepSearchTurns : kBossDeepTurns;
+    // T2.2s: optional hand choices must make finite progress. CHOOSE toggles
+    // the selected suffix back out of the selection; a bounded rollout can
+    // strictly prefer that reversal from BOTH sides and never press CONFIRM.
+    // Keep the engine's legal surface intact, but make this policy's selection
+    // monotone: additions remain searchable and CONFIRM remains available.
+    // This applies only to the actual decision, not simulated future choices;
+    // at most hand_count additions can occur before only CONFIRM (or a finite
+    // potion use) remains. The one-draw tie-break below is unchanged.
+    // enumerate_moves emits CHOICE_CONFIRM only for this optional screen.
+    // Reuse that already-computed legal surface instead of rebuilding a mask
+    // on every combat decision. The selected count uses the same queue-front
+    // accessor that legal_actions uses to expose its hand suffix.
+    bool monotone_choice = false;
+    if (in_combat && rc.combat.action_count != 0) {
+        for (size_t i = 0; i < n; ++i) {
+            if (moves[i].cat == MoveCat::CHOICE_CONFIRM) {
+                monotone_choice = true;
+                break;
+            }
+        }
+    }
+    const unsigned selected = monotone_choice
+        ? engine::choose_selected_count(
+              rc.combat.action_queue[rc.combat.action_head].flags)
+        : 0u;
+    const unsigned unselected = static_cast<unsigned>(rc.combat.hand_count) -
+        (selected <= rc.combat.hand_count ? selected : 0u);
     for (size_t i = 0; i < n; ++i) {
+        if (monotone_choice && moves[i].cat == MoveCat::COMBAT_CHOOSE &&
+            engine::action_arg0(moves[i].action) >= unselected) {
+            scores[i] = INT64_MIN;
+            continue;
+        }
         if (in_combat) {
             // THE TURN RAMP -- a hard cost ceiling per fight, encoded in
             // state so it stays deterministic. The 2-ply deepening runs
@@ -1513,13 +1546,9 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
                 // Hand-select screens: CONFIRM breaks exact evaluation TIES
                 // (+1 is far below any real difference; one HP is worth
                 // 300), so an indifferent toggle can never outrank plain
-                // progress. KNOWN RESIDUAL: this does not close the
-                // select/deselect OSCILLATION where the rollout strictly
-                // prefers each toggle from the other's state -- ~4% of
-                // stage-1 rows still end as LIVELOCK inside a boss-floor
-                // choice screen (reproducer: STS100007 / sim_search / ps0),
-                // measured and carried in the S2.V2 reach report rather
-                // than hidden by a deeper special case.
+                // progress. Strictly preferred select/deselect oscillation
+                // is prevented by the monotone actual-choice guard above;
+                // the historical S2.V2 reach measurements retain their pin.
                 if (moves[i].cat == MoveCat::CHOICE_CONFIRM) scores[i] += 1;
             }
             // The Curiosity hold on the SEARCHED ply (SIM_SEARCH_HOLD only).
