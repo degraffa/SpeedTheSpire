@@ -1986,6 +1986,18 @@ new training-quality result is claimed. Full evidence:
   training or promotion occurred. T2.2 remains `[~]`. Report under
   `SpireTrainer/docs/verification/`: `t2-2u-currency-pipeline.md`.
 
+  **2026-09-08 (T2.2v registered collection) — integrity passed.** The
+  frozen one-policy cohort collected all 20,000 scheduled seeds with exact
+  primary/repeat bytes. Train has 14,000 trajectories and 207,347 rows;
+  development has 2,000 trajectories and 29,428 rows. Both visible splits are
+  fully resolved with exact schedule, label and binary-record validation.
+  Holdout remains payload-opaque: only manifest metadata, names, sizes, hashes
+  and byte equality were inspected. Independent review accepts freeze
+  chronology and all source/build/command bindings. This authorizes only a
+  separate sealed fit stage; no fit, holdout outcome access, currency decision
+  or training occurred. T2.2 remains `[~]`. Report under
+  `SpireTrainer/docs/verification/`: `t2-2v-registered-collection.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2230,6 +2242,10 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2v mirrors the integrity-passed one-policy registered
+  collection. Train/development are fully resolved and holdout remains
+  payload-opaque pending a separately sealed fit/evaluation.
 
 - 2026-09-08 — T2.2u mirrors accepted one-policy producer/evaluator
   engineering evidence at the repaired pin. Registered data and scientific
