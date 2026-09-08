@@ -1998,6 +1998,18 @@ new training-quality result is claimed. Full evidence:
   or training occurred. T2.2 remains `[~]`. Report under
   `SpireTrainer/docs/verification/`: `t2-2v-registered-collection.md`.
 
+  **2026-09-08 (T2.2w registered currency evaluation) — valid
+  `inconclusive_hold`.** After an exclusive execution freeze and independent
+  fit-seal audit, SpireTrainer consumed the 4,000-seed holdout exactly once.
+  All 20,000 trajectories resolve. hpq12 improves paired Brier by 0.0003481,
+  or 0.1541%, but its 99% interval includes zero and it misses the registered
+  1% relative-improvement bar. Primary-positive, relative and conservative
+  missing-label bars fail; integrity, resolution, log-loss noninferiority and
+  candidate-versus-L1 pass. Independent recomputation matches every metric,
+  bootstrap draw, bar and decision. No currency was qualified, adopted or
+  used for training. T2.2 remains `[~]`. Report under
+  `SpireTrainer/docs/verification/`: `t2-2w-currency-evaluation.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2242,6 +2254,10 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2w mirrors the valid once-only hpq12 currency comparison.
+  Its small Brier gain misses significance and the registered effect-size bar,
+  so no currency adoption or training follows.
 
 - 2026-09-08 — T2.2v mirrors the integrity-passed one-policy registered
   collection. Train/development are fully resolved and holdout remains
