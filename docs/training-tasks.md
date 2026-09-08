@@ -1959,6 +1959,20 @@ new training-quality result is claimed. Full evidence:
   fresh registered collection remain separate work. T2.2 remains `[~]`.
   Report: [T2.2s hand-choice progress](verification/t2-2s-hand-choice-progress.md).
 
+  **2026-09-08 (T2.2t fresh currency preregistration) — collection-free
+  lineage accepted.** SpireTrainer now pins the accepted engine repair and
+  registers a new 20,000-seed A20 Ironclad calibration study with canonical
+  SIM_SEARCH id 5 only. Removing policy 6 avoids treating two identical
+  Act-1 endpoint trajectories as independent evidence. The hpq6-versus-hpq12
+  comparison uses whole-seed inference, typed unresolved outcomes, seven
+  conservative bars and a sealed holdout. A bounded metadata audit and an
+  independent recomputation find zero seed overlap without opening T2.2r's
+  registered bulk. This authorizes only a separate clean producer/evaluator
+  acceptance and collection freeze; no collection, fit, holdout access,
+  currency qualification or training occurred. T2.2 remains `[~]`. Report
+  under `SpireTrainer/docs/verification/`:
+  `t2-2t-currency-preregistration.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2203,6 +2217,10 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2t mirrors the fresh one-policy currency preregistration and
+  collection-free seed-lineage acceptance. T2.2r remains inconclusive and its
+  registered holdout stays opaque.
 
 - 2026-09-08 — T2.2s repairs SIM_SEARCH-family optional hand-choice
   oscillation at a new engine version. All previously capped visible T2.2r
