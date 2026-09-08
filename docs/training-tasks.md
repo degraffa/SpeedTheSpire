@@ -1973,6 +1973,19 @@ new training-quality result is claimed. Full evidence:
   under `SpireTrainer/docs/verification/`:
   `t2-2t-currency-preregistration.md`.
 
+  **2026-09-08 (T2.2u one-policy pipeline) — engineering acceptance
+  passed.** SpireTrainer's separate new-pin evaluator implements the T2.2t
+  policy-id-5 schedule, typed missing labels, one-trajectory seed estimator,
+  shared whole-seed bootstrap, seven bars and consumed-before-read holdout
+  seal. Release primary/repeat and ASan real producer bytes agree across the
+  engineering cohort; the immediate cap-edge boss witness and both repaired
+  optional-choice witnesses pass. Protected-path guards refuse T2.2r and
+  future T2.2t registered roots, including junction aliases. The bounded
+  low-cap fit/evaluation is `scientific_use=false` and remains
+  `inconclusive_hold`. No registered collection, currency qualification,
+  training or promotion occurred. T2.2 remains `[~]`. Report under
+  `SpireTrainer/docs/verification/`: `t2-2u-currency-pipeline.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2217,6 +2230,10 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2u mirrors accepted one-policy producer/evaluator
+  engineering evidence at the repaired pin. Registered data and scientific
+  conclusions remain untouched.
 
 - 2026-09-08 — T2.2t mirrors the fresh one-policy currency preregistration and
   collection-free seed-lineage acceptance. T2.2r remains inconclusive and its
