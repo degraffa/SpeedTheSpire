@@ -2010,6 +2010,19 @@ new training-quality result is claimed. Full evidence:
   used for training. T2.2 remains `[~]`. Report under
   `SpireTrainer/docs/verification/`: `t2-2w-currency-evaluation.md`.
 
+  **2026-09-08 (T2.2x train/development diagnosis) — descriptive only.** A
+  sealed-model audit that refuses all registered holdout paths decomposes the
+  hpq6-versus-hpq12 loss using train/development only. Development favors
+  hpq12 by 0.0007094, concentrated in the lowest current-HP bin; dense cells
+  carry most of the additive contribution, while sparse/backoff contributions
+  are small. HP, floor and occupancy are compositionally related, so this does
+  not identify occupancy as a cause. The audit selects one future-only
+  count-aware hpq12 L3-to-L2 prediction gate for bounded feasibility work.
+  Independent recomputation matches all central tables and intervals. No
+  holdout reuse, collection, fit, qualification or training occurred. T2.2
+  remains `[~]`. Report under `SpireTrainer/docs/verification/`:
+  `t2-2x-currency-diagnosis.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2254,6 +2267,10 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2x mirrors the train/development-only hpq12 decomposition
+  and one exploratory count-aware prediction-gate hypothesis. No holdout or
+  training authorization changes.
 
 - 2026-09-08 — T2.2w mirrors the valid once-only hpq12 currency comparison.
   Its small Brier gain misses significance and the registered effect-size bar,
