@@ -2033,6 +2033,18 @@ new training-quality result is claimed. Full evidence:
   `[~]`. Report under `SpireTrainer/docs/verification/`:
   `t2-2y-gate-feasibility.md`.
 
+  **2026-09-08 (T2.2z boss-aware currency feasibility) — exact candidate
+  retired.** SpireTrainer added the source-confirmed public Act-1 boss identity
+  to the hpq6 structural hierarchy after freezing source, native layout
+  witnesses, sealed control and all visible corpus members. The development
+  point Brier gain is 2.4978%, but its paired 99% interval crosses zero; the
+  other three frozen feasibility bars pass. Because all four were required,
+  no fresh collection, adoption or training follows. Native Debug/ASan/Release
+  readers agree with Python on all primary train/development rows, and
+  independent recomputation matches all 20,000 whole-seed bootstrap draws per
+  split. No holdout or evaluation payload was read. T2.2 remains `[~]`. Report
+  under `SpireTrainer/docs/verification/`: `t2-2z-boss-feasibility.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2277,6 +2289,10 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2z mirrors retirement of the exact boss-aware hpq6
+  candidate after one development feasibility bar fails. No fresh collection
+  or training follows; independent T3.3 work is the next bounded path.
 
 - 2026-09-08 — T2.2y retires the fixed count-aware hpq12 gate after its
   development-only feasibility stop fails. No collection or training follows.
