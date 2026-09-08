@@ -56,7 +56,7 @@ one exists, mirroring the Stage B convention.
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
 | Distinguish capped unfinished combat from a true combat exit before assigning value targets | T2.2e | T2.2 | DISCHARGED 2026-09-07 by T2.2f for new actor output and the active generations 28–31 replay window: explicit termination provenance, default consumer refusal, exact simulator replay and whole-episode quarantine. Other historical data remains legacy/unqualified until separately replayed. The completed sharpening comparison remains historical diagnostic evidence. |
-| Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improved held-out policy CE with detached auxiliary gradients but failed playing and retention bars. T2.2i measured the historical 192-evaluation GSH collection-teacher configuration at fixed gen31: robustly weaker than deployed 48-PUCT and SIM_SEARCH, no established advantage over policy, blind or greedy. T2.2j then qualified a matched 192-PUCT configuration: the algorithm contrast against 192-GSH at the same nominal budget is robustly positive, so GSH selection explains the T2.2i deficit, but the 48-to-192 budget contrast within PUCT is robust in neither direction and 192-PUCT still trails SIM_SEARCH. T2.2k run 4 passes aggregate equivalence and shows value passes narrowly, while policy is not a broad bottleneck (row agreement 0.7828; episode-clustered 99% CI [0.7788, 0.8014]). T2.2l localizes 61.71% of disagreements to rows where the search action has policy probability 0.10–<0.25 (RR 3.08, clustered 99% CI [2.81, 3.40]) and selects 256 reproducible states, but has no action-value or stability evidence. Retain `targeted_root_evidence` as the next bounded diagnosis; no training or promotion is authorized. |
+| Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improved held-out policy CE with detached auxiliary gradients but failed playing and retention bars. T2.2i measured the historical 192-evaluation GSH collection-teacher configuration at fixed gen31: robustly weaker than deployed 48-PUCT and SIM_SEARCH, no established advantage over policy, blind or greedy. T2.2j then qualified a matched 192-PUCT configuration: the algorithm contrast against 192-GSH at the same nominal budget is robustly positive, so GSH selection explains the T2.2i deficit, but the 48-to-192 budget contrast within PUCT is robust in neither direction and 192-PUCT still trails SIM_SEARCH. T2.2k run 4 passes aggregate equivalence and shows value passes narrowly, while policy is not a broad bottleneck (row agreement 0.7828; episode-clustered 99% CI [0.7788, 0.8014]). T2.2l localizes 61.71% of disagreements to rows where the search action has policy probability 0.10–<0.25 (RR 3.08, clustered 99% CI [2.81, 3.40]) and selects 256 reproducible states. T2.2m's valid repeated root evidence has mean visit advantage 0.1762462120 (99% CI [0.1123403675, 0.2421977586]), but its learner-ready lower bound is 0.5427350427, below the 0.70 bar; the ordered branch is `forced_action_rollouts`. This is not action-value, oracle, or full-run evidence. Only a bounded matched forced-action rollout is authorized; training and promotion remain unauthorized. |
 | Complete branch-advantage macro adapters and actor consumption | T2.4 | T2.4 | The bounded card-reward collector, versioned record and strict standalone CPU smoke consumer have real-run acceptance. Shop/Neow collection adapters and live combat-actor consumption remain unimplemented; the generic legal-pair API alone does not discharge them. Parent T2.4 remains in progress and no macro-policy or full-run quality claim follows. |
 | Complete the public-map planner's run-agent adapters | T3.3a | T3.3 | The bounded map primitive has explicit model callbacks and map-phase budgets only. Fitted public reveal/value adapters, shop/removal sequence search, imminent-fight combat invocation, other-phase budgets, special movement and multi-act adapters remain. Synthetic fixed-V acceptance is not evidence of stronger play; T3.4 dependencies are unchanged. |
 | Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | **DISCHARGED 2026-09-02 (sim side)** — `build: PROJECT_SOURCE_DIR everywhere, so the engine embeds via add_subdirectory` | Every repo-owned `${CMAKE_SOURCE_DIR}` in the seven build files became `${PROJECT_SOURCE_DIR}` (only `./CMakeLists.txt` calls `project()`, so it is the engine root embedded or not); the quiet failure mode was `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. `CMAKE_RUNTIME_OUTPUT_DIRECTORY` on WIN32 stays `CMAKE_BINARY_DIR` deliberately — googletest hard-codes that bin/ as a target property, and pointing our tests elsewhere cost every one of them a `0xc0000135` (observed, then documented in conventions §8). Nothing needed a `PROJECT_IS_TOP_LEVEL` guard. **Evidence:** `tools/check_embed_consumer.sh` (new, hand-run) built a throwaway `add_subdirectory` consumer on the **Windows/clang-cl host** — embedded build clean, `embed_smoke` linked and ran, and `ctest -N | tail -1` in the CONSUMER's build tree reported `Total Tests: 2699`, i.e. the engine's suites arrive as per-test entries, not one opaque entry; its `#error` decoy header was verified as a negative control by temporarily restoring the old spelling. `win-debug` configure+build+ctest fully green on the final tree. **Training side DISCHARGED 2026-09-03 (T1.1b, SpireTrainer `33a99a0`):** pin `bfd95a2` → `6c50a0b`, `ExternalProject_Add` replaced by `add_subdirectory`, `sts_engine` a real target, googletest fetched once |
@@ -1849,6 +1849,24 @@ new training-quality result is claimed. Full evidence:
   Report under `SpireTrainer/docs/verification/`:
   `t2-2l-disagreement-atlas.md`.
 
+  **2026-09-08 (T2.2m targeted root evidence) — verified; the ordered branch
+  is bounded forced-action rollouts, not a learner change.** Run 3 fixed the
+  T2.2l 256-root cohort, engine pin, gen31/encoding-1 checkpoint and
+  192-PUCT configuration. Native control/evidence summaries agree exactly
+  across all 2,048 root/repeat identities; root arithmetic, reconstruction and
+  read-back pass, and the 32-root Windows ASan/UBSan acceptance has no finding.
+  The preserved run-1 evaluator-startup confound, v6 smoke refusal and run-2
+  NumPy API refusal are excluded from scientific evidence. Mean visit advantage
+  is 0.1762462120 (clustered 99% CI [0.1123403675, 0.2421977586]);
+  `learner_ready` is 161/256 with lower bound 0.5427350427, below the required
+  0.70. The `no_update` rule does not fire, `matched_learner` fails, and the
+  ordered `forced_action_rollouts` branch holds. It authorizes only a fresh,
+  preregistered forced SEARCH-versus-POLICY continuation from persisted roots
+  under matched 192-PUCT; no training, checkpoint promotion, oracle claim or
+  full-run quality claim follows. T2.2 remains `[~]`.
+  Report under `SpireTrainer/docs/verification/`:
+  `t2-2m-root-evidence.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2093,6 +2111,11 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2m validates repeated native root evidence on the fixed 256
+  T2.2l roots. The learner-ready lower bound misses 0.70 despite a positive
+  visit advantage, selecting only the bounded `forced_action_rollouts` branch;
+  no training or promotion is authorized.
 
 - 2026-09-08 — T2.2l maps the accepted gen31 disagreement cohort and selects
   256 reproducible roots. The fixed 0.10–<0.25 search-action policy-probability
