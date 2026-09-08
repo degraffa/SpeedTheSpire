@@ -2023,6 +2023,16 @@ new training-quality result is claimed. Full evidence:
   remains `[~]`. Report under `SpireTrainer/docs/verification/`:
   `t2-2x-currency-diagnosis.md`.
 
+  **2026-09-08 (T2.2y count-aware gate feasibility) — gate retired.** The
+  fixed hpq12-L3-count-at-least-20 / hpq12-L2-otherwise candidate fails its
+  development-only feasibility stop: 0.2653% relative Brier improvement, with
+  the 99% interval crossing zero. The result recommends no fresh cohort for
+  this gate. The analysis reads only sealed train/development inputs and
+  refuses every historical/current holdout and T2.2w evaluation path. No
+  collection, fitting, qualification or training occurred. T2.2 remains
+  `[~]`. Report under `SpireTrainer/docs/verification/`:
+  `t2-2y-gate-feasibility.md`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
@@ -2267,6 +2277,9 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-08 — T2.2y retires the fixed count-aware hpq12 gate after its
+  development-only feasibility stop fails. No collection or training follows.
 
 - 2026-09-08 — T2.2x mirrors the train/development-only hpq12 decomposition
   and one exploratory count-aware prediction-gate hypothesis. No holdout or
