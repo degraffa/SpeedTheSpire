@@ -2790,6 +2790,77 @@ See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
 
 
 
+- **T3.11** `[x]` **Selection-key minimum-count guard (v2.1) and the v4
+  rest-option dashboard fix.** Two bounded fixes to the full-run tooling,
+  each answering a finding an earlier task recorded rather than fixed:
+  T3.8 §6.1 (the v2 selection key selects on noise in its new component --
+  arm B chose its own untrained net 0 over net 80 on 2 Act-1 boss kills in
+  2,000 seeds) and T3.8m §4 (on encoding-v4 shards `full_run_behavior.py`
+  reads the rest referent as a menu index, so `rest_rest_fraction` is
+  always 0 and `rest_smith_fraction` counts REST).
+  **Deps:** T3.8, T3.10 **Deliverables:** selection key `v2.1` in
+  `full_run_loop.py` -- v2's fields under a guard where a count-valued
+  component (`heart`, `act4_entries`, `act3_boss_fights_reached`,
+  `act2_reach`, `act1_boss_kills`) decides a comparison only when at least
+  `--selection-min-count` (default 20) events were seen on it in at least
+  one of the two checkpoints, otherwise a tie and fall through;
+  `selection.min_count` in `freeze.json` and `selection_min_count` +
+  `selection_key_effective` in every selection record, with
+  `selection_decision` in `best.json`;
+  `SpireTrainer/docs/experiments/selection-key-v2.1.md` as
+  the protocol document; encoding-aware rest-site classes in
+  `full_run_behavior.py` (`6800 + PvRestOptionKind` from v4, menu index on
+  v3) with a per-kind histogram.
+  **Acceptance:** offline read-only re-derivation of T3.8's two recorded
+  selections under the guard; the dashboard on a v4 and a v3 directory
+  against T3.8m §4's published numbers; `win-release` build and `--smoke`
+  loop runs showing the guard in the records; boundary check.
+  **Log (2026-09-15):** All bars met; evidence in
+  `SpireTrainer/docs/verification/t3-11-selection-guard.md`.
+  Re-derivation (read-only; the t38 dirs were not written): at
+  `min_count 0` it reproduces both arms' recorded `best.json` exactly (the
+  control); at `min_count 20` **arm A is unchanged at net 80** -- its five
+  count components are 0 at all 17 evaluations -- and **arm B moves from
+  net 0 to net 55**, key `[0,0,0,0,0,8.9770]`, sha `f352fd561a3e6cd9`, via
+  six promotions all decided by `mean_final_floor` with all five counts
+  gated. Not net 80 as the task brief expected: selection is "best so far",
+  and arm B's mean floor peaks at net 55 (8.9770) and falls back over nets
+  60-80. Unguarded, arm B promotes zero times. Finding, pre-existing on
+  master: T3.8 added `selection.key_fields` and T3.9 added
+  `selection.key_version` beside it, so both T3.8 run dirs carry the
+  six-field v2 list and no version, and `back_fill_freeze`'s
+  `setdefault(..., "v1")` **refused both outright on `--resume`**; it now
+  infers the version from the field list and prefers the UNGUARDED
+  spelling, so a run that selected without a guard is never re-read as
+  guarded -- checked read-only over all five frozen run dirs (t37/run1 ->
+  v1, t38/armA and armB -> v2, both t38m smokes -> v2; min_count 0 on every
+  one). Controls refuse: a guard on an unguarded key version, a negative
+  `min_count` (freeze and CLI), an unknown key version, a field list
+  matching no unguarded version; `--selection-key v2 --selection-min-count
+  20` froze `min_count 0`; the comparator suppresses 2-vs-0 but not
+  40-vs-3, and at `min_count 0` still returns the v2 answer. Dashboard, v4
+  (`t38m/smoke_b/.../net_002_hybrid`, 146 rest decisions):
+  `rest_rest_fraction` 0.0000 -> **0.2945**, `rest_smith_fraction` 0.2945 ->
+  0.3014, recall 0.3973, lift 0.0068, `rest_kind_counts` {rest 43, smith 44,
+  lift 1, recall 58, unnamed **0**}; three independent readings agree that
+  58 episodes took Recall (kind histogram, the ruby-key state-change
+  detector, and `full_run_summary.py`'s keys column 55+3). v3
+  (`t38/armA/selection/net_080`, 2,148 rest decisions) is byte-identical to
+  the pre-fix output -- the control -- with the four v4-only fractions
+  `None` rather than 0, and its 167 "other" decisions are exactly its 167
+  Recall uses at two different packed menu positions. `win-release` clean;
+  two `--smoke` loop runs (2 gens and 4 gens x 128 episodes, 200 selection
+  seeds, batch 64) froze `key_version v2.1 min_count 20` and recorded six
+  evaluations, every one 200 DEATH / 0 FAILURE / 0 PARKED and every key
+  component gated to `mean_final_floor`; no promotion occurred (no trained
+  net beat the random-init net's 2.96 mean floor at 128 episodes/gen), so
+  the promotion branch is witnessed on the T3.8 data instead of
+  manufactured in a smoke. Run dirs (uncommitted)
+  `E:/STS_BG_Mod/_train_data/t311/`. Boundary check clean (147 files); no
+  unit tests written or run (owner directive 2026-09-03).
+
+
+
 ### GT3 `[ ]` **Gate: integrated Act-1 agent (M9-equivalent)**
 **Deps:** T3.4, T3.5
 - [ ] T3.4 paired improvement + zero-diff sample re-verified at the gate.
