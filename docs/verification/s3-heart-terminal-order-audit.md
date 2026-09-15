@@ -1,5 +1,11 @@
 # Heart terminal action ordering — source audit, 2026-09-07
 
+**Follow-up, 2026-09-15:** the separately scoped
+[terminal clearing repair](s3-62-terminal-clear-repair.md) corrects the premature
+repeated filtering, with source/build/corpus and constructed-probe evidence.
+The live witness remains pending. The audit below records the original finding
+and its original evidence boundary.
+
 This bounded follow-up to the [S3 source audit](s3-source-audit.md) found a
 specific mismatch in the simulator's post-combat queue filtering. A constructed
 Sentinel/Corruption/Panache play leaves terminal energy at 3; the complete

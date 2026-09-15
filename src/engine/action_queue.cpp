@@ -11,6 +11,7 @@
 
 #include <cassert>
 
+#include "interp/interp_damage.hpp"  // DamageAction's owner-cancellation guard
 #include "sts/engine/card_play.hpp"  // resolve_card_play wired into pump_step step 3
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"  // execute_opcode wired into pump_step
@@ -279,6 +280,75 @@ constexpr uint16_t kTerminalDrainSteps = static_cast<uint16_t>(
     }
 }
 
+// Whether this terminal item reaches its Java action's clearPostCombatActions
+// call. Read BEFORE execution: a hit may itself kill its target or its owner.
+// This is not a damage-applied predicate: LoseHPAction and both vampire actions
+// reach the clear even when damage/healing does nothing; SuicideAction never
+// calls it despite having ActionType.DAMAGE. The initial terminal partition is
+// still the pump's existing approximation of the killing action's first clear.
+[[nodiscard]] bool terminal_action_reaches_clear(
+    const CombatState& s, const ActionQueueItem& item) noexcept {
+    const Opcode opcode = static_cast<Opcode>(item.opcode);
+    if (item.tgt == kActorAllEnemies) {
+        // One DamageAllEnemiesAction, not one clear per fan-out target. Its
+        // completed update clears even when the live-target loop is empty
+        // (DamageAllEnemiesAction.java:68-87).
+        return opcode == Opcode::DAMAGE;
+    }
+    if (item.tgt == kActorRandomEnemy) {
+        // No live target exists during this victory drain, so the dispatcher
+        // never executes a resolved child action.
+        return false;
+    }
+    switch (opcode) {
+        case Opcode::DAMAGE:
+        case Opcode::DAMAGE_BLOCK:
+        case Opcode::DAMAGE_STR_MULT:
+        case Opcode::DAMAGE_DRAW_PILE:
+        case Opcode::DAMAGE_RAMPAGE: {
+            if (opcode == Opcode::DAMAGE_RAMPAGE &&
+                (item.flags & 0xFFu) >= kCardPoolCap) {
+                return false;  // dispatcher rejected the stamped card
+            }
+            const DamageType type = opcode == Opcode::DAMAGE
+                ? damage_type_from_flags(item.flags) : DamageType::NORMAL;
+            if (type == DamageType::THORNS) {
+                return true;  // bypasses BOTH early returns (:65, :70)
+            }
+            // AbstractGameAction.shouldCancelAction (:81-83), then
+            // DamageAction.update's halfDead-owner guard (:69-73). A dead
+            // target cancels NORMAL even when the source is null.
+            if (item.tgt != kActorPlayer &&
+                (item.tgt >= s.monster_count ||
+                 monster_dead_or_escaped(s.monsters[item.tgt]))) {
+                return false;
+            }
+            return !damage_attacker_cancelled(
+                s, item.src, type,
+                opcode == Opcode::DAMAGE && damage_source_is_null(item.flags));
+        }
+        case Opcode::LOSE_HP:           // LoseHPAction.java:39-46
+        case Opcode::LOSE_HP_PER_HAND:  // Regret's LoseHPAction
+        case Opcode::VAMPIRE_DAMAGE:    // VampireDamageAction.java:34-43
+        case Opcode::VAMPIRE_DAMAGE_ALL:// VampireDamageAllEnemiesAction.java:53-76
+            return true;
+        case Opcode::DAMAGE_FEED:       // FeedAction.java:35-46
+        case Opcode::DAMAGE_GREED:      // GreedAction.java:34-44
+            // These classes guard null, NOT dead/escaping targets. Their
+            // reward condition does not guard the following clear.
+            return item.tgt < s.monster_count;
+        case Opcode::RITUAL_DAGGER:     // RitualDaggerAction.java:37-58
+            return item.tgt < s.monster_count &&
+                   (item.flags & 0xFFu) < kCardPoolCap;
+        default:
+            // Includes UseCardAction (and every exhaust callback it queues),
+            // SuicideAction, and baked/no-op DAMAGE_PER_STRIKE/UPGRADE_SCALE.
+            return false;
+    }
+}
+
+[[nodiscard]] bool any_monster_alive(const CombatState& s) noexcept;
+
 void resolve_pending_post_combat_actions_at_terminal(
     CombatState& s, TerminalKind kind) noexcept {
     ActionQueueItem kept[kActionQueueCap]{};
@@ -365,15 +435,11 @@ void resolve_pending_post_combat_actions_at_terminal(
     // they land behind the abandoned non-survivors, and the pump halts at
     // COMBAT_OVER without ever reading either group again.
     //
-    // WHAT A SURVIVOR QUEUES IS FILTERED BY THE SAME FOUR-ARM SET, not admitted
-    // wholesale. `clearPostCombatActions` is not a one-shot: every damage-shaped
-    // action re-calls it whenever it finds the field empty (DamageAction.java:
-    // 88-91 and its 19 siblings), and the field IS empty for the whole of this
-    // drain -- nothing here can revive a monster. So a non-survivor that arrives
-    // mid-drain is exactly as abandoned as one that was already queued, and it
-    // joins `kept`. This keeps the change to the ORDERING question the terminal
-    // actually poses and leaves the survivor set itself untouched: no action
-    // CLASS starts resolving at a terminal that did not resolve there before.
+    // A completed UseCardAction does NOT clear. In particular, Sentinel's
+    // onExhaust prepends GainEnergyAction before Beat of Death's appended hit;
+    // that energy must resolve before the next actual clear. Damage-shaped
+    // actions that cancel early do not clear either. Keep the escape path's
+    // established behavior separate; it has no source-derived clear model.
     for (uint16_t step = 0; step < kTerminalDrainSteps; ++step) {
         if (s.player_hp <= 0 || s.action_count == 0) {
             break;
@@ -382,8 +448,15 @@ void resolve_pending_post_combat_actions_at_terminal(
         if (!pop_action_front(s, item)) {
             break;
         }
+        const bool reaches_clear = kind == TerminalKind::kVictory &&
+                                   terminal_action_reaches_clear(s, item);
         execute_opcode(s, item);
-        // Re-apply the clear to whatever that survivor just queued.
+        if (kind == TerminalKind::kVictory &&
+            (!reaches_clear || any_monster_alive(s))) {
+            continue;
+        }
+        // Re-apply the four-arm filter only at an actual completed clearing
+        // action, including its additions, in the original ring order.
         ActionQueueItem still[kActionQueueCap]{};
         uint8_t still_count = 0;
         const uint8_t pending = s.action_count;
