@@ -112,14 +112,15 @@
 // along.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
-//   * the ACT-4 ENCOUNTERS (S3.41 for the rows, S3.42/S3.43 for the bodies).
-//     S3.33 removed the act-4 room park entirely; what remains is NOT act
-//     -shaped. `Shield and Spear` and `The Heart` have no registry row, so
-//     enter_combat's ordinary encounter join fails and the Act-4 elite and boss
-//     rooms park at ROOM_UNIMPLEMENTED there -- after the exact miscRng
-//     composition draws, exactly like any unimplemented encounter in any act.
-//     The Act-4 rest and shop are fully live today. Nothing else in Act 4
-//     parks.
+//   * (HISTORICAL, closed at S3-G1) the ACT-4 ENCOUNTERS. S3.41 landed the
+//     `Shield and Spear` / `The Heart` registry rows (encounters.yaml 62/63)
+//     and S3.42/S3.43 their bodies (monster_dispatch: SPIRE_SHIELD,
+//     SPIRE_SPEAR, CORRUPT_HEART), so NO Act-4 room parks any more; the Door,
+//     the Act-4 map, its rest/shop/elite/boss rooms and the HEART terminal are
+//     all live (docs/verification/s3-g1-content.md). What is still owed is
+//     the LIVE WITNESS (S3.62's UNVERIFIED-until-captured rows), not code.
+//     This bullet said the opposite until 2026-09-15 -- a stale comment that
+//     a survey agent read as a parked room.
 //   * ? rooms RESOLVE (event_framework.hpp): the one committed eventRng roll
 //     picks MONSTER (a real monster combat, consuming monsterList) / SHOP
 //     (parks, like a map shop) / TREASURE (the chest flow) / EVENT, and an
