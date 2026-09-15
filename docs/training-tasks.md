@@ -2059,6 +2059,44 @@ new training-quality result is claimed. Full evidence:
   Report: `SpireTrainer/docs/verification/t2-2aa-neural-currency.md`.
   T2.2 remains `[~]`; no adoption, qualification, or later gate is implied.
 
+  **2026-09-15 (T2.2ab engine-pin audit and move) — measured reach, then the
+  move.** Between the Trainer pin `2402397` and engine master `38472f7` exactly
+  one commit changes engine behavior: `d146170` (S3.62a), a victory-terminal
+  drain repair in `src/engine/action_queue.cpp` whose predicate is act-agnostic
+  and therefore could reach ordinary Act-1 training data. It was MEASURED, not
+  assumed. New tool `pin_replay_digest` (`src/training/main_pin_replay_digest.cpp`)
+  rebuilds each registered trajectory from its seed, replays the RECORDED action
+  list, and digests `public_hash`, `hash_state(rc.run)`, `hash_state(rc.combat)`
+  and the `RunActionMask` at every decision. The base pass under the old pin
+  reproduces `runs.csv` (zero `final_run_state_hash` and decision-count
+  mismatches) and all 236,775 committed floor rows (zero `public_hash` and
+  action mismatches) over `primary_train`/`primary_dev`/`repeat_train`/
+  `repeat_dev`; the sealed holdouts were refused by the tool and never opened,
+  and `repeat_*` turns out to be the collection's byte-identical determinism
+  repeat of `primary_*` rather than a second policy. Under `38472f7`: of
+  2,843,735 `primary` decisions, 10,053 steps (0.3535%) differ and the ONLY
+  field that ever differs is the drained `CombatState` hash of an already-won
+  fight — every divergent step sits on a post-victory `COMBAT_REWARD`/
+  `MAP_CHOICE` screen with `combat_outcome` `KILLED` or `MUGGED`, none survives
+  into the next combat, and `public_hash`, `run_hash`, `mask_hash`, action,
+  legality, HP, floor, act, phase, decision count, terminal label and victory
+  kind differ on ZERO trajectories. A live-policy re-roll under the new pin is
+  byte-identical to the forced replay, so a fresh collection would produce the
+  same data. `actor_smoke` still matches `tests/golden/actor_smoke_v1.txt`
+  exactly, and the engine's three committed oracle corpora replay zero-diff in
+  `--replay`/`--costs`/`--masks` with all nine injected controls failing loud.
+  The pin therefore moves to `38472f721f540f462f14d4173ba779fcccc02623` in a
+  second commit; `SCHEMA_VERSION` 9, `PUBLIC_VIEW_VERSION` 7, the record layout
+  and the registry manifest hash `35abc258...` are all unchanged. NOT DONE, and
+  deliberately: quarantine's `CommitOrder` is still uncommitted — there is no
+  committed instance to append to (only the struct and `classify_commit`'s use
+  of it), so creating one is the T2.3 lifecycle decision rather than a
+  mechanical append; the five-entry historical order is transcribed in the
+  report for whoever lands it. No data is quarantined, nothing is requalified,
+  T2.2r stays `inconclusive_hold`, and no unit test or `ctest` ran. Report:
+  `SpireTrainer/docs/verification/t2-2ab-engine-pin-audit.md`. T2.2 remains
+  `[~]`.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
