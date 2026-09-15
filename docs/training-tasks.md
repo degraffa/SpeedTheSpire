@@ -2593,6 +2593,81 @@ See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
 
 
 
+- **T3.10** `[x]` **Engine pin 38472f7 -> 6d263b8 (PublicView v8) and
+  observation encoding v4.** Engine T0.8/T0.8a published the on-screen
+  offers the mask already made legal, closing the T3.6 §10.1/§10.2
+  information gap; this task moves the pin with a measured audit and steps
+  the observation encoding to consume the new fields.
+  **Deps:** T3.6, engine T0.8 **Deliverables:** the pin as its own reviewed
+  commit; `pin_replay_digest --compare --ignore-public-hash` plus
+  unconditional per-field divergent-step counts; `actor_smoke --check PATH`
+  (the retired gtest's comparison as a foreground run); the regenerated
+  `tests/golden/actor_smoke_v1.txt`; `kFullRunEncodingVersion` 3 -> 4 --
+  reward-card referents and tokens from `card_offer_*` (with the source in
+  the token's f3), boss-chest claim referents from `claim_rows[]`,
+  rest-option referents and token ids from `rest_option_kind[]`
+  (`6800 + PvRestOptionKind`) -- with token cap, feature count, action cap,
+  enumeration order, container layout and every other token/slot byte
+  unchanged; `observation_encoding_version() -> 4` in
+  `export_full_run_net.py`; `full_run_shards.py` parsing v3 and v4 while
+  pinning `encoding_version` in the stamp.
+  **Acceptance:** pin audit over the T2.2t `primary_dev` cohort only;
+  v3-at-v8 byte diff; v4 real runs (random / `sim_search_keys` / net),
+  reader sweep, logprob check, refusal controls, boundary check, both
+  Windows presets.
+  **Log (2026-09-15):** All bars met; evidence in
+  `SpireTrainer/docs/verification/t3-10-pin-v8-encoding-v4.md`,
+  plus a §12 addendum in
+  `SpireTrainer/docs/verification/t3-6-full-run-actor.md`.
+  Two commits (the pin is its own, per conventions "Moving the engine
+  pin"). Pin audit, `primary_dev` (2,000 trajectories / 351,990 decisions /
+  29,428 floor rows; no holdout opened): the old-pin `--roll` reproduced
+  `runs.csv` and every stored row with zero mismatches and is
+  **byte-identical to T2.2ab's `pin_new/primary_dev` digests**; the new-pin
+  `--forced` compare is `identical=2000 diverged=0`, with `public_hash`
+  divergent on all 351,990 steps and **every other field 0** -- run hash,
+  combat hash, mask hash, action, legality, phase/floor/act/HP, terminal
+  labels, decision counts. `SCHEMA_VERSION` 9 and the registry hash did not
+  move; `PUBLIC_VIEW_VERSION` 7 -> 8, `sizeof(PublicView)` 8992 -> 9248,
+  additive. Fixture: the v8 build REFUSED the v7-stamped golden
+  (`public_view_version mismatch: fixture 7, build 8`), and after
+  `--write` exactly one data column had moved -- `public_hash` on all eight
+  rows -- with `steps`, `final_phase` and `run_state_hash` byte-identical,
+  which is the behavioural finding. Recorded consequence: a v8 build cannot
+  read the T2.2t registered shards at all (`record_bytes 13944` vs 14200);
+  refuse-on-mismatch working, nothing quarantined or requalified. Encoding
+  v3 still ran at the new pin: 512-seed `random` job reproduced T3.6a's
+  22,799 decisions and a full byte diff over 48.9 MB classified **every**
+  differing byte as `sim_commit`, `public_view_version` or per-decision
+  `public_hash` (UNCLASSIFIED=0), all 22,799 `public_hash` moved and no
+  other decision-header byte did. v4: 127 of 22,799 decisions differ from
+  v3-at-v8, the only header field moving by bytes is `token_count` (91 Neow
+  CARD_REWARD decisions, +3 card tokens); slot diffs are exactly the Neow
+  card referents (273, 6858 -> card ids) and the rest kinds (107,
+  `6800+i` -> `6800+kind`). v4 acceptance: random 512 FAILURE 0 and
+  byte-identical on rerun (8/8); `sim_search_keys` 256 reproduced T3.6
+  §7(c) exactly (73,549 decisions, 249 DEATH / 7 TRUNCATED / 0 FAILURE);
+  reader sweep CLEAN -- every `can_choose_rest` referent in 6801..6806
+  (never index-only), every v8-sourced card-pick slot carrying a card id
+  (never 6858); witnesses Neow CARD_REWARD 11 dec / 11 eps (91/91 under
+  random), Dream Catcher 9 dec / 5 eps, boss-chest card row 13,195 / 7,
+  boss-chest claim rows 13,242 / 36 (DIG unwitnessed -- no policy bought a
+  Shovel); random-init v4 net, 256 seeds, FAILURE 0,
+  `full_run_logprob_check.py` PASS (max |dlogprob| 3.908e-04); a T3.7 v3
+  net refused with exit 3 and the version message; a mixed-encoding
+  directory refused (`stamp mismatch on encoding_version: file 3, expected
+  4`). Findings: v3 MIS-referenced the boss chest's claim rows (all 13,234
+  witnessed slots named a chest boss-relic instead of the row's own entity;
+  fixed), and T3.6 finding 3's scripted loop is at `EQUIP_ITEM_REWARD`, not
+  `RELIC_SELECT`. Cost recorded: the T3.7 run1/run2 and T3.9 nets are v3
+  and are NOT loadable by a v4 actor (and vice versa); there is no
+  `--encoding` switch by design. Run dirs (uncommitted)
+  `E:/STS_BG_Mod/_train_data/t310/`. `win-release` and `win-debug` clean;
+  boundary check clean (146 files); no unit tests written or run (owner
+  directive 2026-09-03).
+
+
+
 ### GT3 `[ ]` **Gate: integrated Act-1 agent (M9-equivalent)**
 **Deps:** T3.4, T3.5
 - [ ] T3.4 paired improvement + zero-diff sample re-verified at the gate.
