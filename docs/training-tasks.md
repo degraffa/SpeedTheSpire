@@ -2392,6 +2392,67 @@ See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
   check clean (143 files). Evidence Â§11 of
   `SpireTrainer/docs/verification/t3-6-full-run-actor.md`.
 
+- **T3.7** `[x]` **Full-run PPO learner and training loop: the first real
+  A20H-capable policy training.** The LEARNER half of the direct full-run
+  policy loop and the driver that runs it, then a real 100-generation local
+  run under a frozen protocol, with the §9 proofs that the loop is real. Not
+  a strength claim: no policy killed the Heart, stopped at Act 3, entered
+  Act 4 or fought an Act-3 boss.
+  **Deps:** T3.6 **Deliverables:** `full_run_learner.py` (PPO over
+  `.stsfullrun` shards: freeze/stamp refusal, protocol §2 per-decision
+  reward assignment, current-net value/log-prob recompute, GAE, clipped PPO
+  at the manifest's temperature, PARKED/TRUNCATED bootstrap, FAILURE and
+  off-enumeration exclusion, checkpoint = fp32 model + optimizer + torch/CUDA
+  RNG + generation + protocol sha, fp16 TorchScript export through
+  `export_full_run_net.export`, per-generation `metrics.jsonl`);
+  `full_run_loop.py` (CUDA-free sibling-subprocess driver: freeze at init
+  with the actor's stamp probe and the gen-0 export, `complete.json`
+  receipts written last, `--resume`, model selection every 5 nets with the
+  protocol §7 key, FAILURE/PARKED flags, disk-bounded shard pruning);
+  `full_run_behavior.py` (per-phase action-class dashboard, paired-by-seed
+  bootstrap comparison); the frozen protocol
+  `SpireTrainer/docs/experiments/t37-full-run-ppo.md`.
+  **Acceptance:** `full_run_actor` built under `win-release` on this pin;
+  smoke loop incl. kill-and-`--resume` witnesses; a real run of >= 20
+  generations at 1024 episodes/gen with every episode labeled; parameter
+  hashes changing every generation with finite losses; a checkpoint reloaded
+  from disk and its export recomputing stored log-probs within tolerance;
+  behaviour change between generation 0 and the selected checkpoint measured
+  on the selection cohort with paired bootstrap intervals; boundary check
+  clean; the final cohort ``SpireTrainer/docs/verification/t3-7-full-run-ppo.md`.
+  Protocol sha256 `f90db82209d4cb18c07228e6182f378be9f78971b639b4f33a8b3e4cada99a6b`
+  (LF-normalized bytes), frozen before the first selection evaluation; run
+  directory `D:/STS_BG_Mod/_train_data/t37/run1/` (uncommitted); engine pin
+  `38472f721f540f462f14d4173ba779fcccc02623`; gen-0 net sha256
+  `b57a65b3849b58d4fc35c92db6b8b9931338a5814ee9bf770485e13e6fa31798`
+  (tensors identical to T3.6's random-init net). 100 generations, 102,400
+  episodes, 7.46 M decisions, 1.66 h training wall-clock; terminal kinds
+  DEATH 102,400 / everything else 0; hash chain contiguous, all losses
+  finite. Selection key (HEART, Act-4, Act-3 boss, Act-2 reach, mean floor)
+  at nets 0/5/10/.../100: mean floor 3.162, 4.459, 7.401, 7.824, 7.986,
+  8.143, 8.283, 8.347, 8.319, 8.457, 8.442, 8.523, 8.461, 8.526, 8.594,
+  8.587, 8.641, 8.577, 8.725, 8.752, 8.772 with Act-2 reach 0 except nets
+  45 (1), 55 (2), 60 (1), 90 (1), 95 (1), 100 (1); the first three
+  components were 0 throughout. Selected checkpoint net 55
+  (`nets/gen_055.pt` sha `eb5994428c2f0a4178933d28c28236aa41d8e5942c97eb35842dcab69359134c`,
+  from `gen_054/checkpoint.pt` sha `bb4b03c7…`), last net 100 (sha
+  `c685d1cdf393f025b293a437a0133e0fd72919d67c6aff7a5e2d7694292f1788`).
+  Paired by seed on the 2,000 selection seeds, net 55 − net 0: mean final
+  floor +5.36 [95 % +5.20, +5.52], keys +0.98 [+0.94, +1.01], Act-2 reach
+  +0.001 [0, +0.0025]; the key improved on floor and (within noise) Act-2
+  reach and plateaued after net ~35. Log-prob recomputation on 64 stored
+  decisions of generation 99: max |Δ| 4.45e-3 (tol 2e-2). Findings: the
+  shaping table is farmed (keys via Recall / chests, card rewards left
+  unopened) — a protocol change for the next run, not applied to this one;
+  generation 12's update hit the 16 GB VRAM ceiling at minibatch 2048, so
+  from generation 14 each step is four 512-decision micro-batches (same
+  weighted-mean loss, witnessed equal to ~1e-9); 77 generations' training
+  shards pruned per protocol §11.7 (gen 0, every 5th, last three kept).
+  Smoke run `t37/smoke1` with two SIGKILL-and-resume witnesses. No unit
+  tests written or run (owner directive 2026-09-03). Boundary check clean
+  (146 files).
+
+
 ### GT3 `[ ]` **Gate: integrated Act-1 agent (M9-equivalent)**
 **Deps:** T3.4, T3.5
 - [ ] T3.4 paired improvement + zero-diff sample re-verified at the gate.
