@@ -41,6 +41,13 @@ provenance). [docs/stage-a-design.md](docs/stage-a-design.md) and
   source), `tools/registry_gen/` (PyYAML codegen), `tools/oracle_bridge/`
   (vendored fork source, `PROTOCOL.md`, `driver/`, `translator/`),
   `tools/diff_harness/`, `tools/fixture_gen/`.
+- **Data lives on `E:` by default (owner rule, 2026-09-15).** `D:` reached
+  98 % full; datasets, training runs and campaign artifacts now live under
+  `E:\STS_BG_Mod\_train_data` / `E:\STS_BG_Mod\_oracle_data`, with directory
+  junctions left at the old `D:\STS_BG_Mod\...` paths so every recorded path
+  still resolves. Put new run/campaign output on `E:`; keep repos, worktrees,
+  build trees and `_train_env` on `D:`. Full rule: SpireTrainer
+  `docs/conventions.md` §10.
 - **Calling WSL from the Windows host — use `tools/wsl_run.sh`, never hand-roll
   the `wsl` line:**
   ```bash
