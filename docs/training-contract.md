@@ -61,7 +61,8 @@ sees the new fields: a trainer that wants the Neow/Dream-Catcher card ids, the
 boss-chest claim rows or the campfire option kinds has to re-pin this engine
 and step its own observation-encoding version, and shards written before that
 step simply do not contain the values.
-It is a real field of every `PublicView` instance (`public_view_version`), not
+
+`PUBLIC_VIEW_VERSION` is a real field of every `PublicView` instance (`public_view_version`), not
 just a compile-time constant, so a stored record carries its own schema
 identity and a loader can refuse without out-of-band metadata.
 

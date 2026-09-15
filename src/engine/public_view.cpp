@@ -474,10 +474,13 @@ void encode_always_block(const RunController& rc, PublicView& out) noexcept {
 
 void encode_rewards(const RewardScreen& s, PublicView& out) noexcept {
     out.rewards.active = 1;
-    out.rewards.count = s.count;
-    out.rewards.open_card_item = s.open_card_item;
     const int n = s.count < kRewardItemCap ? static_cast<int>(s.count)
                                            : kRewardItemCap;
+    // The published count is the number of rows actually written (T0.8a review
+    // A1): a count wider than the cap must never exceed the rows a reader can
+    // index.
+    out.rewards.count = static_cast<uint8_t>(n);
+    out.rewards.open_card_item = s.open_card_item;
     for (int i = 0; i < n; ++i) {
         const RunRewardItem& in = s.items[i];
         PvRewardItem& o = out.rewards.items[i];
@@ -594,9 +597,9 @@ void encode_claim_rows(const RewardScreen& s, PvClaimRowSource src,
                        PublicView& out) noexcept {
     out.claim_rows_active = 1;
     out.claim_rows_source = static_cast<uint8_t>(src);
-    out.claim_row_count = s.count;
     const int n = s.count < kRewardItemCap ? static_cast<int>(s.count)
                                            : kRewardItemCap;
+    out.claim_row_count = static_cast<uint8_t>(n);  // rows written, never s.count
     for (int i = 0; i < n; ++i) {
         const RunRewardItem& in = s.items[i];
         PvRewardItem& o = out.claim_rows[i];
@@ -617,6 +620,16 @@ void encode_claim_rows(const RewardScreen& s, PvClaimRowSource src,
 // describes the same button; publishing the kind is what turns "option 2 is
 // legal" into "Toke is legal". RestOptionKind is shifted up by one so a zero
 // slot can mean "no option" (RestOptionKind::REST is 0).
+// PvRestOptionKind is RestOptionKind shifted up by one; pin the alphabet so a
+// renumbered or appended RestOptionKind member cannot publish an undeclared
+// value without a PUBLIC_VIEW_VERSION bump (T0.8a review A2).
+static_assert(static_cast<uint8_t>(RestOptionKind::REST) + 1 == static_cast<uint8_t>(PvRestOptionKind::REST));
+static_assert(static_cast<uint8_t>(RestOptionKind::SMITH) + 1 == static_cast<uint8_t>(PvRestOptionKind::SMITH));
+static_assert(static_cast<uint8_t>(RestOptionKind::LIFT) + 1 == static_cast<uint8_t>(PvRestOptionKind::LIFT));
+static_assert(static_cast<uint8_t>(RestOptionKind::TOKE) + 1 == static_cast<uint8_t>(PvRestOptionKind::TOKE));
+static_assert(static_cast<uint8_t>(RestOptionKind::DIG) + 1 == static_cast<uint8_t>(PvRestOptionKind::DIG));
+static_assert(static_cast<uint8_t>(RestOptionKind::RECALL) + 1 == static_cast<uint8_t>(PvRestOptionKind::RECALL));
+
 void encode_rest_option_kinds(const RunState& rs, PublicView& out) noexcept {
     const RestMenu menu = build_rest_menu(rs);
     const int n = menu.count < kRestOptionCap ? static_cast<int>(menu.count)
@@ -693,10 +706,12 @@ void encode_screens(const RunController& rc, PublicView& out) noexcept {
     }
 
     // --- v8 (T0.8) ----------------------------------------------------------
-    // The four `PvMask` surfaces whose content no v7 field carried. Each gate
-    // is the SAME condition `legal_actions` fills its bits under (the arms in
-    // run_advance.cpp), so a published offer and a legal slot can never
-    // disagree about which row they mean.
+    // The four `PvMask` surfaces whose content no v7 field carried. Gates
+    // (1)-(3) are the SAME conditions `legal_actions` fills their bits under
+    // (the arms in run_advance.cpp), so a published offer and a legal slot can
+    // never disagree about which row they mean. Gate (4) is deliberately
+    // WIDER than the mask's MENU-only arm: the campfire menu is public in every
+    // REST_SITE state, so the kinds are published for the whole phase.
     //
     // (1) Neow's CARD_REWARD sub-screen. ITEM_REWARD is deliberately absent:
     //     it is already inside the v7 `rewards` gate above, and publishing it
