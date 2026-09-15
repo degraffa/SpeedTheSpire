@@ -2529,6 +2529,128 @@ See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
   (146 files).
 
 
+- **T3.8** `[x]` **Protocol v2 (run2): un-farmable shaping, undiscounted
+  horizon, fresh and warm-start arms.** A second frozen protocol for the
+  full-run PPO loop that removes the two things run1 was measured farming
+  (the key reward; the per-decision discount that taxed every screen), and
+  two 80-generation arms under it — B warm-started from run1's selected
+  weights, A from the same random init run1 used — to separate "can v2
+  unlearn v1's behaviour" from "what does v2 produce with no history". Not
+  a strength claim and not a milestone: neither arm killed the Heart,
+  stopped at Act 3, entered Act 4, or fought an Act-3 boss, and neither
+  arm's net 80 killed an Act-1 boss on any selection seed.
+  **Deps:** T3.7 **Deliverables:** the frozen protocol
+  `SpireTrainer/docs/experiments/t38-full-run-ppo-v2.md`
+  (§11 tabulates all thirteen differences from v1 and why); reward-spec
+  plumbing in `full_run_learner.py` and `full_run_loop.py` — a
+  `KNOWN_REWARD_SPECS` table (`v1` = run1's exact numbers, `v2` = this
+  run's), selected by `--reward-spec`, refusing an unknown id, carrying
+  the shaping table, gamma/lambda and the selection key fields through
+  `freeze.json` so a reward change is a data change rather than a learner
+  edit, plus an in-memory back-fill that lets a v1-era freeze resume
+  unmodified; warm-start init via `--init-model-state-dict` and
+  `extract_model_state_dict.py` (model weights only — never optimizer
+  state or RNG — with the source and extracted sha256 recorded in the
+  freeze); the v2 six-component selection key with Act-1 boss kills; the
+  10 GB / every-10th / last-2 prune rule; `act1_boss_kills` added to
+  `full_run_behavior.py`'s paired-bootstrap list.
+  **Acceptance:** both arms run their full budget under the protocol
+  frozen before either arm's first selection evaluation; arm A's gen-0
+  `state_dict` sha equal to run1's; arm B's gen 0 measurably identical to
+  run1 net 55 on the selection cohort; every generation's parameter hash
+  changing with finite losses and a terminal kind on every episode;
+  `shaping_key_total == 0.0` in every generation of both arms (protocol
+  §9.5); gen-0-vs-selected and cross-arm behaviour deltas with paired
+  bootstrap intervals; the final cohort ``SpireTrainer/docs/verification/t3-8-full-run-ppo-v2.md`.
+  Protocol sha256
+  `2e993464ca862df85494bd45fda4989eeca632819209ba16b527ae15eda48fb9`
+  (LF-normalized bytes); actor binary sha256
+  `1ff5198cb7275ebced850a1eb419b72624866de1f8acc222c1e744b79e0d6129`,
+  never rebuilt; engine pin
+  `38472f721f540f462f14d4173ba779fcccc02623`. Run directories
+  (uncommitted): arm B `D:/STS_BG_Mod/_train_data/t38/armB/`, arm A
+  `E:/STS_BG_Mod/_train_data/t38/armA/` — arm A on `E:` under the owner's
+  2026-09-15 rule while `D:` was full; the loop's prune rule already
+  measured `shutil.disk_usage(self.run)`, i.e. the run dir's own drive, so
+  no change was needed and none was made (witness: arm A's init logged
+  `free disk 461.8 GB`). Neither run pruned. 80 generations per arm,
+  1024 episodes/gen, 163,840 episodes; active training 1.112 h (A) and
+  1.549 h (B), both stopping on the generation cap with ~half the 3.0 h
+  wall budget unspent. **Arm B was killed by the harness mid-generation-25
+  and resumed at 14:03:38**; the loop discarded the receipt-less partial
+  generation and replayed it from the same net `6a477b3f6003` on the same
+  seeds `[120_025_600, +1024)` at the same policy seed 20260940 — an
+  unarranged protocol §9.3 witness, and the interruption gap is excluded
+  from the budget because `wall_used_s()` sums only completed generations
+  and selection evaluations. Init shas: arm A gen-0 `state_dict`
+  `2914481fd17afdbd3a23e74cb57a5ca22b12409d75de48c70a0004a833e4594b`
+  (byte-identical to run1's, as protocol §4 requires; the TorchScript
+  container sha differs at `1e02177f1a93…` because the archive embeds its
+  own metadata), arm B from run1 `gen_054/checkpoint.pt` sha
+  `bb4b03c7a409a0c5…` extracted to `70c624f3ed4a055e…`. Selected
+  checkpoints: **arm A net 80**, key `[0, 0, 0, 0, 0, 8.7085]`, sha
+  `77e5c635b334e768bd6c2c2a331154a54f1bf430e5f1a707e342626df7a507f5`;
+  **arm B net 0**, key `[0, 0, 0, 2, 2, 8.5230]`, sha
+  `f76a77b5e778ff58e671210e891cbd8f31400ead7535b3f7e00f315042e76590` —
+  i.e. arm B selected the net it started from, because Act-1 boss kills
+  sit above mean floor in the v2 key and net 0 happened to score 2 of
+  2,000 against net 80's 0 despite net 80's higher mean floor (8.9275 vs
+  8.5230). Arm B's net 0 is measurably identical to run1 net 55 on the
+  selection cohort — every dashboard metric equal to the integer, every
+  paired difference exactly 0.0000 with a [0.0000, 0.0000] interval over
+  2,000 seeds — so "run1 net 55 vs arm B's selected net" is an identity.
+  Selection-key mean floor at nets 0/5/.../80: arm A 3.162, 2.771, 5.791,
+  7.160, 7.593, 7.735, 7.858, 8.001, 8.178, 8.213, 8.289, 8.284, 8.418,
+  8.485, 8.608, 8.659, 8.709 (first five key components 0 throughout);
+  arm B 8.523, 8.415, 8.432, 8.443, 8.642, 8.737, 8.768, 8.867, 8.862,
+  8.919, 8.894, 8.977, 8.861, 8.780, 8.849, 8.897, 8.928 (Act-1 boss
+  kills 2 at net 0, 1 at nets 20 and 35, 0 elsewhere). **Results.** Key
+  farming gone: arm B keys/episode 1.0020 → 0.4575 (paired −0.5445, 95 %
+  [−0.5795, −0.5085]), Recall uses/episode 0.6290 → 0.2025; arm A never
+  acquired it (0.0920 keys/ep, 9 % of run1 net 55's, paired −0.9100
+  [−0.9460, −0.8735] against it). Discount farming gone for the arm that
+  had it: arm B card-offer decisions 137 → 1,300 per 2,000 episodes
+  (0.0685 → 0.6500 per episode), decisions/episode 76.08 → 92.09 (paired
+  +16.01 [+13.77, +18.75]), potion uses 252 → 911 — but **arm A's
+  card-offer rate fell** 0.600 → 0.178 per episode, so the claim holds for
+  the arm taught to skip and is not general (recorded as finding 2, needs
+  a deck-composition instrument). Floor: arm A gen 0 → net 80 +5.5465
+  [+5.3725, +5.7205]; arm B net 0 → net 80 +0.4045 [+0.2725, +0.5350];
+  arm A net 80 vs arm B net 80 −0.2190 [−0.3565, −0.0845] (the warm start
+  is still worth 0.22 floors after equal generations); arm A net 80 vs
+  run1 net 55 +0.1855 [+0.0575, +0.3170] — 80 v2 generations from scratch
+  match run1's 100 v1 generations on depth while holding 9 % of its keys.
+  **Act-1 boss kills: 7 in each arm's 81,920 training episodes (0.0085 %,
+  no trend), 0 for either net 80 on the selection cohort**; every one paid
+  exactly +0.100 with `boss_paid_by_act {1: 1}`, and the +0.15/+0.20 rates
+  were never exercised. Protocol §9 bars: 160/160 generations changed the
+  parameter hash with all losses finite; 163,840 episodes labelled with
+  FAILURE 0, PARKED 0 (no `flags.jsonl` written), TRUNCATED 12 (B) / 0
+  (A); off-enumeration decisions 0; non-finite steps skipped 0;
+  `shaping_key_total` 0.0 in all 160. Max behaviour-log-prob |Δ| 0.0718
+  (A) / 0.0774 (B) over ~7 M decisions each, mean |Δ| ~4e-4 — fp16 export
+  precision, the same quantity T3.7 sampled at 4.45e-3, recorded not
+  suppressed. Findings: (1) **the v2 selection key selects on noise in its
+  new component** — 2 kills in 2,000 seeds is below the cohort's
+  resolution and made arm B select its own initial net; a key component
+  must not sit above mean floor until its event rate is resolvable, which
+  is a protocol change for the NEXT run and is deliberately not applied to
+  this one; (2) arm A's card-offer decline is unexplained; (3) both arms
+  plateau at floor 8.7–8.9 against an Act-1 boss at floor 16/17, and arm
+  A's floor was still rising at net 80, so the generation cap rather than
+  convergence stopped it; (4) arm B's depth plateaued while its behaviour
+  changed enormously — v2 spent its 80 generations re-shaping how run1's
+  depth is reached, not extending it. The final cohort
+  `[300_000_000, +2000)` was NOT opened, no scripted baselines were run,
+  no checkpoint was promoted, and v1's protocol was not touched (the
+  learner keeps run1's numbers under `KNOWN_REWARD_SPECS["v1"]`). No unit
+  tests written or run (owner directive 2026-09-03).
+  **Log (2026-09-15, T3.8m):** merged with T3.9/T3.10 on master; both
+  feature paths (pure PPO v2 fresh/warm-start, hybrid + BC with two-arm
+  selection, kill-and-resume) re-smoked at encoding v4 / pin `6d263b8` --
+  see `SpireTrainer/docs/verification/t3-8m-merge-verification.md`.
+
+
 - **T3.9** `[x]` **Hybrid generation: scripted combat teacher + learned run
   layer, combat imitation, and a measured teacher-dependence gap.** The
   sanctioned staged approach: bootstrap COMBAT competence by imitating the
