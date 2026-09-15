@@ -55,6 +55,7 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| **PublicView v7 omits three on-screen, public facts the full-run policy needs: Neow's card-reward offer (and Dream Catcher's pick), the boss chest's equip-item reward rows, and the per-option kind of rest-site choices (`can_choose_rest[i]` is index-only)** | T3.6 | an engine T0.x contract task (additive v8 tail fields per training-contract.md §10) | Found 2026-09-15 by the T3.6 full-run actor (`SpireTrainer/docs/verification/t3-6-full-run-actor.md` §10.1–10.2): at those screens the unified action slots carry a choose-by-index referent, so the policy sees "three cards and a skip" but not which cards. The trainer may not read `RunState` to close it. Additive by construction; every v7 shard stays readable. Not on the T3.7 critical path (the policy can still act by index); schedule before any promotion claim that depends on Neow/rest quality. Also recorded there: `sim_search*` scripted policies loop open→skip at the Act-1 boss chest on ~3% of seeds (a scripted-policy defect, labelled TRUNCATED, never a harness stall). |
 | Distinguish capped unfinished combat from a true combat exit before assigning value targets | T2.2e | T2.2 | DISCHARGED 2026-09-07 by T2.2f for new actor output and the active generations 28–31 replay window: explicit termination provenance, default consumer refusal, exact simulator replay and whole-episode quarantine. Other historical data remains legacy/unqualified until separately replayed. The completed sharpening comparison remains historical diagnostic evidence. |
 | Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improved held-out policy CE with detached auxiliary gradients but failed playing and retention bars. T2.2i measured the historical 192-evaluation GSH collection-teacher configuration at fixed gen31: robustly weaker than deployed 48-PUCT and SIM_SEARCH, no established advantage over policy, blind or greedy. T2.2j then qualified a matched 192-PUCT configuration: the algorithm contrast against 192-GSH at the same nominal budget is robustly positive, so GSH selection explains the T2.2i deficit, but the 48-to-192 budget contrast within PUCT is robust in neither direction and 192-PUCT still trails SIM_SEARCH. T2.2k run 4 passes aggregate equivalence and shows value passes narrowly, while policy is not a broad bottleneck (row agreement 0.7828; episode-clustered 99% CI [0.7788, 0.8014]). T2.2l localizes 61.71% of disagreements to rows where the search action has policy probability 0.10–<0.25 (RR 3.08, clustered 99% CI [2.81, 3.40]) and selects 256 reproducible states. T2.2m's valid repeated root evidence has mean visit advantage 0.1762462120 (99% CI [0.1123403675, 0.2421977586]), but its learner-ready lower bound is 0.5427350427, below the 0.70 bar. T2.2n retired that ordered forced-action rollout with all pairs resolved but no robust positive V0s result: its 99% interval is [-0.0026993394, 0.0255613606], p=0.0243987801, and its conservative positive-root lower endpoint is 0.0704842713. T2.2o subsequently replayed that fixed evidence descriptively: 1,655/2,048 exit-V0s ties decompose into 1,163 same public endpoints, 58 same scoring-feature endpoints, and 434 same encoded V0s keys. T2.2p preregistered a fresh current-pin six-versus-twelve-HP-quantile calibration comparison and proved its seed range metadata-disjoint. T2.2q then hardened immediate cap-edge boss latching, typed unresolved targets, physical split collection, and the sealed paired evaluator; Release/ASan edge witnesses, deterministic split repeats, and independent source/artifact reviews pass. T2.2r collected the registered cohort with byte-identical repeats and train/dev integrity, keeping holdout payloads opaque. Its 424 train/dev cap-unresolved trajectories limit global resolution to at most 97.88%, below the registered 99% bar even if every held-out trajectory resolves. Independent review accepts collection integrity and the registered comparison stops early as `inconclusive_hold`; fitting and holdout access did not occur. No training, target/value diagnosis, promotion, oracle, causal, or full-run claim is authorized. |
 | Complete branch-advantage macro adapters and actor consumption | T2.4 | T2.4 | The bounded card-reward collector, versioned record and strict standalone CPU smoke consumer have real-run acceptance. Shop/Neow collection adapters and live combat-actor consumption remain unimplemented; the generic legal-pair API alone does not discharge them. Parent T2.4 remains in progress and no macro-policy or full-run quality claim follows. |
@@ -2291,6 +2292,64 @@ See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
   champion bump; agreement-trend gating wired into the promotion
   ladder. **Log:** —
 
+- **T3.6** `[x]` ∥ **Full-run policy actor: A20H-capable episodes under a
+  single policy over every decision class.** The ACTOR half of the direct
+  full-run policy loop. One policy over EVERY decision class (Neow, map,
+  combat, rewards, rest sites, events, shops, chests, boss relics, potions,
+  keys, Act 4); episodes played to the run's TRUE terminal; six exhaustive,
+  exclusive labels — HEART_VICTORY / ACT3_STOP / DEATH / PARKED / TRUNCATED /
+  FAILURE — that never confuse a win, a death, unsupported content, a cap
+  and a harness fault. Its shard format, tensor layout and TorchScript
+  interface are the contract T3.7's learner builds against.
+  **Deps:** GT1 **Deliverables:** observation encoding v3
+  (`full_run_encode.hpp/.cpp`: 256-token budget over always / combat /
+  screen groups, one domain-offset embedding table, the FIXED unified
+  legal-action enumeration over the view's embedded mask with per-slot
+  `(verb, arg0, arg1, referent, phase)` fields and a cap derived from
+  `kMaxFanout`); `export_full_run_net.py` (`FullRunNet`, TorchScript with
+  `observation_encoding_version() == 3` and `policy_kind() == "full_run"`,
+  fp16 export + fp32 `state_dict`); `full_run_nn.hpp/.cpp` (a second
+  LibTorch loader that refuses combat nets); `full_run_actor` (batched,
+  `random` / `ladder` / `net` / any scripted `sim_search*` policy,
+  run-level `advance()` for every action, the versioned `.stsfullrun`
+  container + `episodes.csv` + `manifest.json`); `full_run_shards.py` /
+  `full_run_summary.py` / `full_run_logprob_check.py`.
+  **Acceptance:** real A20 runs on a fresh seed range, FAILURE 0, every
+  PARKED row listed, byte-identical shards on rerun, scripted baseline
+  measured, net loader refusals witnessed, logprob recomputation within
+  tolerance, `win-release` + `win-debug` (+ `win-asan`) builds, boundary
+  check clean, Act-2 reach witnessed.
+  **Log (2026-09-15):** All bars met; evidence in
+  `SpireTrainer/docs/verification/t3-6-full-run-actor.md`.
+  Seeds `[7000000, 7000512)` (fresh; no registered cohort touched). Outcome
+  tables (episodes / DEATH / TRUNCATED / max-act a1/a2/a3): random 512 /
+  512 / 0 / 512/0/0; ladder 512 / 512 / 0 / 512/0/0; `sim_search_keys` 256 /
+  249 / 7 / 204/51/1 with all three keys held on 45 runs; `sim_search` 256 /
+  247 / 9 / 178/77/1; `sim_search_keys_deep` 256 / 250 / 6 / 201/55/0;
+  random-init net (d128, 4 layers, 1,966,466 params, sha `2d440601…`) 256 /
+  256 / 0 / 256/0/0. HEART_VICTORY, ACT3_STOP, PARKED and FAILURE were 0
+  everywhere; Act 4 was never entered (no policy survived Act 3), so those
+  labels have code paths but no live witness yet. Determinism: the random
+  512-seed job is byte-identical across two release runs and the debug and
+  ASan builds; the net job is byte-identical across two release runs and
+  the ASan build at the same batch size (batch size is a determinism input
+  — the fp16 forward pads to the batch's widest slot count). Logprob
+  recomputation on 64 stored decisions: max |Δ| 3.9e-4. Refusals: two
+  unversioned combat nets, an encoding-1 and an encoding-2 combat net, a
+  shard with an edited `public_view_version` byte and one with an edited
+  registry-hash byte — all refused by name. Boundary check clean (141
+  files). Throughput: ~64k decisions/s single-threaded scripted-free,
+  ~6.7k decisions/s with the GPU net at batch 64. Findings for the engine
+  ledger: PublicView v7 does not carry Neow's card-reward offer / Dream
+  Catcher's pick / the boss chest's equip reward rows (referent falls back
+  to choose-by-index); rest options are index-only in the view; the
+  scripted `sim_search*` policies loop open→skip at the Act-1 boss chest on
+  6–9/256 seeds (TRUNCATED, not a harness stall). No unit tests written or
+  run (owner directive 2026-09-03); `pv_encode.cpp`'s combat group bodies
+  were moved into a shared `TokenSink` function with their arithmetic
+  untouched.
+
+
 ### GT3 `[ ]` **Gate: integrated Act-1 agent (M9-equivalent)**
 **Deps:** T3.4, T3.5
 - [ ] T3.4 paired improvement + zero-diff sample re-verified at the gate.
@@ -2384,6 +2443,12 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-15 owner direction: prioritize direct full-run policy learning
+  (T3.6 actor, T3.7 learner) ahead of the T2.3/T3.1–T3.3 ladder; those remain
+  open but are no longer prerequisites for this track. T3.6 landed and marked
+  `[x]` (this change); T3.7 (the PPO learner against T3.6's `.stsfullrun`
+  contract) is the next block on this track.
 
 - 2026-09-15 — T3.3d recovers and lands the frozen all-route branch/replay
   tooling with fresh integrity and statistical review. Its exact route-use
