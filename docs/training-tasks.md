@@ -2349,6 +2349,48 @@ See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
   were moved into a shared `TokenSink` function with their arithmetic
   untouched.
 
+  **Log (2026-09-15, T3.6a â€” independent-review fixes):** An independent
+  review of `5da5058` PASSED terminal labelling, the information boundary
+  and the encoder refactor (byte-proven) and returned ten fixes; all ten
+  applied, with no change to any observation tensor byte, slot
+  enumeration, terminal rule or `.stsfullrun` layout. F1 `from __future__
+  import annotations` in the three Python tools â€” the reader's PEP-604
+  `dict | None` did not import on the box's default `python` 3.9.7 at all.
+  F2 `TRUE_TERMINAL_KINDS = {1,2,3}` + `bootstraps(kind)` (4/5/6) exported
+  and documented as must-bootstrap-never-terminal. F3 `actions_dropped` is
+  now WRITTEN into the low half of the decision header's constant-zero
+  `u64 reserved` (high half still zero, same offsets, layout unchanged;
+  `DECISION_DTYPE` split to match), and the actor ends the episode
+  `FAILURE` "actions beyond slot cap" if it is ever non-zero â€” Â§2 had
+  claimed the field rode along while nothing wrote it. F4 exit 4 on any
+  FAILURE episode + the exit codes documented in usage. F5 overflow guard
+  before `episode_block`'s pad. F6 `std::filesystem::create_directories`
+  instead of `std::system("mkdir")`. F7 argument parsing in try/catch â†’
+  usage + exit 2. F8 null-evaluator guard in `run_worker`. F9
+  `full_run_summary.py` groups per DIRECTORY by default (`--merge-policy`
+  restores the old behaviour) â€” two directories of one policy were being
+  merged silently. F10 comment on the one safe unchecked `w.put`
+  dereference. Acceptance (no unit tests, owner directive): `win-release`
+  clean; the 512-seed random job reproduces Â§7(a) exactly (22,799
+  decisions, 512 DEATH, 0 FAILURE, mean 44.5 steps, keys
+  `497,0,11,0,4,0,0,0`). The shards' sha256s differ from the committed
+  T3.6 values for one reason only â€” T3.6 ran at engine pin `2402397983ceâ€¦`
+  and trainer master has since merged the pin bump to `38472f721f54â€¦`,
+  which is the 40-byte `sim_commit` field at header offset 64. A full byte
+  diff against `_train_data/t36/random_a` (48.6 MB, all 8 files) shows
+  exactly **36 differing bytes per file, all inside offsets 64..102**, and
+  restoring only those bytes reproduces all eight committed hashes â€”
+  proof that F3's write is zero and nothing else in the writer moved.
+  Read-back over 107,522 decisions (new and pre-change corpora):
+  `actions_dropped` and `reserved_hi` 0 everywhere. All three tools run
+  under 3.9.7 and the 3.12.14 venv; `full_run_logprob_check` PASS at
+  3.908e-4 / 2.136e-4, the Â§7(d) figures to the digit. Controls fired:
+  `--batch abc` and `--max-steps 99999999999999` â†’ exit 2; a missing net
+  â†’ 2; a non-full-run net â†’ 3; a three-level `--out` created; and the F3
+  guard temporarily flipped to `>=` â†’ 8/8 FAILURE "actions beyond slot
+  cap" with **exit 4**, then reverted and the hashes reproduced. Boundary
+  check clean (143 files). Evidence Â§11 of
+  `SpireTrainer/docs/verification/t3-6-full-run-actor.md`.
 
 ### GT3 `[ ]` **Gate: integrated Act-1 agent (M9-equivalent)**
 **Deps:** T3.4, T3.5
