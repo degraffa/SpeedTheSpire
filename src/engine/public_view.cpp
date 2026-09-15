@@ -474,10 +474,13 @@ void encode_always_block(const RunController& rc, PublicView& out) noexcept {
 
 void encode_rewards(const RewardScreen& s, PublicView& out) noexcept {
     out.rewards.active = 1;
-    out.rewards.count = s.count;
-    out.rewards.open_card_item = s.open_card_item;
     const int n = s.count < kRewardItemCap ? static_cast<int>(s.count)
                                            : kRewardItemCap;
+    // The published count is the number of rows actually written (T0.8a review
+    // A1): a count wider than the cap must never exceed the rows a reader can
+    // index.
+    out.rewards.count = static_cast<uint8_t>(n);
+    out.rewards.open_card_item = s.open_card_item;
     for (int i = 0; i < n; ++i) {
         const RunRewardItem& in = s.items[i];
         PvRewardItem& o = out.rewards.items[i];
@@ -558,6 +561,85 @@ void encode_neow(const NeowState& s, PublicView& out) noexcept {
     out.neow.grid_done = s.grid_done;
 }
 
+// --- v8 (T0.8): the on-screen offers the v7 gates did not publish ------------
+//
+// `PvMask` already carried the legality bits for these screens; nothing carried
+// their CONTENT. Both helpers read `rc.rewards` -- a PURE COPY in
+// `resample_hidden`, so a hidden twin agrees with the truth here and the leak
+// gate can hold the publication honest.
+
+// The open CARD pick of `s`, whichever screen opened it. Publishes ONLY the
+// open row's offer: at Neow's CARD_REWARD and at Dream Catcher the pick screen
+// is the only thing up, so the container's other rows are not on screen.
+void encode_card_offer(const RewardScreen& s, PvCardOfferSource src,
+                       PublicView& out) noexcept {
+    // The same predicate `legal_actions` gates `can_take_card[]` on, so the
+    // published offer and the legal slots are the same row by construction --
+    // the point of the whole task.
+    if (!reward_card_item_open_legal(s)) {
+        return;
+    }
+    const RunRewardItem& item = s.items[s.open_card_item];
+    out.card_offer_active = 1;
+    out.card_offer_source = static_cast<uint8_t>(src);
+    out.card_offer_item = s.open_card_item;
+    out.card_offer_count = item.card_count;
+    for (int c = 0; c < kRewardCardCap; ++c) {
+        out.card_offer_ids[c] = item.card_ids[c];
+        out.card_offer_upgrades[c] = item.card_upgrades[c];
+    }
+}
+
+// The claimable rows of `s`, for a screen `rewards` does not gate. Mirrors
+// encode_rewards' item loop field-for-field (same element type, same audit
+// row) rather than paraphrasing it.
+void encode_claim_rows(const RewardScreen& s, PvClaimRowSource src,
+                       PublicView& out) noexcept {
+    out.claim_rows_active = 1;
+    out.claim_rows_source = static_cast<uint8_t>(src);
+    const int n = s.count < kRewardItemCap ? static_cast<int>(s.count)
+                                           : kRewardItemCap;
+    out.claim_row_count = static_cast<uint8_t>(n);  // rows written, never s.count
+    for (int i = 0; i < n; ++i) {
+        const RunRewardItem& in = s.items[i];
+        PvRewardItem& o = out.claim_rows[i];
+        o.gold = in.gold;
+        o.bonus_gold = in.bonus_gold;
+        o.id = in.id;
+        o.kind = in.kind;
+        o.card_count = in.card_count;
+        for (int c = 0; c < kRewardCardCap; ++c) {
+            o.card_ids[c] = in.card_ids[c];
+            o.card_upgrades[c] = in.card_upgrades[c];
+        }
+    }
+}
+
+// The campfire's button KINDS, parallel to the mask's can_choose_rest[].
+// build_rest_menu is the same call `legal_actions` makes, so slot i of each
+// describes the same button; publishing the kind is what turns "option 2 is
+// legal" into "Toke is legal". RestOptionKind is shifted up by one so a zero
+// slot can mean "no option" (RestOptionKind::REST is 0).
+// PvRestOptionKind is RestOptionKind shifted up by one; pin the alphabet so a
+// renumbered or appended RestOptionKind member cannot publish an undeclared
+// value without a PUBLIC_VIEW_VERSION bump (T0.8a review A2).
+static_assert(static_cast<uint8_t>(RestOptionKind::REST) + 1 == static_cast<uint8_t>(PvRestOptionKind::REST));
+static_assert(static_cast<uint8_t>(RestOptionKind::SMITH) + 1 == static_cast<uint8_t>(PvRestOptionKind::SMITH));
+static_assert(static_cast<uint8_t>(RestOptionKind::LIFT) + 1 == static_cast<uint8_t>(PvRestOptionKind::LIFT));
+static_assert(static_cast<uint8_t>(RestOptionKind::TOKE) + 1 == static_cast<uint8_t>(PvRestOptionKind::TOKE));
+static_assert(static_cast<uint8_t>(RestOptionKind::DIG) + 1 == static_cast<uint8_t>(PvRestOptionKind::DIG));
+static_assert(static_cast<uint8_t>(RestOptionKind::RECALL) + 1 == static_cast<uint8_t>(PvRestOptionKind::RECALL));
+
+void encode_rest_option_kinds(const RunState& rs, PublicView& out) noexcept {
+    const RestMenu menu = build_rest_menu(rs);
+    const int n = menu.count < kRestOptionCap ? static_cast<int>(menu.count)
+                                              : kRestOptionCap;
+    out.rest_option_count = static_cast<uint8_t>(n);
+    for (int i = 0; i < n; ++i) {
+        out.rest_option_kind[i] = static_cast<uint8_t>(menu.entries[i].kind + 1);
+    }
+}
+
 // Every screen section is gated on the screen being ON SCREEN, never merely on
 // the struct being non-empty: a transient screen struct can legitimately hold
 // rolls the player has not seen (Dead Adventurer loads rc.rewards with the
@@ -621,6 +703,48 @@ void encode_screens(const RunController& rc, PublicView& out) noexcept {
     }
     if (phase == RunPhase::REST_SITE) {
         out.rest_screen = rc.rest.screen;
+    }
+
+    // --- v8 (T0.8) ----------------------------------------------------------
+    // The four `PvMask` surfaces whose content no v7 field carried. Gates
+    // (1)-(3) are the SAME conditions `legal_actions` fills their bits under
+    // (the arms in run_advance.cpp), so a published offer and a legal slot can
+    // never disagree about which row they mean. Gate (4) is deliberately
+    // WIDER than the mask's MENU-only arm: the campfire menu is public in every
+    // REST_SITE state, so the kinds are published for the whole phase.
+    //
+    // (1) Neow's CARD_REWARD sub-screen. ITEM_REWARD is deliberately absent:
+    //     it is already inside the v7 `rewards` gate above, and publishing it
+    //     twice would put the same screen in two blocks.
+    if (phase == RunPhase::NEOW &&
+        rc.neow.screen == static_cast<uint8_t>(NeowScreen::CARD_REWARD)) {
+        encode_card_offer(rc.rewards, PvCardOfferSource::NEOW, out);
+    }
+    // (2) Dream Catcher's pick, opened by finish_sleep at a rest site.
+    if (phase == RunPhase::REST_SITE &&
+        rc.rest.screen == static_cast<uint8_t>(RestScreen::DREAM_CATCHER)) {
+        encode_card_offer(rc.rewards, PvCardOfferSource::DREAM_CATCHER, out);
+    }
+    // (3) The boss chest's equip item-reward screen (Tiny House / Calling
+    //     Bell). The two arms mirror the mask's own split exactly: an open
+    //     card row offers can_take_card[] and nothing else, and a closed one
+    //     offers can_claim_reward[] + proceed.
+    if (phase == RunPhase::BOSS_TREASURE &&
+        rc.run.boss_chest.screen ==
+            static_cast<uint8_t>(BossChestScreen::EQUIP_ITEM_REWARD)) {
+        if (rc.rewards.open_card_item != kNoOpenCardReward) {
+            encode_card_offer(rc.rewards, PvCardOfferSource::BOSS_CHEST, out);
+        } else {
+            encode_claim_rows(rc.rewards, PvClaimRowSource::BOSS_CHEST, out);
+        }
+    }
+    // (4) The campfire option kinds. Published for the WHOLE phase, not only
+    //     the MENU screen: the button list is the room, and a Smith/Toke grid
+    //     is a modal over it. It is rebuilt (not stored), so there is no
+    //     stale-struct trap to gate against -- build_rest_menu is a pure
+    //     function of public RunState.
+    if (phase == RunPhase::REST_SITE) {
+        encode_rest_option_kinds(rc.run, out);
     }
     // TreasureChest: the size is on the room before any interaction; the
     // contents are a construction-time roll revealed only by the open action.

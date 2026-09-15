@@ -28,7 +28,7 @@ that §2.7 draws, restated once because everything here follows from it:
 
 ## 1. `PUBLIC_VIEW_VERSION` and the stamps you must record
 
-`PUBLIC_VIEW_VERSION` is **7**
+`PUBLIC_VIEW_VERSION` is **8**
 ([../include/sts/engine/public_view.hpp](../include/sts/engine/public_view.hpp)).
 (It read **2** here until S2.2F: S2.13's v3 bump did not update this line. The
 number lives in the header; this file quotes it, and a quoted number goes stale
@@ -48,8 +48,21 @@ mask channel exactly as v3's field was, so no v6 offset moved and
 `sizeof(PublicView)` goes 8988 → 8992; a v6 record's zero at both reads
 truthfully for every ACTUAL stored v6 record (see the audit's v7 version-log
 entry for the two-part argument — nobody has ever captured a live Act-4 run
-through `encode_public_view` yet, since the training repo does not exist).)
-It is a real field of every `PublicView` instance (`public_view_version`), not
+through `encode_public_view` yet, since the training repo does not exist). v8 —
+T0.8's on-screen offer blocks: Neow's and Dream Catcher's card offers, the boss
+chest's equip claim rows, and the campfire's per-option kinds — is ADDITIVE
+over v7, appended after `pad_v7` so no v7 offset moved and
+`sizeof(PublicView)` goes 8992 → 9248; a v7 record's zeros there read
+truthfully as "no offer, no claim screen and no option kind published".)
+
+**Consumers must still bump their pin and their own encoding version to
+USE v8.** Additive means a v7 shard stays readable, not that a v7-era encoder
+sees the new fields: a trainer that wants the Neow/Dream-Catcher card ids, the
+boss-chest claim rows or the campfire option kinds has to re-pin this engine
+and step its own observation-encoding version, and shards written before that
+step simply do not contain the values.
+
+`PUBLIC_VIEW_VERSION` is a real field of every `PublicView` instance (`public_view_version`), not
 just a compile-time constant, so a stored record carries its own schema
 identity and a loader can refuse without out-of-band metadata.
 
@@ -99,6 +112,8 @@ The header groups the struct into these sections, in layout order:
 | mask channel | `PvMask` — always live (§4) |
 | *v7 tail append →* | S3.51: appended after `event_flags_hi`, past the mask channel; no earlier offset moved |
 | run outcome | `victory_kind` (`RunVictoryKind`: NONE/ACT3_STOP/HEART) and `act4_floor_base` (the floor Act 4 was constructed at, 51 below A20 / 52 at A20) |
+| *v8 tail append →* | T0.8: appended after `pad_v7`; no earlier offset moved |
+| on-screen offers | `claim_rows[8]` + `claim_row_count` / `claim_rows_source` (the boss chest's equip item-reward rows, the screen `can_claim_reward[]` addresses outside `rewards`); `card_offer_ids[4]` / `card_offer_upgrades[4]` / `card_offer_count` / `card_offer_source` / `card_offer_item` (the open card pick at Neow's `CARD_REWARD`, Dream Catcher, and the boss chest — the screens `can_take_card[]` addresses outside `rewards`); `rest_option_kind[43]` + `rest_option_count` (`PvRestOptionKind` = `RestOptionKind + 1`, **same index space as the mask's `can_choose_rest[]`**) |
 
 Two layout decisions a reader will otherwise re-litigate, both recorded in the
 audit's version log:
@@ -435,6 +450,7 @@ ever look at `PublicView`.
 | Byte classification tripwire | [`include/sts/engine/byte_class.hpp`](../include/sts/engine/byte_class.hpp) |
 | Twin fixture container | [`tools/twin_fixtures/include/sts/twin/twin_fixture.hpp`](../tools/twin_fixtures/include/sts/twin/twin_fixture.hpp) |
 | Omniscient boundary check | [`tools/check_omniscient_boundary.sh`](../tools/check_omniscient_boundary.sh) |
+| Real-run leak witness (T0.8; a program, not a gtest) | [`tools/twin_fixtures/src/pv8_leak_probe.cpp`](../tools/twin_fixtures/src/pv8_leak_probe.cpp) — target `pv8_leak_probe` |
 | Nightly sampler suite entry | [`tools/dist_check/sampler_dist.sh`](../tools/dist_check/sampler_dist.sh) |
 | Gate evidence | [verification/gt0-info-layer.md](verification/gt0-info-layer.md) |
 | Phase T spec / ledger | [training-plan.md](training-plan.md) · [training-tasks.md](training-tasks.md) |

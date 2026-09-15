@@ -85,6 +85,7 @@
 #include <type_traits>
 
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/rest_sites.hpp"  // kRestOptionCap (the v8 option-kind row)
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
@@ -152,7 +153,76 @@ namespace sts::engine {
 //             map array needed NO changes: they already carry Act 4's keys,
 //             act index and the constant 5x7 special map generically (they
 //             are copied wholesale regardless of which act is current).
-inline constexpr uint32_t PUBLIC_VIEW_VERSION = 7;
+// v8: T0.8 -- the ON-SCREEN OFFERS a public-information policy could not see.
+//             `PvMask` already published the legality bits for four screens
+//             whose CONTENT no v7 field carried, so a PublicView-only policy
+//             read "three cards and a skip" without knowing which cards:
+//               (1) Neow's CARD_REWARD sub-screen (`can_take_card[j]` legal,
+//                   but `rewards` is gated on COMBAT_REWARD / Neow ITEM_REWARD
+//                   only, so the offer was absent);
+//               (2) Dream Catcher's rest-site pick (same `rc.rewards`, same
+//                   absent gate);
+//               (3) the boss chest's EQUIP_ITEM_REWARD screen (Tiny House /
+//                   Calling Bell), whose `can_claim_reward[i]` rows and open
+//                   card offer were likewise outside every v7 gate;
+//               (4) rest-site options -- `can_choose_rest[i]` is CampfireUI
+//                   insertion order and NOTHING carried the per-option KIND
+//                   (rest / smith / lift / toke / dig / recall).
+//             ADDITIVE, case 2 (tail append): every field is appended AFTER
+//             `pad_v7`, i.e. past the mask channel exactly as v3's and v7's
+//             own fields were, so no v7 offset moves and `sizeof` grows
+//             8992 -> 9248. Declared "not present" value: **zero** -- a zero
+//             `card_offer_active` / `claim_rows_active` means "no offer or
+//             claim screen published here", and a zero `rest_option_kind[i]`
+//             means "no option published at this index" (which is why the
+//             published kind is `RestOptionKind + 1`: the raw enum's REST is
+//             0 and would have been indistinguishable from an empty slot).
+//             Every v7 record reads truthfully under that declaration: the
+//             fields simply did not exist, and the four screens' content was
+//             absent from a v7 record whether or not the screen was up.
+//             Nothing here is read from hidden state -- all four surfaces are
+//             `rc.rewards` / `build_rest_menu(rc.run)`, both PURE COPIES in
+//             `resample_hidden` (resample.cpp's "rows that are PURE COPIES"
+//             list), which is what makes the hidden-twin gate able to hold
+//             them honest rather than merely unreviewed.
+inline constexpr uint32_t PUBLIC_VIEW_VERSION = 8;
+
+// --- v8 element enums ---------------------------------------------------------
+
+// Which screen `card_offer_*` was published from. The three members are exactly
+// the `can_take_card[]` sites the v7 `rewards` gate did not cover
+// (run_advance.cpp's NEOW / BOSS_TREASURE / REST_SITE arms); COMBAT_REWARD and
+// Neow's ITEM_REWARD keep reaching the consumer through `rewards` and never set
+// this, so the two blocks never describe the same screen twice.
+enum class PvCardOfferSource : uint8_t {
+    NONE = 0,
+    NEOW = 1,           // NeowScreen::CARD_REWARD
+    DREAM_CATCHER = 2,  // RestScreen::DREAM_CATCHER
+    BOSS_CHEST = 3,     // BossChestScreen::EQUIP_ITEM_REWARD, card row open
+};
+
+// Which screen `claim_rows` was published from. One member today: the boss
+// chest's equip item-reward screen, whose `can_claim_reward[i]` bits address
+// `rc.rewards.items[i]` outside `rewards.active`.
+enum class PvClaimRowSource : uint8_t {
+    NONE = 0,
+    BOSS_CHEST = 1,  // BossChestScreen::EQUIP_ITEM_REWARD, no card row open
+};
+
+// `rest_option_kind[i]`'s alphabet: RestOptionKind (rest_sites.hpp) SHIFTED UP
+// BY ONE so that zero can mean "no option at this index". The shift is the
+// schema, not a convenience -- RestOptionKind::REST is 0, so an unshifted
+// encoding could not distinguish "the Rest button" from "an empty slot", and
+// zero must stay the declared not-present value of every appended field.
+enum class PvRestOptionKind : uint8_t {
+    NONE = 0,
+    REST = 1,
+    SMITH = 2,
+    LIFT = 3,
+    TOKE = 4,
+    DIG = 5,
+    RECALL = 6,
+};
 
 // --- PvCard -----------------------------------------------------------------
 
@@ -603,6 +673,53 @@ struct PublicView {
     uint8_t act4_floor_base;   // the floor Act 4 was constructed at; 0 == none
     uint8_t pad_v7[2];         // explicit padding, always zero -- rounds the
                                // v7 tail back to a 4-byte multiple
+
+    // ======================= v8 (T0.8) tail append ==========================
+    // The on-screen offers the mask already made legal and no v7 field
+    // published (see the version log above). All four are appended here, past
+    // `pad_v7` and therefore past the mask channel, so no v7 offset moves.
+    //
+    // ORDERING IS ALIGNMENT-DRIVEN, not thematic: `PvRewardItem` contains
+    // `int32_t`, so the claim block must start on a 4-boundary. `pad_v7` ends
+    // `sizeof(PublicView)` v7 at 8992 (a 4-multiple), so putting it FIRST is
+    // what keeps this append free of compiler-inserted padding -- the same
+    // no-implicit-padding discipline every earlier append kept, and the
+    // layout-walk static_asserts below prove it rather than assert it in prose.
+
+    // (3) The boss chest's EQUIP_ITEM_REWARD rows, when no card pick is open.
+    // Same element type and same meanings as `rewards.items[]` (§8.1 of the
+    // audit); the rows are the ones `can_claim_reward[0..claim_row_count)`
+    // addresses at that screen. Tiny House and Calling Bell are the only two
+    // relics that build it (relic_pickup_boss.cpp), and both ASSEMBLE
+    // `rc.rewards` fresh in the same step that opens the screen -- there is no
+    // pre-stocked-rows trap here of the Dead Adventurer kind.
+    PvRewardItem claim_rows[kRewardItemCap];
+
+    // (1)/(2)/(3) The OPEN card pick, wherever it is open outside the v7
+    // `rewards` gate. Only the open row's offer is published -- never the whole
+    // `rc.rewards` struct -- because at Neow's CARD_REWARD and at Dream Catcher
+    // the pick screen is the ONLY thing on screen; publishing the container
+    // would be publishing rows the player is not looking at.
+    uint16_t card_offer_ids[kRewardCardCap];       // CardId per offered slot
+    uint8_t card_offer_upgrades[kRewardCardCap];   // parallel upgrade counts
+    uint8_t card_offer_active;                     // 1 == an offer is published
+    uint8_t card_offer_source;                     // PvCardOfferSource
+    uint8_t card_offer_count;                      // == the row's card_count
+    uint8_t card_offer_item;   // which rewards.items[] row is open, else 0
+    uint8_t claim_rows_active;                     // 1 == claim rows published
+    uint8_t claim_rows_source;                     // PvClaimRowSource
+    uint8_t claim_row_count;                       // live rows in claim_rows[]
+    // (4) The campfire's option kinds, parallel to the mask's
+    // `can_choose_rest[]` -- SAME INDEX SPACE, so slot i of each describes the
+    // same button. `RestMenu` is not controller state (it is rebuilt from
+    // relics + run state on every call, audit §8.2), so this is the one v8
+    // block that projects a DERIVED value rather than copying a struct; it is
+    // public for the same reason the mask bits over it are, and the hidden-twin
+    // gate compares it byte-for-byte like everything else.
+    uint8_t rest_option_count;                     // == RestMenu.count
+    uint8_t rest_option_kind[kRestOptionCap];      // PvRestOptionKind per slot
+    uint8_t pad_v8[1];  // explicit padding, always zero -- rounds the v8 tail
+                        // back to a 4-byte multiple
 };
 
 static_assert(std::is_trivially_copyable_v<PublicView>,
@@ -628,13 +745,58 @@ inline constexpr std::size_t kPublicViewFixedBytes = 8360;
 // v7 (S3.51): 4 more tail bytes AFTER event_flags_hi and the mask channel --
 // victory_kind + act4_floor_base + pad_v7[2].
 inline constexpr std::size_t kPublicViewV7TailBytes = 4;
+// v8 (T0.8): the on-screen offer blocks, appended after pad_v7 --
+// claim_rows (kRewardItemCap * sizeof(PvRewardItem)) + the card offer
+// (2*kRewardCardCap + kRewardCardCap + 4 scalars) + the claim scalars (3) +
+// rest_option_count (1) + rest_option_kind[kRestOptionCap] + pad_v8[1].
+inline constexpr std::size_t kPublicViewV8TailBytes =
+    kRewardItemCap * sizeof(PvRewardItem) + 3 * kRewardCardCap + 4 + 3 + 1 +
+    kRestOptionCap + 1;
 static_assert(sizeof(PublicView) == kPublicViewFixedBytes + sizeof(PvMask) +
                                         sizeof(uint32_t) +
-                                        kPublicViewV7TailBytes,
+                                        kPublicViewV7TailBytes +
+                                        kPublicViewV8TailBytes,
               "PublicView size changed -- bump PUBLIC_VIEW_VERSION, update the "
               "audit table (docs/public-view-audit.md) and its schema-evolution "
               "note, and re-check the layout-walk asserts");
-static_assert(sizeof(PublicView) == 8992,
+
+// The v8 LAYOUT WALK: every appended member must start exactly where the
+// previous one ended, or the compiler inserted padding this record may not
+// have (public_hash is a byte hash -- see its note). These live in the header
+// rather than in a test on purpose: the 2026-09-03 owner directive retires
+// unit tests as acceptance, and a static_assert is checked by every one of the
+// six presets at build time, which is strictly stronger than a test nobody
+// runs.
+static_assert(offsetof(PublicView, claim_rows) ==
+                  offsetof(PublicView, pad_v7) + 2,
+              "the v8 tail must abut pad_v7 -- an append may never move a v7 "
+              "offset, and PvRewardItem's 4-alignment must be satisfied by the "
+              "v7 size being a 4-multiple, not by inserted padding");
+static_assert(offsetof(PublicView, card_offer_ids) ==
+                  offsetof(PublicView, claim_rows) +
+                      kRewardItemCap * sizeof(PvRewardItem),
+              "v8 layout walk: card_offer_ids must abut claim_rows");
+static_assert(offsetof(PublicView, card_offer_upgrades) ==
+                  offsetof(PublicView, card_offer_ids) + 2 * kRewardCardCap,
+              "v8 layout walk: card_offer_upgrades must abut card_offer_ids");
+static_assert(offsetof(PublicView, card_offer_active) ==
+                  offsetof(PublicView, card_offer_upgrades) + kRewardCardCap,
+              "v8 layout walk: the scalar run must abut card_offer_upgrades");
+static_assert(offsetof(PublicView, rest_option_count) ==
+                  offsetof(PublicView, card_offer_active) + 7,
+              "v8 layout walk: seven scalar bytes precede rest_option_count");
+static_assert(offsetof(PublicView, rest_option_kind) ==
+                  offsetof(PublicView, rest_option_count) + 1,
+              "v8 layout walk: rest_option_kind must abut rest_option_count");
+static_assert(offsetof(PublicView, pad_v8) ==
+                  offsetof(PublicView, rest_option_kind) + kRestOptionCap,
+              "v8 layout walk: pad_v8 must abut rest_option_kind");
+static_assert(offsetof(PublicView, pad_v8) + sizeof(PublicView{}.pad_v8) ==
+                  sizeof(PublicView),
+              "v8 layout walk: pad_v8 must close the record with no implicit "
+              "trailing padding");
+
+static_assert(sizeof(PublicView) == 9248,
               "PublicView size changed -- see the assert above. This literal is "
               "pinned deliberately: a RunActionMask that grows is a public-view "
               "schema change too, and must be reviewed like any other. It was "
@@ -643,13 +805,20 @@ static_assert(sizeof(PublicView) == 8992,
               "roll arrays AND the mask channel's target grids (8932); v6 grew "
               "the two event caps 12 -> 20 for The Library's board (+48 fixed, "
               "+8 mask -> 8988); v7 tail-appended victory_kind + "
-              "act4_floor_base + 2 pad bytes (8992)");
+              "act4_floor_base + 2 pad bytes (8992); v8 tail-appended the "
+              "on-screen offer blocks -- the boss chest's claim rows, the "
+              "generic card offer, the campfire option kinds and 1 pad byte "
+              "(9248)");
 static_assert(offsetof(PublicView, action_mask) == kPublicViewFixedBytes,
               "the fixed part must end exactly where kPublicViewFixedBytes "
               "says. A TAIL APPEND may never move the mask channel; a "
               "kMonsterCap change moves it by construction, which is precisely "
               "why that is a BREAKING public-view version bump and not an "
               "additive one");
+static_assert(offsetof(PublicView, event_flags_hi) ==
+                  kPublicViewFixedBytes + sizeof(PvMask),
+              "the v3 word must stay immediately behind the mask channel -- a "
+              "v8 append may not move it either");
 
 // --- encode_public_view ------------------------------------------------------
 

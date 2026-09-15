@@ -55,7 +55,7 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| **PublicView v7 omits three on-screen, public facts the full-run policy needs: Neow's card-reward offer (and Dream Catcher's pick), the boss chest's equip-item reward rows, and the per-option kind of rest-site choices (`can_choose_rest[i]` is index-only)** | T3.6 | an engine T0.x contract task (additive v8 tail fields per training-contract.md §10) | Found 2026-09-15 by the T3.6 full-run actor (`SpireTrainer/docs/verification/t3-6-full-run-actor.md` §10.1–10.2): at those screens the unified action slots carry a choose-by-index referent, so the policy sees "three cards and a skip" but not which cards. The trainer may not read `RunState` to close it. Additive by construction; every v7 shard stays readable. Not on the T3.7 critical path (the policy can still act by index); schedule before any promotion claim that depends on Neow/rest quality. Also recorded there: `sim_search*` scripted policies loop open→skip at the Act-1 boss chest on ~3% of seeds (a scripted-policy defect, labelled TRUNCATED, never a harness stall). |
+| **PublicView v7 omits three on-screen, public facts the full-run policy needs: Neow's card-reward offer (and Dream Catcher's pick), the boss chest's equip-item reward rows, and the per-option kind of rest-site choices (`can_choose_rest[i]` is index-only)** | T3.6 | **T0.8 — DISCHARGED 2026-09-15** (`PUBLIC_VIEW_VERSION` 8, additive tail append; `card_offer_*`, `claim_rows*`, `rest_option_kind[]`; witness in [verification/t0-8-public-view-v8.md](verification/t0-8-public-view-v8.md)). The trainer-side residue is its own: bump the engine pin and step its encoding version v3 → v4 to consume the fields. The `sim_search*` open→skip loop noted below is a SCRIPTED-POLICY defect and is NOT discharged here. | Found 2026-09-15 by the T3.6 full-run actor (`SpireTrainer/docs/verification/t3-6-full-run-actor.md` §10.1–10.2): at those screens the unified action slots carry a choose-by-index referent, so the policy sees "three cards and a skip" but not which cards. The trainer may not read `RunState` to close it. Additive by construction; every v7 shard stays readable. Not on the T3.7 critical path (the policy can still act by index); schedule before any promotion claim that depends on Neow/rest quality. Also recorded there: `sim_search*` scripted policies loop open→skip at the Act-1 boss chest on ~3% of seeds (a scripted-policy defect, labelled TRUNCATED, never a harness stall). |
 | Distinguish capped unfinished combat from a true combat exit before assigning value targets | T2.2e | T2.2 | DISCHARGED 2026-09-07 by T2.2f for new actor output and the active generations 28–31 replay window: explicit termination provenance, default consumer refusal, exact simulator replay and whole-episode quarantine. Other historical data remains legacy/unqualified until separately replayed. The completed sharpening comparison remains historical diagnostic evidence. |
 | Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improved held-out policy CE with detached auxiliary gradients but failed playing and retention bars. T2.2i measured the historical 192-evaluation GSH collection-teacher configuration at fixed gen31: robustly weaker than deployed 48-PUCT and SIM_SEARCH, no established advantage over policy, blind or greedy. T2.2j then qualified a matched 192-PUCT configuration: the algorithm contrast against 192-GSH at the same nominal budget is robustly positive, so GSH selection explains the T2.2i deficit, but the 48-to-192 budget contrast within PUCT is robust in neither direction and 192-PUCT still trails SIM_SEARCH. T2.2k run 4 passes aggregate equivalence and shows value passes narrowly, while policy is not a broad bottleneck (row agreement 0.7828; episode-clustered 99% CI [0.7788, 0.8014]). T2.2l localizes 61.71% of disagreements to rows where the search action has policy probability 0.10–<0.25 (RR 3.08, clustered 99% CI [2.81, 3.40]) and selects 256 reproducible states. T2.2m's valid repeated root evidence has mean visit advantage 0.1762462120 (99% CI [0.1123403675, 0.2421977586]), but its learner-ready lower bound is 0.5427350427, below the 0.70 bar. T2.2n retired that ordered forced-action rollout with all pairs resolved but no robust positive V0s result: its 99% interval is [-0.0026993394, 0.0255613606], p=0.0243987801, and its conservative positive-root lower endpoint is 0.0704842713. T2.2o subsequently replayed that fixed evidence descriptively: 1,655/2,048 exit-V0s ties decompose into 1,163 same public endpoints, 58 same scoring-feature endpoints, and 434 same encoded V0s keys. T2.2p preregistered a fresh current-pin six-versus-twelve-HP-quantile calibration comparison and proved its seed range metadata-disjoint. T2.2q then hardened immediate cap-edge boss latching, typed unresolved targets, physical split collection, and the sealed paired evaluator; Release/ASan edge witnesses, deterministic split repeats, and independent source/artifact reviews pass. T2.2r collected the registered cohort with byte-identical repeats and train/dev integrity, keeping holdout payloads opaque. Its 424 train/dev cap-unresolved trajectories limit global resolution to at most 97.88%, below the registered 99% bar even if every held-out trajectory resolves. Independent review accepts collection integrity and the registered comparison stops early as `inconclusive_hold`; fitting and holdout access did not occur. No training, target/value diagnosis, promotion, oracle, causal, or full-run claim is authorized. |
 | Complete branch-advantage macro adapters and actor consumption | T2.4 | T2.4 | The bounded card-reward collector, versioned record and strict standalone CPU smoke consumer have real-run acceptance. Shop/Neow collection adapters and live combat-actor consumption remain unimplemented; the generic legal-pair API alone does not discharge them. Parent T2.4 remains in progress and no macro-policy or full-run quality claim follows. |
@@ -311,6 +311,82 @@ simplify**: `bank_restore_state`'s rebinding, `bank_capture_lists`' refusal-by-n
   error), `omniscient-boundary-ok` line hatch, third step of the
   `stale-numbers` CI job; durable negative test via committed fixture
   dirs. Six presets green.
+
+- **T0.8** `[x]` **PublicView v8: publish the on-screen offers a
+  public-information policy could not see.** `PvMask` carried legality bits
+  for four screens whose CONTENT no v7 field published, so a PublicView-only
+  policy saw "three cards and a skip" without seeing which cards, and "option
+  2 is legal" without seeing whether option 2 was Smith or Toke. Additive v8
+  tail fields per [training-contract.md](training-contract.md) §10, closing
+  the T3.6 deferred-obligation row above.
+  **Deps:** GT0
+  **Deliverables:** `PUBLIC_VIEW_VERSION` 7 → 8 with `card_offer_*` (the open
+  card pick at Neow's `CARD_REWARD`, Dream Catcher's rest pick and the boss
+  chest's `EQUIP_ITEM_REWARD`), `claim_rows[]` + `claim_row_count` /
+  `claim_rows_source` (the boss chest's equip item-reward rows) and
+  `rest_option_kind[]` + `rest_option_count` (`RestOptionKind + 1`, so 0 can
+  mean "no option"), all appended after `pad_v7`; the audit rows (§8.1, §8.2)
+  and the v8 version-log entry; the `byte_class.hpp` note extension; the
+  contract's §1/§2 update; a standalone real-run leak probe.
+  **Acceptance** (2026-09-03 owner directive — build + real-run witness +
+  corpus, no unit tests written or run): `win-release` / `win-debug` /
+  WSL `release` build clean; the probe reports zero twin byte differences over
+  ≥ 20,000 A20 runs with every new field witnessed non-zero; all three
+  committed oracle corpora replay zero-diff in `--replay` / `--costs` /
+  `--masks` with every injected control failing loud, on both hosts;
+  `git diff --check`, `tools/check_doc_links.sh`, `tools/check_stale_counts.sh`
+  clean.
+  **Log:** 2026-09-15 — landed. All four reported surfaces were re-verified
+  against `encode_screens` before the design; three were real as reported and
+  the boss-chest one is NARROWER than reported — the chest's `RELIC_SELECT`
+  screen is already covered by S2.47's `boss_relic_choice_reserved` under the
+  `seen` gate, so only `EQUIP_ITEM_REWARD` (Tiny House / Calling Bell) needed
+  a block. Widening the existing `rewards` gate was rejected as BREAKING
+  (schema case 6: existing zero bytes acquiring meaning); appending also lets
+  the card block publish only the OPEN row, which is strictly less than the
+  container and the right amount at a screen where only the pick is up.
+  `sizeof(PublicView)` 8992 → 9248; `kPublicViewFixedBytes`,
+  `offsetof(action_mask)` and `offsetof(event_flags_hi)` unmoved, each now
+  pinned by its own `static_assert`, and seven more walk the append member by
+  member (the replacement for a layout-walk test under the directive). No
+  `byte_class.hpp` ROW was added because no `RunController` byte was added —
+  `rewards` and `rest` were already `public`; both notes now record how much
+  of them the encoder publishes.
+  **Witness** — `tools/twin_fixtures/src/pv8_leak_probe.cpp`, a standalone
+  program (not a gtest, deliberately: the GT0 twin/tripwire suites are exactly
+  what the directive stopped running, so the property was re-established by
+  something that is run). 20,000 A20 runs, 5 scripted policies × 4,000 seeds,
+  **1,811,843 decision states** (1,811,803 swept + 40 directed),
+  `encode_public_view(state)` vs `encode_public_view(make_hidden_twin(state))`
+  byte-compared at every one: **zero differences**. Per-phase: COMBAT
+  1,249,845 · COMBAT_REWARD 257,202 · MAP_CHOICE 121,136 · NEOW 54,237 ·
+  EVENT_DIALOG 51,319 · RUN_OVER 39,978 · REST_SITE 17,446 · SHOP 16,918 ·
+  TREASURE_ROOM 3,663 · BOSS_TREASURE 99. Field witnesses: Neow card offer
+  **3,216**, Dream Catcher **9**, boss-chest card offer **9**, boss-chest
+  claim rows **18**, campfire kinds **17,446** with all six
+  `PvRestOptionKind` values published (bitset `0x7e`). The two rare screens
+  are unreachable by any scripted policy here (the same fact
+  `gen_twin_fixtures.cpp` records for `BOSS_TREASURE`), so they are reached by
+  directed construction — the boss chest through the public
+  `next_room_transition_boss_chest` edge, Dream Catcher on eight real
+  rest-site controllers harvested from the sweep. View digest
+  `0xd5a79b0a6c6077ca`, **identical under clang-cl (win-release) and GCC 13
+  (WSL release)** and identical on a repeat run. Corpus: all three archives
+  zero-diff in all three modes on both hosts, 9/9 injected controls fail loud
+  (`--masks` is expected zero-diff — v8 adds no `RunActionMask` field and no
+  action-space index). `twins_v1.bin` regenerated with its checked-in
+  generator, as at v4/v5/v6/v7. The WSL build (whole `all` target) caught two
+  stale `sizeof(PublicView) == 8992` asserts in `tests/public_view_test.cpp`;
+  those and `twin_test.cpp`'s last-member string were updated as BUILD
+  HYGIENE, not test maintenance — the tree must compile, and a stale number
+  should not be left asserting a lie. Evidence:
+  [verification/t0-8-public-view-v8.md](verification/t0-8-public-view-v8.md).
+  **Consumer consequence:** the trainer must bump its engine pin AND step its
+  own encoding version **v3 → v4** to consume the new fields. Additive means a
+  v7-stamped shard stays readable, not that a v7-era encoder sees values that
+  were never in the record; shards written before the bump do not contain the
+  Neow / Dream Catcher / boss-chest / campfire values, and a policy trained on
+  them keeps acting by index at those screens.
 
 ### GT0 `[x]` **Gate: sim-side information layer (schemas + leak gates — the sim half of M6)** — tag `gt0-info-layer`
 **Deps:** T0.1–T0.7

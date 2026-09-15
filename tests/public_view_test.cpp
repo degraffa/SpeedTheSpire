@@ -97,7 +97,7 @@ static_assert(sizeof(PvPower) == 6);
 static_assert(sizeof(PvMonster) == 20 + 6 * kPowerCap);
 // v3's size; the v1 prefix's 3760 bytes are pinned by V2TailHasNoImplicitPadding
 // asserting that offsetof(PublicView, gold) is still exactly 3760.
-static_assert(sizeof(PublicView) == 8992);  // v7: victory_kind + act4_floor_base tail append on top of v6's event caps
+static_assert(sizeof(PublicView) == 9248);  // v8: the on-screen offer blocks tail-appended on top of v7
 
 // --- Layout walk (the header's promised "no implicit padding" proof) ---------
 
@@ -654,7 +654,7 @@ static_assert(sizeof(PvRelic) == 4);
 static_assert(sizeof(PvMapNode) == 2);
 static_assert(sizeof(PvShopSlot) == 6);
 static_assert(sizeof(PvEventBoardCard) == 6);
-static_assert(sizeof(PublicView) == 8992);  // v7: victory_kind + act4_floor_base tail append on top of v6's event caps
+static_assert(sizeof(PublicView) == 9248);  // v8: the on-screen offer blocks tail-appended on top of v7
 
 // --- Layout walk over the v2 element types and the appended tail -------------
 
@@ -833,6 +833,24 @@ TEST(PublicViewLayout, V2TailHasNoImplicitPadding) {
         STS_MEMBER_SPAN(PublicView, victory_kind),
         STS_MEMBER_SPAN(PublicView, act4_floor_base),
         STS_MEMBER_SPAN(PublicView, pad_v7),
+        // v8 (T0.8) tail append -- the on-screen offers the v7 gates did not
+        // publish. The same walk is now ALSO pinned by static_asserts in
+        // public_view.hpp, which is what actually holds under the 2026-09-03
+        // owner directive (this suite is no longer run as acceptance); these
+        // rows are kept only so the tree still builds and reads truthfully.
+        STS_MEMBER_SPAN(PublicView, claim_rows),
+        STS_MEMBER_SPAN(PublicView, card_offer_ids),
+        STS_MEMBER_SPAN(PublicView, card_offer_upgrades),
+        STS_MEMBER_SPAN(PublicView, card_offer_active),
+        STS_MEMBER_SPAN(PublicView, card_offer_source),
+        STS_MEMBER_SPAN(PublicView, card_offer_count),
+        STS_MEMBER_SPAN(PublicView, card_offer_item),
+        STS_MEMBER_SPAN(PublicView, claim_rows_active),
+        STS_MEMBER_SPAN(PublicView, claim_rows_source),
+        STS_MEMBER_SPAN(PublicView, claim_row_count),
+        STS_MEMBER_SPAN(PublicView, rest_option_count),
+        STS_MEMBER_SPAN(PublicView, rest_option_kind),
+        STS_MEMBER_SPAN(PublicView, pad_v8),
     };
     std::string holes;
     std::size_t cursor = offsetof(PublicView, gold);

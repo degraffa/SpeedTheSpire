@@ -820,12 +820,13 @@ TEST(TwinDiagnostics, PublicViewFieldTableIsOrderedAndReachesTheEnd) {
     }
     // The last entry must be the last member, so no byte falls off the table.
     // v3 (S2.13) tail-appended event_flags_hi AFTER the mask channel, and v7
-    // (S3.51) tail-appended victory_kind/act4_floor_base/pad_v7 after THAT --
-    // so the table's last row moved again, which is exactly what this
-    // assertion exists to force.
-    EXPECT_EQ(public_view_field(n - 1).offset, offsetof(PublicView, pad_v7))
+    // (S3.51) tail-appended victory_kind/act4_floor_base/pad_v7 after THAT, and
+    // v8 (T0.8) tail-appended the on-screen offer blocks after pad_v7 -- so the
+    // table's last row moved again, which is exactly what this assertion
+    // exists to force.
+    EXPECT_EQ(public_view_field(n - 1).offset, offsetof(PublicView, pad_v8))
         << "a PublicView member was appended without a diagnostic-table row";
-    EXPECT_STREQ(public_view_field_at(sizeof(PublicView) - 1), "pad_v7");
+    EXPECT_STREQ(public_view_field_at(sizeof(PublicView) - 1), "pad_v8");
     EXPECT_STREQ(public_view_field_at(offsetof(PublicView, action_mask)),
                  "action_mask");
     EXPECT_STREQ(public_view_field_at(sizeof(PublicView)), "<out of range>");
