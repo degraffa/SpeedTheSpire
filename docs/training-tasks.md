@@ -2045,6 +2045,20 @@ new training-quality result is claimed. Full evidence:
   split. No holdout or evaluation payload was read. T2.2 remains `[~]`. Report
   under `SpireTrainer/docs/verification/`: `t2-2z-boss-feasibility.md`.
 
+  **2026-09-15 (T2.2aa public-state neural development training) — completed.**
+  The owner's renewed local-training request authorizes a fresh fixed-budget
+  Act-1 outcome network experiment inside T2.2, using permitted existing
+  training/development data and a matched scalar-only neural control. It is
+  separate from the retired exact hpq6-boss candidate. Source and data bindings
+  are frozen before development decoding; historical holdouts stay closed.
+  Both CUDA arms completed 6,000 updates with finite losses, matched batches
+  and initialization, and loadable first/final recovery checkpoints. Native
+  Debug/ASan/Release exports agree on real shards, and all permitted rows join
+  exactly. The rich candidate is worse than its scalar control on development
+  Brier and log loss and is not adopted. Local training is operational.
+  Report: `SpireTrainer/docs/verification/t2-2aa-neural-currency.md`.
+  T2.2 remains `[~]`; no adoption, qualification, or later gate is implied.
+
 - **T2.3** `[ ]` **Currency machinery + V1.** Versioned value-artifact
   registry; V1 re-fit on self-play Act-1 outcomes (bootstrapped horizon);
   the reanalyze-vs-quarantine lifecycle implemented as a shard-metadata
