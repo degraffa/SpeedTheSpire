@@ -825,7 +825,7 @@ TEST(TwinDiagnostics, PublicViewFieldTableIsOrderedAndReachesTheEnd) {
     // assertion exists to force.
     EXPECT_EQ(public_view_field(n - 1).offset, offsetof(PublicView, pad_v7))
         << "a PublicView member was appended without a diagnostic-table row";
-    EXPECT_STREQ(public_view_field_at(sizeof(PublicView) - 1), "pad_v7");
+    EXPECT_STREQ(public_view_field_at(sizeof(PublicView) - 1), "pad_v8");
     EXPECT_STREQ(public_view_field_at(offsetof(PublicView, action_mask)),
                  "action_mask");
     EXPECT_STREQ(public_view_field_at(sizeof(PublicView)), "<out of range>");

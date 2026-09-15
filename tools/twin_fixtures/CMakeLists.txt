@@ -22,3 +22,14 @@ target_compile_definitions(gen_twin_fixtures PRIVATE
     STS_TWIN_FIXTURE_OUT="${PROJECT_SOURCE_DIR}/tests/golden/twin_fixtures")
 sts_set_warnings(gen_twin_fixtures)
 sts_enable_sanitizers(gen_twin_fixtures)
+
+# T0.8's real-run leak witness for PublicView v8. It lives beside the fixture
+# generator because it is the same shape -- a hand-run executable over
+# fuzz_core's run loop -- and because the property it establishes is the one
+# the committed twin fixture samples. It links no gtest: under the 2026-09-03
+# owner directive the twin/tripwire suites are neither extended nor run, so the
+# leak property is re-established by a program instead. See the file header.
+add_executable(pv8_leak_probe src/pv8_leak_probe.cpp)
+target_link_libraries(pv8_leak_probe PRIVATE sts_engine fuzz_core)
+sts_set_warnings(pv8_leak_probe)
+sts_enable_sanitizers(pv8_leak_probe)

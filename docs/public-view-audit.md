@@ -292,6 +292,26 @@ is not a safe gate and phase is.
 
 Gate: `phase == COMBAT_REWARD`, or `phase == NEOW && neow.screen == ITEM_REWARD`.
 
+**The v7 gate was NOT the whole set of screens this struct is on (T0.8).**
+`legal_actions` fills `can_take_card[]` / `can_claim_reward[]` from
+`rc.rewards` at three FURTHER screens — Neow's `CARD_REWARD`, Dream Catcher's
+rest-site pick, and the boss chest's `EQUIP_ITEM_REWARD` (run_advance.cpp's
+NEOW / REST_SITE / BOSS_TREASURE arms) — and none of them satisfies the gate
+above, so through v7 the mask published *that* three cards were offered and
+nothing published *which*. v8 closes that with two tail-appended blocks rather
+than by widening this gate (widening it would re-classify existing `rewards.*`
+bytes, which the schema-evolution note calls breaking):
+
+| Member | Class | v8 | Notes |
+|---|---|---|---|
+| the OPEN card row's `card_ids` / `card_upgrades` / `card_count` | public while on screen | → `card_offer_ids[4]` / `card_offer_upgrades[4]` / `card_offer_count`, with `card_offer_source` (`PvCardOfferSource`: Neow / Dream Catcher / boss chest) and `card_offer_item` | Gate: the SAME predicate the mask uses, `reward_card_item_open_legal(rc.rewards)`, under each of the three screens. **Only the open row** is published, never the container: at Neow's CARD_REWARD and at Dream Catcher the pick screen is the only thing on screen, so the other rows are not the player's information. `card_offer_active` is the gate byte. |
+| the claimable rows of the boss chest's equip screen | public while on screen | → `claim_rows[8]` (`PvRewardItem`, the §8.1 element type unchanged) + `claim_row_count` + `claim_rows_source` | Gate: `phase == BOSS_TREASURE && boss_chest.screen == EQUIP_ITEM_REWARD && rewards.open_card_item == kNoOpenCardReward` — exactly the arm under which the mask fills `can_claim_reward[i]` there. Tiny House and Calling Bell are the only two BOSS-tier `on_equip_screen` bodies that build this screen, and **both assemble `rc.rewards` fresh in the same step that opens it** (relic_pickup_boss.cpp), so there is no pre-stocked-rows trap of the Dead Adventurer kind to gate against. |
+
+Both blocks are twin-invariant by construction: `rc.rewards` is a PURE COPY in
+`resample_hidden` (resample.cpp's "rows that are PURE COPIES" list), so a
+hidden twin agrees with the truth byte-for-byte — and the T0.8 probe checks
+that over 1.8 M states rather than asserting it here.
+
 | Member | Class | v1 | Notes |
 |---|---|---|---|
 | `RewardScreen.items[8]` | public while on screen | → `rewards.items[8]` | Per-field below. |
@@ -317,8 +337,19 @@ Gate: `phase == REST_SITE`.
 
 `RestMenu` / `RestOptionEntry` are **not** `RunController` state — the campfire
 menu is rebuilt from relics and run state on every `legal_actions` call. Its
-information therefore reaches the consumer through §9's mask
+LEGALITY therefore reaches the consumer through §9's mask
 (`can_choose_rest[]`), which is the case plan §2.1 introduces the channel for.
+
+**A legality bit alone was not enough (T0.8).** `can_choose_rest[i]` is an
+index into CampfireUI's insertion order and nothing published what the button
+at index *i* **is**, so a PublicView-only policy could tell that option 2 was
+legal without being able to tell smithing from smoking. v8 publishes the kind:
+
+| Member | Class | v8 | Notes |
+|---|---|---|---|
+| `build_rest_menu(rs).entries[i].kind` | derived (public inputs only) | → `rest_option_kind[i]`, with `rest_option_count` | Gate: `phase == REST_SITE` — the WHOLE phase, not just `RestScreen::MENU`, because the button list is the room and a Smith/Toke grid is a modal over it. The alphabet is `PvRestOptionKind` = `RestOptionKind + 1`, because `RestOptionKind::REST` is 0 and zero must stay the appended field's declared not-present value. **Same index space as `can_choose_rest[]`** by construction: both come from one `build_rest_menu` call. |
+| `RestOptionEntry.usable` | derived | excluded — it IS `can_choose_rest[i]` | Publishing it twice would create two answers to one question. |
+| `RestOptionEntry.relic_index` | derived | excluded | Which owned relic sourced a Lift/Toke/Dig button is recoverable from `relics[]` + the kind; the index is engine bookkeeping. |
 
 ### 8.3 ShopState / ShopSlot → `PvShop` / `PvShopSlot`
 
@@ -735,3 +766,62 @@ lifecycle rule; no in-place reinterpretation exists):
     Corrupt Heart's `isFirstMove`/`moveCount`/`buffCount` (§4) — both were
     already complete in v6's carried-whole words.
   - `twins_v1.bin` regenerated with its checked-in generator, as at v4/v5/v6.
+- v8 — T0.8: the ON-SCREEN OFFERS a public-information policy could not see —
+  Neow's and Dream Catcher's card offers, the boss chest's equip claim rows,
+  and the campfire's per-option kinds. **ADDITIVE, case 2 (tail append).**
+  - *What it closes.* `PvMask` published legality bits for four screens whose
+    CONTENT no v7 field carried, so a `PublicView`-only policy read "three
+    cards and a skip" without knowing which cards, and "option 2 is legal"
+    without knowing whether option 2 was Smith or Toke. Found 2026-09-15 by
+    the training repo's full-run actor (T3.6,
+    `SpireTrainer/docs/verification/t3-6-full-run-actor.md` §10.1–10.2) and
+    carried here as a deferred obligation; §8.1 and §8.2 hold the
+    field-by-field tables.
+  - *The four surfaces, each verified against `encode_screens` before the
+    design rather than taken from the report:* (1) Neow's `CARD_REWARD` —
+    `encode_rewards` is gated on `COMBAT_REWARD || (NEOW && screen ==
+    ITEM_REWARD)`, and `CARD_REWARD` is a different `NeowScreen`, so the offer
+    was absent; (2) Dream Catcher's rest-site pick — the same `rc.rewards`, and
+    `REST_SITE` sets only `rest_screen`; (3) the boss chest's
+    `EQUIP_ITEM_REWARD` — `BOSS_TREASURE` published only `chest_opened` and
+    `boss_relic_choice_reserved`, never the equip screen's rows or its card
+    row; (4) rest-site options — `can_choose_rest[i]` is CampfireUI insertion
+    order and nothing published the kind. The chest's `RELIC_SELECT` screen was
+    checked and is NOT in the list: S2.47 already publishes its three offers
+    through `boss_relic_choice_reserved` under the `seen` gate.
+  - *Why new blocks rather than a wider `rewards` gate.* Widening
+    `rewards.active` to cover the three extra screens would give existing v7
+    bytes a meaning they did not have, which is breaking case 6 ("existing zero
+    bytes acquire meaning retroactively"). Appending is what keeps every v7
+    shard readable, and it also lets the card block publish ONLY the open row —
+    strictly less than the container, which is the right amount at a screen
+    where only the pick is up.
+  - *Declared "not present" value:* **zero** — `card_offer_active == 0` /
+    `claim_rows_active == 0` mean "no offer or claim screen published here",
+    and `rest_option_kind[i] == 0` means "no option at this index". Every v7
+    record reads truthfully: the fields did not exist, and their content was
+    absent from a v7 record whether or not the screen was up. `PvRestOptionKind`
+    is `RestOptionKind + 1` precisely so zero can carry that meaning —
+    `RestOptionKind::REST` is 0 and an unshifted encoding could not tell the
+    Rest button from an empty slot.
+  - *Layout.* `sizeof` grows 8992 → 9248 (+256). The `PvRewardItem` array is
+    placed FIRST in the append because that element type is 4-aligned and the
+    v7 record already ends on a 4-multiple, so the whole addition is free of
+    compiler-inserted padding; `pad_v8[1]` rounds the tail back. Seven new
+    `static_assert`s in public_view.hpp walk the append member by member, which
+    is what replaces the layout-walk test under the 2026-09-03 owner directive.
+  - *Nothing new is read from hidden state.* Both blocks project `rc.rewards`
+    and the third projects `build_rest_menu(rc.run)`; `rc.rewards` and `rc.rest`
+    are PURE COPIES in `resample_hidden` and `build_rest_menu` is a pure
+    function of public `RunState`. No `byte_class.hpp` ROW was added because no
+    controller byte was added — the `rewards` and `rest` rows were already
+    `public`; both notes are extended to say how much of them the encoder now
+    publishes.
+  - *Evidence.* `tools/twin_fixtures/src/pv8_leak_probe.cpp`, a standalone
+    program (not a gtest): 20,000 A20 runs over five scripted policies,
+    1,811,843 decision states, `encode_public_view(state)` vs
+    `encode_public_view(make_hidden_twin(state))` byte-compared at every one —
+    **zero differences**, with every new field witnessed non-zero. Full
+    numbers, including the identical view digest under clang-cl and GCC, in
+    [verification/t0-8-public-view-v8.md](verification/t0-8-public-view-v8.md).
+  - `twins_v1.bin` regenerated with its checked-in generator, as at v4/v5/v6/v7.

@@ -157,6 +157,23 @@ constexpr FieldSpan kFields[] = {
     STS_PV_FIELD(victory_kind),
     STS_PV_FIELD(act4_floor_base),
     STS_PV_FIELD(pad_v7),
+    // v8 (T0.8) tail append -- the on-screen offers the v7 gates did not
+    // publish. Named individually rather than as one group because the point
+    // of the diagnostic is to say WHICH offer leaked: "card_offer_ids" and
+    // "rest_option_kind" are different bugs.
+    STS_PV_FIELD(claim_rows),
+    STS_PV_FIELD(card_offer_ids),
+    STS_PV_FIELD(card_offer_upgrades),
+    STS_PV_FIELD(card_offer_active),
+    STS_PV_FIELD(card_offer_source),
+    STS_PV_FIELD(card_offer_count),
+    STS_PV_FIELD(card_offer_item),
+    STS_PV_FIELD(claim_rows_active),
+    STS_PV_FIELD(claim_rows_source),
+    STS_PV_FIELD(claim_row_count),
+    STS_PV_FIELD(rest_option_count),
+    STS_PV_FIELD(rest_option_kind),
+    STS_PV_FIELD(pad_v8),
 };
 
 #undef STS_PV_FIELD

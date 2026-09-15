@@ -471,10 +471,22 @@ inline constexpr ClassRow kRunControllerRows[] = {
     STS_BC_ROW(RunController, rewards, ByteClass::PUBLIC,
                "audit 8.1: public WHILE ON SCREEN. The encoder gates it on the "
                "phase, never on emptiness -- Dead Adventurer pre-stocks it "
-               "before its combat starts"),
+               "before its combat starts. T0.8/v8: it is on screen at THREE "
+               "more places the `rewards` section never gated -- Neow's "
+               "CARD_REWARD, Dream Catcher's rest-site pick, and the boss "
+               "chest's EQUIP_ITEM_REWARD -- and those reach the view through "
+               "the v8 `card_offer_*` / `claim_rows` blocks instead, each "
+               "under the same screen gate. The classification of the BYTES "
+               "is unchanged (it was already `public`); what changed is how "
+               "much of them the encoder publishes"),
     STS_BC_ROW(RunController, rest, ByteClass::PUBLIC,
                "audit 8.2: only the screen id is stored; the option list is "
-               "rebuilt per call and reaches the consumer through the mask"),
+               "rebuilt per call. T0.8/v8: the rebuilt list's per-option KIND "
+               "now also reaches the view directly (`rest_option_kind[]`, "
+               "parallel to the mask's `can_choose_rest[]`), because a bare "
+               "legality bit over CampfireUI insertion order does not say "
+               "WHICH button is legal. Still no new controller state: "
+               "build_rest_menu is a pure function of public RunState"),
     STS_BC_ROW(RunController, shop, ByteClass::PUBLIC,
                "audit 8.3: the whole current-visit stock is drawn with prices"),
     STS_BC_SUB(RunController, treasure_chest, kTreasureChestTable,
