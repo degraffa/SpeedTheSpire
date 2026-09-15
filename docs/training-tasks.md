@@ -2453,6 +2453,70 @@ See `SpireTrainer/docs/verification/t2-2-combat-exit-v1.md` (training repo).
   (146 files).
 
 
+- **T3.9** `[x]` **Hybrid generation: scripted combat teacher + learned run
+  layer, combat imitation, and a measured teacher-dependence gap.** The
+  sanctioned staged approach: bootstrap COMBAT competence by imitating the
+  engine's scripted one-ply search while the RUN layer is learned by PPO
+  from the start, and MEASURE how much the resulting net depends on the
+  teacher by evaluating the net alone. Not a claim of autonomous full-game
+  learning: during generation, combat is scripted; only the `net_only` arm
+  is the learned agent, and it killed no Act-1 boss here.
+  **Deps:** T3.7 **Deliverables:** actor `--combat-policy
+  {net,sim_search,sim_search_keys,...}` (with `--policy net`: the scripted
+  policy chooses every COMBAT-phase decision, the net still scores the
+  observation — `value` = V(s), `logprob` = the net's log-prob of the
+  teacher's slot — and a per-decision `source` byte 0/1 fills the decision
+  header's former pad byte; manifest `combat_policy`, `decisions_net`,
+  `decisions_teacher`, `teacher_off_enumeration`); reader `source` field
+  and `--source-audit`; learner `KNOWN_REWARD_SPECS` (`v1` T3.7 / `v2`:
+  floor 0.002, boss kills 0.10/0.15/0.20, Act-4 0.05, keys 0, γ 1.0, λ 0.95),
+  `--bc-coef` (PPO + entropy on source-0 rows, masked-softmax cross-entropy
+  on source-1 rows, value loss and GAE over every row in order); loop
+  `--combat-policy` / `--bc-coef` / `--reward-spec` / `--selection-key v2`
+  (Act-1 boss kills before mean floor) and a two-arm selection (`net_only`
+  selects; `hybrid` measures); frozen protocol
+  `SpireTrainer/docs/experiments/t39-hybrid-combat-teacher.md`.
+  **Acceptance:** `win-release` build; hybrid smoke on 256 A20 seeds with
+  the gen-0 net (FAILURE 0, decision counts, off-enumeration count, outcome
+  table beside pure `sim_search` and pure `net`); reader witness over every
+  decision; the bounded run of 12 generations × 512 episodes with a
+  per-generation table; the selection table for both arms at nets 0/4/8/12
+  with the paired teacher-dependence gap; the behaviour dashboard on
+  `net_only` net 0 vs net 12; boundary check clean; final cohort not opened.
+  **Log (2026-09-15):** All bars met; evidence in
+  `SpireTrainer/docs/verification/t3-9-hybrid-combat-teacher.md`.
+  Protocol sha256 `36e1303fba863ce69ad49279db3eb33043bfee2df7408456ffa18917a98cb772`
+  (LF-normalized bytes), frozen before the first selection evaluation; run
+  directory `D:/STS_BG_Mod/_train_data/t39/run1/` (uncommitted); engine pin
+  `38472f721f540f462f14d4173ba779fcccc02623` unchanged; gen-0 tensors equal
+  to T3.7 run1's. Actor smoke (seeds `[7_000_000, +256)`): FAILURE 0, net
+  7,300 / teacher 21,455 decisions, 1 teacher off-enumeration (4.7e-5),
+  mean floor net 3.00 < hybrid 7.91 < `sim_search` 16.07; source audit 0
+  violations over the smoke, all 12 training generations (603,214 decisions:
+  151,885 net / 451,329 teacher, 6 off-enumeration) and both selection arms.
+  Run: 12 generations, 6,144 episodes, all DEATH (no PARKED / TRUNCATED /
+  FAILURE), hash chain contiguous, all losses finite, peak VRAM 2.85 GB, BC
+  loss 1.208 → 1.121, BC accuracy 0.466 → 0.496 (chance 0.36). Selection on
+  500 seeds, `net_only` / `hybrid` mean floor: net 0 3.11 / 7.97, net 4
+  5.74 / 7.47, net 8 6.46 / 8.18, net 12 6.78 / 8.74; Act-1 boss kills
+  0 / 4, 0 / 2, 0 / 7, 0 / 4; Act-2 reach identical to the boss kills.
+  Teacher-dependence gap (hybrid − net_only, paired, 4,000-resample 95 %
+  CI) on mean floor: +4.86 [+4.56, +5.16], +1.73 [+1.49, +1.99], +1.73
+  [+1.44, +2.03], +1.96 [+1.67, +2.26] — it shrank once (the net_only run
+  layer improved) and then plateaued; every boss kill and Act-2 entry was
+  the hybrid's. Selected checkpoint net 12 (`nets/gen_012.pt` sha
+  `b146523f7278…`), key `[0, 0, 0, 0, 0, 6.78]`. Behaviour dashboard net 0 →
+  net 12 (net_only): floor +3.67 [+3.39, +3.95], cards per turn 2.18 → 3.12,
+  keys 0.02 → 0.20 (not farmed under v2). Findings: explained variance is
+  uninformative under v2's tiny return band (γ 1, floors 0.002); the
+  hybrid's own floor dipped before rising (unrewarded card rewards); the
+  teacher's search runs single-threaded in the actor. Shards of run1 gens
+  1–10 and both smokes pruned by hand after the evidence was computed. No
+  unit tests written or run (owner directive 2026-09-03). Boundary check
+  clean (146 files).
+
+
+
 ### GT3 `[ ]` **Gate: integrated Act-1 agent (M9-equivalent)**
 **Deps:** T3.4, T3.5
 - [ ] T3.4 paired improvement + zero-diff sample re-verified at the gate.
@@ -2546,6 +2610,15 @@ desired.
 ---
 
 ## Change log
+
+- 2026-09-15 (T3.9) — hybrid generation (scripted `sim_search` combat
+  teacher + net run layer), combat imitation in the learner, reward spec
+  `v2`, a two-arm selection with the teacher-dependence gap, and a bounded
+  12-generation run landed; block marked `[x]`. A T3.8 header placeholder was
+  created so the sibling task's block has its slot. What is learned: the run
+  layer by PPO, combat by imitation of a privileged one-ply search; what is
+  scripted: combat during generation. The learned agent alone killed no
+  Act-1 boss in this run — a plateaued gap, reported as measured.
 
 - 2026-09-15 owner direction: prioritize direct full-run policy learning
   (T3.6 actor, T3.7 learner) ahead of the T2.3/T3.1–T3.3 ladder; those remain
