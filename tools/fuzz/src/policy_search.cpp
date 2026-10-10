@@ -77,6 +77,7 @@
 #include "sts/engine/potions.hpp"
 #include "sts/engine/resample.hpp"
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/state_hash.hpp"
 
 namespace sts::fuzz {
 
@@ -243,6 +244,38 @@ constexpr int kPimcMaxWorlds = 256;
         return v;
     }();
     return k;
+}
+
+// BOSS-FLOOR PARTICLE MULTIPLIER (SIM_SEARCH_PIMC only). Every combat
+// decision on a boss floor averages over pimc_worlds() * this many particles.
+//
+// WHY THE BOSS, AND WHY THIS MUCH. The Act-1 boss fight is where the public
+// agent's kills are decided (it reaches the boss about as often as the
+// omniscient SIM_SEARCH, then wins far fewer of those fights), and its boss
+// decisions are NOISE-limited rather than depth-limited: a rolled-out leaf is
+// worth kEvalDefeat or kEvalCombatOver plus a few thousand points of HP, so a
+// particle average is in effect a count of the particles in which the line
+// loses, resolved in steps of 1/K, while the move that flips a boss fight
+// usually flips it in a small fraction of the worlds. Measured on dev seeds
+// STS800000-800499 with the turn-plan search below at K=8 (boss kill rate when
+// reached): x1 38.7%, x2 41.9%, x4 45.8%, x8 48.7%, x16 52.6%. The curve is
+// still climbing at x16, but every doubling doubles the boss floor's cost, and
+// x8 is where a whole K=8 scan stays near 4x the 1-ply agent's cost. Boss
+// floors are a small share of a run's decisions, which is why this buys far
+// more than raising STS_PIMC_K everywhere (1-ply agent: K=16 vs K=8 gave 199
+// vs 190 kills per 1000). Override with STS_PIMC_BOSS_MULT, clamped to
+// [1, kPimcMaxBossMult]; read once per process.
+constexpr int kPimcDefaultBossMult = 8;
+constexpr int kPimcMaxBossMult = 32;
+[[nodiscard]] int pimc_boss_mult() noexcept {
+    static const int m = [] {
+        const char* e = std::getenv("STS_PIMC_BOSS_MULT");
+        int v = e != nullptr ? std::atoi(e) : kPimcDefaultBossMult;
+        if (v < 1) v = 1;
+        if (v > kPimcMaxBossMult) v = kPimcMaxBossMult;
+        return v;
+    }();
+    return m;
 }
 
 [[nodiscard]] constexpr bool kind_deepens_boss(PolicyKind kind) noexcept {
@@ -1443,6 +1476,415 @@ constexpr int kFloorRolloutBudget = 600;
     return run_layer_eval(sim);
 }
 
+// --- the TURN-PLAN SEARCH (SIM_SEARCH_PIMC only) -----------------------------
+//
+// WHAT IT REPLACES. The 1-ply search scores a candidate by applying it and
+// letting the static completion play the REST OF THE TURN as well as the rest
+// of the fight, so a candidate is only as good as complete_combat's follow-up
+// within the turn: a Bash is scored with whatever the completion plays after
+// it, a block card with the completion's block-first ordering, and the
+// boss-floor 2-ply looks one play further on a 6-turn inner leash. The public
+// agent instead scores a candidate by the BEST PLAN THAT FINISHES THE CURRENT
+// TURN after it -- every in-turn sequence of plays (and hand-select choices) up
+// to END_TURN, each finished by the static completion from the next turn on.
+//
+// WHY THE TURN IS THE RIGHT HORIZON FOR A PUBLIC AGENT. Within the turn
+// everything the plan depends on is public: the hand, the energy, the current
+// intents, the piles as multisets. The first hidden quantity a plan touches is
+// the next draw, which END_TURN reveals -- so the search stops exactly where
+// the particles start to disagree and hands the rest to the completion -- a
+// fixed script, not a search, so on each particle it reacts to what that
+// particle draws (as a player would) but never optimizes over the particle's
+// hidden future. Draws, shuffles and random card effects INSIDE the turn
+// (Pommel Strike, True Grit, Sword Boomerang, random potions) are chance
+// nodes: the search does not branch past them (chance_move) and lets the
+// completion finish from there.
+//
+// OPEN LOOP, NOT PER-PARTICLE BEST (strategy fusion). Each particle runs the
+// same tree, so every plan is identified across particles by the PUBLIC state
+// it ends in (public_key). A candidate is worth max over its plans of the
+// particle-AVERAGE of that plan, not the average over particles of each
+// particle's best plan: the agent will choose the continuation at its next
+// decision without seeing which particle is real, so a per-particle best
+// credits it with a choice made on hidden information (the next turn's draw).
+// Measured with K x8 on the boss floor (dev seeds STS800000-800499): 192 kills
+// open-loop vs 186 per-particle-best, and the boss-fight win rate given both
+// lines reached the boss matched what the per-particle-best search needed
+// x16 particles for. When a candidate's plans do not line up in every particle
+// (an un-telegraphed Louse bite roll, which public_key cannot tell apart from
+// public monster state, or a chance move the detector misses) the decision
+// falls back to the per-particle-best average for ALL its candidates, so the
+// two estimators are never compared against each other.
+//
+// COST. Each particle is searched under a completion budget of
+// kTurnPlanLeafBudget, split evenly among the candidates and, inside a
+// subtree, among its children; a node whose share is spent is scored by the
+// static completion from where it stands, so a starved candidate is scored
+// exactly as the 1-ply search scored it.
+// Transpositions (Strike-then-Defend vs Defend-then-Strike) are merged by a
+// canonical state key, and identical cards in hand are expanded once.
+// Measured at K=8 without the boss multiplier (per-particle best, before the
+// open-loop step): 24 leaves -> 148 kills per 500 dev seeds against the 1-ply
+// agent's 105, 12 -> 112 (starves the plans), 48 -> 142 (no gain, ~1.7x the
+// scan time).
+//
+// THE WHOLE LEVER (this search + open loop + pimc_boss_mult, K=8, dev seeds
+// STS800000-800999): 336 Act-1 boss kills per 1000 against the 1-ply agent's
+// 190 (paired McNemar p = 3.6e-19), boss reached 744 vs 702, boss fights won
+// 45.2% vs 27.1%; a 1000-seed scan costs ~150 s (~3.7x the CPU of the 1-ply
+// agent's).
+constexpr int kTurnPlanLeafBudget = 24;
+// Ten plies covers a full ten-card hand; on any ordinary turn the leaf budget
+// is spent long before this cap binds.
+constexpr int kTurnPlanMaxPlies = 10;
+
+// Sort an index pile's live prefix and zero its dead tail, so two states that
+// hold the same cards in a different pile order key alike.
+template <size_t Cap>
+void canonical_pile(engine::CardPoolIndex (&pile)[Cap], uint8_t count) noexcept {
+    const size_t c = count < Cap ? count : Cap;
+    for (size_t i = 1; i < c; ++i) {
+        const engine::CardPoolIndex v = pile[i];
+        size_t j = i;
+        while (j > 0 && pile[j - 1] > v) {
+            pile[j] = pile[j - 1];
+            --j;
+        }
+        pile[j] = v;
+    }
+    for (size_t i = c; i < Cap; ++i) pile[i] = 0;
+}
+
+// Transposition key WITHIN one particle: the whole state, except that hand,
+// discard and exhaust are compared as multisets. Two orderings of the same
+// commuting plays reach the same key and share one completion (the discard
+// ORDER they differ in only re-seeds a later reshuffle, which the particle's
+// own completion already treats as chance).
+[[nodiscard]] uint64_t transposition_key(const RunController& rc) noexcept {
+    engine::CombatState cs = rc.combat;
+    canonical_pile(cs.hand, cs.hand_count);
+    canonical_pile(cs.discard, cs.discard_count);
+    canonical_pile(cs.exhaust, cs.exhaust_count);
+    return engine::hash_state(cs) * 0x9E3779B97F4A7C15ull ^
+           engine::hash_state(rc.run);
+}
+
+// The PUBLIC identity of an in-turn state -- what every particle of one
+// decision agrees on: the draw pile as a multiset (its order is exactly what
+// the particles disagree on), no combat RNG streams (each particle reseeds
+// them), and the potion belt (the only run-layer field a turn changes).
+[[nodiscard]] uint64_t public_key(const RunController& rc) noexcept {
+    engine::CombatState cs = rc.combat;
+    canonical_pile(cs.hand, cs.hand_count);
+    canonical_pile(cs.discard, cs.discard_count);
+    canonical_pile(cs.exhaust, cs.exhaust_count);
+    canonical_pile(cs.draw, cs.draw_count);
+    cs.monster_hp_rng = engine::RngStream{};
+    cs.ai_rng = engine::RngStream{};
+    cs.shuffle_rng = engine::RngStream{};
+    cs.card_random_rng = engine::RngStream{};
+    cs.misc_rng = engine::RngStream{};
+    uint64_t h = engine::hash_state(cs);
+    for (int p = 0; p < engine::kPotionCap; ++p) {
+        h = h * 0x100000001B3ull ^ static_cast<uint64_t>(rc.run.potions[p]);
+    }
+    return h;
+}
+
+// Per-particle memo of leaf values, keyed by transposition_key (salted by the
+// leaf kind). Open addressing over a fixed table: a full table simply stops
+// memoizing, which costs time, never correctness.
+struct TurnLeafCache {
+    static constexpr size_t kSlots = 512;
+    uint64_t key[kSlots];
+    int64_t value[kSlots];
+    bool used[kSlots];
+    void clear() noexcept { std::memset(used, 0, sizeof(used)); }
+    [[nodiscard]] bool find(uint64_t k, int64_t& v) const noexcept {
+        size_t s = static_cast<size_t>(k % kSlots);
+        for (size_t probe = 0; probe < kSlots && used[s]; ++probe) {
+            if (key[s] == k) {
+                v = value[s];
+                return true;
+            }
+            s = (s + 1) % kSlots;
+        }
+        return false;
+    }
+    void put(uint64_t k, int64_t v) noexcept {
+        size_t s = static_cast<size_t>(k % kSlots);
+        for (size_t probe = 0; probe < kSlots; ++probe) {
+            if (!used[s] || key[s] == k) {
+                used[s] = true;
+                key[s] = k;
+                value[s] = v;
+                return;
+            }
+            s = (s + 1) % kSlots;
+        }
+    }
+};
+
+// The open-loop ledger of one decision: (root candidate, public leaf key) ->
+// the sum of that plan's values and the number of particles that reached it.
+// A plan reached more than once inside one particle (a transposition) counts
+// once. A full table drops new plans; a dropped plan never reaches a full
+// count, so the decision falls back to the per-particle average -- slower to
+// trust, never wrong.
+struct OpenLoopLedger {
+    static constexpr size_t kSlots = 4096;
+    uint64_t key[kSlots];
+    int64_t sum[kSlots];
+    int32_t count[kSlots];
+    int32_t last_particle[kSlots];
+    uint8_t root[kSlots];
+    bool used[kSlots];
+    void clear() noexcept { std::memset(used, 0, sizeof(used)); }
+    void add(size_t r, uint64_t leaf, int64_t v, int particle) noexcept {
+        const uint64_t k =
+            leaf ^ (static_cast<uint64_t>(r + 1) * 0x9E3779B97F4A7C15ull);
+        size_t s = static_cast<size_t>(k % kSlots);
+        for (size_t probe = 0; probe < kSlots; ++probe) {
+            if (!used[s]) {
+                used[s] = true;
+                key[s] = k;
+                sum[s] = v;
+                count[s] = 1;
+                last_particle[s] = particle;
+                root[s] = static_cast<uint8_t>(r);
+                return;
+            }
+            if (key[s] == k) {
+                if (last_particle[s] != particle) {
+                    sum[s] += v;
+                    ++count[s];
+                    last_particle[s] = particle;
+                }
+                return;
+            }
+            s = (s + 1) % kSlots;
+        }
+    }
+};
+static_assert(kMoveCap <= 256, "OpenLoopLedger stores the root index in a byte");
+
+// Leaf-kind salts, so the four ways a plan can end never share a key.
+constexpr uint64_t kLeafEndTurn = 0x5bd1e995u;  // the plan presses END_TURN
+constexpr uint64_t kLeafStatic = 0x27d4eb2fu;   // budget spent: completion
+constexpr uint64_t kLeafOver = 0x165667b1u;     // the fight ended mid-turn
+constexpr uint64_t kLeafChance = 0x85ebca6bu;   // a chance move was played
+
+// Did this in-turn move reveal or roll something the particles disagree on --
+// a draw, a shuffle, or an in-combat random roll? Past such a move each
+// particle's continuation is its own, so the search stops there.
+[[nodiscard]] bool chance_move(const RunController& before,
+                               const RunController& after) noexcept {
+    const engine::CombatState& a = before.combat;
+    const engine::CombatState& b = after.combat;
+    return b.draw_count < a.draw_count ||
+           std::memcmp(&a.card_random_rng, &b.card_random_rng,
+                       sizeof(a.card_random_rng)) != 0 ||
+           std::memcmp(&a.misc_rng, &b.misc_rng, sizeof(a.misc_rng)) != 0 ||
+           std::memcmp(&a.shuffle_rng, &b.shuffle_rng,
+                       sizeof(a.shuffle_rng)) != 0;
+}
+
+// Two card plays that are the same decision: byte-identical card instances
+// (id, upgrade, cost, flags) aimed at the same target.
+[[nodiscard]] bool same_card_play(const RunController& rc, const Move& a,
+                                  const Move& b) noexcept {
+    if (a.cat != b.cat) return false;
+    if (a.cat != MoveCat::PLAY_CARD && a.cat != MoveCat::PLAY_CARD_TARGET) {
+        return false;
+    }
+    if (engine::action_arg1(a.action) != engine::action_arg1(b.action)) {
+        return false;
+    }
+    const uint8_t sa = engine::action_arg0(a.action);
+    const uint8_t sb = engine::action_arg0(b.action);
+    if (sa >= rc.combat.hand_count || sb >= rc.combat.hand_count) return false;
+    return std::memcmp(&rc.combat.card_pool[rc.combat.hand[sa]],
+                       &rc.combat.card_pool[rc.combat.hand[sb]],
+                       sizeof(engine::CardInstance)) == 0;
+}
+
+// The hand-select monotonicity guard (sim_search_pick's T2.2s note) for any
+// node: is moves[i] a DESELECT toggle on an optional hand-select screen?
+[[nodiscard]] bool is_deselect_toggle(const RunController& rc,
+                                      const Move* moves, size_t n,
+                                      size_t i) noexcept {
+    if (moves[i].cat != MoveCat::COMBAT_CHOOSE || rc.combat.action_count == 0) {
+        return false;
+    }
+    bool has_confirm = false;
+    for (size_t j = 0; j < n && !has_confirm; ++j) {
+        has_confirm = moves[j].cat == MoveCat::CHOICE_CONFIRM;
+    }
+    if (!has_confirm) return false;
+    const unsigned selected = engine::choose_selected_count(
+        rc.combat.action_queue[rc.combat.action_head].flags);
+    const unsigned unselected =
+        static_cast<unsigned>(rc.combat.hand_count) -
+        (selected <= rc.combat.hand_count ? selected : 0u);
+    return engine::action_arg0(moves[i].action) >= unselected;
+}
+
+struct TurnSearch {
+    PolicyKind kind;
+    EvalWeights w;
+    uint16_t turn0;          // the turn being planned
+    TurnLeafCache* cache;    // this particle's memo
+    OpenLoopLedger* ledger;  // shared by every particle of the decision
+    size_t root;             // the candidate whose subtree is being searched
+    int particle;
+    int used = 0;            // completions this particle actually ran
+};
+
+// Every leaf is recorded in the ledger under its PUBLIC key; `pub` overrides
+// the key for a chance leaf, whose post-move state the particles disagree on.
+[[nodiscard]] int64_t record_leaf(TurnSearch& ts, uint64_t pub,
+                                  int64_t v) noexcept {
+    ts.ledger->add(ts.root, pub, v, ts.particle);
+    return v;
+}
+
+// Finish the fight from `node` with the static completion (the 1-ply value).
+[[nodiscard]] int64_t completion_leaf(TurnSearch& ts, const RunController& node,
+                                      uint64_t pub) noexcept {
+    const uint64_t k = transposition_key(node) ^ kLeafStatic;
+    int64_t v;
+    if (!ts.cache->find(k, v)) {
+        RunController sim = node;
+        (void)complete_combat(ts.kind, sim, kRolloutBudget);
+        v = eval_state(sim, ts.w);
+        ++ts.used;
+        ts.cache->put(k, v);
+    }
+    return record_leaf(ts, pub, v);
+}
+
+// Press END_TURN on `node`, then finish the fight with the static completion.
+[[nodiscard]] int64_t end_turn_leaf(TurnSearch& ts, const RunController& node,
+                                    Action end_turn) noexcept {
+    const uint64_t k = transposition_key(node) ^ kLeafEndTurn;
+    int64_t v;
+    if (!ts.cache->find(k, v)) {
+        RunController sim = node;
+        apply_one(sim, end_turn);
+        (void)complete_combat(ts.kind, sim, kRolloutBudget);
+        v = eval_state(sim, ts.w);
+        ++ts.used;
+        ts.cache->put(k, v);
+    }
+    return record_leaf(ts, public_key(node) ^ kLeafEndTurn, v);
+}
+
+// The public key of the plan "from `parent`, play `m`" when `m` is a chance
+// move: the prefix every particle shares.
+[[nodiscard]] uint64_t chance_key(const RunController& parent, Action m) noexcept {
+    return (public_key(parent) ^ kLeafChance) * 0x100000001B3ull ^
+           static_cast<uint64_t>(m.bits);
+}
+
+[[nodiscard]] int64_t turn_plan_value(TurnSearch& ts, const RunController& node,
+                                      int depth, int allot) noexcept;
+
+// Apply `m` to a copy of `node` and value what follows: a chance move becomes
+// a completion leaf keyed by its public prefix, anything else is searched on.
+[[nodiscard]] int64_t turn_plan_child(TurnSearch& ts, const RunController& node,
+                                      const Move& m, int depth,
+                                      int allot) noexcept {
+    if (m.cat == MoveCat::END_TURN) return end_turn_leaf(ts, node, m.action);
+    RunController child = node;
+    apply_one(child, m.action);
+    if (child.phase == static_cast<uint8_t>(RunPhase::COMBAT) &&
+        child.combat.turn == ts.turn0 && chance_move(node, child)) {
+        return completion_leaf(ts, child, chance_key(node, m.action));
+    }
+    return turn_plan_value(ts, child, depth - 1, allot);
+}
+
+// Best value (this particle) over the plans that finish the current turn from
+// `node`, spending about `allot` completions.
+[[nodiscard]] int64_t turn_plan_value(TurnSearch& ts, const RunController& node,
+                                      int depth, int allot) noexcept {
+    if (node.phase != static_cast<uint8_t>(RunPhase::COMBAT)) {
+        return record_leaf(ts, public_key(node) ^ kLeafOver,
+                           eval_state(node, ts.w));
+    }
+    // A turn ended by something other than the plan's END_TURN, or a share
+    // too small to branch on: the static completion takes it from here.
+    if (node.combat.turn != ts.turn0 || depth <= 0 || allot <= 1) {
+        return completion_leaf(ts, node, public_key(node) ^ kLeafStatic);
+    }
+    RunActionMask mask;
+    engine::legal_actions(node, mask);
+    Move moves[kMoveCap];
+    const size_t n = enumerate_moves(node, mask, moves, kMoveCap);
+    if (n == 0) {
+        return record_leaf(ts, public_key(node) ^ kLeafOver,
+                           eval_state(node, ts.w));
+    }
+    // END_TURN first -- one cheap leaf, and the plan every other one must
+    // beat -- then the plays in enumeration order, identical cards folded.
+    // Potions stay a FIRST-ply decision: drinking one is searched as a root
+    // candidate at every decision, so branching on it here would only
+    // multiply the tree.
+    size_t kids[kMoveCap];
+    size_t nk = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (moves[i].cat == MoveCat::END_TURN) kids[nk++] = i;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const Move& m = moves[i];
+        if (m.cat == MoveCat::END_TURN || m.cat == MoveCat::USE_POTION ||
+            m.cat == MoveCat::USE_POTION_TARGET ||
+            is_deselect_toggle(node, moves, n, i)) {
+            continue;
+        }
+        bool dup = false;
+        for (size_t j = 0; j < nk && !dup; ++j) {
+            dup = same_card_play(node, moves[kids[j]], m);
+        }
+        if (!dup) kids[nk++] = i;
+    }
+    if (nk == 0) return completion_leaf(ts, node, public_key(node) ^ kLeafStatic);
+    int64_t best = INT64_MIN;
+    const int used0 = ts.used;
+    for (size_t j = 0; j < nk; ++j) {
+        // Even split of what is left; a child that needs less (a small
+        // subtree, memo hits) hands the rest to its later siblings.
+        const int left = allot - (ts.used - used0);
+        const int share = left / static_cast<int>(nk - j);
+        const int64_t v = turn_plan_child(ts, node, moves[kids[j]], depth,
+                                          share < 1 ? 1 : share);
+        if (v > best) best = v;
+    }
+    return best;
+}
+
+// One particle's pass: out[i] = this particle's best plan after candidate i
+// (the per-particle value; the open-loop value is read off the ledger once
+// every particle has run). Candidates with skip[i] are left untouched.
+void turn_plan_scores(PolicyKind kind, const RunController& world,
+                      const Move* moves, size_t n, const bool* skip,
+                      const EvalWeights& w, OpenLoopLedger& ledger,
+                      int particle, int64_t* out) noexcept {
+    TurnLeafCache cache;
+    cache.clear();
+    TurnSearch ts{kind, w, world.combat.turn, &cache, &ledger, 0, particle};
+    int live = 0;
+    for (size_t i = 0; i < n; ++i) live += skip[i] ? 0 : 1;
+    for (size_t i = 0; i < n; ++i) {
+        if (skip[i]) continue;
+        const int share = (kTurnPlanLeafBudget - ts.used) / live;
+        --live;
+        ts.root = i;
+        out[i] = turn_plan_child(ts, world, moves[i], kTurnPlanMaxPlies,
+                                 share < 1 ? 1 : share);
+    }
+}
+
 }  // namespace
 
 int sim_search_curiosity_tax(const engine::CombatState& cs) noexcept {
@@ -1459,6 +1901,12 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
                        const Move* moves, size_t n, PolicyRng& rng) noexcept {
     const bool in_combat = rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
     if (n > kMoveCap) n = kMoveCap;  // enumerate_moves already guarantees this
+    // SIM_SEARCH_PIMC: a forced move needs no particles. Every turn ends on
+    // one (END_TURN with nothing left to play), and scoring it would cost a
+    // full set of K rollouts for a choice that cannot change; skipping it
+    // also skips the decision's policy-stream draws, which is fine for a kind
+    // whose stream is its own.
+    if (is_public_agent(kind) && n == 1) return 0;
 
     // SIM_SEARCH_BLIND: THE ONE SUBSTITUTION (docs/verification/
     // sim-search-blind.md). Every other kind rolls candidates out over `rc`
@@ -1534,7 +1982,55 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
         : 0u;
     const unsigned unselected = static_cast<unsigned>(rc.combat.hand_count) -
         (selected <= rc.combat.hand_count ? selected : 0u);
-    const auto score_all = [&](const RunController& world, int64_t* out) noexcept {
+    // SIM_SEARCH_PIMC's combat decisions run the TURN-PLAN SEARCH (see the
+    // band above turn_plan_scores) in place of the 1-ply / boss 2-ply, inside
+    // the same turn window. `plan_skip` marks the candidates the search does
+    // not run: the monotone guard's deselects (scored INT64_MIN as below) and
+    // duplicate card plays, which are folded onto their first occurrence
+    // (`plan_rep`) -- two Strikes in hand are one decision, and searching both
+    // would double the decision's cost for nothing.
+    const bool use_turn_plan = in_combat && is_public_agent(kind) &&
+                               rc.combat.turn <= search_turn_window;
+    bool plan_skip[kMoveCap];
+    size_t plan_rep[kMoveCap];
+    OpenLoopLedger ledger;
+    if (use_turn_plan) {
+        ledger.clear();
+        for (size_t i = 0; i < n; ++i) {
+            plan_rep[i] = i;
+            if (monotone_choice && moves[i].cat == MoveCat::COMBAT_CHOOSE &&
+                engine::action_arg0(moves[i].action) >= unselected) {
+                plan_skip[i] = true;
+                continue;
+            }
+            for (size_t j = 0; j < i; ++j) {
+                if (!plan_skip[j] && plan_rep[j] == j &&
+                    same_card_play(rc, moves[j], moves[i])) {
+                    plan_rep[i] = j;
+                    break;
+                }
+            }
+            plan_skip[i] = plan_rep[i] != i;
+        }
+    }
+    const auto score_all = [&](const RunController& world, int64_t* out,
+                               int particle) noexcept {
+    if (use_turn_plan) {
+        turn_plan_scores(kind, world, moves, n, plan_skip, w, ledger, particle,
+                         out);
+        for (size_t i = 0; i < n; ++i) {
+            if (plan_rep[i] != i) {
+                out[i] = out[plan_rep[i]];
+            } else if (plan_skip[i]) {
+                out[i] = INT64_MIN;  // the monotone guard's deselect
+            }
+            // The same CONFIRM tie-break as the 1-ply branch below.
+            if (out[i] != INT64_MIN && moves[i].cat == MoveCat::CHOICE_CONFIRM) {
+                out[i] += 1;
+            }
+        }
+        return;
+    }
     for (size_t i = 0; i < n; ++i) {
         if (monotone_choice && moves[i].cat == MoveCat::COMBAT_CHOOSE &&
             engine::action_arg0(moves[i].action) >= unselected) {
@@ -1626,14 +2122,17 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
         }
     }
     if (!is_public_agent(kind) || !consults_world) {
-        score_all(rollout_world, scores);
+        score_all(rollout_world, scores, 0);
     } else {
         // SIM_SEARCH_PIMC: average over K particles. The K seeds are drawn up
         // front so the policy stream advances by exactly K + 1 draws per
         // decision; every candidate is scored against the same K worlds.
         // Scores are summed and divided once at the end, so a band score that
-        // does not depend on the world comes back exact.
-        const int k_worlds = pimc_worlds();
+        // does not depend on the world comes back exact. On a boss floor's
+        // combat decisions K is pimc_worlds() * pimc_boss_mult() (see
+        // pimc_boss_mult for why and how much).
+        const int k_worlds =
+            pimc_worlds() * (in_combat && boss_floor ? pimc_boss_mult() : 1);
         int64_t world_scores[kMoveCap];
         bool min_seen[kMoveCap] = {};
         for (size_t i = 0; i < n; ++i) scores[i] = 0;
@@ -1642,7 +2141,7 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             SamplerRng sampler_rng =
                 sampler_rng_from_seed(static_cast<int64_t>(rng.next()));
             resample_hidden(world, sampler_rng);
-            score_all(world, world_scores);
+            score_all(world, world_scores, wk);
             for (size_t i = 0; i < n; ++i) {
                 if (world_scores[i] == INT64_MIN) {
                     min_seen[i] = true;
@@ -1653,6 +2152,31 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
         }
         for (size_t i = 0; i < n; ++i) {
             scores[i] = min_seen[i] ? INT64_MIN : scores[i] / k_worlds;
+        }
+        if (use_turn_plan) {
+            // OPEN LOOP: each candidate's best plan by particle AVERAGE, over
+            // the plans every particle reached. Only when every candidate has
+            // one -- otherwise the per-particle averages above stand for all
+            // of them, so the two estimators never meet in one argmax.
+            int64_t plan_best[kMoveCap];
+            for (size_t i = 0; i < n; ++i) plan_best[i] = INT64_MIN;
+            for (size_t sl = 0; sl < OpenLoopLedger::kSlots; ++sl) {
+                if (!ledger.used[sl] || ledger.count[sl] != k_worlds) continue;
+                const size_t r = ledger.root[sl];
+                const int64_t v = ledger.sum[sl] / k_worlds;
+                if (r < n && v > plan_best[r]) plan_best[r] = v;
+            }
+            bool all_planned = true;
+            for (size_t i = 0; i < n; ++i) {
+                if (scores[i] != INT64_MIN && plan_best[plan_rep[i]] == INT64_MIN) {
+                    all_planned = false;
+                }
+            }
+            for (size_t i = 0; i < n && all_planned; ++i) {
+                if (scores[i] == INT64_MIN) continue;
+                scores[i] = plan_best[plan_rep[i]] +
+                            (moves[i].cat == MoveCat::CHOICE_CONFIRM ? 1 : 0);
+            }
         }
     }
 
