@@ -268,6 +268,31 @@ constexpr int64_t kEvalCombatOver = 1'000'000'000;
 constexpr int64_t kEvalDefeat = -1'000'000'000'000;
 constexpr int64_t kEvalVictory = 1'000'000'000'000;
 
+// THE PUBLIC AGENT'S GRADED TERMINALS. kEvalCombatOver / kEvalDefeat make a
+// rolled-out death outweigh everything and make every death equal. For the
+// omniscient search that is a sound lexicographic order; for SIM_SEARCH_PIMC
+// it is the largest weakness measured. Its completion is far weaker than the
+// agent, so at an A20 elite or boss the completion very often dies in EVERY
+// particle -- and then every candidate scores the identical kEvalDefeat +
+// floor, the argmax collapses to the uniform tie-break, and the agent plays at
+// random exactly where the run is decided (traced on the dev boss snapshots:
+// END_TURN with full energy and a full hand). Graded instead:
+//
+//   defeat  = -kEvalPublicDefeat - the monster HP and bodies still standing
+//             (the ongoing-combat monster terms), so a losing line that got
+//             the fight further still outranks one that did not;
+//   victory = +kEvalPublicWin + HP * kEvalPlayerHp + held potions.
+//
+// Both bands are 100 player HP wide: a win still outranks every ongoing or
+// lost state and a death ranks below them, while HP and damage order the
+// lines inside each band. Band widths of 30 and 300 HP were swept on the dev
+// fight benches and moved nothing beyond noise -- the gain is from grading at
+// all. Dev fight benches, K=8, against the hard terminals: elite wins 75.5% ->
+// 84.0% of 3,756; boss wins 26.0% -> 28.2% of 2,808 under the boss 2-ply, and
+// far more once the boss search also rolls out to the end of the fight.
+constexpr int64_t kEvalPublicWin = 100 * kEvalPlayerHp;
+constexpr int64_t kEvalPublicDefeat = 100 * kEvalPlayerHp;
+
 // Rollout budget per candidate: enough for the remainder of a long fight
 // under the static completion (plays + choices + end-turns); a pathological
 // loop or a genuine stalemate exhausts it deterministically and the state is
@@ -1069,6 +1094,104 @@ enum class GridWants : uint8_t { WORST, BEST };
 
 void apply_one(RunController& rc, Action a) noexcept;  // defined below
 
+// --- the public agent's completion rules (SIM_SEARCH_PIMC only) --------------
+//
+// Under PIMC every candidate's value IS "candidate, then this completion", so
+// the completion is the agent's value function: a completion that wastes
+// damage or energy misprices every candidate, not just its own line. Three
+// rules, each a general card-play principle rather than a named encounter, and
+// each measured on the dev fight benches (939 elite + 5,553 hallway Act-1
+// snapshots off the K=8 baseline trajectories) before it was kept:
+//
+//   FOCUS FIRE. A targeted card aims at the live monster with the least
+//   effective HP (hp + block) instead of the lowest slot index, so damage
+//   kills monsters -- and removes their turns -- instead of spreading.
+//   Elites +1.0pp wins, hallways -0.34 HP per fight.
+//
+//   BLOCK TO NEED. The once-per-turn end-turn probe already measures what is
+//   coming; block-first now holds only while the player's block is short of
+//   (block at the probe + the HP the probe lost), so the rest of the turn's
+//   energy goes to damage instead of to block that absorbs nothing.
+//   Elites +0.8pp wins.
+//
+//   DEBUFFS FIRST. A card that applies Vulnerable is played before the plain
+//   attacks it multiplies (when not blocking), and one that applies Weak
+//   before anything (it cuts the hit being blocked). Elites +1.4pp wins.
+//
+// Two further candidates were measured and NOT kept: powers-first (elites
+// -0.2pp, bosses +0.1pp: noise) and a best/worst-card rule for in-combat
+// choice screens (elites -0.5pp).
+constexpr int kFocusShift = 3;      // completion rank * 8 + target preference
+constexpr int kFocusPreferred = 4;  // < 1 << kFocusShift: only breaks rank ties
+constexpr int kDebuffFirst = 40;    // above a Strike's 24, below a power-up's 200
+
+[[nodiscard]] bool card_applies_to_enemy(const engine::CardDef& def,
+                                         uint8_t upgrade,
+                                         engine::PowerId power) noexcept {
+    const engine::CardEffectView v = engine::card_effect_steps(def, upgrade);
+    for (uint8_t i = 0; i < v.count; ++i) {
+        const engine::CardEffectStep& st = v.steps[i];
+        if (st.op == Opcode::APPLY_POWER &&
+            st.extra == static_cast<uint32_t>(power) &&
+            st.target != sts::registry::StepTarget::SELF) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The live, targetable monster with the least effective HP, or -1. Ties go to
+// the lowest slot, so the choice is a pure function of the state.
+[[nodiscard]] int focus_monster(const engine::CombatState& cs) noexcept {
+    int best = -1;
+    int best_ehp = 0;
+    for (int i = 0; i < cs.monster_count && i < engine::kMonsterCap; ++i) {
+        const engine::MonsterState& mo = cs.monsters[i];
+        if (mo.monster_id == 0 || engine::monster_dead_or_escaped(mo)) continue;
+        const int ehp = mo.hp + mo.block;
+        if (best < 0 || ehp < best_ehp) {
+            best = i;
+            best_ehp = ehp;
+        }
+    }
+    return best;
+}
+
+// completion_rank plus the debuff and focus-fire rules. Scaled by
+// kFocusShift so the target preference only ever breaks a tie between two
+// spellings of the same card play; the scaling preserves every other order.
+[[nodiscard]] int public_completion_rank(const RunController& rc, const Move& m,
+                                         bool blocking, bool hold_powers,
+                                         int focus) noexcept {
+    int r = completion_rank(rc, m, blocking, hold_powers);
+    int pref = 0;
+    if (m.cat == MoveCat::PLAY_CARD || m.cat == MoveCat::PLAY_CARD_TARGET) {
+        const uint8_t slot = engine::action_arg0(m.action);
+        if (slot < rc.combat.hand_count) {
+            const engine::CardInstance& ci =
+                rc.combat.card_pool[rc.combat.hand[slot]];
+            const engine::CardDef* def =
+                engine::card_def(static_cast<CardId>(ci.card_id));
+            if (def != nullptr) {
+                if (!blocking &&
+                    card_applies_to_enemy(*def, ci.upgrade,
+                                          engine::PowerId::VULNERABLE)) {
+                    r += kDebuffFirst;
+                }
+                if (card_applies_to_enemy(*def, ci.upgrade,
+                                          engine::PowerId::WEAK)) {
+                    r += kDebuffFirst;
+                }
+            }
+        }
+        if (m.cat == MoveCat::PLAY_CARD_TARGET &&
+            static_cast<int>(engine::action_arg1(m.action)) == focus) {
+            pref = kFocusPreferred;
+        }
+    }
+    return (r << kFocusShift) + pref;
+}
+
 // The threat-aware static completion of the CURRENT fight, shared by both
 // rollouts. Once per turn it probes the incoming damage exactly -- copy the
 // state, end the turn on the copy, read the HP delta (the sim IS the intent
@@ -1096,6 +1219,11 @@ void apply_one(RunController& rc, Action a) noexcept;  // defined below
     // is scored as it stands by the ongoing-combat formula, which penalizes
     // every monster still alive -- fair across candidates, and bounded.
     const uint16_t turn0 = sim.combat.turn;
+    // The public agent's completion rules (see the band above
+    // public_completion_rank). Every other kind keeps the original rank.
+    const bool public_rules = is_public_agent(kind);
+    // BLOCK TO NEED: the block that covers this turn's probed hit.
+    int block_need = 0;
     while (steps < budget &&
            sim.phase == static_cast<uint8_t>(RunPhase::COMBAT) &&
            static_cast<uint16_t>(sim.combat.turn - turn0) <= turn_cap) {
@@ -1112,16 +1240,33 @@ void apply_one(RunController& rc, Action a) noexcept;  // defined below
                     ? probe.combat.player_hp
                     : probe.run.hp;
             threat = hp_after < sim.combat.player_hp;
+            block_need = sim.combat.player_block +
+                         (sim.combat.player_hp - hp_after);
             probed_turn = sim.combat.turn;
         }
         if (hold_powers) hold_powers = curiosity_tax(sim.combat) > 0;
         size_t best_i = 0;
         int best_rank = 0;
-        for (size_t i = 0; i < n; ++i) {
-            const int r = completion_rank(sim, moves[i], threat, hold_powers);
-            if (i == 0 || r > best_rank) {
-                best_rank = r;
-                best_i = i;
+        if (public_rules) {
+            const bool blocking =
+                threat && sim.combat.player_block < block_need;
+            const int focus = focus_monster(sim.combat);
+            for (size_t i = 0; i < n; ++i) {
+                const int r = public_completion_rank(sim, moves[i], blocking,
+                                                     hold_powers, focus);
+                if (i == 0 || r > best_rank) {
+                    best_rank = r;
+                    best_i = i;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < n; ++i) {
+                const int r =
+                    completion_rank(sim, moves[i], threat, hold_powers);
+                if (i == 0 || r > best_rank) {
+                    best_rank = r;
+                    best_i = i;
+                }
             }
         }
         apply_one(sim, moves[best_i].action);
@@ -1132,6 +1277,9 @@ void apply_one(RunController& rc, Action a) noexcept;  // defined below
 
 struct EvalWeights {
     int64_t potion_held;  // 0 while R2 says the fight is worth spending in
+    // The public agent's graded terminals (kEvalPublicWin / kEvalPublicDefeat)
+    // in place of kEvalCombatOver / kEvalDefeat. False for every other kind.
+    bool graded_terminals = false;
 };
 
 // --- run-layer evaluation (map / event 1-ply) --------------------------------
@@ -1171,18 +1319,24 @@ constexpr int64_t kRunEvalCurse = -1500;
 [[nodiscard]] int64_t eval_state(const RunController& rc,
                                  const EvalWeights& w) noexcept {
     const auto phase = static_cast<RunPhase>(rc.phase);
-    if (phase == RunPhase::RUN_OVER) {
+    // A graded defeat falls through to the monster terms below: the fight's
+    // final combat state is still on the controller (the defeat fold-back
+    // copies HP out to the run and leaves the monsters in place).
+    const bool graded_defeat = w.graded_terminals &&
+                               phase == RunPhase::RUN_OVER &&
+                               !engine::run_is_victory(rc);
+    if (phase == RunPhase::RUN_OVER && !graded_defeat) {
         return engine::run_is_victory(rc)
                    ? kEvalVictory
                    : kEvalDefeat + rc.run.floor;  // die later > die sooner
     }
     const int64_t potions =
         static_cast<int64_t>(potion_count(rc.run)) * w.potion_held;
-    if (phase != RunPhase::COMBAT) {
+    if (phase != RunPhase::COMBAT && phase != RunPhase::RUN_OVER) {
         // Combat over, run continues (reward screen, boss chest, event page,
         // act transition): strictly better than any ongoing state.
-        return kEvalCombatOver + static_cast<int64_t>(rc.run.hp) * kEvalPlayerHp +
-               potions;
+        return (w.graded_terminals ? kEvalPublicWin : kEvalCombatOver) +
+               static_cast<int64_t>(rc.run.hp) * kEvalPlayerHp + potions;
     }
     const engine::CombatState& cs = rc.combat;
     int64_t monster_hp = 0;
@@ -1192,6 +1346,10 @@ constexpr int64_t kRunEvalCurse = -1500;
         if (mo.monster_id == 0 || mo.hp <= 0) continue;
         ++live;
         monster_hp += mo.hp;
+    }
+    if (graded_defeat) {
+        return -kEvalPublicDefeat - monster_hp * kEvalMonsterHp -
+               live * kEvalLiveMonster;
     }
     return static_cast<int64_t>(cs.player_hp) * kEvalPlayerHp + potions -
            monster_hp * kEvalMonsterHp - live * kEvalLiveMonster;
@@ -1490,7 +1648,8 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
     // nothing is still a waste) and expensive to spend anywhere else.
     const EvalWeights w{in_combat && potion_worth_spending(rc)
                             ? kEvalPotionHeldSpendable
-                            : kEvalPotionHeld};
+                            : kEvalPotionHeld,
+                        is_public_agent(kind)};
     // The Curiosity hold's trigger for THIS decision, read once off the board.
     // False for SIM_SEARCH / SIM_SEARCH_SKIP always, and for SIM_SEARCH_HOLD in
     // every combat except an Awakened One's phase 1.
