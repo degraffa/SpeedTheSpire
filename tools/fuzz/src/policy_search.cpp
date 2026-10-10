@@ -269,16 +269,35 @@ constexpr int kPimcMaxWorlds = 256;
 // points of HP makes a particle average a death count resolved in steps of
 // 1/K): boss kill rate when reached, dev seeds STS800000-800499, turn-plan
 // search, K=8: x1 38.7%, x2 41.9%, x4 45.8%, x8 48.7%, x16 52.6%.
-// The merge of the two keeps (b)'s x8 boss and (a)'s x1.5 elites. Combined
-// code (turn-plan search + graded terminals + completion rules + Act-1
-// potion hold), K=8, dev seeds STS800000-800999: 464 Act-1 boss kills, boss
-// reached 826, won 56.2% of those; 2371 core-s per scan.
+// Graded terminals did NOT remove the boss's appetite for particles (a
+// graded leaf still swings ~200 HP-equivalents between a won and a lost
+// line), and the extra elite particles buy nothing once the turn-plan search
+// plays the elite. Combined code (turn-plan search + graded terminals +
+// completion rules + Act-1 potion hold), K=8, dev seeds STS800000-800999,
+// Act-1 boss kills (boss fights won when reached) and core-s per 1000-seed
+// scan; changing only the boss multiplier leaves every run identical up to
+// the boss, so the boss rows are exactly paired:
+//
+//   elite x1   boss x3  448 (53.3%) 1244     policy seed 1:
+//              boss x5  450 (53.5%) 1712       boss x5  419 (49.6%) 1635
+//              boss x8  474 (56.4%) 2338       boss x8  456 (54.0%) 2266
+//              boss x12 472 (56.1%) 3266
+//              boss x16 483 (57.4%) 4087
+//   elite x1.5 boss x3  435 (52.7%) 1320
+//              boss x8  464 (56.2%) 2371       boss x8  464 (54.7%) 2344
+//
+// x8 vs x5: +24 (paired McNemar p=0.03) and +37 on policy seed 1
+// (p=0.0014); x8 vs x3 +26 (p=0.018). Past x8 the curve flattens (x12 +-0,
+// x16 +9, p=0.44) at +40% / +75% CPU. Elite x1 vs x1.5: 474 vs 464 and 456
+// vs 464 on policy seed 1 -- 930 vs 928 pooled, noise -- so elites keep
+// the base K (the cheaper). Boss x8 / elite x1 costs ~3.8x the 1-ply agent's
+// ~613 core-s per scan, about three quarters of it on boss floors.
 // Override with STS_PIMC_BOSS_MULT (clamped to
 // [1, kPimcMaxBossMult]) and STS_PIMC_ELITE_HALVES (elite multiplier in
 // halves, clamped to [2, kPimcMaxEliteHalves]); each is read once per process.
 constexpr int kPimcDefaultBossMult = 8;
 constexpr int kPimcMaxBossMult = 32;
-constexpr int kPimcDefaultEliteHalves = 3;  // x1.5
+constexpr int kPimcDefaultEliteHalves = 2;  // x1: elites keep the base K
 constexpr int kPimcMaxEliteHalves = 32;
 
 [[nodiscard]] int env_int_clamped(const char* name, int def, int lo,
