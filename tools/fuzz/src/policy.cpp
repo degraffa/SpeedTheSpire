@@ -1,6 +1,9 @@
 #include "sts/fuzz/policy.hpp"
 
+#include <atomic>
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "sts/engine/cards.hpp"
@@ -9,6 +12,7 @@
 #include "sts/engine/map_gen.hpp"
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/potions.hpp"
+#include "sts/engine/twin.hpp"
 
 namespace sts::fuzz {
 
@@ -34,6 +38,7 @@ const char* policy_name(PolicyKind k) noexcept {
         case PolicyKind::SIM_SEARCH_KEYS: return "sim_search_keys";
         case PolicyKind::SIM_SEARCH_BLIND: return "sim_search_blind";
         case PolicyKind::SIM_SEARCH_KEYS_DEEP: return "sim_search_keys_deep";
+        case PolicyKind::SIM_SEARCH_PIMC: return "sim_search_pimc";
         case PolicyKind::COUNT: break;
     }
     return "?";
@@ -855,6 +860,54 @@ struct CardScore {
     return 0;
 }
 
+// STS_TWIN_CHECK=1: the EMPIRICAL leak test for the public agent. Every
+// SIM_SEARCH_PIMC decision is computed twice -- on the true controller and on
+// make_hidden_twin(rc) (same public state, every hidden quantity redrawn) --
+// from identical copies of the policy stream. A policy that reads only public
+// information (and draws its particles through resample_hidden, a function of
+// public state and seed) must pick the same move from both; any disagreement
+// is a leak and is reported on stderr as TWIN_MISMATCH. The pick from the true
+// controller is the one played, so a checked scan's trajectories equal an
+// unchecked one's. Off by default; read once.
+[[nodiscard]] bool twin_check_enabled() noexcept {
+    static const bool on = [] {
+        const char* e = std::getenv("STS_TWIN_CHECK");
+        return e != nullptr && e[0] == '1';
+    }();
+    return on;
+}
+
+[[nodiscard]] size_t twin_checked_pick(PolicyKind kind, const RunController& rc,
+                                       const Move* moves, size_t n,
+                                       PolicyRng& rng) noexcept {
+    PolicyRng twin_rng = rng;
+    const size_t pick = sim_search_pick(kind, rc, moves, n, rng);
+    const RunController twin = engine::make_hidden_twin(
+        rc, static_cast<int64_t>(twin_rng.state() ^ 0x5157494E434B4543ull));
+    const size_t twin_pick = sim_search_pick(kind, twin, moves, n, twin_rng);
+    static std::atomic<uint64_t> checked{0};
+    static std::atomic<uint64_t> mismatched{0};
+    const uint64_t c = checked.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (twin_pick != pick || twin_rng.state() != rng.state()) {
+        const uint64_t m = mismatched.fetch_add(1, std::memory_order_relaxed) + 1;
+        std::fprintf(stderr,
+                     "TWIN_MISMATCH phase=%u floor=%u act=%u n=%zu pick=%zu "
+                     "twin_pick=%zu (mismatches %llu of %llu checked)\n",
+                     static_cast<unsigned>(rc.phase),
+                     static_cast<unsigned>(rc.run.floor),
+                     static_cast<unsigned>(rc.run.act), n, pick, twin_pick,
+                     static_cast<unsigned long long>(m),
+                     static_cast<unsigned long long>(c));
+    }
+    if ((c & 0xFFFFF) == 0) {
+        std::fprintf(stderr, "TWIN_CHECK %llu decisions checked, %llu mismatched\n",
+                     static_cast<unsigned long long>(c),
+                     static_cast<unsigned long long>(
+                         mismatched.load(std::memory_order_relaxed)));
+    }
+    return pick;
+}
+
 }  // namespace
 
 size_t policy_pick(PolicyKind kind, const RunController& rc, const Move* moves, size_t n,
@@ -867,7 +920,8 @@ size_t policy_pick(PolicyKind kind, const RunController& rc, const Move* moves, 
         kind == PolicyKind::SIM_SEARCH_HOLD ||
         kind == PolicyKind::SIM_SEARCH_KEYS ||
         kind == PolicyKind::SIM_SEARCH_BLIND ||
-        kind == PolicyKind::SIM_SEARCH_KEYS_DEEP) {
+        kind == PolicyKind::SIM_SEARCH_KEYS_DEEP ||
+        kind == PolicyKind::SIM_SEARCH_PIMC) {
         // The sim-consulting policy (S2.V2) is a different class of generator
         // and lives in its own translation unit; see policy_search.cpp. All
         // six kinds share that body -- _SKIP differs only in R4's boss-relic
@@ -881,6 +935,9 @@ size_t policy_pick(PolicyKind kind, const RunController& rc, const Move* moves, 
         // the exact bug S3.61 hit adding _KEYS_DEEP the first time: every row
         // ran, produced well-formed output, and died far too early, because it
         // was running move_score's static heuristic instead of the search.
+        if (kind == PolicyKind::SIM_SEARCH_PIMC && twin_check_enabled()) {
+            return twin_checked_pick(kind, rc, moves, n, rng);
+        }
         return sim_search_pick(kind, rc, moves, n, rng);
     }
 

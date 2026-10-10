@@ -170,7 +170,22 @@ enum class PolicyKind : uint8_t {
     // acceptance proves by sha256 the same way its predecessors did. See
     // docs/verification/s3-61-reach.md for the measured cost and result.
     SIM_SEARCH_KEYS_DEEP = 10,
-    COUNT = 11,
+    // The A20 PUBLIC-INFORMATION agent (TE.4). Every rollout it scores runs on
+    // resample_hidden particles -- K per decision (STS_PIMC_K, default 8),
+    // averaged, shared by every candidate (common random numbers) -- never on
+    // the true controller, and every run-layer read is of on-screen state.
+    // On top of SIM_SEARCH's skeleton it carries its own combat (a turn-plan
+    // search scored open-loop across particles, graded terminals, a public
+    // completion policy, x8 particles at the boss) and its own run layer (a
+    // per-card value table, shop buying, an elite-minimizing path rule and an
+    // HP-walk path value, Neow boss swap, campfire gates). Every such rule is
+    // gated on this kind (is_public_agent in policy_search.cpp), so SIM_SEARCH
+    // and SIM_SEARCH_BLIND stay byte-identical baselines. Held-out A20 Act-1
+    // boss kills 87.8 % against SIM_SEARCH's 35.4 % and SIM_SEARCH_BLIND's
+    // 4.6 %; STS_TWIN_CHECK=1 is its empirical leak test. Evidence:
+    // docs/verification/a20-public-agent.md.
+    SIM_SEARCH_PIMC = 11,
+    COUNT = 12,
 };
 
 [[nodiscard]] const char* policy_name(PolicyKind k) noexcept;

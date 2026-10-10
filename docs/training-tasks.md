@@ -55,6 +55,10 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| `SIM_SEARCH_PIMC` opens run-layer paths no earlier scripted line took — shop purchases, shop purge, the Neow boss-relic swap — whose live-game fidelity no oracle capture has checked | TE.4 | the next oracle campaign that schedules from `sim_search_pimc` | Its 87.8 % held-out Act-1 kill rate is a sim measurement. Earlier scripted cohorts bought nothing (`kShopLeave` beat every buy), so these screens are covered only by random-policy breadth. Capture a cohort of its lines through the bridge before quoting the rate as a game result. |
+| `queue_rally` in `src/engine/monster_gremlin_leader.cpp` writes past its `xs[kMonsterCap+2]` stack array once a long Gremlin Leader fight grows the monster records to `kMonsterCap` (`spawn_monster_at_slot`'s cap assert is compiled out in release) | TE.4 | engine (unowned) | Found under ASan by the TE.4 merge on `STS800386` at K=16 inside a turn-plan rollout (Act 2). Silent in release; cannot touch Act-1 numbers. |
+| `resample_relic_pool_remainders` and `resample_match_and_keep_board` shuffle the STORED window, not a canonical one (`resample_draw_order` sorts first), so a particle depends on the hidden arrangement it was drawn from, not only on public state and seed | TE.4 | engine (unowned) | The distribution is right; the realization is not twin-invariant, so `STS_TWIN_CHECK` reports benign mismatches on Match-and-Keep and map screens (276 in 92,268 decisions; 0 with both rows sorted, diagnostic build). Canonicalizing moves every particle consumer's realizations (`SIM_SEARCH_BLIND` scans, trainer search), so it is a reviewed change, not a drive-by. |
+| The full-run learner has only a privileged combat teacher (T3.9) or a teacher driven by its own weak net (T3.12) | TE.4 | SpireTrainer T3.x (pin move past the TE.4 commit) | `sim_search_pimc` is a public-information teacher at 87.8 % held-out Act-1 kills: imitation targets a net can actually represent. Needs the engine pin moved and the trainer's Linux environment (no LibTorch on the CachyOS host yet). |
 | **PublicView v7 omits three on-screen, public facts the full-run policy needs: Neow's card-reward offer (and Dream Catcher's pick), the boss chest's equip-item reward rows, and the per-option kind of rest-site choices (`can_choose_rest[i]` is index-only)** | T3.6 | **T0.8 — DISCHARGED 2026-09-15** (`PUBLIC_VIEW_VERSION` 8, additive tail append; `card_offer_*`, `claim_rows*`, `rest_option_kind[]`; witness in [verification/t0-8-public-view-v8.md](verification/t0-8-public-view-v8.md)). The trainer-side residue is its own: bump the engine pin and step its encoding version v3 → v4 to consume the fields. The `sim_search*` open→skip loop noted below is a SCRIPTED-POLICY defect and is NOT discharged here. | Found 2026-09-15 by the T3.6 full-run actor (`SpireTrainer/docs/verification/t3-6-full-run-actor.md` §10.1–10.2): at those screens the unified action slots carry a choose-by-index referent, so the policy sees "three cards and a skip" but not which cards. The trainer may not read `RunState` to close it. Additive by construction; every v7 shard stays readable. Not on the T3.7 critical path (the policy can still act by index); schedule before any promotion claim that depends on Neow/rest quality. Also recorded there: `sim_search*` scripted policies loop open→skip at the Act-1 boss chest on ~3% of seeds (a scripted-policy defect, labelled TRUNCATED, never a harness stall). |
 | Distinguish capped unfinished combat from a true combat exit before assigning value targets | T2.2e | T2.2 | DISCHARGED 2026-09-07 by T2.2f for new actor output and the active generations 28–31 replay window: explicit termination provenance, default consumer refusal, exact simulator replay and whole-episode quarantine. Other historical data remains legacy/unqualified until separately replayed. The completed sharpening comparison remains historical diagnostic evidence. |
 | Establish stronger policy after the optional-hand encoding repair | T2.2f | T2.2 | T2.2g repaired optional-hand encoding without robust policy improvement. T2.2h improved held-out policy CE with detached auxiliary gradients but failed playing and retention bars. T2.2i measured the historical 192-evaluation GSH collection-teacher configuration at fixed gen31: robustly weaker than deployed 48-PUCT and SIM_SEARCH, no established advantage over policy, blind or greedy. T2.2j then qualified a matched 192-PUCT configuration: the algorithm contrast against 192-GSH at the same nominal budget is robustly positive, so GSH selection explains the T2.2i deficit, but the 48-to-192 budget contrast within PUCT is robust in neither direction and 192-PUCT still trails SIM_SEARCH. T2.2k run 4 passes aggregate equivalence and shows value passes narrowly, while policy is not a broad bottleneck (row agreement 0.7828; episode-clustered 99% CI [0.7788, 0.8014]). T2.2l localizes 61.71% of disagreements to rows where the search action has policy probability 0.10–<0.25 (RR 3.08, clustered 99% CI [2.81, 3.40]) and selects 256 reproducible states. T2.2m's valid repeated root evidence has mean visit advantage 0.1762462120 (99% CI [0.1123403675, 0.2421977586]), but its learner-ready lower bound is 0.5427350427, below the 0.70 bar. T2.2n retired that ordered forced-action rollout with all pairs resolved but no robust positive V0s result: its 99% interval is [-0.0026993394, 0.0255613606], p=0.0243987801, and its conservative positive-root lower endpoint is 0.0704842713. T2.2o subsequently replayed that fixed evidence descriptively: 1,655/2,048 exit-V0s ties decompose into 1,163 same public endpoints, 58 same scoring-feature endpoints, and 434 same encoded V0s keys. T2.2p preregistered a fresh current-pin six-versus-twelve-HP-quantile calibration comparison and proved its seed range metadata-disjoint. T2.2q then hardened immediate cap-edge boss latching, typed unresolved targets, physical split collection, and the sealed paired evaluator; Release/ASan edge witnesses, deterministic split repeats, and independent source/artifact reviews pass. T2.2r collected the registered cohort with byte-identical repeats and train/dev integrity, keeping holdout payloads opaque. Its 424 train/dev cap-unresolved trajectories limit global resolution to at most 97.88%, below the registered 99% bar even if every held-out trajectory resolves. Independent review accepts collection integrity and the registered comparison stops early as `inconclusive_hold`; fitting and holdout access did not occur. No training, target/value diagnosis, promotion, oracle, causal, or full-run claim is authorized. |
@@ -511,6 +515,28 @@ force run 1 with `workflow_dispatch` after this lands).
   reach, floor/deck-size distributions, assist-level histogram,
   rolled-back death counts) vs the TE.1 survival-biased baseline
   committed under `docs/verification/`. **Log:** —
+
+- **TE.4** `[x]` ∥ **A20 public-information scripted agent.** A scripted
+  Ironclad agent that reads only public information (every rollout on
+  `resample_hidden` particles, every run-layer read on-screen state) and
+  kills the A20 Act-1 boss at a real rate — the honest baseline for an
+  information-limited learner and a teacher it can imitate (no learned agent
+  had a measurable Act-1 kill rate; `SIM_SEARCH`'s 35 % rests on reading the
+  true controller). `PolicyKind::SIM_SEARCH_PIMC` (`sim_search_pimc`).
+  **Deps:** — **Acceptance:** held-out A20 Act-1 boss-kill rate on a grid
+  never used for tuning, paired against `SIM_SEARCH` and `SIM_SEARCH_BLIND`;
+  `SIM_SEARCH`/`SIM_SEARCH_BLIND` byte-identical; an empirical leak test.
+  **Log:** 2026-10-10 — landed. K-particle averaging (19.7 % held-out),
+  then four levers built in parallel and merged — card table, run layer
+  (shop buying, fewest-elite path rule, HP-walk path value, Neow boss swap,
+  campfire gates), combat evaluation (graded terminals, public completion,
+  potion hold) and combat search (open-loop turn-plan search, x8 boss
+  particles). Held-out `STS700000`–`STS702499`, K=8: **2,194/2,500 Act-1
+  boss kills (87.8 %)** vs `sim_search` 884 (35.4 %) and `sim_search_blind`
+  115 (4.6 %); boss reach 97.2 %; dev grid 883/1,000. `STS_TWIN_CHECK=1`:
+  0 decision mismatches over 92,268 decisions once the two non-canonical
+  resample rows are canonicalized (diagnostic build). Full evidence:
+  [verification/a20-public-agent.md](verification/a20-public-agent.md).
 
 ---
 
@@ -2954,6 +2980,14 @@ desired.
 ---
 
 ## Change log
+
+- 2026-10-10 (TE.4) — `SIM_SEARCH_PIMC`, the A20 public-information scripted
+  agent, landed and marked `[x]`: 87.8 % held-out Act-1 boss kills against
+  35.4 % for the omniscient `SIM_SEARCH`. Four deferred rows added (live-game
+  fidelity of its new shop/Neow paths, the Gremlin Leader stack overrun, the
+  two non-canonical resample rows, the public-teacher hand-off to the full-run
+  learner). First work on the native-Linux (CachyOS) host; to be mirrored into
+  `SpireTrainer/docs/training-tasks.md` at the next training-repo landing.
 
 - 2026-09-15 (T3.9) — hybrid generation (scripted `sim_search` combat
   teacher + net run layer), combat imitation in the learner, reward spec
