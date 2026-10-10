@@ -65,6 +65,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <string_view>
 
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_rewards.hpp"
@@ -491,6 +492,266 @@ struct StaticCardScore {
     return rank;
 }
 
+// --- the public agent's card table (SIM_SEARCH_PIMC only) --------------------
+//
+// WHY A TABLE. card_rank prices a card by the damage/block numbers printed on
+// it, which is blind to what makes an Ironclad card good or bad for THIS agent
+// at A20. On the dev seeds (STS800000-800999, K=8) the PIMC baseline built
+// exactly the deck that ranking implies: ~5 Act-1 picks per run and almost
+// never a skip; Clash (14 damage, unplayable while any skill is in hand) taken
+// in two thirds of the runs that saw it and smithed first; every power at a
+// flat 110, so Evolve / Rupture / Fire Breathing / Dark Embrace (no engine to
+// feed them) were taken over Pommel Strike and Uppercut. Act-1 boss kills
+// 190/1000.
+//
+// THE VALUES are a pick-priority table on a 0..100 scale. It started from the
+// usual A20 Ironclad Act-1 order (front-loaded damage, scaling powers, the two
+// energy rares) and was then re-weighted against what the dev-seed traces say
+// about THIS agent -- a 1-ply search over a scripted greedy completion -- in
+// logistic fits of elite survival and Act-1 boss kills on deck contents
+// (~5,000 traced boss fights and ~4,600 elite fights, from the decks of five
+// pick-policy variants). Three findings shaped it, each with a game mechanism
+// behind it:
+//   * Act-1 elites are damage races. Carnage, Hemokinesis, Anger, Sever Soul,
+//     Uppercut and Blood for Blood were the strongest survival terms; skills
+//     were neutral to harmful (Defend, Shrug It Off) -- Gremlin Nob's Enrage
+//     taxes every skill played, and Lagavulin punishes a slow start.
+//   * Boss kills come from scaling: Inflame, Demon Form, Berserk, Spot
+//     Weakness and Offering were the largest boss terms.
+//   * Plain block (Shrug It Off, Flame Barrier, Battle Trance, Ghostly Armor)
+//     did not convert into kills for this agent, so it sits mid-table, not at
+//     the top where a human tier list puts Shrug It Off.
+// The table is used in every act; the act-specific part is the boss term
+// below. Strike sits ABOVE Defend for the same elite evidence, so the purge /
+// transform grids remove Defends first. The second column is the UPGRADED
+// value, so `upgraded - base` is what a campfire upgrade of that card buys,
+// which is what the smith picks on (Bash's extra Vulnerable turn first). Curses
+// and statuses sit far below everything. A card missing from the table
+// (event-only cards) scores kCardValueUnknown, below the take threshold.
+struct CardValue {
+    int base;
+    int upgraded;
+};
+
+constexpr int kCardValueUnknown = 20;
+constexpr int kCardValueCurse = -100;
+
+[[nodiscard]] constexpr CardValue card_value_entry(CardId id) noexcept {
+    switch (id) {
+        // Starters.
+        case CardId::STRIKE: return {10, 16};
+        case CardId::DEFEND: return {4, 10};
+        case CardId::BASH: return {40, 58};
+        // Attacks.
+        case CardId::IMMOLATE: return {72, 82};
+        case CardId::HEMOKINESIS: return {72, 80};
+        case CardId::CARNAGE: return {66, 76};
+        case CardId::UPPERCUT: return {66, 78};
+        case CardId::BLUDGEON: return {64, 74};
+        case CardId::ANGER: return {62, 68};
+        case CardId::SEVER_SOUL: return {56, 62};
+        case CardId::POMMEL_STRIKE: return {54, 66};
+        case CardId::BLOOD_FOR_BLOOD: return {54, 66};
+        case CardId::THUNDERCLAP: return {52, 58};
+        case CardId::FEED: return {51, 59};
+        case CardId::PERFECTED_STRIKE: return {50, 62};
+        case CardId::HEADBUTT: return {49, 55};
+        case CardId::TWIN_STRIKE: return {48, 58};
+        case CardId::WHIRLWIND: return {48, 58};
+        case CardId::RECKLESS_CHARGE: return {45, 51};
+        case CardId::RAMPAGE: return {44, 54};
+        case CardId::CLEAVE: return {44, 52};
+        case CardId::IRON_WAVE: return {44, 50};
+        case CardId::WILD_STRIKE: return {43, 51};
+        case CardId::CLOTHESLINE: return {42, 50};
+        case CardId::FIEND_FIRE: return {40, 48};
+        case CardId::DROPKICK: return {38, 44};
+        case CardId::HEAVY_BLADE: return {37, 43};
+        case CardId::SWORD_BOOMERANG: return {37, 47};
+        case CardId::REAPER: return {36, 44};
+        case CardId::PUMMEL: return {35, 43};
+        case CardId::SEARING_BLOW: return {25, 35};
+        case CardId::CLASH: return {25, 30};
+        case CardId::BODY_SLAM: return {14, 34};
+        // Skills.
+        case CardId::OFFERING: return {66, 76};
+        case CardId::SPOT_WEAKNESS: return {58, 65};
+        case CardId::IMPERVIOUS: return {58, 68};
+        case CardId::SHOCKWAVE: return {54, 64};
+        case CardId::DISARM: return {48, 56};
+        case CardId::FLAME_BARRIER: return {39, 49};
+        case CardId::BATTLE_TRANCE: return {36, 44};
+        case CardId::GHOSTLY_ARMOR: return {34, 40};
+        case CardId::SHRUG_IT_OFF: return {32, 42};
+        case CardId::POWER_THROUGH: return {30, 36};
+        case CardId::TRUE_GRIT: return {28, 40};
+        case CardId::SEEING_RED: return {28, 40};
+        case CardId::SECOND_WIND: return {26, 32};
+        case CardId::BLOODLETTING: return {25, 33};
+        case CardId::INTIMIDATE: return {24, 30};
+        case CardId::SENTINEL: return {22, 28};
+        case CardId::INFERNAL_BLADE: return {22, 32};
+        case CardId::BURNING_PACT: return {22, 30};
+        case CardId::ARMAMENTS: return {20, 40};
+        case CardId::DOUBLE_TAP: return {20, 28};
+        case CardId::RAGE: return {16, 22};
+        case CardId::DUAL_WIELD: return {14, 20};
+        case CardId::FLEX: return {12, 18};
+        case CardId::LIMIT_BREAK: return {12, 28};
+        case CardId::HAVOC: return {10, 16};
+        case CardId::ENTRENCH: return {8, 18};
+        case CardId::EXHUME: return {8, 14};
+        case CardId::WARCRY: return {4, 10};
+        // Powers: the ones that scale a fight on their own. The engine powers
+        // (Dark Embrace, Evolve, Rupture, ...) have nothing to feed on.
+        case CardId::DEMON_FORM: return {72, 82};
+        case CardId::INFLAME: return {71, 81};
+        case CardId::BERSERK: return {62, 68};
+        case CardId::METALLICIZE: return {45, 53};
+        case CardId::COMBUST: return {40, 48};
+        case CardId::JUGGERNAUT: return {30, 36};
+        case CardId::FEEL_NO_PAIN: return {28, 34};
+        case CardId::FIRE_BREATHING: return {20, 26};
+        case CardId::CORRUPTION: return {20, 32};
+        case CardId::BARRICADE: return {12, 20};
+        case CardId::BRUTALITY: return {12, 16};
+        case CardId::EVOLVE: return {8, 12};
+        case CardId::RUPTURE: return {6, 10};
+        case CardId::DARK_EMBRACE: return {6, 14};
+        // Colorless (Neow / event offers): the few that fight on their own.
+        case CardId::APOTHEOSIS: return {50, 62};
+        case CardId::HAND_OF_GREED: return {44, 52};
+        case CardId::PANIC_BUTTON: return {36, 44};
+        case CardId::THE_BOMB: return {36, 44};
+        case CardId::MASTER_OF_STRATEGY: return {34, 40};
+        case CardId::DRAMATIC_ENTRANCE: return {34, 40};
+        case CardId::SWIFT_STRIKE: return {30, 36};
+        case CardId::FLASH_OF_STEEL: return {30, 36};
+        case CardId::GOOD_INSTINCTS: return {30, 36};
+        case CardId::FINESSE: return {28, 34};
+        case CardId::DARK_SHACKLES: return {26, 32};
+        default: return {kCardValueUnknown, kCardValueUnknown};
+    }
+}
+
+// The table value of one card instance (curses and statuses at the floor).
+[[nodiscard]] int card_value(uint16_t card_id, uint8_t upgrade) noexcept {
+    const engine::CardDef* def =
+        engine::card_def(static_cast<CardId>(card_id));
+    if (def == nullptr) return 0;
+    if (def->type == CardType::CURSE || def->type == CardType::STATUS) {
+        return kCardValueCurse;
+    }
+    const CardValue v = card_value_entry(static_cast<CardId>(card_id));
+    return upgrade > 0 ? v.upgraded : v.base;
+}
+
+// THE BOSS TERM. The act's boss is on the map from the act's first floor
+// (boss_list[0] is public; resample_hidden conditions on it), so an Act-1 pick
+// may be aimed at it. Each entry names its mechanism, and each was among the
+// largest boss-specific terms in the dev-seed fits, with the same sign in two
+// independent sets of decks. Measured on the dev seeds (1,000 runs, the first
+// version of the table): 302 Act-1 kills with the term, 277 without it. The
+// term is Act-1 only.
+enum class ActBoss : uint8_t { OTHER, HEXAGHOST, GUARDIAN, SLIME_BOSS };
+
+[[nodiscard]] ActBoss act1_boss(const RunController& rc) noexcept {
+    if (rc.run.act != 1 || rc.lists.boss_list_count == 0) return ActBoss::OTHER;
+    const std::string_view key = engine::encounter_key_of(rc.lists.boss_list[0]);
+    if (key == "Hexaghost") return ActBoss::HEXAGHOST;
+    if (key == "The Guardian") return ActBoss::GUARDIAN;
+    if (key == "Slime Boss") return ActBoss::SLIME_BOSS;
+    return ActBoss::OTHER;
+}
+
+[[nodiscard]] int act_boss_card_bonus(ActBoss boss, CardId id) noexcept {
+    switch (boss) {
+        case ActBoss::SLIME_BOSS:
+            switch (id) {
+                // Goop Spray shuffles Slimed STATUS cards into the deck, and
+                // Fire Breathing hits every enemy each time one is drawn: 54
+                // of the 59 traced Slime Boss fights with it were won (35%
+                // overall), the largest term in the fit.
+                case CardId::FIRE_BREATHING: return 55;
+                // Combust's end-of-turn AOE ticks keep hitting both halves
+                // after the split.
+                case CardId::COMBUST: return 20;
+                // The split leaves two large slimes: AOE pays twice.
+                case CardId::CLEAVE:
+                case CardId::THUNDERCLAP:
+                case CardId::WHIRLWIND:
+                case CardId::IMMOLATE: return 8;
+                // Headbutt: a positive Slime Boss term in both fits (it
+                // re-draws the attack the split fight needs).
+                case CardId::HEADBUTT: return 10;
+                // Strength loss and Weak on the boss are erased by the split.
+                case CardId::CLOTHESLINE: return -10;
+                case CardId::DISARM: return -15;
+                default: return 0;
+            }
+        case ActBoss::HEXAGHOST:
+            switch (id) {
+                // Sear and Inferno shuffle Burns into the deck.
+                case CardId::FIRE_BREATHING: return 25;
+                // Hexaghost attacks almost every turn and the fight is long.
+                case CardId::INFLAME:
+                case CardId::SPOT_WEAKNESS: return 10;
+                default: return 0;
+            }
+        case ActBoss::GUARDIAN:
+            switch (id) {
+                // Fierce Bash and Twin Slam are single big hits: Strength
+                // loss and Weak blunt them.
+                case CardId::DISARM:
+                case CardId::SHOCKWAVE: return 15;
+                case CardId::UPPERCUT: return 10;
+                // Sharp Hide punishes every attack PLAYED in defensive mode,
+                // which cheap attacks feed; Combust's AOE has one target here
+                // and still costs HP every turn.
+                case CardId::POMMEL_STRIKE:
+                case CardId::WILD_STRIKE: return -10;
+                case CardId::COMBUST: return -15;
+                default: return 0;
+            }
+        case ActBoss::OTHER:
+            break;
+    }
+    return 0;
+}
+
+// What taking this offered card is worth to THIS deck: the table value plus
+// the boss term, less a duplicate discount (a second copy dilutes the draws
+// the first copy already covers, and the table prices the first copy).
+constexpr int kCardDuplicatePenalty = 10;
+
+[[nodiscard]] int offered_card_value(const RunController& rc, uint16_t card_id,
+                                     uint8_t upgrade) noexcept {
+    int v = card_value(card_id, upgrade);
+    for (int i = 0; i < rc.run.master_deck_count && i < engine::kMasterDeckCap;
+         ++i) {
+        if (rc.run.master_deck[i].card_id == card_id) v -= kCardDuplicatePenalty;
+    }
+    return v + act_boss_card_bonus(act1_boss(rc), static_cast<CardId>(card_id));
+}
+
+// The public agent takes the offer's best card iff its value clears this bar
+// (Clash, Warcry, Evolve, ... do not). Measured on the dev seeds, 1,000 runs:
+// a bar of 42 (a leaner Act-1 deck) LOST 61 kills against 30, and 18 was
+// level with it -- for this agent the old "stay lean in Act 1" rule is wrong;
+// a decent card beats another Strike draw.
+constexpr int kCardTakeThreshold = 30;
+
+[[nodiscard]] int best_offered_value(const RunController& rc,
+                                     const engine::RunRewardItem& item) noexcept {
+    int best = kCardValueCurse;
+    for (uint8_t j = 0; j < item.card_count && j < engine::kRewardCardCap; ++j) {
+        const int v =
+            offered_card_value(rc, item.card_ids[j], item.card_upgrades[j]);
+        if (v > best) best = v;
+    }
+    return best;
+}
+
 // The best rank among a CARDS reward row's offer -- the second clause of the
 // widened R1 gate below.
 [[nodiscard]] int best_offered_rank(const engine::RunRewardItem& item) noexcept {
@@ -514,11 +775,19 @@ struct StaticCardScore {
 // open is still always followed by a take and the row is always retired.
 constexpr int kStandoutRank = 100;
 
-[[nodiscard]] bool wants_card_from(const RunController& rc,
+[[nodiscard]] bool wants_card_from(PolicyKind kind, const RunController& rc,
                                    const engine::RunRewardItem* item) noexcept {
     const ActProfile p = act_profile(rc.run.act);
     const int deck = rc.run.master_deck_count;
     if (deck <= 0 || deck >= p.deck_size_cap) return false;
+    // The public agent replaces the attack quota with the card table: take
+    // the offer's best card when it is worth a slot, in every act. Still a
+    // function of (deck, offered item) alone, so the claim-row open and the
+    // pick screen it opens agree by the construction described above.
+    if (is_public_agent(kind)) {
+        return item != nullptr &&
+               best_offered_value(rc, *item) >= kCardTakeThreshold;
+    }
     int attacks = 0;
     for (int i = 0; i < deck && i < engine::kMasterDeckCap; ++i) {
         const engine::CardDef* def = engine::card_def(
@@ -707,24 +976,69 @@ constexpr int kMapEliteAvoid = 200;
 }
 
 // Grid-pick direction: does this master-deck grid want the WORST card (purge /
-// transform) or the BEST (upgrade / duplicate)?
-enum class GridWants : uint8_t { WORST, BEST };
+// transform), the BEST (duplicate / bottle) or the best card TO UPGRADE? Only
+// the public agent tells UPGRADE apart from BEST; every other kind scores an
+// upgrade grid exactly as it always has, by the card's rank.
+enum class GridWants : uint8_t { WORST, BEST, UPGRADE };
 
-[[nodiscard]] int grid_pick_score(const RunController& rc, uint8_t deck_index,
-                                  GridWants wants) noexcept {
+// Public-agent grid scores, all within kGridPick +- 100 (above kGridCancel and
+// kDefaultProceed, as the rank band was). An upgrade is scored on what it BUYS
+// (the table's upgraded-minus-base gain), with the card's own value breaking
+// ties between equal gains; an already-upgraded card gains nothing.
+constexpr int kGridUpgradeGainWeight = 4;
+
+[[nodiscard]] int public_grid_pick_score(const engine::CardInstance& ci,
+                                         GridWants wants) noexcept {
+    const int v = card_value(ci.card_id, ci.upgrade);
+    switch (wants) {
+        case GridWants::WORST:
+            return kGridPick - v;
+        case GridWants::BEST:
+            return kGridPick + v;
+        case GridWants::UPGRADE: {
+            if (ci.upgrade > 0 &&
+                ci.card_id != static_cast<uint16_t>(CardId::SEARING_BLOW)) {
+                return kGridPick;
+            }
+            const int gain = card_value(ci.card_id, 1) - card_value(ci.card_id, 0);
+            return kGridPick + gain * kGridUpgradeGainWeight + v / 10;
+        }
+    }
+    return kGridPick;
+}
+
+[[nodiscard]] int grid_pick_score(PolicyKind kind, const RunController& rc,
+                                  uint8_t deck_index, GridWants wants) noexcept {
     if (deck_index >= rc.run.master_deck_count ||
         deck_index >= engine::kMasterDeckCap) {
         return kGridPick;
     }
     const engine::CardInstance& ci = rc.run.master_deck[deck_index];
+    if (is_public_agent(kind)) return public_grid_pick_score(ci, wants);
     const int rank = card_rank(ci.card_id, ci.upgrade);
-    return wants == GridWants::BEST ? kGridPick + rank
-                                    : kGridPick + (kCardRankMax - rank);
+    return wants != GridWants::WORST ? kGridPick + rank
+                                     : kGridPick + (kCardRankMax - rank);
 }
 
 // --- run-layer scoring (the greedy_policy.py port) ---------------------------
 
-[[nodiscard]] int neow_move_score(const RunController& rc,
+// The take score of offered card `j` once the gate has said take: the take
+// band plus the card's rank, or -- for the public agent -- its deck-adjusted
+// table value, clamped into the same [0, kCardRankMax] band so a take always
+// stays above kCardSkip.
+[[nodiscard]] int card_take_band(PolicyKind kind, const RunController& rc,
+                                 const engine::RunRewardItem& item,
+                                 uint8_t j) noexcept {
+    if (!is_public_agent(kind)) {
+        return kCardTakeOpen + card_rank(item.card_ids[j], item.card_upgrades[j]);
+    }
+    int v = offered_card_value(rc, item.card_ids[j], item.card_upgrades[j]);
+    if (v < 0) v = 0;
+    if (v > kCardRankMax) v = kCardRankMax;
+    return kCardTakeOpen + v;
+}
+
+[[nodiscard]] int neow_move_score(PolicyKind kind, const RunController& rc,
                                   const Move& m) noexcept {
     const engine::NeowState& n = rc.neow;
     const uint8_t arg0 = engine::action_arg0(m.action);
@@ -739,11 +1053,9 @@ enum class GridWants : uint8_t { WORST, BEST };
             if (arg0 == engine::kChooseSkipCard) return kCardSkip;
             if (arg0 == engine::kChooseSing) return kCardSing;
             const engine::RunRewardItem* item = open_card_item(rc);
-            if (!wants_card_from(rc, item)) return 10;  // CARD_REWARD_TAKE
+            if (!wants_card_from(kind, rc, item)) return 10;  // CARD_REWARD_TAKE
             if (item != nullptr && arg0 < engine::kRewardCardCap) {
-                return kCardTakeOpen +
-                       card_rank(item->card_ids[arg0],
-                                 item->card_upgrades[arg0]);
+                return card_take_band(kind, rc, *item, arg0);
             }
             return kCardTakeOpen;
         }
@@ -751,9 +1063,9 @@ enum class GridWants : uint8_t { WORST, BEST };
             const auto mode = static_cast<engine::NeowGridMode>(n.grid_mode);
             if (arg0 == engine::kChooseProceed) return kDefaultProceed;
             const GridWants wants =
-                mode == engine::NeowGridMode::UPGRADE ? GridWants::BEST
+                mode == engine::NeowGridMode::UPGRADE ? GridWants::UPGRADE
                                                       : GridWants::WORST;
-            return grid_pick_score(rc, arg0, wants);
+            return grid_pick_score(kind, rc, arg0, wants);
         }
         case engine::NeowScreen::ITEM_REWARD:
             if (arg0 == engine::kChooseProceed) return kRewardProceed;
@@ -770,7 +1082,7 @@ enum class GridWants : uint8_t { WORST, BEST };
     // The pending-bottle overlay replaces the claim mask with a mandatory
     // 1-pick master-deck grid (run_advance.hpp): bottle the BEST card.
     if (rc.pending_bottle != 0) {
-        return grid_pick_score(rc, arg0, GridWants::BEST);
+        return grid_pick_score(kind, rc, arg0, GridWants::BEST);
     }
     if (arg0 >= rc.rewards.count || arg0 >= engine::kRewardItemCap) {
         return kRewardCardClosed;
@@ -786,7 +1098,7 @@ enum class GridWants : uint8_t { WORST, BEST };
         case engine::RewardItemKind::CARDS:
             // R1: open the row only when the (widened) gate says take, so the
             // open is always followed by a take and the row is retired.
-            return wants_card_from(rc, &rc.rewards.items[arg0])
+            return wants_card_from(kind, rc, &rc.rewards.items[arg0])
                        ? kRewardCardTake
                        : kRewardCardClosed;
         case engine::RewardItemKind::EMERALD_KEY:
@@ -803,14 +1115,13 @@ enum class GridWants : uint8_t { WORST, BEST };
     return kRewardCardClosed;
 }
 
-[[nodiscard]] int take_card_score(const RunController& rc,
+[[nodiscard]] int take_card_score(PolicyKind kind, const RunController& rc,
                                   const Move& m) noexcept {
     const engine::RunRewardItem* item = open_card_item(rc);
-    if (!wants_card_from(rc, item)) return 10;  // CARD_REWARD_TAKE: skip wins
+    if (!wants_card_from(kind, rc, item)) return 10;  // CARD_REWARD_TAKE: skip wins
     const uint8_t j = engine::action_arg0(m.action);
     if (item != nullptr && j < engine::kRewardCardCap) {
-        return kCardTakeOpen +
-               card_rank(item->card_ids[j], item->card_upgrades[j]);
+        return card_take_band(kind, rc, *item, j);
     }
     return kCardTakeOpen;
 }
@@ -831,12 +1142,12 @@ enum class GridWants : uint8_t { WORST, BEST };
         case engine::BossChestScreen::EQUIP_GRID:
             // Astrolabe / Empty Cage / Pandora grids act on purgeable cards:
             // spend the picks on the WORST cards.
-            return grid_pick_score(rc, arg0, GridWants::WORST);
+            return grid_pick_score(kind, rc, arg0, GridWants::WORST);
         case engine::BossChestScreen::EQUIP_ITEM_REWARD:
             if (arg0 == engine::kChooseSkipCard) return kCardSkip;
             if (arg0 == engine::kChooseSing) return kCardSing;
             if (rc.rewards.open_card_item != engine::kNoOpenCardReward) {
-                return take_card_score(rc, m);
+                return take_card_score(kind, rc, m);
             }
             return reward_claim_score(kind, rc, m);
         case engine::BossChestScreen::CLOSED:
@@ -853,7 +1164,7 @@ enum class GridWants : uint8_t { WORST, BEST };
                                  const Move& m) noexcept {
     switch (m.cat) {
         case MoveCat::NEOW_PROCEED:
-            return neow_move_score(rc, m);
+            return neow_move_score(kind, rc, m);
         case MoveCat::MAP_NODE:
         case MoveCat::MAP_BOSS: {
             const engine::RoomType r = map_dest_room(rc, m);
@@ -896,7 +1207,7 @@ enum class GridWants : uint8_t { WORST, BEST };
         case MoveCat::REWARD_CLAIM_KEY:
             return reward_claim_score(kind, rc, m);
         case MoveCat::REWARD_TAKE_CARD:
-            return take_card_score(rc, m);
+            return take_card_score(kind, rc, m);
         case MoveCat::REWARD_SKIP_CARD:
             return kCardSkip;
         case MoveCat::REWARD_SING:
@@ -938,14 +1249,15 @@ enum class GridWants : uint8_t { WORST, BEST };
                 return kGridCancel;
             }
             // Upgrade the BEST card (a deliberate sharpening of the Python's
-            // uniform SELECT_PICK: the sim knows the registry rank).
-            return grid_pick_score(rc, engine::action_arg0(m.action),
-                                   GridWants::BEST);
+            // uniform SELECT_PICK: the sim knows the registry rank); the
+            // public agent upgrades the card whose upgrade buys the most.
+            return grid_pick_score(kind, rc, engine::action_arg0(m.action),
+                                   GridWants::UPGRADE);
         case MoveCat::TOKE_CARD:
             if (engine::action_arg0(m.action) == engine::kChooseCancelGrid) {
                 return kGridCancel;
             }
-            return grid_pick_score(rc, engine::action_arg0(m.action),
+            return grid_pick_score(kind, rc, engine::action_arg0(m.action),
                                    GridWants::WORST);
         case MoveCat::TREASURE_OPEN:
             return kTreasureOpen;
@@ -961,11 +1273,11 @@ enum class GridWants : uint8_t { WORST, BEST };
             const auto gk = static_cast<engine::EventGridKind>(
                 rc.event.grid_kind);
             const GridWants wants =
-                gk == engine::EventGridKind::UPGRADE ||
-                        gk == engine::EventGridKind::DUPLICATE
-                    ? GridWants::BEST
-                    : GridWants::WORST;
-            return grid_pick_score(rc, engine::action_arg0(m.action), wants);
+                gk == engine::EventGridKind::UPGRADE
+                    ? GridWants::UPGRADE
+                    : (gk == engine::EventGridKind::DUPLICATE ? GridWants::BEST
+                                                              : GridWants::WORST);
+            return grid_pick_score(kind, rc, engine::action_arg0(m.action), wants);
         }
         case MoveCat::SHOP:
             // Buy nothing, leave (SHOP_ROOM_LEAVE > every buy): the b1.7.0
