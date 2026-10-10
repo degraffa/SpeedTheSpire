@@ -170,17 +170,20 @@ enum class PolicyKind : uint8_t {
     // acceptance proves by sha256 the same way its predecessors did. See
     // docs/verification/s3-61-reach.md for the measured cost and result.
     SIM_SEARCH_KEYS_DEEP = 10,
-    // The A20 PUBLIC-INFORMATION agent. SIM_SEARCH_BLIND rolls every candidate
-    // out against ONE resample_hidden particle per decision, so it plans
-    // against a single guess of the draw order and the un-telegraphed monster
-    // rolls -- a high-variance estimator, not just a less-informed one. This
-    // kind averages every rollout score over K particles (perfect-information
-    // Monte Carlo; K = STS_PIMC_K, default 16), each drawn from a fresh
-    // PolicyRng::next() draw and shared by every candidate of the decision
-    // (common random numbers). It never reads hidden state except through
-    // resample_hidden particles. Further A20 Act-1 improvements to the public
-    // agent are gated on this kind (is_public_agent in policy_search.cpp), so
-    // SIM_SEARCH and SIM_SEARCH_BLIND stay byte-identical baselines.
+    // The A20 PUBLIC-INFORMATION agent (TE.4). Every rollout it scores runs on
+    // resample_hidden particles -- K per decision (STS_PIMC_K, default 8),
+    // averaged, shared by every candidate (common random numbers) -- never on
+    // the true controller, and every run-layer read is of on-screen state.
+    // On top of SIM_SEARCH's skeleton it carries its own combat (a turn-plan
+    // search scored open-loop across particles, graded terminals, a public
+    // completion policy, x8 particles at the boss) and its own run layer (a
+    // per-card value table, shop buying, an elite-minimizing path rule and an
+    // HP-walk path value, Neow boss swap, campfire gates). Every such rule is
+    // gated on this kind (is_public_agent in policy_search.cpp), so SIM_SEARCH
+    // and SIM_SEARCH_BLIND stay byte-identical baselines. Held-out A20 Act-1
+    // boss kills 87.8 % against SIM_SEARCH's 35.4 % and SIM_SEARCH_BLIND's
+    // 4.6 %; STS_TWIN_CHECK=1 is its empirical leak test. Evidence:
+    // docs/verification/a20-public-agent.md.
     SIM_SEARCH_PIMC = 11,
     COUNT = 12,
 };

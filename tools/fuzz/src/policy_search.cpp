@@ -236,9 +236,12 @@ constexpr int kMapEmeraldSeek = 800;
     return kind == PolicyKind::SIM_SEARCH_PIMC;
 }
 
-// Particles per decision for SIM_SEARCH_PIMC: STS_PIMC_K, default 16, clamped
-// to [1, kPimcMaxWorlds]. Read once per process.
-constexpr int kPimcDefaultWorlds = 16;
+// Particles per decision for SIM_SEARCH_PIMC: STS_PIMC_K, default 8, clamped
+// to [1, kPimcMaxWorlds]. Read once per process. 8, not 16: on the landed
+// agent K=16 scored 882/1000 dev Act-1 boss kills against K=8's 883 at about
+// twice the CPU (docs/verification/a20-public-agent.md); the boss, where
+// particles do pay, gets its own multiplier (pimc_worlds_for).
+constexpr int kPimcDefaultWorlds = 8;
 constexpr int kPimcMaxWorlds = 256;
 [[nodiscard]] int pimc_worlds() noexcept {
     static const int k = [] {
