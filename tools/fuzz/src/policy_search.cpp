@@ -157,6 +157,8 @@ constexpr int kRestSecondary = 500;
 constexpr int kRestOther = 300;
 constexpr int kRestRecall = 250;
 constexpr int kRestHpPct = 70;
+// The public agent's pre-boss gate (see "the public agent's campfire").
+constexpr int kPreBossRestHpPct = 90;
 
 constexpr int kTreasureOpen = 900;
 constexpr int kTreasureSkip = 100;
@@ -688,26 +690,37 @@ constexpr int kMapEliteAvoid = 200;
 // weaker signal than an elite on every remaining path.
 constexpr int64_t kElitePathPenalty = 10'000'000'000'000;
 
-// The minimum number of Elite rooms on any map path from (col, row) through
-// the act's last row. Exact backward DP over the 15x7 DAG (map_gen.hpp's
-// two-bit edges, the same walk node_reaches_emerald does forward); a node with
-// no way forward counts as unreachable. Wing Boots can only ADD paths, so the
-// count is an upper bound, never an undercount.
-[[nodiscard]] int min_elites_on_path(const RunController& rc, int col,
-                                     int row) noexcept {
-    if (row < 0 || row >= engine::kMapRows || col < 0 ||
-        col >= engine::kMapCols) {
-        return 0;
-    }
-    constexpr int kUnreachable = engine::kMapRows + 1;
-    int best[engine::kMapRows][engine::kMapCols];
-    for (int y = engine::kMapRows - 1; y >= row; --y) {
+// The minimum number of Elite rooms on any map path from each node through
+// the act's last row (the node's own room included). Exact backward DP over
+// the 15x7 DAG (map_gen.hpp's two-bit edges, the same walk
+// node_reaches_emerald does forward); a node with no way forward counts as
+// unreachable. Wing Boots can only ADD paths, so a count is an upper bound,
+// never an undercount.
+constexpr int kPathUnreachable = engine::kMapRows + 1;
+using MapGrid = int[engine::kMapRows][engine::kMapCols];
+
+// Calls `visit(nx)` for each in-grid child column of node (x, y).
+template <typename Visit>
+void for_each_child(const RunController& rc, int x, int y,
+                    Visit&& visit) noexcept {
+    const uint8_t e = rc.run.map[engine::run_state_map_index(x, y)].edges;
+    if ((e & engine::kEdgeLeft) != 0 && x > 0) visit(x - 1);
+    if ((e & engine::kEdgeCenter) != 0) visit(x);
+    if ((e & engine::kEdgeRight) != 0 && x + 1 < engine::kMapCols) visit(x + 1);
+}
+
+[[nodiscard]] engine::RoomType node_room(const RunController& rc, int x,
+                                         int y) noexcept {
+    return static_cast<engine::RoomType>(
+        rc.run.map[engine::run_state_map_index(x, y)].room_type);
+}
+
+void min_elite_table(const RunController& rc, MapGrid& best) noexcept {
+    for (int y = engine::kMapRows - 1; y >= 0; --y) {
         for (int x = 0; x < engine::kMapCols; ++x) {
-            const engine::MapNode& nd =
-                rc.run.map[engine::run_state_map_index(x, y)];
-            const auto rt = static_cast<engine::RoomType>(nd.room_type);
+            const engine::RoomType rt = node_room(rc, x, y);
             if (rt == engine::RoomType::None) {
-                best[y][x] = kUnreachable;
+                best[y][x] = kPathUnreachable;
                 continue;
             }
             const int self = rt == engine::RoomType::Elite ? 1 : 0;
@@ -715,19 +728,14 @@ constexpr int64_t kElitePathPenalty = 10'000'000'000'000;
                 best[y][x] = self;
                 continue;
             }
-            int next = kUnreachable;
-            const auto take = [&](int nx) {
-                if (nx >= 0 && nx < engine::kMapCols && best[y + 1][nx] < next) {
-                    next = best[y + 1][nx];
-                }
-            };
-            if ((nd.edges & engine::kEdgeLeft) != 0) take(x - 1);
-            if ((nd.edges & engine::kEdgeCenter) != 0) take(x);
-            if ((nd.edges & engine::kEdgeRight) != 0) take(x + 1);
-            best[y][x] = next >= kUnreachable ? kUnreachable : next + self;
+            int next = kPathUnreachable;
+            for_each_child(rc, x, y, [&](int nx) {
+                if (best[y + 1][nx] < next) next = best[y + 1][nx];
+            });
+            best[y][x] = next >= kPathUnreachable ? kPathUnreachable
+                                                  : next + self;
         }
     }
-    return best[row][col];
 }
 
 [[nodiscard]] int64_t public_path_penalty(PolicyKind kind,
@@ -737,8 +745,188 @@ constexpr int64_t kElitePathPenalty = 10'000'000'000'000;
     const int col = engine::action_arg0(m.action);
     const int row =
         static_cast<int>(rc.run.floor) - engine::act_floor_base_of(rc.run);
-    return static_cast<int64_t>(min_elites_on_path(rc, col, row)) *
-           kElitePathPenalty;
+    if (row < 0 || row >= engine::kMapRows || col < 0 ||
+        col >= engine::kMapCols) {
+        return 0;
+    }
+    MapGrid elites;
+    min_elite_table(rc, elites);
+    return static_cast<int64_t>(elites[row][col]) * kElitePathPenalty;
+}
+
+// --- the public agent's path value: expected boss HP over the public map -----
+//
+// WHY. The elite rule above fixes WHICH elites to fight (as few as the map
+// allows), but among the paths that tie on it the one-room rollout still
+// walks blind: it cannot see that a column leads into three hallway fights at
+// 20% HP, or that the other one reaches a campfire first -- and 97 of the 161
+// pre-boss deaths left in the dev trace were hallway fights entered at a
+// median ~15% HP, 62 of them with no alternative left on the map. Boss
+// outcomes say what the walk should buy instead: in the same trace the
+// Act-1 boss kill rate climbs ~1.1 points per HP at the boss door (12% below
+// 40 HP, 49% above 70), and with each campfire on the way (31% / 41% / 47% /
+// 68% for 1 / 2 / 3 / 4 mid-act campfires) and the first shop (35% -> 46%).
+//
+// HOW. A deterministic HP walk over the PUBLIC map -- room types and edges
+// only; what a ? or a fight holds is hidden and enters as a dev-trace mean.
+// Per room: a hallway fight costs kPathHallwayLossHp, an elite
+// kPathEliteLossHp, a ? room gains kPathEventGainHp, a campfire heals
+// rest_heal_amount under the same gate public_rest_wanted applies (else it
+// smiths, worth kPathSmithValueHp), a shop is worth kPathShopValueHp. A fight
+// entered below kPathRiskSpan times its mean loss survives with odds falling
+// linearly to zero at 0 HP. A path's value is its survival odds times (the
+// HP left at the boss door above kPathBossHpFloor plus the rooms' worth), and
+// a node's value is its best continuation's, restricted to the continuations
+// that keep the act's minimum elite count -- the elite rule decides first.
+// The values are an exact backward DP over (row, column, HP).
+//
+// The candidate's OWN room is still the particles' rollout (what it actually
+// does to the run, death included); the walk starts from each particle's HP
+// after it, and replaces the rollout's flat per-HP term (kEvalPlayerHp per
+// point) with the same weight on the walk's expected boss HP. Measured on the
+// 1000 dev seeds against the elite rule alone: 346 -> 382 Act-1 boss kills
+// (boss reach 84% -> 88%).
+constexpr int kPathHallwayLossHp = 8;   // dev-trace mean, floors 5-15
+constexpr int kPathEliteLossHp = 25;    // dev-trace mean over survivors
+constexpr int kPathEventGainHp = 2;     // dev-trace mean: +2.4..+3.2
+constexpr int kPathRiskSpan = 3;        // 3x the mean loss: ~the p95 loss
+constexpr int kPathBossHpFloor = 20;    // ~no boss kill below this
+constexpr int kPathSmithValueHp = 4;    // one upgrade, in boss-door HP
+constexpr int kPathShopValueHp = 6;     // one shop visit, in boss-door HP
+constexpr int kPathHpCap = 255;         // table bound; max HP is clamped to it
+constexpr int32_t kPathMilli = 1000;    // values and odds are fixed-point
+constexpr int32_t kPathDead = -1;       // no continuation from this cell
+
+using PathRow = int32_t[engine::kMapCols][kPathHpCap + 1];
+
+// The expected boss-door value (fixed-point HP) of STANDING on (col, row) --
+// its room already resolved -- with `hp` left, over the best continuation
+// that keeps the minimum elite count. `elites` is min_elite_table's output.
+[[nodiscard]] int64_t path_hp_value(const RunController& rc,
+                                    const MapGrid& elites, int col, int row,
+                                    int hp) noexcept {
+    const int max_hp = rc.run.max_hp < kPathHpCap ? rc.run.max_hp : kPathHpCap;
+    const auto clamp_hp = [max_hp](int h) {
+        return h < 1 ? 1 : (h > max_hp ? max_hp : h);
+    };
+    const auto boss_door = [](int h) -> int32_t {
+        return h > kPathBossHpFloor ? (h - kPathBossHpFloor) * kPathMilli : 0;
+    };
+    hp = clamp_hp(hp);
+    if (row >= engine::kMapRows - 1) return boss_door(hp);
+    // Coffee Dripper / Fusion Hammer (which veto a campfire button) are
+    // deliberately NOT modelled: vetoing the walk's heal / smith with them
+    // measured 200 -> 195 on the 500-seed screen, i.e. no better than this.
+    const int heal = engine::rest_heal_amount(rc.run);
+    // odds (fixed-point) of surviving a fight with mean loss `mean` at h HP.
+    const auto survive = [](int h, int mean) -> int32_t {
+        const int safe = mean * kPathRiskSpan;
+        return h >= safe ? kPathMilli : h * kPathMilli / safe;
+    };
+    // next = values of ENTERING row r+1, cur = row r being filled.
+    PathRow buf_a;
+    PathRow buf_b;
+    int32_t(*next)[kPathHpCap + 1] = buf_a;
+    int32_t(*cur)[kPathHpCap + 1] = buf_b;
+    for (int r = engine::kMapRows - 1; r > row; --r) {
+        for (int x = 0; x < engine::kMapCols; ++x) {
+            const engine::RoomType rt = node_room(rc, x, r);
+            const int self = rt == engine::RoomType::Elite ? 1 : 0;
+            for (int h = 0; h <= max_hp; ++h) {
+                if (rt == engine::RoomType::None ||
+                    elites[r][x] >= kPathUnreachable) {
+                    cur[x][h] = kPathDead;
+                    continue;
+                }
+                int32_t odds = kPathMilli;
+                int after = h;
+                int worth = 0;
+                switch (rt) {
+                    case engine::RoomType::Monster:
+                        odds = survive(h, kPathHallwayLossHp);
+                        after = h - kPathHallwayLossHp;
+                        break;
+                    case engine::RoomType::Elite:
+                        odds = survive(h, kPathEliteLossHp);
+                        after = h - kPathEliteLossHp;
+                        break;
+                    case engine::RoomType::Event:
+                        after = h + kPathEventGainHp;
+                        break;
+                    case engine::RoomType::Shop:
+                        worth = kPathShopValueHp;
+                        break;
+                    case engine::RoomType::Rest: {
+                        const int gate = r == engine::kMapRows - 1
+                                             ? kPreBossRestHpPct
+                                             : kRestHpPct;
+                        if (h * 100 <= max_hp * gate) {
+                            after = h + heal;
+                        } else {
+                            worth = kPathSmithValueHp;
+                        }
+                        break;
+                    }
+                    default:
+                        break;
+                }
+                after = clamp_hp(after);
+                int32_t cont = kPathDead;
+                if (r == engine::kMapRows - 1) {
+                    cont = boss_door(after);
+                } else {
+                    for_each_child(rc, x, r, [&](int nx) {
+                        if (elites[r + 1][nx] + self != elites[r][x]) return;
+                        if (next[nx][after] > cont) cont = next[nx][after];
+                    });
+                }
+                cur[x][h] =
+                    cont == kPathDead
+                        ? kPathDead
+                        : static_cast<int32_t>(
+                              static_cast<int64_t>(odds) *
+                              (cont + worth * kPathMilli) / kPathMilli);
+            }
+        }
+        int32_t(*swap)[kPathHpCap + 1] = next;
+        next = cur;
+        cur = swap;
+    }
+    // `next` now holds row + 1: the standing node's best continuation.
+    const int self = node_room(rc, col, row) == engine::RoomType::Elite ? 1 : 0;
+    int32_t best = kPathDead;
+    for_each_child(rc, col, row, [&](int nx) {
+        if (elites[row + 1][nx] + self != elites[row][col]) return;
+        if (next[nx][hp] > best) best = next[nx][hp];
+    });
+    return best == kPathDead ? 0 : best;
+}
+
+// The walk's term for one rolled-out map candidate (zero for every other
+// kind, and for a particle that did not come back to a map choice in the same
+// act -- dead, or past the boss): the rollout's flat HP term swapped for the
+// expected boss-door HP of the best continuation from where it stands.
+[[nodiscard]] int64_t public_path_hp_term(PolicyKind kind,
+                                          const RunController& rc,
+                                          const Move& m,
+                                          const RunController& after) noexcept {
+    if (!is_public_agent(kind) || m.cat != MoveCat::MAP_NODE) return 0;
+    if (after.phase != static_cast<uint8_t>(RunPhase::MAP_CHOICE) ||
+        after.run.act != rc.run.act) {
+        return 0;
+    }
+    const int col = engine::action_arg0(m.action);
+    const int row =
+        static_cast<int>(rc.run.floor) - engine::act_floor_base_of(rc.run);
+    if (row < 0 || row >= engine::kMapRows || col < 0 ||
+        col >= engine::kMapCols) {
+        return 0;
+    }
+    MapGrid elites;
+    min_elite_table(rc, elites);
+    const int64_t door = path_hp_value(after, elites, col, row, after.run.hp);
+    return door * kEvalPlayerHp / kPathMilli -
+           static_cast<int64_t>(after.run.hp) * kEvalPlayerHp;
 }
 
 // K3/K4 (S3.22): the bounded key appetite added to a map candidate's ROLLED-OUT
@@ -1073,7 +1261,6 @@ constexpr int64_t kPotionHoldForCombat = -1'000'000'000'000'000;
 // campfire -- 90% before the boss, kRestHpPct elsewhere -- with REST above it
 // and SMITH below, so exactly one of the two leads. (Both gates were screened
 // at other values -- 80% pre-boss, 55% / 80% elsewhere -- and none beat these.)
-constexpr int kPreBossRestHpPct = 90;
 
 [[nodiscard]] bool public_rest_wanted(const RunController& rc) noexcept {
     const bool pre_boss = static_cast<int>(rc.run.floor) ==
@@ -2008,6 +2195,8 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             out[i] += key_map_bonus(kind, rc, moves[i]);
             // The public agent's elite-avoiding path rule (zero otherwise).
             out[i] -= public_path_penalty(kind, rc, moves[i]);
+            // ...and its HP walk over the remaining map (zero otherwise).
+            out[i] += public_path_hp_term(kind, rc, moves[i], sim);
         } else {
             out[i] = run_move_score(kind, rc, moves[i]);
         }
