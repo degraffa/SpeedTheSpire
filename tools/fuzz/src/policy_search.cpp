@@ -245,6 +245,43 @@ constexpr int kPimcMaxWorlds = 256;
     return k;
 }
 
+// THE PUBLIC AGENT'S BOSS PLY AND PARTICLE BUDGET. The boss 2-ply scores each
+// candidate by the BEST of up to 12 follow-up moves, each finished by a
+// rollout truncated at kBossInnerTurnCap turns. For the omniscient search
+// that is a deeper look; under PIMC it is a biased one. The inner max is
+// taken per particle, i.e. by a player who knows that particle's draws and
+// monster rolls, so a candidate that opens a wide follow-up decision (END_TURN
+// into a fresh hand) collects the largest optimistic bonus whatever it is
+// worth -- traced on the dev boss snapshots as END_TURN with full energy and
+// a playable hand. And the 6-turn truncation hands most boss decisions to the
+// ongoing-combat formula rather than to the outcome. The public agent
+// therefore spends its boss budget on the plain 1-ply rollout to the END of
+// the fight, over MORE particles: a full-length 1-ply decision at 3K costs
+// about what the 2-ply cost at K, and the particle count is where the boss
+// pays. Dev boss bench (702 Act-1 boss snapshots of the K=8 baseline
+// trajectories x 4 policy seeds), wins: baseline 26.0%; graded terminals,
+// 2-ply 28.2% vs 1-ply 39.0% at K=8; plus the completion rules, 1-ply K=8
+// 39.3%, K=16 43.4%, K=24 44.7%, K=32 45.6%; the omniscient SIM_SEARCH wins
+// 47.8% of the same fights. Elites take 3K/2 (85.2% -> 85.9% wins); hallway
+// fights, map and event rollouts keep the base K.
+constexpr int kPimcBossWorldsMul = 3;
+constexpr int kPimcEliteWorldsNum = 3;
+constexpr int kPimcEliteWorldsDen = 2;
+
+[[nodiscard]] int pimc_worlds_for(const RunController& rc,
+                                  bool in_combat) noexcept {
+    int k = pimc_worlds();
+    if (in_combat) {
+        const auto room = static_cast<engine::RoomType>(rc.room_type);
+        if (room == engine::RoomType::Boss) {
+            k *= kPimcBossWorldsMul;
+        } else if (room == engine::RoomType::Elite) {
+            k = k * kPimcEliteWorldsNum / kPimcEliteWorldsDen;
+        }
+    }
+    return k < kPimcMaxWorlds ? k : kPimcMaxWorlds;
+}
+
 [[nodiscard]] constexpr bool kind_deepens_boss(PolicyKind kind) noexcept {
     return kind == PolicyKind::SIM_SEARCH_KEYS_DEEP;
 }
@@ -1666,6 +1703,10 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
     const bool deepens = kind_deepens_boss(kind) && boss_floor;
     const uint16_t search_turn_window = deepens ? kDeepSearchTurns : kSearchTurns;
     const uint16_t boss_ply_window = deepens ? kDeepSearchTurns : kBossDeepTurns;
+    // The public agent searches the boss with the 1-ply full-length rollout
+    // instead of the 2-ply -- see "THE PUBLIC AGENT'S BOSS PLY" above
+    // pimc_worlds_for. Every other kind keeps the 2-ply.
+    const bool boss_two_ply = boss_floor && !is_public_agent(kind);
     // T2.2s: optional hand choices must make finite progress. CHOOSE toggles
     // the selected suffix back out of the selection; a bounded rollout can
     // strictly prefer that reversal from BOTH sides and never press CONFIRM.
@@ -1718,7 +1759,7 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
                 RunController sim = world;  // trivially-copyable snapshot
                 apply_one(sim, moves[i].action);
                 out[i] =
-                    boss_floor && rc.combat.turn <= boss_ply_window &&
+                    boss_two_ply && rc.combat.turn <= boss_ply_window &&
                             n <= kBossDeepMaxCandidates &&
                             live_monster_count(rc.combat) <=
                                 kBossDeepMaxLiveMonsters
@@ -1792,7 +1833,7 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
         // decision; every candidate is scored against the same K worlds.
         // Scores are summed and divided once at the end, so a band score that
         // does not depend on the world comes back exact.
-        const int k_worlds = pimc_worlds();
+        const int k_worlds = pimc_worlds_for(rc, in_combat);
         int64_t world_scores[kMoveCap];
         bool min_seen[kMoveCap] = {};
         for (size_t i = 0; i < n; ++i) scores[i] = 0;
