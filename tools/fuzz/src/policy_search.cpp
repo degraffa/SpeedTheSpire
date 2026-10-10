@@ -297,6 +297,11 @@ constexpr int kPimcMaxWorlds = 256;
 // vs 464 on policy seed 1 -- 930 vs 928 pooled, noise -- so elites keep
 // the base K (the cheaper). Boss x8 / elite x1 costs ~3.8x the 1-ply agent's
 // ~613 core-s per scan, about three quarters of it on boss floors.
+// Re-checked on the merged agent (run layer + card table on top of this
+// search; the boss is reached on ~97% of the dev seeds and won ~89% of the
+// time): boss x4 lost 20 kills against x8 (840 vs 860, paired McNemar 22 vs
+// 42, p=0.017) for 2310 vs 3875 core-s, and K=16 at x8 (128 boss particles)
+// is level with K=8 (882 vs 883 at the take bar of 20), so x8 at K=8 stays.
 // Override with STS_PIMC_BOSS_MULT (clamped to
 // [1, kPimcMaxBossMult]) and STS_PIMC_ELITE_HALVES (elite multiplier in
 // halves, clamped to [2, kPimcMaxEliteHalves]); each is read once per process.
@@ -884,11 +889,16 @@ constexpr int kCardDuplicatePenalty = 10;
 }
 
 // The public agent takes the offer's best card iff its value clears this bar
-// (Clash, Warcry, Evolve, ... do not). Measured on the dev seeds, 1,000 runs:
-// a bar of 42 (a leaner Act-1 deck) LOST 61 kills against 30, and 18 was
-// level with it -- for this agent the old "stay lean in Act 1" rule is wrong;
-// a decent card beats another Strike draw.
-constexpr int kCardTakeThreshold = 30;
+// (Warcry, Evolve, Flex, ... do not). Measured on the dev seeds, 1,000 runs,
+// under the card lever's 1-ply combat: a bar of 42 (a leaner Act-1 deck) LOST
+// 61 kills against 30, and 18 was level with it -- for this agent the old
+// "stay lean in Act 1" rule is wrong; a decent card beats another Strike draw.
+// The same bar prices the shop (shelf cards above it, purges below it). On the
+// merged agent (run layer + card table + turn-plan combat search, K=8) the
+// lower bar pays: 30 -> 20 took Act-1 boss kills 860 -> 883 of 1000 (paired
+// McNemar 52 vs 29, p=0.014; boss reach 96.9% -> 98.0%, boss fights won
+// 88.8% -> 90.1%), with the take, shelf and purge effects not separated.
+constexpr int kCardTakeThreshold = 20;
 
 [[nodiscard]] int best_offered_value(const RunController& rc,
                                      const engine::RunRewardItem& item) noexcept {
@@ -1533,12 +1543,14 @@ constexpr int kShopRelicValue = 20;
 // GridWants::WORST), and below the Strike for the card lever's elite-fight
 // evidence. The service is worth the card's distance below the reward take
 // bar, at kShopPurgeValuePerPoint table points per shop point, capped at a
-// curse's kPurgeCurse: Defend 13, Strike 10, upgraded Strike 7, nothing for a
-// card at or above the bar. The grid pick and the row's value read the same
-// table, so the service is only bought when the card it will remove is worth
-// removing. Measured on the 1000 dev seeds against the Strike-first hand table
-// (curse 30 / Strike 12 / Defend 4): 548 -> 564 Act-1 boss kills on the plain
-// merge, 571 -> 592 with the table-priced shelf cards.
+// curse's kPurgeCurse: at the bar of 20, Defend 8, Strike 5, upgraded Strike
+// 2, nothing for a card at or above the bar (at the run pair's bar of 30:
+// Defend 13, Strike 10, upgraded Strike 7). The grid pick and the row's value
+// read the same table, so the service is only bought when the card it will
+// remove is worth removing. Measured on the 1000 dev seeds against the
+// Strike-first hand table (curse 30 / Strike 12 / Defend 4), bar 30: 548 ->
+// 564 Act-1 boss kills on the plain run-pair merge, 571 -> 592 with the
+// table-priced shelf cards.
 constexpr int kPurgeCurse = 30;
 constexpr int kShopPurgeValuePerPoint = 2;
 
@@ -1564,12 +1576,14 @@ constexpr int kShopPurgeValuePerPoint = 2;
 // Cards: priced by the card table (the reward-pick layer's own scale). A shelf
 // card is worth its deck-adjusted table value (offered_card_value: the table,
 // the Act-1 boss term, the duplicate discount) ABOVE the reward take bar, at
-// kShopCardValuePerPoint table points per shop point -- so a 70 (Inflame,
-// Hemokinesis) is a relic's 20 points, a 54 (Pommel Strike) a potion's 12, a
-// card under the bar is never bought, and at A20 prices a common needs ~36, an
-// uncommon ~38 and a rare ~44 to be worth its gold at all. The act's deck cap
-// (wants_card_from) holds here too. Measured on the 1000 dev seeds on top of
-// the merged run layer + card table: 548 -> 571 Act-1 boss kills.
+// kShopCardValuePerPoint table points per shop point -- at the run pair's bar
+// of 30 a 70 (Inflame, Hemokinesis) is a relic's 20 points and a 54 (Pommel
+// Strike) a potion's 12 (at the bar of 20: 25 and 17), a card under the bar
+// is never bought, and at A20 prices a common needs about the bar + 6, an
+// uncommon the bar + 8 and a rare the bar + 14 to be worth its gold at all.
+// The act's deck cap (wants_card_from) holds here too. Measured on the 1000
+// dev seeds on top of the merged run layer + card table, bar 30: 548 -> 571
+// Act-1 boss kills.
 constexpr int kShopCardValuePerPoint = 2;
 
 [[nodiscard]] int shop_card_value(const RunController& rc, uint16_t card_id,
