@@ -170,7 +170,19 @@ enum class PolicyKind : uint8_t {
     // acceptance proves by sha256 the same way its predecessors did. See
     // docs/verification/s3-61-reach.md for the measured cost and result.
     SIM_SEARCH_KEYS_DEEP = 10,
-    COUNT = 11,
+    // The A20 PUBLIC-INFORMATION agent. SIM_SEARCH_BLIND rolls every candidate
+    // out against ONE resample_hidden particle per decision, so it plans
+    // against a single guess of the draw order and the un-telegraphed monster
+    // rolls -- a high-variance estimator, not just a less-informed one. This
+    // kind averages every rollout score over K particles (perfect-information
+    // Monte Carlo; K = STS_PIMC_K, default 16), each drawn from a fresh
+    // PolicyRng::next() draw and shared by every candidate of the decision
+    // (common random numbers). It never reads hidden state except through
+    // resample_hidden particles. Further A20 Act-1 improvements to the public
+    // agent are gated on this kind (is_public_agent in policy_search.cpp), so
+    // SIM_SEARCH and SIM_SEARCH_BLIND stay byte-identical baselines.
+    SIM_SEARCH_PIMC = 11,
+    COUNT = 12,
 };
 
 [[nodiscard]] const char* policy_name(PolicyKind k) noexcept;

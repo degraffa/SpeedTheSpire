@@ -34,6 +34,7 @@ const char* policy_name(PolicyKind k) noexcept {
         case PolicyKind::SIM_SEARCH_KEYS: return "sim_search_keys";
         case PolicyKind::SIM_SEARCH_BLIND: return "sim_search_blind";
         case PolicyKind::SIM_SEARCH_KEYS_DEEP: return "sim_search_keys_deep";
+        case PolicyKind::SIM_SEARCH_PIMC: return "sim_search_pimc";
         case PolicyKind::COUNT: break;
     }
     return "?";
@@ -867,7 +868,8 @@ size_t policy_pick(PolicyKind kind, const RunController& rc, const Move* moves, 
         kind == PolicyKind::SIM_SEARCH_HOLD ||
         kind == PolicyKind::SIM_SEARCH_KEYS ||
         kind == PolicyKind::SIM_SEARCH_BLIND ||
-        kind == PolicyKind::SIM_SEARCH_KEYS_DEEP) {
+        kind == PolicyKind::SIM_SEARCH_KEYS_DEEP ||
+        kind == PolicyKind::SIM_SEARCH_PIMC) {
         // The sim-consulting policy (S2.V2) is a different class of generator
         // and lives in its own translation unit; see policy_search.cpp. All
         // six kinds share that body -- _SKIP differs only in R4's boss-relic

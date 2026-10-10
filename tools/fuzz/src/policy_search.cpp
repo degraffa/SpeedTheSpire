@@ -63,6 +63,7 @@
 #include "sts/fuzz/policy.hpp"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 
 #include "sts/engine/cards.hpp"
@@ -222,6 +223,28 @@ constexpr int kMapEmeraldSeek = 800;
 // widened turn window. Gated separately from `kind_seeks_keys` so a future
 // non-key-seeking deep kind could reuse `rollout_boss_deep_and_eval` without
 // also picking up K1-K4.
+// The A20 public-information agent (SIM_SEARCH_PIMC). Every rule that exists
+// to make the public agent stronger is gated on this, never on SIM_SEARCH, so
+// the existing kinds stay byte-identical baselines.
+[[nodiscard]] constexpr bool is_public_agent(PolicyKind kind) noexcept {
+    return kind == PolicyKind::SIM_SEARCH_PIMC;
+}
+
+// Particles per decision for SIM_SEARCH_PIMC: STS_PIMC_K, default 16, clamped
+// to [1, kPimcMaxWorlds]. Read once per process.
+constexpr int kPimcDefaultWorlds = 16;
+constexpr int kPimcMaxWorlds = 256;
+[[nodiscard]] int pimc_worlds() noexcept {
+    static const int k = [] {
+        const char* e = std::getenv("STS_PIMC_K");
+        int v = e != nullptr ? std::atoi(e) : kPimcDefaultWorlds;
+        if (v < 1) v = 1;
+        if (v > kPimcMaxWorlds) v = kPimcMaxWorlds;
+        return v;
+    }();
+    return k;
+}
+
 [[nodiscard]] constexpr bool kind_deepens_boss(PolicyKind kind) noexcept {
     return kind == PolicyKind::SIM_SEARCH_KEYS_DEEP;
 }
@@ -1511,10 +1534,11 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
         : 0u;
     const unsigned unselected = static_cast<unsigned>(rc.combat.hand_count) -
         (selected <= rc.combat.hand_count ? selected : 0u);
+    const auto score_all = [&](const RunController& world, int64_t* out) noexcept {
     for (size_t i = 0; i < n; ++i) {
         if (monotone_choice && moves[i].cat == MoveCat::COMBAT_CHOOSE &&
             engine::action_arg0(moves[i].action) >= unselected) {
-            scores[i] = INT64_MIN;
+            out[i] = INT64_MIN;
             continue;
         }
         if (in_combat) {
@@ -1530,11 +1554,11 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             // because that is precisely where a long fight (the Heart) is
             // still worth searching past turn 32.
             if (rc.combat.turn > search_turn_window) {
-                scores[i] = completion_rank(rc, moves[i], false, hold_powers);
+                out[i] = completion_rank(rc, moves[i], false, hold_powers);
             } else {
-                RunController sim = rollout_world;  // trivially-copyable snapshot
+                RunController sim = world;  // trivially-copyable snapshot
                 apply_one(sim, moves[i].action);
-                scores[i] =
+                out[i] =
                     boss_floor && rc.combat.turn <= boss_ply_window &&
                             n <= kBossDeepMaxCandidates &&
                             live_monster_count(rc.combat) <=
@@ -1549,14 +1573,14 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
                 // progress. Strictly preferred select/deselect oscillation
                 // is prevented by the monotone actual-choice guard above;
                 // the historical S2.V2 reach measurements retain their pin.
-                if (moves[i].cat == MoveCat::CHOICE_CONFIRM) scores[i] += 1;
+                if (moves[i].cat == MoveCat::CHOICE_CONFIRM) out[i] += 1;
             }
             // The Curiosity hold on the SEARCHED ply (SIM_SEARCH_HOLD only).
             // Subtracted after the rollout rather than folded into it, because
             // it prices the tail the rollout's turn cap was assumed not to see
             // -- the band above the helpers, and why that assumption is wrong.
             if (hold_powers) {
-                scores[i] -= curiosity_penalty_for(rc.combat, rc, moves[i]);
+                out[i] -= curiosity_penalty_for(rc.combat, rc, moves[i]);
             }
         } else if (moves[i].cat == MoveCat::MAP_NODE ||
                    moves[i].cat == MoveCat::MAP_BOSS ||
@@ -1571,17 +1595,67 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             // keeps its greedy_policy.py band -- rest/smith and card-take
             // value lives in state the run evaluation cannot see (upgrades,
             // deck quality), so a rollout would systematically misjudge them.
-            RunController sim = rollout_world;
+            RunController sim = world;
             apply_one(sim, moves[i].action);
-            scores[i] = rollout_floor_and_eval(kind, sim);
+            out[i] = rollout_floor_and_eval(kind, sim);
             // K3/K4 (S3.22): the key appetite, on the OUTER map decision only.
             // Zero for every kind but SIM_SEARCH_KEYS, so this line cannot move
             // an existing trajectory.
-            scores[i] += key_map_bonus(kind, rc, moves[i]);
+            out[i] += key_map_bonus(kind, rc, moves[i]);
         } else {
-            scores[i] = run_move_score(kind, rc, moves[i]);
+            out[i] = run_move_score(kind, rc, moves[i]);
         }
     }
+    };
+    // Does any candidate's score consult a rollout world? (Exactly the two
+    // rollout branches of score_all.) A screen scored by bands alone needs no
+    // particles at all.
+    bool consults_world = false;
+    if (in_combat) {
+        consults_world = rc.combat.turn <= search_turn_window;
+    } else {
+        for (size_t i = 0; i < n && !consults_world; ++i) {
+            consults_world =
+                moves[i].cat == MoveCat::MAP_NODE ||
+                moves[i].cat == MoveCat::MAP_BOSS ||
+                moves[i].cat == MoveCat::EVENT_OPTION ||
+                (moves[i].cat == MoveCat::NEOW_PROCEED &&
+                 rc.phase == static_cast<uint8_t>(RunPhase::NEOW) &&
+                 rc.neow.screen ==
+                     static_cast<uint8_t>(engine::NeowScreen::BLESSING));
+        }
+    }
+    if (!is_public_agent(kind) || !consults_world) {
+        score_all(rollout_world, scores);
+    } else {
+        // SIM_SEARCH_PIMC: average over K particles. The K seeds are drawn up
+        // front so the policy stream advances by exactly K + 1 draws per
+        // decision; every candidate is scored against the same K worlds.
+        // Scores are summed and divided once at the end, so a band score that
+        // does not depend on the world comes back exact.
+        const int k_worlds = pimc_worlds();
+        int64_t world_scores[kMoveCap];
+        bool min_seen[kMoveCap] = {};
+        for (size_t i = 0; i < n; ++i) scores[i] = 0;
+        for (int wk = 0; wk < k_worlds; ++wk) {
+            RunController world = rc;
+            SamplerRng sampler_rng =
+                sampler_rng_from_seed(static_cast<int64_t>(rng.next()));
+            resample_hidden(world, sampler_rng);
+            score_all(world, world_scores);
+            for (size_t i = 0; i < n; ++i) {
+                if (world_scores[i] == INT64_MIN) {
+                    min_seen[i] = true;
+                } else {
+                    scores[i] += world_scores[i];
+                }
+            }
+        }
+        for (size_t i = 0; i < n; ++i) {
+            scores[i] = min_seen[i] ? INT64_MIN : scores[i] / k_worlds;
+        }
+    }
+
     // RUN-LAYER NO-OP GUARD. The legal mask can advertise a move whose
     // advance() is a documented no-op -- the live witness is Drug Dealer's
     // two-pick grid, where the FIRST-picked card stays advertised for the
