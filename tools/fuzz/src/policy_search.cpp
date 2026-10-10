@@ -1382,28 +1382,25 @@ constexpr int kShopRelicValue = 20;
     }
 }
 
-// Purge targets: a removable curse, then a basic Strike, then a basic Defend.
-// The grid pick and the purge row's value read the SAME function, so the
-// service is only bought when the card it will remove is worth removing.
+// Purge targets: the card table's LOWEST-value purgeable card -- a curse, then
+// a basic Defend, then a Strike or an upgraded Defend -- the same card the
+// public agent's event / Neow purge grids remove (public_grid_pick_score,
+// GridWants::WORST), and below the Strike for the card lever's elite-fight
+// evidence. The service is worth the card's distance below the reward take
+// bar, at kShopPurgeValuePerPoint table points per shop point, capped at a
+// curse's kPurgeCurse: Defend 13, Strike 10, upgraded Strike 7, nothing for a
+// card at or above the bar. The grid pick and the row's value read the same
+// table, so the service is only bought when the card it will remove is worth
+// removing. Measured on the 1000 dev seeds against the Strike-first hand table
+// (curse 30 / Strike 12 / Defend 4): 548 -> 564 Act-1 boss kills on the plain
+// merge, 571 -> 592 with the table-priced shelf cards.
 constexpr int kPurgeCurse = 30;
-constexpr int kPurgeStrike = 12;
-constexpr int kPurgeStrikeUpgraded = 8;
-constexpr int kPurgeDefend = 4;
-constexpr int kPurgeDefendUpgraded = 2;
+constexpr int kShopPurgeValuePerPoint = 2;
 
 [[nodiscard]] int purge_target_value(const engine::CardInstance& ci) noexcept {
-    const engine::CardDef* def =
-        engine::card_def(static_cast<CardId>(ci.card_id));
-    if (def == nullptr) return 0;
-    if (def->type == CardType::CURSE) return kPurgeCurse;
-    switch (static_cast<CardId>(ci.card_id)) {
-        case CardId::STRIKE:
-            return ci.upgrade != 0 ? kPurgeStrikeUpgraded : kPurgeStrike;
-        case CardId::DEFEND:
-            return ci.upgrade != 0 ? kPurgeDefendUpgraded : kPurgeDefend;
-        default:
-            return 0;
-    }
+    const int v = (kCardTakeThreshold - card_value(ci.card_id, ci.upgrade)) /
+                  kShopPurgeValuePerPoint;
+    return v > kPurgeCurse ? kPurgeCurse : v;
 }
 
 [[nodiscard]] int best_purge_value(const engine::RunState& rs) noexcept {
@@ -1424,8 +1421,8 @@ constexpr int kPurgeDefendUpgraded = 2;
 // the Act-1 boss term, the duplicate discount) ABOVE the reward take bar, at
 // kShopCardValuePerPoint table points per shop point -- so a 70 (Inflame,
 // Hemokinesis) is a relic's 20 points, a 54 (Pommel Strike) a potion's 12, a
-// card under the bar is never bought, and at A20 prices a common needs ~35, an
-// uncommon ~37 and a rare ~43 to be worth its gold at all. The act's deck cap
+// card under the bar is never bought, and at A20 prices a common needs ~36, an
+// uncommon ~38 and a rare ~44 to be worth its gold at all. The act's deck cap
 // (wants_card_from) holds here too. Measured on the 1000 dev seeds on top of
 // the merged run layer + card table: 548 -> 571 Act-1 boss kills.
 constexpr int kShopCardValuePerPoint = 2;
@@ -1533,7 +1530,9 @@ struct ShopRow {
         static_cast<uint8_t>(engine::ShopScreenKind::PURGE_GRID)) {
         if (arg0 == engine::kChooseCancelGrid) return kShopOther;
         if (arg0 >= rc.run.master_deck_count) return kShopOther;
-        return kShopBuy + purge_target_value(rc.run.master_deck[arg0]);
+        // The lowest-value card first, exactly as the purge grids pick it.
+        return kShopBuy - kGridPick +
+               public_grid_pick_score(rc.run.master_deck[arg0], GridWants::WORST);
     }
     if (arg0 == engine::kChooseProceed) return kShopLeave;
     return arg0 == shop_next_buy(rc) ? kShopBuy : kShopOther;
