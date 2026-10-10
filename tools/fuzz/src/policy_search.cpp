@@ -784,8 +784,13 @@ void min_elite_table(const RunController& rc, MapGrid& best) noexcept {
 // does to the run, death included); the walk starts from each particle's HP
 // after it, and replaces the rollout's flat per-HP term (kEvalPlayerHp per
 // point) with the same weight on the walk's expected boss HP. Measured on the
-// 1000 dev seeds against the elite rule alone: 346 -> 382 Act-1 boss kills
-// (boss reach 84% -> 88%).
+// 1000 dev seeds against the elite rule alone: 346 -> 384 Act-1 boss kills
+// (boss reach 84% -> 88%). Three extensions of the same walk were screened on
+// 500 seeds and left out as no better: deciding rest-vs-smith by the walk
+// (200 -> 203), adding the walk to event options (200 -> 191), and pricing
+// elites INTO the walk (relic worth 8 / 15 / 25 HP, no elite rule) in place
+// of the elite rule (203 / 205 / 197 -- more elites, more relics, a higher
+// boss win rate and a lower boss reach that cancel out).
 constexpr int kPathHallwayLossHp = 8;   // dev-trace mean, floors 5-15
 constexpr int kPathEliteLossHp = 25;    // dev-trace mean over survivors
 constexpr int kPathEventGainHp = 2;     // dev-trace mean: +2.4..+3.2
