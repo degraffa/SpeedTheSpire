@@ -2046,6 +2046,21 @@ constexpr int kNeowBossSwap = 600;  // above kNeowChoice
             return kind == PolicyKind::SIM_SEARCH_SKIP ? kBossRelicSkipWins
                                                        : kBossRelicSkip;
         case MoveCat::BOSS_CHEST_PROCEED:
+            // The public agent leaves a boss relic's claimable screen (Tiny
+            // House / Calling Bell, EQUIP_ITEM_REWARD) the way it leaves a
+            // combat reward screen: at kRewardProceed, above a card row its
+            // take rule declines (kRewardCardClosed). At kBossChestProceed
+            // the declined row outranked the exit, so the claim opened the
+            // pick, the pick scored skip above every take, the skip closed
+            // it -- and the claim opened it again: the claim / skip_card
+            // LIVELOCK on the boss-chest floor (22 of the 1000 dev runs of the
+            // merged agent, every one after an Act-1 boss kill).
+            if (is_public_agent(kind) &&
+                rc.run.boss_chest.screen ==
+                    static_cast<uint8_t>(
+                        engine::BossChestScreen::EQUIP_ITEM_REWARD)) {
+                return kRewardProceed;
+            }
             return kBossChestProceed;
         case MoveCat::USE_POTION:
         case MoveCat::USE_POTION_TARGET:
