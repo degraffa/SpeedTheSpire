@@ -496,6 +496,35 @@ constexpr int kCuriosityMaxHits = 4;  // SS_AMT (AwakenedOne.java:89)
     return belt_is_full(rc.run);
 }
 
+// THE PUBLIC AGENT'S ACT-1 POTION PRICE. R2 prices a held potion at ~13 HP
+// (kEvalPotionHeld) and calls every elite fight spendable (~3 HP). Measured
+// on the dev boss bench (800 Act-1 boss snapshots of this agent x 4 policy
+// seeds, the same fights replayed with the belt emptied), a potion carried
+// INTO the Act-1 boss is worth +14pp of boss wins for the first and +21pp for
+// two -- about 22 HP of arrival HP at the ~0.65pp per HP the same bench shows
+// across arrival-HP buckets. So before the Act-1 boss the public agent prices
+// a held potion at those 22 HP and no longer treats an elite as spendable by
+// itself: an elite potion is drunk when the rollouts say it buys more than
+// that (or averts a death), and R2's low-HP and full-belt clauses still
+// apply. The boss fight itself stays spendable. Elite bench: 0.86 -> 0.68
+// potions drunk per fight, wins unchanged, +1.2 HP lost per fight. Later acts
+// keep R2 unchanged.
+constexpr int64_t kEvalPotionHeldAct1 = 22 * kEvalPlayerHp;
+
+[[nodiscard]] int64_t potion_hold_value(PolicyKind kind, const RunController& rc,
+                                        bool in_combat) noexcept {
+    if (!is_public_agent(kind) || rc.run.act != 1) {
+        return in_combat && potion_worth_spending(rc) ? kEvalPotionHeldSpendable
+                                                      : kEvalPotionHeld;
+    }
+    const bool spendable =
+        in_combat &&
+        (rc.room_type == static_cast<uint8_t>(engine::RoomType::Boss) ||
+         hp_at_or_below_pct(rc, act_profile(rc.run.act).potion_low_hp_pct) ||
+         belt_is_full(rc.run));
+    return spendable ? kEvalPotionHeldSpendable : kEvalPotionHeldAct1;
+}
+
 // --- card ranking (run layer) ------------------------------------------------
 //
 // greedy_policy._card_reward_rank ported onto the registry tables: static
@@ -1682,10 +1711,9 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
     int64_t scores[kMoveCap];
     // R2's discipline as a HOLD VALUE: a potion is nearly free to spend in a
     // boss/elite/low-HP fight (but not literally free -- a drink that buys
-    // nothing is still a waste) and expensive to spend anywhere else.
-    const EvalWeights w{in_combat && potion_worth_spending(rc)
-                            ? kEvalPotionHeldSpendable
-                            : kEvalPotionHeld,
+    // nothing is still a waste) and expensive to spend anywhere else. The
+    // public agent prices it higher before the Act-1 boss (potion_hold_value).
+    const EvalWeights w{potion_hold_value(kind, rc, in_combat),
                         is_public_agent(kind)};
     // The Curiosity hold's trigger for THIS decision, read once off the board.
     // False for SIM_SEARCH / SIM_SEARCH_SKIP always, and for SIM_SEARCH_HOLD in
