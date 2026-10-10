@@ -75,8 +75,10 @@
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/neow.hpp"
 #include "sts/engine/potions.hpp"
+#include "sts/engine/relic_pools.hpp"
 #include "sts/engine/resample.hpp"
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/shop.hpp"
 
 namespace sts::fuzz {
 
@@ -665,6 +667,80 @@ constexpr int kMapEliteAvoid = 200;
     return (frontier & static_cast<uint8_t>(1u << ex)) != 0;
 }
 
+// --- the public agent's path rule: avoid elites --------------------------------
+//
+// WHY. The map decision is a one-room rollout, which cannot see that a column
+// funnels into an elite two rooms later -- and at A20 an Act-1 elite is where
+// the PIMC agent's runs end: in the dev-seed trace 219 of its 298 pre-boss
+// deaths were in an elite room (72 of them the first elite row, floor 6), and
+// relic count at the boss did not predict a boss kill at all (33% / 36% / 33%
+// for 2 / 3 / 4+ relics). An elite is a large risk paid for a reward this
+// policy cannot cash before the Act-1 boss. So the public agent plans over the
+// PUBLIC map (room types and edges are on screen; what a ? or a fight holds
+// is not) and walks the path with the FEWEST elites to the act's last row;
+// the one-room rollout then chooses among the columns that tie on that count.
+// Measured on the 500-seed dev screen: 133 -> 171 Act-1 boss kills, with boss
+// reach 75% -> 86%.
+//
+// The penalty is per elite and dominates any rollout difference -- including
+// a rollout death (kEvalDefeat averaged over the particles is at most 1e12),
+// because the immediate room's death in a greedy-completion particle is a far
+// weaker signal than an elite on every remaining path.
+constexpr int64_t kElitePathPenalty = 10'000'000'000'000;
+
+// The minimum number of Elite rooms on any map path from (col, row) through
+// the act's last row. Exact backward DP over the 15x7 DAG (map_gen.hpp's
+// two-bit edges, the same walk node_reaches_emerald does forward); a node with
+// no way forward counts as unreachable. Wing Boots can only ADD paths, so the
+// count is an upper bound, never an undercount.
+[[nodiscard]] int min_elites_on_path(const RunController& rc, int col,
+                                     int row) noexcept {
+    if (row < 0 || row >= engine::kMapRows || col < 0 ||
+        col >= engine::kMapCols) {
+        return 0;
+    }
+    constexpr int kUnreachable = engine::kMapRows + 1;
+    int best[engine::kMapRows][engine::kMapCols];
+    for (int y = engine::kMapRows - 1; y >= row; --y) {
+        for (int x = 0; x < engine::kMapCols; ++x) {
+            const engine::MapNode& nd =
+                rc.run.map[engine::run_state_map_index(x, y)];
+            const auto rt = static_cast<engine::RoomType>(nd.room_type);
+            if (rt == engine::RoomType::None) {
+                best[y][x] = kUnreachable;
+                continue;
+            }
+            const int self = rt == engine::RoomType::Elite ? 1 : 0;
+            if (y == engine::kMapRows - 1) {
+                best[y][x] = self;
+                continue;
+            }
+            int next = kUnreachable;
+            const auto take = [&](int nx) {
+                if (nx >= 0 && nx < engine::kMapCols && best[y + 1][nx] < next) {
+                    next = best[y + 1][nx];
+                }
+            };
+            if ((nd.edges & engine::kEdgeLeft) != 0) take(x - 1);
+            if ((nd.edges & engine::kEdgeCenter) != 0) take(x);
+            if ((nd.edges & engine::kEdgeRight) != 0) take(x + 1);
+            best[y][x] = next >= kUnreachable ? kUnreachable : next + self;
+        }
+    }
+    return best[row][col];
+}
+
+[[nodiscard]] int64_t public_path_penalty(PolicyKind kind,
+                                          const RunController& rc,
+                                          const Move& m) noexcept {
+    if (!is_public_agent(kind) || m.cat != MoveCat::MAP_NODE) return 0;
+    const int col = engine::action_arg0(m.action);
+    const int row =
+        static_cast<int>(rc.run.floor) - engine::act_floor_base_of(rc.run);
+    return static_cast<int64_t>(min_elites_on_path(rc, col, row)) *
+           kElitePathPenalty;
+}
+
 // K3/K4 (S3.22): the bounded key appetite added to a map candidate's ROLLED-OUT
 // score in sim_search_pick. Zero for every other kind, for every key already
 // held, and below each rule's HP gate. It is added AFTER the rollout rather
@@ -722,14 +798,314 @@ enum class GridWants : uint8_t { WORST, BEST };
                                     : kGridPick + (kCardRankMax - rank);
 }
 
+// --- the public agent's shop (SIM_SEARCH_PIMC only) --------------------------
+//
+// WHY THIS EXISTS. The b1.7.0 band buys nothing (kShopLeave beats every row),
+// and a trace of the PIMC agent over the dev seeds reached its Act-1 boss
+// carrying ~270 unspent gold and ~1 potion on average. Gold is worth nothing
+// at a boss; what it buys on the way there is. So the public agent shops.
+//
+// HOW. Every purchasable row is public -- the shelves, their prices and the
+// purge cost are on screen -- and each gets a value in POINTS (roughly player
+// HP-equivalents of fight strength). The screen then solves the whole basket:
+// the subset of rows that maximizes total value minus the gold's own worth
+// (kShopGoldPerPoint), under the gold on hand and the free potion slots, and
+// buys that basket's most valuable row. The next decision re-solves over what
+// is left, so a purchase that changes the picture (a Courier restock, a purge
+// that ramps its own cost) is priced in. The basket is solved exhaustively:
+// the shop has at most kShopPlanMaxRows rows, so 2^14 subsets is a hard
+// ceiling, and the usual affordable set is a handful of rows.
+//
+// The values are a small hand table, not a measurement of each item -- the
+// coarse ordering (a curse purge and a boss-fight potion over a Strike purge,
+// most relics over most potions per row, dead-weight relics never) is what
+// the gold-to-boss-kill effect comes from. Measured over the 1000 dev seeds
+// against the buy-nothing band: 190 -> 242 Act-1 boss kills. The potion level
+// was screened both ways on 500 seeds (every potion +15 points: 166 -> 157;
+// -6 points: 166 -> 146), so potions stay level with a Strike purge and below
+// a relic.
+constexpr int kShopBuy = 700;            // a planned row: above kShopLeave
+constexpr int kShopGoldPerPoint = 25;    // gold's own worth when kept
+constexpr int kShopPlanMaxRows = engine::kShopItemCount + 1;  // + the purge
+
+// Potions: what one drink is worth in the boss / elite fight R2 spends it in.
+constexpr int kShopPotionDefault = 12;
+constexpr int kShopPotionStrong = 16;  // a whole-fight effect (Str, Ritual...)
+constexpr int kShopPotionRevive = 25;  // Fairy in a Bottle: a second life
+constexpr int kShopPotionWeak = 4;     // random / setup-dependent effects
+
+[[nodiscard]] int shop_potion_value(uint16_t potion_id) noexcept {
+    using engine::PotionId;
+    switch (static_cast<PotionId>(potion_id)) {
+        case PotionId::FAIRY_POTION:
+            return kShopPotionRevive;
+        case PotionId::STRENGTH_POTION:
+        case PotionId::CULTIST_POTION:
+        case PotionId::HEART_OF_IRON:
+        case PotionId::ENTROPIC_BREW:
+        case PotionId::FEAR_POTION:
+            return kShopPotionStrong;
+        case PotionId::GAMBLERS_BREW:
+        case PotionId::ELIXIR:
+        case PotionId::LIQUID_MEMORIES:
+        case PotionId::SNECKO_OIL:
+            return kShopPotionWeak;
+        case PotionId::SMOKE_BOMB:
+            return 0;  // escapes a fight; a boss cannot be escaped
+        default:
+            return kShopPotionDefault;
+    }
+}
+
+// Relics: one flat value with a dead-weight list. The dead list is "does
+// nothing for THIS policy": gold relics (the agent now spends its gold),
+// campfire options the rest band never takes (Girya / Peace Pipe / Shovel),
+// the Singing Bowl (kCardSing loses to every take), and the shelf-changers
+// whose payoff is more shopping or off-colour cards.
+constexpr int kShopRelicValue = 20;
+
+[[nodiscard]] int shop_relic_value(uint16_t relic_id) noexcept {
+    switch (static_cast<RelicId>(relic_id)) {
+        case RelicId::MAW_BANK:
+        case RelicId::OLD_COIN:
+        case RelicId::CERAMIC_FISH:
+        case RelicId::SMILING_MASK:
+        case RelicId::GIRYA:
+        case RelicId::PEACE_PIPE:
+        case RelicId::SHOVEL:
+        case RelicId::SINGING_BOWL:
+        case RelicId::PRISMATIC_SHARD:
+        case RelicId::MEMBERSHIP_CARD:
+        case RelicId::THE_COURIER:
+        case RelicId::MEDICAL_KIT:
+        case RelicId::ORRERY:
+        case RelicId::CHEMICAL_X:
+        case RelicId::DARKSTONE_PERIAPT:
+        case RelicId::DU_VU_DOLL:
+        case RelicId::BLUE_CANDLE:
+        case RelicId::TINY_CHEST:
+            return 0;
+        default:
+            return kShopRelicValue;
+    }
+}
+
+// Purge targets: a removable curse, then a basic Strike, then a basic Defend.
+// The grid pick and the purge row's value read the SAME function, so the
+// service is only bought when the card it will remove is worth removing.
+constexpr int kPurgeCurse = 30;
+constexpr int kPurgeStrike = 12;
+constexpr int kPurgeStrikeUpgraded = 8;
+constexpr int kPurgeDefend = 4;
+constexpr int kPurgeDefendUpgraded = 2;
+
+[[nodiscard]] int purge_target_value(const engine::CardInstance& ci) noexcept {
+    const engine::CardDef* def =
+        engine::card_def(static_cast<CardId>(ci.card_id));
+    if (def == nullptr) return 0;
+    if (def->type == CardType::CURSE) return kPurgeCurse;
+    switch (static_cast<CardId>(ci.card_id)) {
+        case CardId::STRIKE:
+            return ci.upgrade != 0 ? kPurgeStrikeUpgraded : kPurgeStrike;
+        case CardId::DEFEND:
+            return ci.upgrade != 0 ? kPurgeDefendUpgraded : kPurgeDefend;
+        default:
+            return 0;
+    }
+}
+
+[[nodiscard]] int best_purge_value(const engine::RunState& rs) noexcept {
+    int best = 0;
+    for (uint16_t i = 0; i < rs.master_deck_count && i < engine::kMasterDeckCap;
+         ++i) {
+        if (!engine::master_card_purgeable_unbottled(rs.master_deck[i])) {
+            continue;
+        }
+        const int v = purge_target_value(rs.master_deck[i]);
+        if (v > best) best = v;
+    }
+    return best;
+}
+
+// Cards: none bought yet (the reward-pick layer owns deck building).
+[[nodiscard]] int shop_card_value(uint16_t /*card_id*/,
+                                  uint8_t /*upgrade*/) noexcept {
+    return 0;
+}
+
+struct ShopRow {
+    uint8_t arg;    // the CHOOSE arg0 that buys it
+    int price;
+    int value;      // points
+    bool potion;    // occupies a belt slot
+};
+
+// The CHOOSE arg0 of the row to buy next, or kChooseProceed to leave.
+[[nodiscard]] uint8_t shop_next_buy(const RunController& rc) noexcept {
+    const engine::RunState& rs = rc.run;
+    const engine::ShopState& sh = rc.shop;
+    ShopRow rows[kShopPlanMaxRows];
+    int n = 0;
+    const auto add = [&](uint8_t arg, int price, int value, bool potion) {
+        if (value <= 0 || n >= kShopPlanMaxRows) return;
+        rows[n++] = ShopRow{arg, price, value, potion};
+    };
+    for (uint8_t i = 0; i < engine::kShopColoredCount; ++i) {
+        if (engine::shop_buy_card_legal(rs, sh, i, false)) {
+            add(static_cast<uint8_t>(engine::kChooseShopColoredBase + i),
+                sh.colored[i].price,
+                shop_card_value(sh.colored[i].id, sh.colored[i].upgrade), false);
+        }
+    }
+    for (uint8_t i = 0; i < engine::kShopColorlessCount; ++i) {
+        if (engine::shop_buy_card_legal(rs, sh, i, true)) {
+            add(static_cast<uint8_t>(engine::kChooseShopColorlessBase + i),
+                sh.colorless[i].price,
+                shop_card_value(sh.colorless[i].id, sh.colorless[i].upgrade),
+                false);
+        }
+    }
+    for (uint8_t i = 0; i < engine::kShopRelicCount; ++i) {
+        if (engine::shop_buy_relic_legal(rs, sh, i)) {
+            add(static_cast<uint8_t>(engine::kChooseShopRelicBase + i),
+                sh.relics[i].price, shop_relic_value(sh.relics[i].id), false);
+        }
+    }
+    for (uint8_t i = 0; i < engine::kShopPotionCount; ++i) {
+        if (engine::shop_buy_potion_legal(rs, sh, i)) {
+            add(static_cast<uint8_t>(engine::kChooseShopPotionBase + i),
+                sh.potions[i].price, shop_potion_value(sh.potions[i].id), true);
+        }
+    }
+    if (engine::shop_purge_legal(rs, sh)) {
+        add(engine::kChooseShopPurge, sh.actual_purge_cost,
+            best_purge_value(rs), false);
+    }
+    int free_slots = 0;
+    if (engine::shop_potion_slot_available(rs)) {
+        for (uint8_t i = 0; i < rs.potion_slots && i < engine::kPotionCap; ++i) {
+            if (rs.potions[i] == 0) ++free_slots;
+        }
+    }
+    uint32_t best_mask = 0;
+    int64_t best_net = 0;
+    const uint32_t subsets = 1u << static_cast<uint32_t>(n);
+    for (uint32_t mask = 1; mask < subsets; ++mask) {
+        int64_t gold = 0;
+        int64_t net = 0;
+        int potions = 0;
+        for (int i = 0; i < n; ++i) {
+            if ((mask & (1u << static_cast<uint32_t>(i))) == 0) continue;
+            gold += rows[i].price;
+            net += static_cast<int64_t>(rows[i].value) * kShopGoldPerPoint -
+                   rows[i].price;
+            if (rows[i].potion) ++potions;
+        }
+        if (gold > rs.gold || potions > free_slots) continue;
+        if (net > best_net) {
+            best_net = net;
+            best_mask = mask;
+        }
+    }
+    uint8_t pick = engine::kChooseProceed;
+    int pick_value = 0;
+    for (int i = 0; i < n; ++i) {
+        if ((best_mask & (1u << static_cast<uint32_t>(i))) == 0) continue;
+        if (rows[i].value > pick_value) {
+            pick_value = rows[i].value;
+            pick = rows[i].arg;
+        }
+    }
+    return pick;
+}
+
+[[nodiscard]] int public_shop_score(const RunController& rc,
+                                    const Move& m) noexcept {
+    const uint8_t arg0 = engine::action_arg0(m.action);
+    if (rc.shop.screen ==
+        static_cast<uint8_t>(engine::ShopScreenKind::PURGE_GRID)) {
+        if (arg0 == engine::kChooseCancelGrid) return kShopOther;
+        if (arg0 >= rc.run.master_deck_count) return kShopOther;
+        return kShopBuy + purge_target_value(rc.run.master_deck[arg0]);
+    }
+    if (arg0 == engine::kChooseProceed) return kShopLeave;
+    return arg0 == shop_next_buy(rc) ? kShopBuy : kShopOther;
+}
+
+// --- the public agent's out-of-combat potions --------------------------------
+//
+// The inherited band scores an out-of-combat drink kPotionOutOfCombat (20),
+// "below any screen move" -- but at a MAP_CHOICE the other candidates carry
+// ROLLOUT scores, which go negative whenever a particle dies (or a path is
+// priced down), and then the drink outranks every node: a Blood Potion was
+// being drunk at full-ish HP on the way into an elite. The public agent
+// decides a drink on its own merits instead, at a magnitude no rollout score
+// reaches, so the decision never depends on how the map happens to score:
+//   * Fruit Juice: drink at once -- +5 max HP is permanent and frees a slot.
+//   * Entropic Brew: drink while another slot is empty -- it fills them.
+//   * anything else (Blood Potion): hold; it does the same in combat, where it
+//     can be timed against the damage.
+constexpr int64_t kPotionDrinkNow = 1'000'000'000'000'000;
+constexpr int64_t kPotionHoldForCombat = -1'000'000'000'000'000;
+
+[[nodiscard]] int64_t public_out_of_combat_potion_score(
+    const RunController& rc, const Move& m) noexcept {
+    const uint8_t slot = engine::action_arg0(m.action);
+    if (slot >= engine::kPotionCap) return kPotionHoldForCombat;
+    switch (static_cast<engine::PotionId>(rc.run.potions[slot])) {
+        case engine::PotionId::FRUIT_JUICE:
+            return kPotionDrinkNow;
+        case engine::PotionId::ENTROPIC_BREW:
+            return potion_count(rc.run) < rc.run.potion_slots
+                       ? kPotionDrinkNow
+                       : kPotionHoldForCombat;
+        default:
+            return kPotionHoldForCombat;
+    }
+}
+
+// --- the public agent's campfire ----------------------------------------------
+//
+// The inherited bands TIE at the pre-boss campfire: REST scores kRestPreferred
+// there up to 90% HP, while SMITH scores kRestPreferred above the 70% gate, so
+// between 70% and 90% the one-draw tie-break flips a coin between healing and
+// upgrading before the boss. The public agent decides it: one gate per
+// campfire -- 90% before the boss, kRestHpPct elsewhere -- with REST above it
+// and SMITH below, so exactly one of the two leads. (Both gates were screened
+// at other values -- 80% pre-boss, 55% / 80% elsewhere -- and none beat these.)
+constexpr int kPreBossRestHpPct = 90;
+
+[[nodiscard]] bool public_rest_wanted(const RunController& rc) noexcept {
+    const bool pre_boss = static_cast<int>(rc.run.floor) ==
+                          engine::act_floor_base_of(rc.run) + 15;
+    return hp_at_or_below_pct(rc, pre_boss ? kPreBossRestHpPct : kRestHpPct);
+}
+
+// --- the public agent's Neow ---------------------------------------------------
+//
+// Neow's four options are on screen, and option 3 is always the boss-relic
+// swap (category 3 has exactly one entry): Burning Blood out, one random boss
+// relic in -- most of which are an extra energy every turn. The one-floor
+// rollout cannot price that (relic count is unchanged and the payoff is in
+// every later fight), so it took the swap on 29% of the dev seeds. Forcing the
+// swap on the 500-seed dev screen: 170 -> 191 Act-1 boss kills (boss reach
+// 87% -> 83%, boss win rate 39% -> 46%). So the public agent always swaps and
+// skips the Neow rollouts altogether.
+constexpr int kNeowBossSwap = 600;  // above kNeowChoice
+
 // --- run-layer scoring (the greedy_policy.py port) ---------------------------
 
-[[nodiscard]] int neow_move_score(const RunController& rc,
+[[nodiscard]] int neow_move_score(PolicyKind kind, const RunController& rc,
                                   const Move& m) noexcept {
     const engine::NeowState& n = rc.neow;
     const uint8_t arg0 = engine::action_arg0(m.action);
     switch (static_cast<engine::NeowScreen>(n.screen)) {
         case engine::NeowScreen::BLESSING:
+            if (is_public_agent(kind) && arg0 < engine::kNeowOptionCount &&
+                n.option_type[arg0] ==
+                    static_cast<uint8_t>(engine::NeowRewardType::BOSS_RELIC)) {
+                return kNeowBossSwap;
+            }
             // No captured evidence ranks the four blessings (the Python's
             // _score_event has no opinion that reaches Neow), so they tie and
             // the one-draw tie-break picks -- which is also what gives one
@@ -853,7 +1229,7 @@ enum class GridWants : uint8_t { WORST, BEST };
                                  const Move& m) noexcept {
     switch (m.cat) {
         case MoveCat::NEOW_PROCEED:
-            return neow_move_score(rc, m);
+            return neow_move_score(kind, rc, m);
         case MoveCat::MAP_NODE:
         case MoveCat::MAP_BOSS: {
             const engine::RoomType r = map_dest_room(rc, m);
@@ -913,11 +1289,17 @@ enum class GridWants : uint8_t { WORST, BEST };
             const bool pre_boss =
                 static_cast<int>(rc.run.floor) ==
                 engine::act_floor_base_of(rc.run) + 15;
+            if (is_public_agent(kind)) {
+                return public_rest_wanted(rc) ? kRestPreferred : kRestSecondary;
+            }
             if (pre_boss && hp_at_or_below_pct(rc, 90)) return kRestPreferred;
             return hp_at_or_below_pct(rc, kRestHpPct) ? kRestPreferred
                                                       : kRestSecondary;
         }
         case MoveCat::SMITH:
+            if (is_public_agent(kind)) {
+                return public_rest_wanted(rc) ? kRestSecondary : kRestPreferred;
+            }
             return hp_at_or_below_pct(rc, kRestHpPct) ? kRestSecondary
                                                       : kRestPreferred;
         case MoveCat::LIFT:
@@ -968,6 +1350,7 @@ enum class GridWants : uint8_t { WORST, BEST };
             return grid_pick_score(rc, engine::action_arg0(m.action), wants);
         }
         case MoveCat::SHOP:
+            if (is_public_agent(kind)) return public_shop_score(rc, m);
             // Buy nothing, leave (SHOP_ROOM_LEAVE > every buy): the b1.7.0
             // driver's measured behaviour, and the reason no scripted line
             // ever needs a purchase matched against a live shelf.
@@ -1400,10 +1783,21 @@ constexpr uint16_t kDeepSearchTurns = 60;
 // the completion before the state is scored. This is what replaces the
 // Python's map-symbol bands and label word-buckets: the sim is consulted, per
 // the design's sanction, instead of a guess about what a room might contain.
+//
+// THE HORIZON IS ONE ROOM LATER THAN IT READS for the inherited kinds: `floor0`
+// is taken AFTER the candidate move, and a map move has already advanced the
+// floor (an event option has not left its floor at all), so the map choice
+// that ends the candidate's room is on `floor0` and does NOT stop the loop --
+// the rollout walks one more room, picked by the map BANDS, which prefer an
+// elite over a hallway fight above 60% HP. The public agent stops at the FIRST
+// map choice (`room_horizon`), so a candidate is judged by its own room, not
+// by whatever elite the band would walk into next. SIM_SEARCH and the other
+// kinds keep the two-room horizon their measured baselines were taken under.
 constexpr int kFloorRolloutBudget = 600;
 
 [[nodiscard]] int64_t rollout_floor_and_eval(PolicyKind kind,
-                                             RunController& sim) noexcept {
+                                             RunController& sim,
+                                             bool room_horizon = false) noexcept {
     const uint16_t floor0 = sim.run.floor;
     const uint8_t act0 = sim.run.act;
     for (int step = 0; step < kFloorRolloutBudget; ++step) {
@@ -1414,7 +1808,8 @@ constexpr int kFloorRolloutBudget = 600;
             break;
         }
         if (phase == RunPhase::MAP_CHOICE &&
-            (sim.run.floor != floor0 || sim.run.act != act0)) {
+            (room_horizon || sim.run.floor != floor0 ||
+             sim.run.act != act0)) {
             break;  // the floor is resolved: the next choice is the horizon
         }
         if (phase == RunPhase::COMBAT) {
@@ -1534,11 +1929,20 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
         : 0u;
     const unsigned unselected = static_cast<unsigned>(rc.combat.hand_count) -
         (selected <= rc.combat.hand_count ? selected : 0u);
+    // The Neow blessing is rolled out for every kind but the public agent,
+    // which scores it by its band (see "the public agent's Neow").
+    const bool neow_rolls_out = !is_public_agent(kind);
     const auto score_all = [&](const RunController& world, int64_t* out) noexcept {
     for (size_t i = 0; i < n; ++i) {
         if (monotone_choice && moves[i].cat == MoveCat::COMBAT_CHOOSE &&
             engine::action_arg0(moves[i].action) >= unselected) {
             out[i] = INT64_MIN;
+            continue;
+        }
+        if (!in_combat && is_public_agent(kind) &&
+            (moves[i].cat == MoveCat::USE_POTION ||
+             moves[i].cat == MoveCat::USE_POTION_TARGET)) {
+            out[i] = public_out_of_combat_potion_score(rc, moves[i]);
             continue;
         }
         if (in_combat) {
@@ -1585,7 +1989,7 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
         } else if (moves[i].cat == MoveCat::MAP_NODE ||
                    moves[i].cat == MoveCat::MAP_BOSS ||
                    moves[i].cat == MoveCat::EVENT_OPTION ||
-                   (moves[i].cat == MoveCat::NEOW_PROCEED &&
+                   (neow_rolls_out && moves[i].cat == MoveCat::NEOW_PROCEED &&
                     rc.phase == static_cast<uint8_t>(RunPhase::NEOW) &&
                     rc.neow.screen ==
                         static_cast<uint8_t>(engine::NeowScreen::BLESSING))) {
@@ -1597,11 +2001,13 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
             // deck quality), so a rollout would systematically misjudge them.
             RunController sim = world;
             apply_one(sim, moves[i].action);
-            out[i] = rollout_floor_and_eval(kind, sim);
+            out[i] = rollout_floor_and_eval(kind, sim, is_public_agent(kind));
             // K3/K4 (S3.22): the key appetite, on the OUTER map decision only.
             // Zero for every kind but SIM_SEARCH_KEYS, so this line cannot move
             // an existing trajectory.
             out[i] += key_map_bonus(kind, rc, moves[i]);
+            // The public agent's elite-avoiding path rule (zero otherwise).
+            out[i] -= public_path_penalty(kind, rc, moves[i]);
         } else {
             out[i] = run_move_score(kind, rc, moves[i]);
         }
@@ -1619,7 +2025,7 @@ size_t sim_search_pick(PolicyKind kind, const RunController& rc,
                 moves[i].cat == MoveCat::MAP_NODE ||
                 moves[i].cat == MoveCat::MAP_BOSS ||
                 moves[i].cat == MoveCat::EVENT_OPTION ||
-                (moves[i].cat == MoveCat::NEOW_PROCEED &&
+                (neow_rolls_out && moves[i].cat == MoveCat::NEOW_PROCEED &&
                  rc.phase == static_cast<uint8_t>(RunPhase::NEOW) &&
                  rc.neow.screen ==
                      static_cast<uint8_t>(engine::NeowScreen::BLESSING));
