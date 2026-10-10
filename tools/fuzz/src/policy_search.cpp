@@ -1710,8 +1710,16 @@ struct ShopRow {
 //   * Entropic Brew: drink while another slot is empty -- it fills them.
 //   * anything else (Blood Potion): hold; it does the same in combat, where it
 //     can be timed against the damage.
-constexpr int64_t kPotionDrinkNow = 1'000'000'000'000'000;
-constexpr int64_t kPotionHoldForCombat = -1'000'000'000'000'000;
+//
+// The magnitude is 1e16, not larger: score_all's value is SUMMED over the
+// decision's particles before the average, so it must survive x kPimcMaxWorlds
+// (256) inside int64 (2.56e18 < 9.2e18). 1e18 overflowed from K=10 on (found
+// by the merge verifier at the default K=16). 1e16 still dwarfs every map
+// score (rollouts ~1e12, kElitePathPenalty 1e13 per elite).
+constexpr int64_t kPotionDrinkNow = 10'000'000'000'000'000;
+constexpr int64_t kPotionHoldForCombat = -10'000'000'000'000'000;
+static_assert(kPotionDrinkNow <= INT64_MAX / kPimcMaxWorlds,
+              "the drink score is summed over up to kPimcMaxWorlds particles");
 
 [[nodiscard]] int64_t public_out_of_combat_potion_score(
     const RunController& rc, const Move& m) noexcept {
