@@ -1314,7 +1314,8 @@ constexpr int kGridUpgradeGainWeight = 4;
 // against the buy-nothing band: 190 -> 242 Act-1 boss kills. The potion level
 // was screened both ways on 500 seeds (every potion +15 points: 166 -> 157;
 // -6 points: 166 -> 146), so potions stay level with a Strike purge and below
-// a relic.
+// a relic. Shelf cards are priced by the card table (shop_card_value), which
+// puts the strongest cards level with a relic.
 constexpr int kShopBuy = 700;            // a planned row: above kShopLeave
 constexpr int kShopGoldPerPoint = 25;    // gold's own worth when kept
 constexpr int kShopPlanMaxRows = engine::kShopItemCount + 1;  // + the purge
@@ -1418,10 +1419,24 @@ constexpr int kPurgeDefendUpgraded = 2;
     return best;
 }
 
-// Cards: none bought yet (the reward-pick layer owns deck building).
-[[nodiscard]] int shop_card_value(uint16_t /*card_id*/,
-                                  uint8_t /*upgrade*/) noexcept {
-    return 0;
+// Cards: priced by the card table (the reward-pick layer's own scale). A shelf
+// card is worth its deck-adjusted table value (offered_card_value: the table,
+// the Act-1 boss term, the duplicate discount) ABOVE the reward take bar, at
+// kShopCardValuePerPoint table points per shop point -- so a 70 (Inflame,
+// Hemokinesis) is a relic's 20 points, a 54 (Pommel Strike) a potion's 12, a
+// card under the bar is never bought, and at A20 prices a common needs ~35, an
+// uncommon ~37 and a rare ~43 to be worth its gold at all. The act's deck cap
+// (wants_card_from) holds here too. Measured on the 1000 dev seeds on top of
+// the merged run layer + card table: 548 -> 571 Act-1 boss kills.
+constexpr int kShopCardValuePerPoint = 2;
+
+[[nodiscard]] int shop_card_value(const RunController& rc, uint16_t card_id,
+                                  uint8_t upgrade) noexcept {
+    if (rc.run.master_deck_count >= act_profile(rc.run.act).deck_size_cap) {
+        return 0;
+    }
+    return (offered_card_value(rc, card_id, upgrade) - kCardTakeThreshold) /
+           kShopCardValuePerPoint;
 }
 
 struct ShopRow {
@@ -1445,14 +1460,15 @@ struct ShopRow {
         if (engine::shop_buy_card_legal(rs, sh, i, false)) {
             add(static_cast<uint8_t>(engine::kChooseShopColoredBase + i),
                 sh.colored[i].price,
-                shop_card_value(sh.colored[i].id, sh.colored[i].upgrade), false);
+                shop_card_value(rc, sh.colored[i].id, sh.colored[i].upgrade),
+                false);
         }
     }
     for (uint8_t i = 0; i < engine::kShopColorlessCount; ++i) {
         if (engine::shop_buy_card_legal(rs, sh, i, true)) {
             add(static_cast<uint8_t>(engine::kChooseShopColorlessBase + i),
                 sh.colorless[i].price,
-                shop_card_value(sh.colorless[i].id, sh.colorless[i].upgrade),
+                shop_card_value(rc, sh.colorless[i].id, sh.colorless[i].upgrade),
                 false);
         }
     }
